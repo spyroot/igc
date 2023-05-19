@@ -1,0 +1,7 @@
+[submodule "thirdparty/Redfish-Interface-Emulator"]
+    path = thirdparty/Redfish-Interface-Emulator
+    url = git://github.com/some_user/Redfish-Interface-Emulator.git
+
+[submodule "idrac_ctl"]
+    path = idrac_ctl
+    url = git@github.com:spyroot/idrac_ctl.git
