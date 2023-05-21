@@ -1,6 +1,7 @@
 from distutils.version import LooseVersion
 from typing import Optional
 
+import numpy as np
 import torch
 from pynvml import *
 from torch import dist
@@ -31,7 +32,7 @@ def get_device(rank: Optional[int] = None) -> torch.device:
         cuda_device = torch.device(f"cuda:{device_index}")
         print(f"Using CUDA device: {cuda_device}")
         return cuda_device
-    elif torch.backends.mps.is_available():
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         dev = torch.device("mps")
         print(f"Using MPS device: {dev}")
         return torch.device("mps")
@@ -54,16 +55,23 @@ def torch_runtime_details():
     """
     Print details about the PyTorch runtime environment, including
     CUDA version, CuDNN version, and NCCL version (if available).
+    if AMP supported BGF16 supported or not, NCCL available or not.
+
     """
     print("PyTorch version:", torch.__version__)
     print("CUDA version:", torch.version.cuda)
     cudnn_version = cudnn.version() if hasattr(torch.backends, 'cudnn') else None
     print("CuDNN version:", cudnn_version if cudnn_version is not None else "Not available")
+
+    if not hasattr(torch._C, '_nccl_all_reduce'):
+        print('PyTorch is not compiled with NCCL support')
+
     print("NCCL available:", nccl.is_available(torch.tensor([1, 2, 3])))
     print("NCCL version:", nccl.version() if nccl.is_available(torch.tensor([1, 2, 3])) else "Not available")
-    print("BF16 supported:", torch.cuda.is_bf16_supported())
-    print("BF16 supported:", torch.cuda.is_f16_supported())
-    print("BF16 supported:", torch.cuda.is_f16_supported())
+    if torch.cuda.is_available():
+        print("BF16 supported:", torch.cuda.is_bf16_supported())
+    else:
+        print("BF16 not supported:")
 
     if torch.cuda.is_available():
         mem_get_info = torch.cuda.memory_stats()
@@ -74,6 +82,70 @@ def torch_runtime_details():
         if hasattr(torch.cuda, 'memory_summary'):
             print("CUDA memory summary:")
             torch.cuda.memory_summary()
+
+    if torch.cuda.is_available() and hasattr(torch.cuda, "amp") and torch.cuda.amp.is_available():
+        print("AMP is supported")
+    else:
+        print("AMP is not supported")
+
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+        fp16_tensor = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16, device=device)
+        x = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16, device=device, requires_grad=True)
+        y = torch.tensor([4.0, 5.0, 6.0], dtype=torch.float16, device=device, requires_grad=True)
+        z = torch.sqrt(x ** 2 + y ** 2)
+        w = torch.sin(z)
+        loss = w.sum()
+        loss.backward()
+        loss = loss.detach()
+        fp16_tensor_np = fp16_tensor.cpu().numpy()
+
+        x_np = x.detach().cpu().numpy()
+        y_np = y.detach().cpu().numpy()
+        z_np = z.detach().cpu().numpy()
+        w_np = w.detach().cpu().numpy()
+
+        # Check if all tensors have dtype float16
+        all_fp16 = all(
+            np.issubdtype(arr.dtype, np.float16)
+            for arr in [fp16_tensor_np, x_np, y_np, z_np, w_np]
+        )
+        if all_fp16:
+            print("All tensors are in the supported float16 format.")
+        else:
+            print("Not all tensors have dtype float16.")
+
+        # Float64 tensors
+        try:
+            x64 = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64, device=device, requires_grad=True)
+            y64 = torch.tensor([4.0, 5.0, 6.0], dtype=torch.float64, device=device, requires_grad=True)
+            z64 = torch.sqrt(x64 ** 2 + y64 ** 2)
+            w64 = torch.sin(z64)
+            loss64 = w64.sum()
+            loss64.backward()
+            print("\nFloat64 tensors:")
+            print("loss:", loss64)
+
+            # Convert to NumPy arrays
+            x64_np = x64.cpu().numpy()
+            y64_np = y64.cpu().numpy()
+            z64_np = z64.cpu().numpy()
+            w64_np = w64.cpu().numpy()
+
+            # Check if all tensors have dtype float64
+            all_fp64 = all(
+                np.issubdtype(arr.dtype, np.float64)
+                for arr in [x64_np, y64_np, z64_np, w64_np]
+            )
+
+            # Print the corresponding message
+            if all_fp64:
+                print("\nAll float64 tensors have dtype float64.")
+            else:
+                print("\nNot all float64 tensors have dtype float64.")
+
+        except TypeError as e:
+            print("\nUnsupported float64 tensors:", e)
 #
 # >>> dir(torch.cuda)
 # ['Any', 'BFloat16Storage', 'BFloat16Tensor', 'BoolStorage', 'BoolTensor', 'ByteStorage', 'ByteTensor', 'CUDAGraph', 'CUDAPluggableAllocator', 'CharStorage',
