@@ -1,13 +1,14 @@
 from distutils.version import LooseVersion
 from typing import Optional
 
-import numpy as np
 import torch
-from pynvml import *
-from torch import dist
+import torch.distributed as dist
 from torch.backends import cudnn
 from torch.cuda import nccl
+import numpy as np
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from tabulate import tabulate
+from pynvml import *
 
 
 def get_device(rank: Optional[int] = None) -> torch.device:
@@ -41,6 +42,21 @@ def get_device(rank: Optional[int] = None) -> torch.device:
         return torch.device("cpu")
 
 
+
+import socket
+
+def get_network_interfaces():
+    """
+    Get a list of network interface names.
+
+    :return: List of interface names.
+    """
+    interfaces = []
+    for interface in socket.if_nameindex():
+        interfaces.append(interface[1])
+    return interfaces
+
+
 def print_gpu_utilization():
     """
     :return:
@@ -49,6 +65,31 @@ def print_gpu_utilization():
     handle = nvmlDeviceGetHandleByIndex(0)
     info = nvmlDeviceGetMemoryInfo(handle)
     print(f"GPU memory occupied: {info.used // 1024 ** 2} MB.")
+
+
+def print_dict_as_table(data):
+    """
+
+    :param data:
+    :return:
+    """
+    table = []
+    for key, value in data.items():
+        table.append([key, value])
+    headers = ["Key", "Value"]
+    print(tabulate(table, headers=headers, tablefmt="fancy_grid"))
+
+
+def cuda_memory(is_verbose=False):
+    """
+
+    :return:
+    """
+    if is_verbose:
+        torch.cuda.memory_summary()
+        print_dict_as_table(torch.cuda.memory_stats())
+
+    torch.cuda.mem_get_info()
 
 
 def torch_runtime_details():
@@ -66,8 +107,36 @@ def torch_runtime_details():
     if not hasattr(torch._C, '_nccl_all_reduce'):
         print('PyTorch is not compiled with NCCL support')
 
-    print("NCCL available:", nccl.is_available(torch.tensor([1, 2, 3])))
-    print("NCCL version:", nccl.version() if nccl.is_available(torch.tensor([1, 2, 3])) else "Not available")
+    print("NCCL available:", torch.distributed.is_nccl_available())
+    print("MPI available:", torch.distributed.is_mpi_available())
+    print("GLO available:", torch.distributed.is_gloo_available())
+    print("UCC available:", torch.distributed.is_ucc_available())
+
+    # ['AllToAllOptions', 'AllreduceCoalescedOptions', 'AllreduceOptions', 'Backend', 'BackendConfig', 'BarrierOptions',
+    #  'BroadcastOptions', 'BuiltinCommHookType', 'DebugLevel', 'DistBackendError', 'Enum', 'FileStore', 'GatherOptions',
+    #  'GradBucket', 'GroupMember', 'HashStore', 'Logger', 'P2POp', 'PrefixStore', 'ProcessGroup', 'ProcessGroupGloo',
+    #  'ProcessGroupMPI', 'ProcessGroupNCCL', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions', 'Reducer',
+    #  'ScatterOptions', 'Store', 'TCPStore', 'Work', '_Backend', '_CoalescingManager', '_DEFAULT_FIRST_BUCKET_BYTES',
+    #  '_Work', '__builtins__', '__cached__', '__doc__', '__file__', '__loader__', '__name__', '__package__', '__path__',
+    #  '__spec__', '_all_gather_base', '_backend', '_broadcast_coalesced', '_c10d_error_logger', '_coalescing_manager',
+    #  '_compute_bucket_assignment_by_size', '_create_process_group_wrapper', '_create_store_from_options',
+    #  '_make_nccl_premul_sum', '_rank_not_in_group', '_reduce_scatter_base', '_register_builtin_comm_hook',
+    #  '_register_comm_hook', '_remote_device', '_round_robin_process_groups', '_test_python_store',
+    #  '_verify_params_across_processes', 'algorithms', 'all_gather', 'all_gather_coalesced', 'all_gather_into_tensor',
+    #  'all_gather_multigpu', 'all_gather_object', 'all_reduce', 'all_reduce_coalesced', 'all_reduce_multigpu',
+    #  'all_to_all', 'all_to_all_single', 'autograd', 'barrier', 'batch_isend_irecv', 'broadcast', 'broadcast_multigpu',
+    #  'broadcast_object_list', 'c10d_error_logger', 'constants', 'default_pg_timeout', 'destroy_process_group',
+    #  'dist_backend', 'distributed_c10d', 'exception_handler', 'gather', 'gather_object', 'get_backend',
+    #  'get_backend_config', 'get_debug_level', 'get_global_rank', 'get_group_rank', 'get_process_group_ranks',
+    #  'get_rank', 'get_world_size', 'group', 'init_process_group', 'irecv', 'is_available', 'is_gloo_available',
+    #  'is_initialized', 'is_mpi_available', 'is_nccl_available', 'is_torchelastic_launched', 'is_ucc_available', 'isend',
+    #  'logging_handlers', 'monitored_barrier', 'new_group', 'new_subgroups', 'new_subgroups_by_enumeration', 'os',
+    #  'recv', 'reduce', 'reduce_multigpu', 'reduce_op', 'reduce_scatter', 'reduce_scatter_multigpu',
+    #  'reduce_scatter_tensor', 'register_rendezvous_handler', 'remote_device', 'rendezvous', 'rpc', 'scatter',
+    #  'scatter_object_list', 'send', 'set_debug_level', 'set_debug_level_from_env', 'supports_complex', 'sys', 'torch',
+    #  'utils']
+    # >> >
+
     if torch.cuda.is_available():
         print("BF16 supported:", torch.cuda.is_bf16_supported())
     else:
@@ -83,10 +152,12 @@ def torch_runtime_details():
             print("CUDA memory summary:")
             torch.cuda.memory_summary()
 
-    if torch.cuda.is_available() and hasattr(torch.cuda, "amp") and torch.cuda.amp.is_available():
+    if torch.cuda.is_available() and hasattr(torch.cuda, "amp") and torch.cuda.amp:
         print("AMP is supported")
     else:
         print("AMP is not supported")
+
+    print("distribute supported:", torch.distributed.is_available())
 
     if torch.backends.mps.is_available():
         device = torch.device("mps")
@@ -146,6 +217,8 @@ def torch_runtime_details():
 
         except TypeError as e:
             print("\nUnsupported float64 tensors:", e)
+
+
 #
 # >>> dir(torch.cuda)
 # ['Any', 'BFloat16Storage', 'BFloat16Tensor', 'BoolStorage', 'BoolTensor', 'ByteStorage', 'ByteTensor', 'CUDAGraph', 'CUDAPluggableAllocator', 'CharStorage',
@@ -177,19 +250,19 @@ def torch_runtime_details():
 
 def is_amp_supported():
     return (
-            torch.version.cuda
-            and torch.cuda.is_available()
-            and LooseVersion(torch.version.cuda) >= "11.0"
+        torch.version.cuda
+        and torch.cuda.is_available()
+        and LooseVersion(torch.version.cuda) >= "11.0"
     )
 
 
 def is_bf16_supported():
     return (
-            torch.version.cuda
-            and torch.cuda.is_bf16_supported()
-            and LooseVersion(torch.version.cuda) >= "11.0"
-            and dist.is_nccl_available()
-            and nccl.version() >= (2, 10)
+        torch.version.cuda
+        and torch.cuda.is_bf16_supported()
+        and LooseVersion(torch.version.cuda) >= "11.0"
+        and torch.distributed.is_nccl_available()
+        and nccl.version() >= (2, 10)
     )
 
 
@@ -278,3 +351,82 @@ def generate_observation(model, dataset):
     print(data_sample["input_ids"].shape)
     print(data_sample["attention_mask"].shape)
     print(data_sample["labels"].shape)
+
+
+def check_torch_distributed_ops():
+    """Print all dist ops supported or not
+    :return:
+    """
+    table = []
+    operations = [
+        "is_available",
+        "get_rank",
+        "get_world_size",
+        "is_initialized",
+        "init_process_group",
+        "destroy_process_group",
+        "backend",
+        "new_group",
+        "all_reduce",
+        "reduce",
+        "broadcast",
+        "all_gather",
+        "gather",
+        "scatter",
+        "reduce_scatter",
+        "barrier"
+    ]
+
+    for op in operations:
+        is_available = hasattr(torch.distributed, op)
+        table.append([op, "Available" if is_available else "Not available"])
+
+    headers = ["Operation", "Availability"]
+    print(tabulate(table, headers=headers, tablefmt="fancy_grid"))
+
+
+def debug_nccl(debug_level="WARN"):
+    """Set the debug level for NCCL.
+    :param debug_level: Debug level for NCCL. Default is "WARN".
+    """
+    os.environ["NCCL_DEBUG"] = debug_level
+
+
+def set_ifname(if_name: str = "enp7s0"):
+    """Set the interface name for NCCL socket.
+    :param if_name: Interface name for NCCL socket. Default is "ens1f0".
+    """
+    os.environ["NCCL_SOCKET_IFNAME"] = if_name
+
+
+def torch_distributed_operations_test(rank, world_size):
+    """
+    Test torch.distributed operations (all_reduce, all_gather) in a distributed environment.
+    :param rank: Rank of the current process.
+    :param world_size: Total number of processes.
+    """
+    # Initialize the distributed environment
+    dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
+
+    print(f"Rank: {rank}, World Size: {world_size}")
+
+    # Test all_reduce operation
+    input_tensor = torch.tensor(rank).cuda()
+    output_tensor = torch.tensor([0])
+    input_tensor = input_tensor.to_dense()
+
+    dist.all_reduce(input_tensor, op=dist.ReduceOp.SUM)
+    print(f"Rank: {rank}, All Reduce Result: {output_tensor.item()}")
+
+    # # Test gather operation
+    # input_tensor = torch.tensor(rank).cuda()
+    # output_tensors = [torch.tensor([0]).cuda() for _ in range(world_size)]
+    # input_tensor = input_tensor.to_dense()
+    #
+    # dist.gather(input_tensor, gather_list=output_tensors, dst=0)
+    # if rank == 0:
+    #     gather_result = [tensor.item() for tensor in output_tensors]
+    #     print(f"Rank: {rank}, Gather Result: {gather_result}")
+
+    # Cleanup
+    dist.destroy_process_group()

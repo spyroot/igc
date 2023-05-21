@@ -39,6 +39,4 @@ def shared_main(
 
         os.environ["CUDA_VISIBLE_DEVICES"] = device_list_visibility
 
-
-
     return args, device

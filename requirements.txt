@@ -137,3 +137,6 @@ flask_httpauth
 transformers
 deepspeed
 accelerate
+
+# for cuda printing
+tabulate
