@@ -2,6 +2,18 @@
 Infrastructure Goal Condition  Reinforce Learner
 
 ```bash
+conda create -n igc python=3.10
+conda activate igc
+conda install pytorch::pytorch torchvision torchaudio -c pytorch
+pip install 'transformers[torch]'
+pip install deepspeed
+pip install fairscale
+pip install asv
+pip install pynvml
+
+```
+
+```bash
 CFLAGS=-noswitcherror pip install mpi4py
 CC=cc CXX=CC pip install mpi4py -U          
 ```
