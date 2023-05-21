@@ -136,3 +136,4 @@ flask_httpauth
 # hugging face
 transformers
 deepspeed
+accelerate

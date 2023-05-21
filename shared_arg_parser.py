@@ -1,9 +1,16 @@
 import argparse
+from typing import Optional
+
+import deepspeed
+from accelerate import Accelerator
+from transformers import Trainer
 
 
-def parse_args():
+def shared_arg_parser(
+    is_deepspeed_arg_parser: Optional[bool] = False,
+    is_accelerate_arg_parser: Optional[bool] = False,
+    is_fairscale_arg_parser: Optional[bool] = False):
     """
-
     :return:
     """
     parser = argparse.ArgumentParser(
@@ -12,10 +19,6 @@ def parse_args():
     parser.add_argument("--per_device_train_batch_size",
                         type=int, default=8,
                         help="Batch size (per device) for the training dataloader.")
-
-    parser.add_argument("--model_type",
-                        type=str, default="gpt2-xl", choices=['gpt2-xl', 'gpt2-large', 'gpt2-medium'],
-                        help="Model type.")
 
     parser.add_argument("--per_device_eval_batch_size",
                         type=int, default=8,
@@ -55,8 +58,44 @@ def parse_args():
 
     parser.add_argument("--local-rank",
                         type=int, default=-1,
-                        help="local_rank for distributed training on gpus")
+                        help="local_rank for distributed training on GPUs")
 
-    # parser = deepspeed.add_config_arguments(parser)
+    if is_accelerate_arg_parser:
+        try:
+            accelerator = Accelerator()
+            parser = accelerator.inject_arguments(parser)
+        except ImportError:
+            pass
+
+    if is_fairscale_arg_parser:
+        optimizer_group = parser.add_argument_group('Optimizer')
+        optimizer_group.add_argument("--optimizer",
+                                     type=str, default="adamw",
+                                     choices=['adamw', 'sgd', 'adagrad'],
+                                     help="Optimizer to use.")
+
+        optimizer_group.add_argument(
+            "--scale-loss", action='store_true', help="Enable gradient scaling using fairscale.")
+
+    optimizer_group = parser.add_argument_group('Optimizer')
+    optimizer_group.add_argument(
+        "--optimizer", type=str, default="adamw", help="Optimizer to use.")
+
+    optimizer_group.add_argument(
+        "--optimizer",
+        type=str,
+        default=Trainer.default_optimizer,
+        choices=Trainer.get_supported_optimizers(),
+        help="Optimizer to use."
+    )
+
+    model_type_group = parser.add_argument_group('Model Type')
+    model_type_group.add_argument("--model_type",
+                                  type=str, default="gpt2-xl", choices=['gpt2-xl', 'gpt2-large', 'gpt2-medium'],
+                                  help="Model type.")
+
+    if is_deepspeed_arg_parser:
+        parser = deepspeed.add_config_arguments(parser)
+
     args = parser.parse_args()
     return args
