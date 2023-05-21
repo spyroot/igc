@@ -1,224 +1,290 @@
+"""
+
+we pre-train the model using the shift generation method:
+
+In this step, we train the model to predict the next token in
+the sequence by shifting the input sequence and using a masked language modeling objective.
+This helps the model learn the language patterns and dependencies.
+
+Fine-tune the pretrained model using the random span method: After pre-training, you can further fine-tune the model
+using the random span method. In this case, you replace random spans of text with a single mask token and train the
+model
+to predict the original text. This helps the model learn to fill in missing information and generate coherent text.
+
+By combining these two methods, you can benefit from both the language modeling capabilities learned through shift
+generation and the ability to generate missing text using the random span method. This two-step process
+allows the model to capture a broader range of language understanding and generation capabilities.
+"""
 import os
-import json
-
+import numpy as np
 import torch
-import transformers
-from transformers import GPT2Tokenizer, GPT2LMHeadModel, GPT2Model
-from transformers import GPT2Tokenizer, TextDataset, DataCollatorForLanguageModeling, Trainer, TrainingArguments
-from torch.utils.data import Dataset
-import hashlib
-from transformers import OpenAIGPTTokenizer, OpenAIGPTModel
+import argparse
+from transformers import GPT2LMHeadModel
+from transformers import TrainingArguments, Trainer
+
+from ds.RedfishDataset import JSONDataset
+from torch_utils import print_gpu_utilization
+import evaluate
+from torch.utils.data import random_split
+
+#
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"  # Set to the index of the GPU you want to use
+
+torch.cuda.empty_cache()
 
 
-def model2hfname(model: str) -> str:
-    return {
-        'bert-tiny': 'prajjwal1/bert-tiny',
-        'bert-med': 'prajjwal1/bert-medium',
-        'small': 'gpt2',
-        'med': 'gpt2-medium',
-        'large': 'gpt2-large',
-        'full': 'gpt2-xl',
-        'gpt2-sm': 'gpt2',
-        'gpt2-med': 'gpt2-medium',
-        'gpt2-lg': 'gpt2-large',
-        'gpt2': 'gpt2-xl',
-        'neo': 'EleutherAI/gpt-neo-2.7B',
-    }[model]
-
-
-class JSONDataset(Dataset):
-    def __init__(self, directory_path):
+class LLmTrainer:
+    def __init__(self, cmd):
         """
 
+        :param cmd:
         """
-        self.data = []
-        self.directory_path = directory_path
-        self.load_json_files()
+        super().__init__()
+        self.cmd = cmd
+        self.pad_token_id = None
+        self.collate_fn = self.collate_input_shift_fn
+        self.directory_path = os.path.expanduser("~/.json_responses")
+
 
     @staticmethod
-    def convert_file_name(file_name):
-        converted_name = file_name.replace("_", "/")
-        return converted_name
+    def dataset_checker():
+        """
+        :return:
+        """
+        directory_path = os.path.expanduser("~/.json_responses")
+        dataset = JSONDataset(directory_path, verbose=False)
+        for data_point in dataset:
+            rest_call = dataset.action(data_point["label"])
+            print("Rest recovered:", rest_call)
+            print("Rest original:", data_point["rest_api"])
+            print("Rest original:", data_point["label"])
+
+    def collate_random_span_fn(self, batch):
+        """
+        :param batch:
+        :return:
+        """
+        input_ids = torch.cat([item['input_ids'].squeeze(1) for item in batch])
+        attention_mask = torch.cat([item['attention_mask'].squeeze(1) for item in batch])
+        labels = input_ids.clone()  # Make a copy of input_ids as labels
+
+        # Mask a random span of text in each input
+        for i in range(len(batch)):
+            input_length = input_ids[i].size(0)
+            # Randomly choose start position for masking
+            mask_start = torch.randint(1, input_length - 1, (1,)).item()
+            # Randomly choose end position for masking
+            mask_end = mask_start + torch.randint(1, input_length - mask_start, (1,)).item()
+
+            # Replace the selected span with pad_token_id
+            input_ids[i, mask_start:mask_end] = self.pad_token_id
+            # Set the labels to the original span
+            labels[i, mask_start:mask_end] = input_ids[i, mask_start:mask_end]
+
+        input_ids = input_ids.squeeze(1)
+        attention_mask = attention_mask.squeeze(1)
+
+        return {
+            'input_ids': input_ids,
+            'attention_mask': attention_mask,
+            'labels': labels,
+        }
 
     @staticmethod
-    def calculate_hash(text):
-        return hashlib.sha256(text.encode()).hexdigest()
+    def print_batch_shapes(input_ids, attention_mask, labels):
+        """
+        :param input_ids:
+        :param attention_mask:
+        :param labels:
+        :return:
+        """
+        print(f"shapes "
+              f"input:{input_ids.shape} "
+              f"mask:{attention_mask.shape} "
+              f"label:{labels.shape}")
 
-    def load_json_files(self):
+    def collate_input_shift_fn(self, batch):
         """
+        :param batch:
+        :return:
         """
-        for file_name in os.listdir(self.directory_path):
-            if file_name.endswith(".json"):
-                file_path = os.path.join(self.directory_path, file_name)
-                with open(file_path, "r") as json_file:
-                    rest_api = self.convert_file_name(file_name)
-                    json_lines = json_file.read()
-                    hash_value = self.calculate_hash(rest_api)
-                    self.data.append({
-                        "request_hash": hash_value,
-                        "request": rest_api,
-                        "respond": json_lines,
-                    })
+        input_ids = torch.cat(
+            [item['input_ids'].squeeze(1) for item in batch]
+        )
+
+        attention_mask = torch.cat(
+            [item['attention_mask'].squeeze(1) for item in batch]
+        )
+
+        input_ids = input_ids.squeeze(1)
+        attention_mask = attention_mask.squeeze(1)
+
+        # shifting
+        labels = input_ids[:, 1:].clone()
+        labels[:, -1] = -100  # ignore index
+        mask = torch.tensor(input_ids == self.pad_token_id)
+        labels = labels.masked_fill(mask, -100)
+
+        input_ids = input_ids[:, :-1]
+        attention_mask = attention_mask[:, :-1]
+
+        return {
+            'input_ids': input_ids,
+            'attention_mask': attention_mask,
+            'labels': labels,
+        }
 
     @staticmethod
-    def preprocess_sample(sample):
-        return sample
-
-    @staticmethod
-    def preprocess_json_data(json_data):
+    def compute_metrics(eval_prediction, ):
         """
+        :param eval_prediction:
+        :return:
         """
-        preprocessed_data = []
-        for item in json_data:
-            preprocessed_sample = JSONDataset.preprocess_sample(item)
-            preprocessed_data.append(preprocessed_sample)
-        return preprocessed_data
+        metric = evaluate.load("glue", "mrpc")
+        logits, labels = eval_prediction
+        predictions = np.argmax(logits, axis=-1)
+        return metric.compute(predictions=predictions, references=labels)
 
-    def convert_to_one_hot(self, text):
+    def run(self):
         """
+        :return:
         """
-        hash_value = hashlib.sha256(text.encode()).hexdigest()
-        print(f"hash_value: {hash_value}")
-        binary_value = bin(int(hash_value, 16))[2:]  # Convert hash to binary string
-        one_hot_tensor = torch.tensor(list(binary_value)).float()
-        return one_hot_tensor
 
-    def __len__(self):
-        return len(self.data)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def __getitem__(self, idx):
-        return self.data[idx]
+        directory_path = os.path.expanduser("~/.json_responses")
+        dataset = JSONDataset(directory_path, default_tokenize=self.cmd.model_type, verbose=False)
+        pad_token_id = dataset.tokenizer.pad_token
+
+        train_size = int(len(dataset) * 0.8)
+        eval_size = len(dataset) - train_size
+        train_dataset, eval_dataset = random_split(dataset, [train_size, eval_size])
+
+        # labels = inputs.input_ids.detach().clone()
+        # model = GPT2Model.from_pretrained('gpt2-xl').to(device)
+        model = GPT2LMHeadModel.from_pretrained(self.cmd.model_type).to(device)
+        print_gpu_utilization()
+
+        # model.to(device)
+        # dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
+
+        num_train_epochs = 2
+        default_args = {
+            "output_dir": "tmp",
+            "evaluation_strategy": "steps",
+            "num_train_epochs": 10,
+            "log_level": "error",
+            "report_to": "none",
+            "do_train": True,
+        }
+
+        # the Trainer to evaluate during training by setting evaluation_
+        # strategy to either "steps" (evaluate every eval_steps)
+        # or "epoch" (evaluate at the end of each epoch).
+
+        training_args = TrainingArguments(
+            per_device_train_batch_size=1,
+            gradient_accumulation_steps=8,
+            gradient_checkpointing=True,
+            fp16=True,
+            **default_args,
+            local_rank=cmd.local_rank)
+
+        print(training_args)
+
+        # Traineraloader = DataLoader(dataset, batch_size=4, collate_fn=my_collate_fn)
+        trainer = Trainer(model=model,
+                          args=training_args,
+                          train_dataset=train_dataset,
+                          eval_dataset=eval_dataset,
+                          data_collator=self.collate_fn,
+                          compute_metrics=self.metrics)
+
+        result = trainer.train()
+        print(result)
+
+        # callbacks=[LossMonitorCallback(logging_steps=10)]
 
 
-#
-# json_responses_dir = "json_responses"
-# tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-# model = GPT2LMHeadModel.from_pretrained("gpt2")
-#
-# training_data = []
-#
-# # Iterate over the JSON files in the directory
-# for filename in os.listdir(json_responses_dir):
-#     if filename.endswith(".json"):
-#         filepath = os.path.join(json_responses_dir, filename)
-#         with open(filepath, "r") as file:
-#             json_data = json.load(file)
-#             # Process the JSON data as needed and append to the training data list
-#
-# # Tokenize and encode the training data
-# encoded_inputs = tokenizer(training_data, truncation=True, padding=True, return_tensors="pt")
-#
-# # Train the GPT model with the encoded inputs
-# model.train_model(encoded_inputs["input_ids"])
-#
-# def train_gpt():
-#     pass
-#
-#
-# def build_dataset(tokenizer, json_dir):
-#     """
-#     """
-#     preprocessed_data = []
-#
-#     for file_name in os.listdir(json_responses_dir):
-#         if file_name.endswith(".json"):
-#             file_path = os.path.join(json_responses_dir, file_name)
-#             with open(filepath, "r") as json_file:
-#                     json_data = json.load(json_file)
-#
-#     tokenized_data = tokenizer(preprocessed_data, truncation=True, padding=True)
-#     dataset = Dataset.from_dict(
-#         {
-#             "input_ids": tokenized_data["input_ids"],
-#             "attention_mask": tokenized_data["attention_mask"],
-#         }
-#     )
-#
-#     dataset = dataset.map(
-#         lambda example: {
-#             "input_ids": Value("int64"),
-#             "attention_mask": Value("int64"),
-#         },
-#         features=Features(),
-#     )
-#
-#
-
-def get_model_and_tokenizer(model: str, Cls, **model_kwargs):
+def main(cmd):
     """
 
-    :param model:
-    :param Cls:
-    :param model_kwargs:
+    :param cmd:
     :return:
     """
-    hf_model_name = model2hfname(model)
-    m = Cls.from_pretrained(hf_model_name, **model_kwargs)
-    if isinstance(m, transformers.GPT2LMHeadModel):
-        m.transformer.gradient_checkpointing_enable()
-
-    tok = transformers.AutoTokenizer.from_pretrained(hf_model_name)
-
-    if tok.pad_token_id is None:
-        if Cls == transformers.AutoModelForCausalLM:
-            tok.pad_token = tok.eos_token
-        else:
-            print("Adding pad token to tokenizer")
-            tok.add_special_tokens({'pad_token': '[PAD]'})
-            tok.pad_token = '[PAD]'
-    return m, tok
+    llm_trainer = LLmTrainer(cmd)
 
 
-def main():
+def parse_args():
     """
+
+    :return:
     """
-    # ses_dir = "json_responses"
-    # tokenizer = GPT2Tokenizer.from_pretrained("gpt3")
-    # model = GPT2LMHeadModel.from_pretrained("gpt3")
+    parser = argparse.ArgumentParser(
+        description="Finetune a transformers model on a causal language modeling task")
 
-    directory_path = os.path.expanduser("~/.json_responses")
-    dataset = JSONDataset(directory_path)
+    parser.add_argument("--per_device_train_batch_size",
+                        type=int, default=8,
+                        help="Batch size (per device) for the training dataloader.")
 
-    # tokenizer and model
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2-xl')
-    tokenizer.pad_token = tokenizer.eos_token
+    parser.add_argument("--model_type",
+                        type=str, default="gpt2-xl", choices=['gpt2-xl', 'gpt2-large', 'gpt2-medium'],
+                        help="Model type.")
 
-    inputs = tokenizer([sample['respond'] for sample in dataset.data],
-                       truncation=True, padding=True, return_tensors='pt')
+    parser.add_argument("--per_device_eval_batch_size",
+                        type=int, default=8,
+                        help="Batch size (per device) for the evaluation dataloader.")
 
-    print(inputs)
-    labels = inputs.input_ids.detach().clone()
-    model = GPT2Model.from_pretrained('gpt2-xl')
+    parser.add_argument("--learning_rate",
+                        type=float, default=5e-5,
+                        help="Initial learning rate (after the potential warmup period) to use.")
 
-    print(f"Tokens: {inputs['input_ids'][0]}")
+    parser.add_argument("--weight_decay",
+                        type=float, default=0.0,
+                        help="Weight decay to use.")
 
-    # Decode the first sample back to text
-    print(f"Decoded: {tokenizer.decode(inputs['input_ids'][0])}")
+    parser.add_argument("--num_train_epochs",
+                        type=int, default=3,
+                        help="Total number of training epochs to perform.")
 
-    #
-    # training_args = TrainingArguments(
-    #     output_dir="./results",             # The output directory
-    #     num_train_epochs=3,                 # Total number of training epochs
-    #     per_device_train_batch_size=16,     # Batch size per device during training
-    #     warmup_steps=500,                   # Number of warmup steps for learning rate scheduler
-    #     weight_decay=0.01,                  # Strength of weight decay
-    #     logging_dir='./logs',               # Directory for storing logs
-    #     logging_steps=10,                   # How often to print logs
-    # )
-    #
-    # trainer = Trainer(
-    #     model=model,                         # The instantiated, transformers model to be trained
-    #     args=training_args,                  # Training arguments, defined above
-    #     train_dataset=inputs,                # Training dataset
-    #     eval_dataset=inputs,                 # Evaluation dataset
-    #     data_collator=lambda data: {'input_ids': torch.stack([f[0] for f in data]),
-    #                                 'attention_mask': torch.stack([f[1] for f in data]),
-    #                                 'labels': torch.stack([f[0] for f in data])}
-    # )
-    #
-    # # Train the model
-    # trainer.train()
+    parser.add_argument("--max_train_steps",
+                        type=int, default=None,
+                        help="Total number of training steps to perform. If provided, overrides num_train_epochs.")
+
+    parser.add_argument("--gradient_accumulation_steps",
+                        type=int, default=1,
+                        help="Number of updates steps to accumulate before performing a backward/update pass.")
+
+    parser.add_argument("--num_warmup_steps",
+                        type=int, default=0,
+                        help="Number of steps for the warmup in the lr scheduler.")
+
+    parser.add_argument("--output_dir",
+                        type=str, default=None,
+                        help="Where to store the model.")
+
+    parser.add_argument("--seed",
+                        type=int, default=None,
+                        help="A seed for reproducible training.")
+
+    parser.add_argument("--local-rank",
+                        type=int, default=-1,
+                        help="local_rank for distributed training on gpus")
+
+    # parser = deepspeed.add_config_arguments(parser)
+    args = parser.parse_args()
+    return args
 
 
 if __name__ == '__main__':
-    main()
+
+    args = parse_args()
+    if args.local_rank == -1:
+        device = torch.device("cuda")
+    else:
+        torch.cuda.set_device(args.local_rank)
+        device = torch.device("cuda", args.local_rank)
+        # deepspeed.init_distributed()
+
+    print(args)
+    main(args)
