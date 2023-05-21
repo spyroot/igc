@@ -5,8 +5,6 @@ from typing import Any, Type
 from huggingface_utils import model_hf_name, model_and_tokenizer
 
 
-# Add your model_hf_name and model_and_tokenizer functions here...
-
 class TestModelAndTokenizer(unittest.TestCase):
     def test_model_hf_name(self):
         self.assertEqual(model_hf_name('gpt2', 'small'), 'gpt2')
@@ -27,6 +25,7 @@ class TestModelAndTokenizer(unittest.TestCase):
             model_and_tokenizer('gpt2', 'unknown', transformers.AutoModelForCausalLM)
         with self.assertRaises(ValueError):
             model_and_tokenizer('gpt2', 'small', int)  # int is not a valid model class
+
 
 if __name__ == '__main__':
     unittest.main()

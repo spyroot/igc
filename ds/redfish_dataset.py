@@ -7,38 +7,6 @@ from torch.utils.data import Dataset
 from transformers import GPT2Tokenizer
 
 
-class PromptDataset(Dataset):
-
-    def __init__(self, prompt_dataset, chosen_dataset, reject_dataset,
-                 pad_token_id, train_phase) -> None:
-        super().__init__()
-        self.prompt_dataset = prompt_dataset
-        self.chosen_dataset = chosen_dataset
-        self.reject_dataset = reject_dataset
-        self.pad_token_id = pad_token_id
-        self.train_phase = train_phase
-
-    def __len__(self):
-        length = len(self.chosen_dataset)
-        if self.train_phase == 3:
-            length = len(self.prompt_dataset)
-        return length
-
-    def __getitem__(self, idx):
-        if self.train_phase == 1:
-            return {
-                "input_ids": self.chosen_dataset[idx]["input_ids"],
-                "attention_mask": self.chosen_dataset[idx]["attention_mask"],
-                "labels": self.chosen_dataset[idx]["input_ids"]
-            }
-        elif self.train_phase == 2:
-            return self.chosen_dataset[idx]["input_ids"], self.chosen_dataset[idx]["attention_mask"], \
-                self.reject_dataset[idx]["input_ids"], self.reject_dataset[idx]["attention_mask"]
-        elif self.train_phase == 3:
-            return self.prompt_dataset[idx]["input_ids"], self.prompt_dataset[idx]["attention_mask"], \
-                self.pad_token_id
-
-
 class JSONDataset(Dataset):
     def __init__(self,
                  directory_path: str,
@@ -236,7 +204,9 @@ class JSONDataset(Dataset):
 
     @staticmethod
     def preprocess_json_data(json_data):
-        """
+        """ preprocess json data
+        :param json_data:
+        :return:
         """
         preprocessed_data = []
         for item in json_data:
@@ -245,7 +215,44 @@ class JSONDataset(Dataset):
         return preprocessed_data
 
     def __len__(self):
+        """Return length of dataset"""
         return len(self._data["train_data"])
 
     def __getitem__(self, idx):
+        """Get item from dataset
+        :param idx:
+        :return:
+        """
         return self._data["train_data"][idx]
+
+
+class PromptDataset(Dataset):
+
+    def __init__(self, prompt_dataset, chosen_dataset, reject_dataset,
+                 pad_token_id, train_phase) -> None:
+        super().__init__()
+        self.prompt_dataset = prompt_dataset
+        self.chosen_dataset = chosen_dataset
+        self.reject_dataset = reject_dataset
+        self.pad_token_id = pad_token_id
+        self.train_phase = train_phase
+
+    def __len__(self):
+        length = len(self.chosen_dataset)
+        if self.train_phase == 3:
+            length = len(self.prompt_dataset)
+        return length
+
+    def __getitem__(self, idx):
+        if self.train_phase == 1:
+            return {
+                "input_ids": self.chosen_dataset[idx]["input_ids"],
+                "attention_mask": self.chosen_dataset[idx]["attention_mask"],
+                "labels": self.chosen_dataset[idx]["input_ids"]
+            }
+        elif self.train_phase == 2:
+            return self.chosen_dataset[idx]["input_ids"], self.chosen_dataset[idx]["attention_mask"], \
+                self.reject_dataset[idx]["input_ids"], self.reject_dataset[idx]["attention_mask"]
+        elif self.train_phase == 3:
+            return self.prompt_dataset[idx]["input_ids"], self.prompt_dataset[idx]["attention_mask"], \
+                self.pad_token_id

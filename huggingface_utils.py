@@ -12,9 +12,22 @@ import accelerate
 
 class LossMonitorCallback(TrainerCallback):
     def __init__(self, logging_steps=10):
+        """
+
+        :param logging_steps:
+        """
         self.logging_steps = logging_steps
 
     def on_log(self, args, state, control, logs=None, **kwargs):
+        """
+
+        :param args:
+        :param state:
+        :param control:
+        :param logs:
+        :param kwargs:
+        :return:
+        """
         if state.global_step % self.logging_steps == 0:
             print(f"Step: {state.global_step}, Loss: {logs['loss']}")
 
@@ -27,7 +40,6 @@ def hugging_face_info():
     print(transformers.__file__)
     print(f"Deepspeed version: {deepspeed.__version__}")
     print(f"Deepspeed location: {deepspeed.__file__}")
-
     print(f"Accelerate version: {accelerate.__version__}")
     print(f"Accelerate location: {accelerate.__file__}")
 

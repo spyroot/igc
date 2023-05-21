@@ -9,14 +9,16 @@ import numpy as np
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from tabulate import tabulate
 from pynvml import *
+# for nccl to figure interface we need
+import socket
 
 
 def get_device(rank: Optional[int] = None) -> torch.device:
-    """
-    Get a torch.device. If rank is specified,
+    """Get a torch.device. If rank is specified,
     CUDA devices are distributed in a round-robin fashion.
 
-    :param rank: The rank of the current process, for CUDA device distribution. If None, no distribution is done.
+    :param rank: The rank of the current process, for CUDA device distribution.
+                  If None, no distribution is done.
     :return: A torch.device.
     """
     # Get the total number of CUDA devices
@@ -42,13 +44,8 @@ def get_device(rank: Optional[int] = None) -> torch.device:
         return torch.device("cpu")
 
 
-
-import socket
-
 def get_network_interfaces():
-    """
-    Get a list of network interface names.
-
+    """Get a list of network interface names.
     :return: List of interface names.
     """
     interfaces = []
@@ -68,8 +65,7 @@ def print_gpu_utilization():
 
 
 def print_dict_as_table(data):
-    """
-
+    """Print dict as table, this mainly for mem utilization.
     :param data:
     :return:
     """
@@ -82,7 +78,6 @@ def print_dict_as_table(data):
 
 def cuda_memory(is_verbose=False):
     """
-
     :return:
     """
     if is_verbose:
@@ -111,31 +106,6 @@ def torch_runtime_details():
     print("MPI available:", torch.distributed.is_mpi_available())
     print("GLO available:", torch.distributed.is_gloo_available())
     print("UCC available:", torch.distributed.is_ucc_available())
-
-    # ['AllToAllOptions', 'AllreduceCoalescedOptions', 'AllreduceOptions', 'Backend', 'BackendConfig', 'BarrierOptions',
-    #  'BroadcastOptions', 'BuiltinCommHookType', 'DebugLevel', 'DistBackendError', 'Enum', 'FileStore', 'GatherOptions',
-    #  'GradBucket', 'GroupMember', 'HashStore', 'Logger', 'P2POp', 'PrefixStore', 'ProcessGroup', 'ProcessGroupGloo',
-    #  'ProcessGroupMPI', 'ProcessGroupNCCL', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions', 'Reducer',
-    #  'ScatterOptions', 'Store', 'TCPStore', 'Work', '_Backend', '_CoalescingManager', '_DEFAULT_FIRST_BUCKET_BYTES',
-    #  '_Work', '__builtins__', '__cached__', '__doc__', '__file__', '__loader__', '__name__', '__package__', '__path__',
-    #  '__spec__', '_all_gather_base', '_backend', '_broadcast_coalesced', '_c10d_error_logger', '_coalescing_manager',
-    #  '_compute_bucket_assignment_by_size', '_create_process_group_wrapper', '_create_store_from_options',
-    #  '_make_nccl_premul_sum', '_rank_not_in_group', '_reduce_scatter_base', '_register_builtin_comm_hook',
-    #  '_register_comm_hook', '_remote_device', '_round_robin_process_groups', '_test_python_store',
-    #  '_verify_params_across_processes', 'algorithms', 'all_gather', 'all_gather_coalesced', 'all_gather_into_tensor',
-    #  'all_gather_multigpu', 'all_gather_object', 'all_reduce', 'all_reduce_coalesced', 'all_reduce_multigpu',
-    #  'all_to_all', 'all_to_all_single', 'autograd', 'barrier', 'batch_isend_irecv', 'broadcast', 'broadcast_multigpu',
-    #  'broadcast_object_list', 'c10d_error_logger', 'constants', 'default_pg_timeout', 'destroy_process_group',
-    #  'dist_backend', 'distributed_c10d', 'exception_handler', 'gather', 'gather_object', 'get_backend',
-    #  'get_backend_config', 'get_debug_level', 'get_global_rank', 'get_group_rank', 'get_process_group_ranks',
-    #  'get_rank', 'get_world_size', 'group', 'init_process_group', 'irecv', 'is_available', 'is_gloo_available',
-    #  'is_initialized', 'is_mpi_available', 'is_nccl_available', 'is_torchelastic_launched', 'is_ucc_available', 'isend',
-    #  'logging_handlers', 'monitored_barrier', 'new_group', 'new_subgroups', 'new_subgroups_by_enumeration', 'os',
-    #  'recv', 'reduce', 'reduce_multigpu', 'reduce_op', 'reduce_scatter', 'reduce_scatter_multigpu',
-    #  'reduce_scatter_tensor', 'register_rendezvous_handler', 'remote_device', 'rendezvous', 'rpc', 'scatter',
-    #  'scatter_object_list', 'send', 'set_debug_level', 'set_debug_level_from_env', 'supports_complex', 'sys', 'torch',
-    #  'utils']
-    # >> >
 
     if torch.cuda.is_available():
         print("BF16 supported:", torch.cuda.is_bf16_supported())
@@ -218,35 +188,6 @@ def torch_runtime_details():
         except TypeError as e:
             print("\nUnsupported float64 tensors:", e)
 
-
-#
-# >>> dir(torch.cuda)
-# ['Any', 'BFloat16Storage', 'BFloat16Tensor', 'BoolStorage', 'BoolTensor', 'ByteStorage', 'ByteTensor', 'CUDAGraph', 'CUDAPluggableAllocator', 'CharStorage',
-#  'CharTensor', 'ComplexDoubleStorage', 'ComplexFloatStorage', 'CudaError',
-#  'DeferredCudaCallError', 'Device', 'DoubleStorage', 'DoubleTensor', 'Event', 'ExternalStream',
-#  'FloatStorage', 'FloatTensor', 'HalfStorage', 'HalfTensor', 'IntStorage', 'IntTensor', 'List', 'LongStorage', 'LongTensor', 'Optional', 'OutOfMemoryError',
-#  'ShortStorage', 'ShortTensor', 'Stream', 'StreamContext', 'Tuple', 'Union', '_CudaBase', '_CudaDeviceProperties',
-#  '_DeviceGuard', '_LazySeedTracker', '__all__', '__annotations__', '__builtins__', '__cached__', '__doc__', '__file__', '__loader__',
-#  '__name__', '__package__', '__path__', '__spec__', '_check_capability', '_check_cubins',
-#  '_cudart', '_device', '_device_count_nvml', '_device_t', '_dummy_type', '_exchange_device', '_get_device_index', '_initialization_lock',
-#  '_initialized', '_is_compiled', '_is_in_bad_fork', '_lazy_call', '_lazy_init', '_lazy_new',
-#  '_lazy_seed_tracker', '_memory_viz', '_nvml_based_avail', '_parse_visible_devices',
-#  '_queued_calls', '_raw_device_count_nvml', '_raw_device_uuid_nvml', '_sleep', '_tls',
-#  '_transform_uuid_to_ordinals', '_utils', '_warn_typed_storage_removal', 'amp', 'caching_allocator_alloc',
-#  'caching_allocator_delete', 'can_device_access_peer', 'cast', 'change_current_allocator', 'check_error',
-#  'classproperty', 'contextlib', 'cudaStatus', 'cudart', 'current_blas_handle', 'current_device', 'current_stream',
-#  'default_generators', 'default_stream', 'device', 'device_count', 'device_of', 'empty_cache', 'get_allocator_backend',
-#  'get_arch_list', 'get_device_capability', 'get_device_name', 'get_device_properties', 'get_gencode_flags', 'get_rng_state',
-#  'get_rng_state_all', 'get_sync_debug_mode', 'graph', 'graph_pool_handle', 'graphs', 'has_half', 'has_magma'
-#     , 'init', 'initial_seed', 'ipc_collect', 'is_available', 'is_bf16_supported', 'is_current_stream_capturing',
-#  'is_initialized', 'jiterator', 'list_gpu_processes', 'lru_cache', 'make_graphed_callables',
-#  'manual_seed', 'manual_seed_all', 'max_memory_allocated', 'max_memory_cached', 'max_memory_reserved',
-#  'mem_get_info', 'memory', 'memory_allocated', 'memory_cached', 'memory_reserved', 'memory_snapshot',
-#  'memory_stats', 'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'nccl', 'nvtx',
-#  'os', 'profiler', 'random', 'reset_accumulated_memory_stats', 'reset_max_memory_allocated',
-#  'reset_max_memory_cached', 'reset_peak_memory_stats', 'seed', 'seed_all', 'set_device',
-#  'set_per_process_memory_fraction', 'set_rng_state', 'set_rng_state_all', 'set_stream', 'set_sync_debug_mode',
-#  'sparse', 'stream', 'streams', 'synchronize', 'threading', 'torch', 'traceback', 'utilization', 'warnings']
 
 def is_amp_supported():
     return (
@@ -400,7 +341,7 @@ def set_ifname(if_name: str = "enp7s0"):
 
 
 def torch_distributed_operations_test(rank, world_size):
-    """
+    """I need properly test it.
     Test torch.distributed operations (all_reduce, all_gather) in a distributed environment.
     :param rank: Rank of the current process.
     :param world_size: Total number of processes.
