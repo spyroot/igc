@@ -195,7 +195,7 @@ def add_logging_group(parser):
                             "`log_level` once per node, or only on the main")
 
     group.add_argument("--log_steps",
-                       type=int, default=500,
+                       type=int, default=10,
                        help=" Number of update steps between two logs.")
 
     return parser

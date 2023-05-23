@@ -140,3 +140,5 @@ accelerate
 
 # for cuda printing
 tabulate
+nltk
+rouge_score

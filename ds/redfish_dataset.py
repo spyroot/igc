@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Optional
 
@@ -14,7 +15,8 @@ class JSONDataset(Dataset):
                  max_len: Optional[int] = 1024,
                  overlap: Optional[int] = 256,
                  dataset_dir: Optional[str] = "datasets",
-                 verbose: Optional[bool] = False):
+                 verbose: Optional[bool] = False,
+                 recreate_dataset: Optional[bool] = False):
         """
         """
         assert isinstance(directory_path, str), 'directory_path should be a string'
@@ -31,6 +33,7 @@ class JSONDataset(Dataset):
         self._overlap = overlap
         self.tokenizer = GPT2Tokenizer.from_pretrained(default_tokenize)
         self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self._default_dir = dataset_dir
         os.makedirs(self._default_dir, exist_ok=True)
 
@@ -39,14 +42,14 @@ class JSONDataset(Dataset):
         # Dictionary to map hash values to action one-hot vectors
         self.num_actions = 0
 
-        if os.path.exists(self._dataset_file_name):
-            print(f"Loading dataset from {self._dataset_file_name}")
-            self._data = torch.load(self._dataset_file_name)
-            self._load_dicts_from_data()
-        else:
+        if recreate_dataset or not os.path.exists(self._dataset_file_name):
             self._load_json_files()
             self._load_dicts_from_data()
             torch.save(self._data, self._dataset_file_name)
+        else:
+            print(f"Loading dataset from {self._dataset_file_name}")
+            self._data = torch.load(self._dataset_file_name)
+            self._load_dicts_from_data()
 
     def _load_dicts_from_data(self):
         """Load the dictionaries based on the data points in self.data.
@@ -117,7 +120,8 @@ class JSONDataset(Dataset):
         return converted_name
 
     def create_chunks(self, input_ids, attention_mask):
-        """
+        """Create chunks of input_ids and attention_mask, this
+        splits the input_ids and attention_mask for large json files.
         :param attention_mask:
         :param input_ids:
         :return:
@@ -137,12 +141,28 @@ class JSONDataset(Dataset):
             padded_input_ids = torch.nn.functional.pad(
                 chunk_input_ids, (0, self._max_len - chunk_input_ids.size(1)),
                 value=self.tokenizer.pad_token_id)
+
             padded_attention_mask = torch.nn.functional.pad(
                 chunk_attention_mask, (0, self._max_len - chunk_attention_mask.size(1)))
             chunks.append((padded_input_ids, padded_attention_mask))
             idx += self._max_len - self._overlap
 
         return chunks
+
+    @staticmethod
+    def extract_recursive(json_obj, allowable_values, targets):
+        """Recursively extracts values from a nested JSON structure.
+        """
+        if isinstance(json_obj, dict):
+            for key, value in json_obj.items():
+                if "@Redfish.AllowableValues" in key:
+                    allowable_values[key] = value
+                if "target" in key:
+                    targets[key] = value
+                JSONDataset.extract_recursive(value, allowable_values, targets)
+        elif isinstance(json_obj, list):
+            for item in json_obj:
+                JSONDataset.extract_recursive(item, allowable_values, targets)
 
     def _load_json_files(self) -> None:
         """
@@ -153,41 +173,60 @@ class JSONDataset(Dataset):
         self._data["hash_to_rest_api"] = {}
         self._data["train_data"] = []
 
+        def process_json_file(file_path: str, file_name: str) -> None:
+            """
+
+            :param file_path:
+            :param file_name:
+            :return:
+            """
+            with open(file_path, "r") as json_file:
+                if self._verbose:
+                    print(f"reading {file_name}")
+
+                rest_api = self.convert_file_name(file_name)
+                json_lines = json_file.read()
+                hash_value = hash(rest_api)
+
+                # load JSON as a dictionary
+                json_data = json.loads(json_lines)
+                allowable_values = {}
+                targets = {}
+                JSONDataset.extract_recursive(json_data, allowable_values, targets)
+
+                tokenizer = self.tokenizer(
+                    json_lines,
+                    padding='max_length',
+                    max_length=self._max_len,
+                    truncation=False,
+                    return_tensors='pt')
+
+                input_ids = tokenizer['input_ids']
+                attention_mask = tokenizer['attention_mask']
+                chunks = self.create_chunks(input_ids, attention_mask)
+
+                # for each chunk add it as a separate data point
+                for i, chunk_tuple in enumerate(chunks):
+                    padded_chunk, padded_mask = chunk_tuple
+                    self._data["hash_to_rest_api"][hash_value] = rest_api
+                    self._data["train_data"].append(
+                        {
+                            "rest_api": rest_api,  # this for debug
+                            "request_hash": hash_value,
+                            "request": rest_api,
+                            "input_ids": padded_chunk,
+                            "attention_mask": padded_mask,
+                            "allowable_values": allowable_values,
+                            "targets": targets,
+                            "file_path": file_path.split(".json_responses")[1],
+                        }
+                    )
+
         for root, dirs, files in os.walk(self.directory_path):
             for file_name in files:
                 if file_name.endswith(".json"):
                     file_path = os.path.join(root, file_name)
-                    with open(file_path, "r") as json_file:
-                        if self._verbose:
-                            print(f"reading {file_name}")
-
-                        rest_api = self.convert_file_name(file_name)
-                        json_lines = json_file.read()
-                        hash_value = hash(rest_api)
-
-                        tokenizer = self.tokenizer(
-                            json_lines,
-                            padding='max_length',
-                            max_length=self._max_len,
-                            truncation=False,
-                            return_tensors='pt')
-
-                        input_ids = tokenizer['input_ids']
-                        attention_mask = tokenizer['attention_mask']
-                        chunks = self.create_chunks(input_ids, attention_mask)
-                        # for each chunk add it as separate data point
-                        for i, chunk_tuple in enumerate(chunks):
-                            padded_chunk, padded_mask = chunk_tuple
-                            self._data["hash_to_rest_api"][hash_value] = rest_api
-                            self._data["train_data"].append(
-                                {
-                                    "rest_api": rest_api,  # this for debug
-                                    "request_hash": hash_value,
-                                    "request": rest_api,
-                                    "input_ids": padded_chunk,
-                                    "attention_mask": padded_mask
-                                }
-                            )
+                    process_json_file(file_path, file_name)
 
     def action(self, one_hot_vec: torch.Tensor) -> str:
         """return action from one hot vector representation

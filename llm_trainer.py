@@ -19,21 +19,27 @@ allows the model to capture a broader range of language understanding and genera
 """
 import argparse
 import os
+from random import random
+from typing import Tuple, Optional, List
 
 import evaluate
+import nltk
 import numpy as np
 import torch
+from tqdm import tqdm
 from transformers import (
     GPT2LMHeadModel,
     TrainingArguments,
-    Trainer
+    Trainer, GPT2Tokenizer
 )
 from ds.redfish_dataset import JSONDataset
 from huggingface_utils import LossMonitorCallback
+from llm_base_trainer import LLmBaseTrainer
 from shared_main import shared_main
 from torch.utils.data import random_split
 
 from shared_torch_utils import cuda_memory
+from torch.nn import functional as F
 
 #
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"  # Set to the index of the GPU you want to use
@@ -41,8 +47,9 @@ from shared_torch_utils import cuda_memory
 torch.cuda.empty_cache()
 
 
-class LLmTrainer:
-    def __init__(self, cmd: argparse.Namespace):
+class LLmTrainer(LLmBaseTrainer):
+    def __init__(self, cmd: argparse.Namespace,
+                 default_tokenize: Optional[str] = "gpt2-xl"):
         """
         :param cmd:
         """
@@ -51,11 +58,14 @@ class LLmTrainer:
         self.cmd = cmd
         self.collate_fn = self.collate_input_shift_fn
         self.metrics_fn = self.compute_metrics
-        # datasset
+
+        self.model = None
+        self.tokenizer = GPT2Tokenizer.from_pretrained(default_tokenize)
+
+        # dataset
         self.directory_path = os.path.expanduser("~/.json_responses")
         self.dataset = JSONDataset(
             self.directory_path, verbose=False)
-        self.pad_token_id = self.dataset.tokenizer.pad_token
 
         self.train_dataset = self.dataset
         self.eval_dataset = self.dataset
@@ -63,128 +73,24 @@ class LLmTrainer:
         # split dataset
         self.split_dataset()
 
-    def split_dataset(self, ratio: float = 0.8):
-        """
-        :param ratio:
-        :return:
-        """
-        train_size = int(len(self.dataset) * ratio)
-        eval_size = len(self.dataset) - train_size
-        self.train_dataset, self.eval_dataset = random_split(
-            self.dataset, [train_size, eval_size])
-
-    @staticmethod
-    def dataset_checker(self):
-        """Dataset checker
-        :return:
-        """
-        for data_point in self.dataset:
-            rest_call = self.dataset.action(data_point["label"])
-            print("rest recovered:", rest_call)
-            print("rest original:", data_point["rest_api"])
-            print("rest original:", data_point["label"])
-
-    def collate_random_span_fn(self, batch):
-        """
-        :param batch:
-        :return:
-        """
-        input_ids = torch.cat([item['input_ids'].squeeze(1) for item in batch])
-        attention_mask = torch.cat([item['attention_mask'].squeeze(1) for item in batch])
-        labels = input_ids.clone()  # Make a copy of input_ids as labels
-
-        # Mask a random span of text in each input
-        for i in range(len(batch)):
-            input_length = input_ids[i].size(0)
-            # randomly choose start position for masking
-            mask_start = torch.randint(1, input_length - 1, (1,)).item()
-            # randomly choose end position for masking
-            mask_end = mask_start + torch.randint(1, input_length - mask_start, (1,)).item()
-            # replace the selected span with pad_token_id
-            input_ids[i, mask_start:mask_end] = self.pad_token_id
-            # set the labels to the original span
-            labels[i, mask_start:mask_end] = input_ids[i, mask_start:mask_end]
-
-        input_ids = input_ids.squeeze(1)
-        attention_mask = attention_mask.squeeze(1)
-
-        return {
-            'input_ids': input_ids,
-            'attention_mask': attention_mask,
-            'labels': labels,
-        }
-
-    @staticmethod
-    def print_batch_shapes(input_ids, attention_mask, labels):
-        """
-        :param input_ids:
-        :param attention_mask:
-        :param labels:
-        :return:
-        """
-        print(f"shapes "
-              f"input:{input_ids.shape} "
-              f"mask:{attention_mask.shape} "
-              f"label:{labels.shape}")
-
-    def collate_input_shift_fn(self, batch):
-        """
-        :param batch:
-        :return:
-        """
-        input_ids = torch.cat(
-            [item['input_ids'].squeeze(1) for item in batch]
-        )
-
-        attention_mask = torch.cat(
-            [item['attention_mask'].squeeze(1) for item in batch]
-        )
-
-        input_ids = input_ids.squeeze(1)
-        attention_mask = attention_mask.squeeze(1)
-
-        # shifting
-        labels = input_ids[:, 1:].clone()
-        labels[:, -1] = -100  # ignore index
-        mask = torch.tensor(input_ids == self.pad_token_id)
-        labels = labels.masked_fill(mask, -100)
-
-        input_ids = input_ids[:, :-1]
-        attention_mask = attention_mask[:, :-1]
-
-        return {
-            'input_ids': input_ids,
-            'attention_mask': attention_mask,
-            'labels': labels,
-        }
-
-    @staticmethod
-    def compute_metrics(eval_prediction):
-        """
-        :param eval_prediction:
-        :return:
-        """
-        metric = evaluate.load("glue", "mrpc")
-        logits, labels = eval_prediction
-        predictions = np.argmax(logits, axis=-1)
-        return metric.compute(predictions=predictions, references=labels)
-
     def run(self):
         """
         :return:
         """
         # labels = inputs.input_ids.detach().clone()
         # model = GPT2Model.from_pretrained('gpt2-xl').to(device)
-        print(self.cmd)
-        print(self.cmd)
+        if self.cmd.gradient_checkpointing:
+            self.model = GPT2LMHeadModel.from_pretrained(
+                self.cmd.model_type, use_cache=False).to(self.cmd.device)
+        else:
+            self.model = GPT2LMHeadModel.from_pretrained(
+                self.cmd.model_type, use_cache=False).to(self.cmd.device)
 
-        model = GPT2LMHeadModel.from_pretrained(
-            self.cmd.model_type).to(self.cmd.device)
         if torch.cuda.is_available():
             cuda_memory()
 
         print(f"Dataset size train {len(self.train_dataset)} {len(self.eval_dataset)}")
-        model.to(self.cmd.device)
+        self.model.to(self.cmd.device)
         # dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
 
         default_args = {
@@ -260,17 +166,151 @@ class LLmTrainer:
         print(training_args)
 
         # Traineraloader = DataLoader(dataset, batch_size=4, collate_fn=my_collate_fn)
-        trainer = Trainer(model=model,
+        trainer = Trainer(model=self.model,
                           args=training_args,
                           train_dataset=self.train_dataset,
                           eval_dataset=self.eval_dataset,
                           data_collator=self.collate_fn,
                           compute_metrics=self.metrics_fn,
-                          callbacks=[LossMonitorCallback(logging_steps=10)])
+                          callbacks=[LossMonitorCallback(logging_steps=self.cmd.log_steps)])
 
-        result = trainer.train(use_cache=False)
+        result = trainer.train()
         print(result)
         trainer.save_model(self.cmd.output_dir)
+
+    # def train_extract_goal(self):
+    #     """
+    #
+    #     :return:
+    #     """
+    #     # Initialize tokenizer and model
+    #     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    #     model = GPT2ForSequenceClassification.from_pretrained('gpt2')
+    #
+    #     # Tokenize input data
+    #     input_text = ["Change Raid to RAID0", ...]  # list of your sentences
+    #     labels = ["RAID0", ...]  # list of your goals
+    #     encodings = tokenizer(input_text, truncation=True, padding=True)
+    #     labels_enc = tokenizer(labels, truncation=True, padding=True)
+    #
+    #     # Prepare optimizer
+    #     optimizer = Adam(model.parameters())
+    #
+    #     # Training loop
+    #     for epoch in range(epochs):
+    #         optimizer.zero_grad()
+    #
+    #         # Forward pass
+    #         outputs = model(**encodings)
+    #
+    #         # Compute loss
+    #         loss = CrossEntropyLoss()(outputs.logits, labels_enc['input_ids'])
+    #
+    #         # Backward pass
+    #         loss.backward()
+    #         optimizer.step()
+
+    def map_verb_to_http_method(verb):
+        """
+        :return:
+        """
+        if verb in ["update", "change", "modify"]:
+            return "PUT"
+        elif verb in ["create", "add"]:
+            return "POST"
+        elif verb in ["remove", "delete"]:
+            return "DELETE"
+        else:
+            return "GET"  # default
+
+    @staticmethod
+    def extract_verb(input_text):
+        """"Tokenize the sentence into words,
+            perform part-of-speech tagging, filter out the word(s) tagged as 'VB' (verb, base form)
+            return the first verb, or None if no verb was found
+        """
+        words = nltk.word_tokenize(input_text)
+        tagged_words = nltk.pos_tag(words)
+        verbs = [word for word, tag in tagged_words if tag.startswith('VB')]
+        return verbs[0] if verbs else None
+
+    # Prompt: "Goal: Update the RAID configuration to RAID0, Parameters: RAID Type: RAID0, Disk Count: 4"
+    def emit_goal_prompt(self, goal, parameters):
+        """
+        :param goal:
+        :param parameters:
+        :return:
+        """
+        # Generate the prompt based on the goal and parameters
+        return f"Goal: {goal}\nParameters: {parameters}\n"
+
+    @torch.inference_mode()
+    def do_sample(self,
+                  input_ids: torch.Tensor,
+                  stop_tokens: torch.Tensor,
+                  max_tokens: int, debug=False) -> torch.Tensor:
+        """Sample from the model using
+
+        :param input_ids:
+        :param stop_tokens:  A list of token ids that indicates when should stop.
+        :param max_tokens:  Stop sampling if we've sampled this many tokens
+        :param debug:
+        :return:
+        """
+
+        initial_shape = input_ids.shape[1]
+        for i in range(0, max_tokens):
+            # (batch_size, sequence_length, config.vocab_size)
+            next_tokens = self.model(input_ids).logits[:, -1, :].argmax(dim=-1)
+            if stop_tokens is not None:
+                condition = (next_tokens == stop_tokens)
+                if torch.any(condition):
+                    if debug:
+                        print("stopping criteria condition", condition, input_ids.shape)
+                    break
+
+            input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
+
+        ids_squeezed = input_ids.squeeze()
+        new_ids = ids_squeezed[initial_shape:]
+        return new_ids
+
+    def train_extact_goal(self):
+        """
+
+        :return:
+        """
+        for epoch in range(epochs):
+            total_loss = 0
+
+            for data in self._data["train_data"]:
+                optimizer.zero_grad()
+
+                # Encode the input and output sentences
+                input_text = data["request"]
+                verb = extract_verb(input_text)  # You need to write the extract_verb function
+                http_method = map_verb_to_http_method(verb)
+
+                # Generate the expected output sentence
+                output_text = f"HTTP method: {http_method}"
+
+                # Tokenize input and output
+                inputs = tokenizer(input_text, return_tensors='pt', truncation=True, padding=True)
+                labels = tokenizer(output_text, return_tensors='pt', truncation=True, padding=True).input_ids
+
+                # Forward pass
+                outputs = model(**inputs, labels=labels)
+
+                # Compute loss
+                loss = outputs.loss
+
+                # Backward pass
+                loss.backward()
+                optimizer.step()
+
+                total_loss += loss.item()
+
+            print(f"Epoch {epoch}, Loss: {total_loss}")
 
 
 def main():
