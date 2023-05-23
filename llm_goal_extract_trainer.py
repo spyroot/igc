@@ -160,11 +160,12 @@ class GoalExtractor:
         for i in range(min(num_permutations, len(permutations))):
             permutation = permutations[i]
             values_str = ' '.join(permutation)
-            prompt_case_sensitive = f"{action} {values_str} RedfishGoal: {goal}."
-            prompt_case_insensitive = prompt_case_sensitive.lower()
-            prompt_case_title = prompt_case_sensitive.title()
-            prompt_case_upper = prompt_case_sensitive.upper()
-            prompts.extend([prompt_case_sensitive, prompt_case_insensitive, prompt_case_title, prompt_case_upper])
+            prompt_case_sensitive = f"{action.lower()} {values_str.lower()} RedfishGoal: {goal}."
+            prompts.append(prompt_case_sensitive)
+            # # prompt_case_insensitive = prompt_case_sensitive.lower()
+            # # prompt_case_title = prompt_case_sensitive.title()
+            # # prompt_case_upper = prompt_case_sensitive.upper()
+            # prompts.extend([prompt_case_sensitive, prompt_case_insensitive, prompt_case_title, prompt_case_upper])
         return prompts
 
     def train_goal_representation(self):
