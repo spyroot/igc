@@ -123,6 +123,7 @@ class GoalExtractor:
             for high_level_action in flatten_high_level_action:
                 prompts = self.generate_goal_permutation(high_level_action, goal, goal_modified.split(), 32)
                 for prompt in prompts:
+                    print(prompt)
                     batch.append(prompt)
                     if len(batch) == self.batch_size:
                         yield batch
@@ -174,7 +175,17 @@ class GoalExtractor:
                     # Accumulate loss
                     total_loss += loss.item()
                     # Report batch loss
-                    print(f"Epoch {epoch + 1}/{self.num_epochs} - Batch {i + 1}/{num_batches} - Loss: {loss.item()}")
+                # eval
+                for i in range(0, len(encoded_inputs['input_ids']), self.batch_size):
+                    eval_input_ids = encoded_inputs['input_ids'].to(self.device)
+                    eval_attr_mask = encoded_inputs['attention_mask'].to(self.device)
+                    with torch.no_grad():
+                        outputs = self.model.generate(
+                            input_ids=eval_input_ids, attention_mask=eval_attr_mask)
+                        # decode the generated output
+                        generated_prompt = self.tokenizer.decode(
+                            outputs[0], skip_special_tokens=True)
+                        print("Model generated text: ", generated_prompt)
 
             average_loss = total_loss / num_batches
             print(f"Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
