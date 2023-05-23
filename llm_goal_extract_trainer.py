@@ -69,12 +69,12 @@ class GoalExtractor:
         self.actions = ['Create', 'Update', 'Delete', 'Query']
 
         self.goal_to_action = {
-            "RaidLevelMigration": "/redfish/v1/Systems/raid",
-            "BootSourceOverrideTarget": "/redfish/v1/Systems/System.Embedded.1/BootOptions",
-            "ComputerSystem.Reset": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset",
-            "ChangePDState": "/redfish/v1/Systems/System.Embedded.1/Oem/Dell/DellRaidService/Actions/DellRaidService.CancelRebuildPhysicalDisk",
-            "SecureBoot.ResetKeys": "/redfish/v1/Systems/System.Embedded.1/SecureBoot/Actions/SecureBoot.ResetKeys",
-            "GetAvailableDisks": "BootSourceOverrideTarget",
+            "raidlevelmigration": "/redfish/v1/Systems/raid",
+            "bootsourceoverridetarget": "/redfish/v1/Systems/System.Embedded.1/BootOptions",
+            "Ccmputersystem.reset": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset",
+            "changeodstate": "/redfish/v1/Systems/System.Embedded.1/Oem/Dell/DellRaidService/Actions/DellRaidService.CancelRebuildPhysicalDisk",
+            "secureBoot.resetkeys": "/redfish/v1/Systems/System.Embedded.1/SecureBoot/Actions/SecureBoot.ResetKeys",
+            "getavailabledisks": "BootSourceOverrideTarget",
         }
 
         self.device = get_device()
@@ -567,7 +567,8 @@ class GoalExtractor:
             goal = self.query_agent_goal(input_string)
             if len(goal) == 2:
                 goal, parameters = goal
-                target_rest = self.goal_to_action[goal]
+                rest_action = goal.lower()
+                target_rest = self.goal_to_action[rest_action]
                 print(f"Agent goal: {goal} parameters {parameters} target api {target_rest}")
                 continue
 
