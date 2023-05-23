@@ -45,19 +45,41 @@ class GoalExtractor:
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.model.config.pad_token_id = self.tokenizer.pad_token_id
 
-        self.num_epochs = 200
+        self.num_epochs = 10
         self.batch_size = 4
 
         # this for test
-        self.targets = ['raid', 'BootSourceOverrideTarget', 'Reset']
+        self.targets = [
+            "RaidLevelMigration",
+            "BootSourceOverrideTarget",
+            "ComputerSystem.Reset",
+            "SecureBoot.ResetKeys",
+            "ChangePDState",
+            "GetAvailableDisks"
+        ]
+
         self.allowable_values = [
             ['raid0', 'raid1', 'raid5'],
             ['None', 'Pxe', 'Floppy'],
-            ['On', 'ForceOff', 'ForceRestart']
+            ['On', 'ForceOff', 'ForceRestart'],
+            ['ResetAllKeysToDefault', 'DeleteAllKeys', 'ResetPK'],
+            ["Offline", "Online"],
+            ["NoRAID", "RAID0", "RAID1"],
         ]
         self.actions = ['Create', 'Update', 'Delete', 'Query']
 
+        self.goal_to_action = {
+            "raid": "/redfish/v1/Systems/raid",
+            "BootSourceOverrideTarget": "/redfish/v1/Systems/System.Embedded.1/BootOptions",
+            "reset": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset",
+            "ChangePDState": "/redfish/v1/Systems/System.Embedded.1/Oem/Dell/DellRaidService/Actions/DellRaidService.CancelRebuildPhysicalDisk",
+            "resetkeys": "/redfish/v1/Systems/System.Embedded.1/SecureBoot/Actions/SecureBoot.ResetKeys",
+            "boot": "BootSourceOverrideTarget",
+        }
+
         self.device = get_device()
+        # self.modified_targets = [target.replace(".", " ") for target in self.targets]
+        # self.targets_mapping = {re.sub(r"([a-z])([A-Z])", r"\1 \2", target): target for target in self.modified_targets}
 
     @staticmethod
     def generate_prompts(target, allowable_values):
@@ -110,7 +132,7 @@ class GoalExtractor:
         for r in range(1, len(allowable_parameters) + 1):
             for permutation in itertools.permutations(allowable_parameters, r):
                 prompt = f"{action} {goal} with "
-                values_str = ', '.join(permutation)
+                values_str = ' '.join(permutation)
                 prompt += values_str
                 prompts.append(prompt)
 
@@ -120,6 +142,74 @@ class GoalExtractor:
             prompts.append(prompt)
 
         return prompts
+
+    @staticmethod
+    def generate_goal_permutation(action: str, goal: str, allowable_parameters: List[str], num_permutations: int):
+        """Generate permutations of prompts based on the given parameters.
+
+        :param action: Action word such as 'Create', 'Update'
+        :param goal: Goal for RL agent.
+        :param allowable_parameters: Parameters that the agent must use.
+        :param num_permutations: Number of permutations to generate.
+        :return: List of generated prompts.
+        """
+
+        prompts = []
+        permutations = list(itertools.permutations(allowable_parameters))
+
+        for i in range(min(num_permutations, len(permutations))):
+            permutation = permutations[i]
+            values_str = ' '.join(permutation)
+            prompt = f"{action} {goal} TextInput: {values_str}"
+            prompts.append(prompt)
+
+        return prompts
+
+    def train_goal_representation(self):
+        """Train LLM model to map high level goal to redfish actions.
+
+        For example
+                "target": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
+        :return:
+        """
+        prompts = []
+        for goal in self.targets:
+            goal_modified = goal.replace(".", " ")
+            goal_modified = re.sub(r"([a-z])([A-Z])", r"\1 \2", goal_modified)
+            prompts += self.generate_goal_permutation("RedfishAction:", goal, goal_modified.split(), 16)
+
+        # tokenize the prompts
+        encoded_inputs = self.tokenizer(prompts, padding=True, truncation=True, return_tensors='pt')
+        optimizer = AdamW(self.model.parameters(), lr=1e-5)
+        self.model.to(self.device)
+        self.model.train()
+
+        for epoch in range(self.num_epochs):
+            total_loss = 0.0
+            num_batches = len(encoded_inputs['input_ids']) // self.batch_size
+            for i in range(0, len(encoded_inputs['input_ids']), self.batch_size):
+                batch_inputs = {
+                    'input_ids': encoded_inputs['input_ids'][i:i + self.batch_size],
+                    'attention_mask': encoded_inputs['attention_mask'][i:i + self.batch_size]
+                }
+
+                # move input tensors to the GPU if available
+                batch_inputs = {
+                    k: v.to(self.device) for k, v in batch_inputs.items()
+                }
+
+                # forward
+                outputs = self.model(**batch_inputs, labels=batch_inputs['input_ids'])
+                loss = outputs.loss
+
+                # Backward pass
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
+
+            average_loss = total_loss / num_batches
+            print(f"Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
 
     def train_goal_extractor(self):
         """Train LLM model to extract goal and parameters from input text.
@@ -154,17 +244,6 @@ class GoalExtractor:
                 _prompt, _labels = action_and_goal.generate_prompt()
                 prompts += _prompt
                 labels += _labels
-
-        # for action in self.actions:
-        #     for goal, goal_parameter in zip(self.targets, self.allowable_values):
-        #         action_and_goal = RestActionSpace.get_action(action, goal, goal_parameter)
-        #         _prompts, _labels = action_and_goal.generate_prompt()
-        #         # Concatenate prompts and labels with special token in between
-        #         prompts += [_prompt + ' <SEP> ' + _label for _prompt, _label in zip(_prompts, _labels)]
-        #         # Create labels with special start and end tokens for generation task
-        #         labels += ['<BOS> ' + _label + ' <EOS>' for _label in _labels]
-        #         # <BOS> Update raid with raid1 <SEP> Goal: raid parameters: raid1 <EOS>
-        #         # <BOS> Update raid with raid1 <SEP> Goal: raid parameters: raid1 <EOS>
 
         # Tokenize the prompts
         encoded_inputs = self.tokenizer(prompts, padding=True, truncation=True, return_tensors='pt')
@@ -355,6 +434,38 @@ class GoalExtractor:
         param = match_param.group(1).rstrip('.') if match_param else None
         return goal, param
 
+    def extract_goal(self, input_prompt):
+        """Agent extract goal from the input sentence.
+        :param input_prompt:
+        :return:
+        """
+
+        # tokenize the prompt
+        encoded_input = self.tokenizer(
+            input_prompt, return_tensors='pt', padding=True, truncation=True)
+
+        # Set the model to evaluation mode
+        self.model.to("cpu")
+        self.model.eval()
+
+        # Move the input tensor to the GPU if available
+        input_ids = encoded_input['input_ids'].to("cpu")
+        attention_mask = encoded_input['attention_mask'].to("cpu")
+
+        # forward pass
+        with torch.no_grad():
+            outputs = self.model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask)
+
+        # decode the generated output
+        generated_prompt = self.tokenizer.decode(
+            outputs[0], skip_special_tokens=True)
+
+        print("Model output generated: ", generated_prompt)
+        generated_values, generated_action = GoalExtractor.extract_goal_and_param(generated_prompt)
+        return generated_values, generated_action
+
     def extract_goal_and_parameters(self, input_prompt):
         """Agent extract goal and parameters for the goal.
         :param input_prompt:
@@ -408,15 +519,6 @@ class GoalExtractor:
             sampled_action = RestActionSpace.get_action(action, goal, goal_parameters)
             self.evaluate_goal_extraction2(sampled_action)
 
-        # for i in range(num_samples):
-        #     for goal, goal_parameter in zip(goals, goal_parameters):
-        #         random_param = random.choice(goal_parameter)
-        #         generated_target, generated_values = goal_extractor.evaluate_goal_extraction(goal, [goal_parameter])
-        #         print(f"Input: {goal} goal parameters {goal_parameter}")
-        #         print("Generated goal:", generated_target)
-        #         print("Generated parameter for goal:", generated_values)
-        #         print()
-
     def agent_interaction(self):
         """
         :return:
@@ -431,8 +533,10 @@ class GoalExtractor:
                 break
             if not input_string.endswith('.'):
                 input_string += '.'  # Add a period if it's not already present
-            goal, parameters = self.extract_goal_and_parameters(input_string)
-            print("Agent goal:", goal, parameters)
+
+            goal = self.extract_goal(input_string)
+            # goal, parameters = self.extract_goal_and_parameters(input_string)
+            # print(f"Agent goal: {goal} parameters {parameters}")
 
 
 def main():
@@ -440,8 +544,12 @@ def main():
     :return:
     """
     goal_extractor = GoalExtractor()
-    goal_extractor.train_goal_extractor()
+    goal_extractor.train_goal_representation()
     goal_extractor.agent_interaction()
+
+    # goal_extractor.train_goal_extractor()
+    # goal_extractor.agent_interaction()
+    # print(goal_extractor.targets_mapping)
 
 
 if __name__ == '__main__':
