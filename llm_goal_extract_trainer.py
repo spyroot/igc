@@ -69,12 +69,12 @@ class GoalExtractor:
         self.actions = ['Create', 'Update', 'Delete', 'Query']
 
         self.goal_to_action = {
-            "raid": "/redfish/v1/Systems/raid",
+            "RaidLevelMigration": "/redfish/v1/Systems/raid",
             "BootSourceOverrideTarget": "/redfish/v1/Systems/System.Embedded.1/BootOptions",
-            "reset": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset",
+            "ComputerSystem.Reset": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset",
             "ChangePDState": "/redfish/v1/Systems/System.Embedded.1/Oem/Dell/DellRaidService/Actions/DellRaidService.CancelRebuildPhysicalDisk",
-            "resetkeys": "/redfish/v1/Systems/System.Embedded.1/SecureBoot/Actions/SecureBoot.ResetKeys",
-            "boot": "BootSourceOverrideTarget",
+            "SecureBoot.ResetKeys": "/redfish/v1/Systems/System.Embedded.1/SecureBoot/Actions/SecureBoot.ResetKeys",
+            "GetAvailableDisks": "BootSourceOverrideTarget",
         }
 
         self.device = get_device()
@@ -567,7 +567,8 @@ class GoalExtractor:
             goal = self.query_agent_goal(input_string)
             if len(goal) == 2:
                 goal, parameters = goal
-                print(f"Agent goal: {goal} parameters {parameters}")
+                target_rest = self.goal_to_action[goal]
+                print(f"Agent goal: {goal} parameters {parameters} target api {target_rest}")
                 continue
 
             input_token = input_string.split()
