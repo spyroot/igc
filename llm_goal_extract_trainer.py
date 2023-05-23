@@ -30,6 +30,10 @@ from rest_action import RestActionSpace, ActionWithoutParam
 from shared_torch_utils import get_device
 import readline
 
+from collections import namedtuple
+
+BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
+
 
 class GoalExtractor:
     """
@@ -100,6 +104,7 @@ class GoalExtractor:
         """
 
         prompts = []
+        input_seq = []
         permutations = list(itertools.permutations(allowable_parameters))
 
         for i in range(min(num_permutations, len(permutations))):
@@ -107,7 +112,9 @@ class GoalExtractor:
             values_str = ' '.join(permutation)
             prompt_case_sensitive = f"{action.lower()} {values_str.lower()} RedfishGoal: {goal}."
             prompts.append(prompt_case_sensitive)
-        return prompts
+            input_seq.append(f"{action.lower()} {values_str.lower()}")
+
+        return prompts, input_seq
 
     def generate_prompts(self):
         """
@@ -120,13 +127,18 @@ class GoalExtractor:
             goal_modified = goal.replace(".", " ")
             goal_modified = re.sub(r"([a-z])([A-Z])", r"\1 \2", goal_modified)
             batch = []
+            goals = []
+
+            # input seq used for validation
             for high_level_action in flatten_high_level_action:
-                prompts = self.generate_goal_permutation(high_level_action, goal, goal_modified.split(), 32)
+                prompts, input_seqs = self.generate_goal_permutation(high_level_action, goal, goal_modified.split(), 32)
                 for prompt in prompts:
                     batch.append(prompt)
+                    goals.append(goal)
                     if len(batch) == self.batch_size:
-                        yield batch
+                        yield batch, input_seqs, goals
                         batch = []
+                        goals = []
 
     def train_goal_representation(self):
         """Train LLM model to map high level goal to redfish actions.
@@ -143,8 +155,8 @@ class GoalExtractor:
         for epoch in range(self.num_epochs):
             total_loss = 0.0
             num_batches = 0
-            for i, batch in enumerate(self.generate_prompts()):
-                # tokenize the prompts
+            for i, (batch, input_seqs, goals) in enumerate(self.generate_prompts()):
+
                 encoded_inputs = self.tokenizer(batch, padding=True, truncation=True, return_tensors='pt')
                 # batch_size = len(encoded_inputs['input_ids'])
                 # input_ids = encoded_inputs["input_ids"]
@@ -174,10 +186,12 @@ class GoalExtractor:
                     # Accumulate loss
                     total_loss += loss.item()
                     # Report batch loss
+
+                eval_encoded_inputs = self.tokenizer(input_seqs, padding=True, truncation=True, return_tensors='pt')
                 # eval
-                for i in range(0, len(encoded_inputs['input_ids']), self.batch_size):
-                    eval_input_ids = encoded_inputs['input_ids'].to(self.device)
-                    eval_attr_mask = encoded_inputs['attention_mask'].to(self.device)
+                for i in range(0, len(eval_encoded_inputs['input_ids']), self.batch_size):
+                    eval_input_ids = eval_encoded_inputs['input_ids'].to(self.device)
+                    eval_attr_mask = eval_encoded_inputs['attention_mask'].to(self.device)
                     with torch.no_grad():
                         outputs = self.model.generate(
                             input_ids=eval_input_ids, attention_mask=eval_attr_mask)
