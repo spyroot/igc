@@ -123,7 +123,6 @@ class GoalExtractor:
             for high_level_action in flatten_high_level_action:
                 prompts = self.generate_goal_permutation(high_level_action, goal, goal_modified.split(), 32)
                 for prompt in prompts:
-                    print(prompt)
                     batch.append(prompt)
                     if len(batch) == self.batch_size:
                         yield batch
