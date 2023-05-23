@@ -109,6 +109,25 @@ class GoalExtractor:
             prompts.append(prompt_case_sensitive)
         return prompts
 
+    def generate_prompts(self):
+        """
+
+        :return:
+        """
+        flatten_high_level_action = RestActionSpace.high_level_actions()
+        actions = self.dataset.action_to_rest
+        for goal in actions:
+            goal_modified = goal.replace(".", " ")
+            goal_modified = re.sub(r"([a-z])([A-Z])", r"\1 \2", goal_modified)
+            batch = []
+            for high_level_action in flatten_high_level_action:
+                prompts = self.generate_goal_permutation(high_level_action, goal, goal_modified.split(), 32)
+                for prompt in prompts:
+                    batch.append(prompt)
+                    if len(batch) == self.batch_size:
+                        yield batch
+                        batch = []
+
     def train_goal_representation(self):
         """Train LLM model to map high level goal to redfish actions.
 
@@ -116,45 +135,46 @@ class GoalExtractor:
                 "target": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
         :return:
         """
-        flatten_high_level_action = RestActionSpace.high_level_actions()
-        prompts = []
-        actions = self.dataset.action_to_rest
-        for goal in actions:
-            goal_modified = goal.replace(".", " ")
-            goal_modified = re.sub(r"([a-z])([A-Z])", r"\1 \2", goal_modified)
-            for high_level_action in flatten_high_level_action:
-                prompt = self.generate_goal_permutation(high_level_action, goal, goal_modified.split(), 32)
-                prompts += prompt
 
-        # tokenize the prompts
-        encoded_inputs = self.tokenizer(prompts, padding=True, truncation=True, return_tensors='pt')
         optimizer = AdamW(self.model.parameters(), lr=1e-5)
         self.model.to(self.device)
         self.model.train()
 
         for epoch in range(self.num_epochs):
             total_loss = 0.0
-            num_batches = len(encoded_inputs['input_ids']) // self.batch_size
-            for i in range(0, len(encoded_inputs['input_ids']), self.batch_size):
-                batch_inputs = {
-                    'input_ids': encoded_inputs['input_ids'][i:i + self.batch_size],
-                    'attention_mask': encoded_inputs['attention_mask'][i:i + self.batch_size]
-                }
+            num_batches = 0
+            for i, batch in enumerate(self.generate_prompts()):
+                # tokenize the prompts
+                encoded_inputs = self.tokenizer(batch, padding=True, truncation=True, return_tensors='pt')
+                # batch_size = len(encoded_inputs['input_ids'])
+                # input_ids = encoded_inputs["input_ids"]
+                # num_batches = len(encoded_inputs['input_ids']) // self.batch_size
+                num_batches += 1
+                for i in range(0, len(encoded_inputs['input_ids']), self.batch_size):
+                    # print(f"batch_inputs feeding : {input_ids.shape}.")
+                    batch_inputs = {
+                        'input_ids': encoded_inputs['input_ids'][i:i + self.batch_size],
+                        'attention_mask': encoded_inputs['attention_mask'][i:i + self.batch_size]
+                    }
 
-                # move input tensors to the GPU if available
-                batch_inputs = {
-                    k: v.to(self.device) for k, v in batch_inputs.items()
-                }
+                    # move input tensors to the GPU if available
+                    batch_inputs = {
+                        k: v.to(self.device) for k, v in batch_inputs.items()
+                    }
 
-                # forward
-                outputs = self.model(**batch_inputs, labels=batch_inputs['input_ids'])
-                loss = outputs.loss
+                    # forward
+                    outputs = self.model(**batch_inputs, labels=batch_inputs['input_ids'])
+                    loss = outputs.loss
 
-                # Backward pass
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
+                    # Backward pass
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    total_loss += loss.item()
+                    # Accumulate loss
+                    total_loss += loss.item()
+                    # Report batch loss
+                    print(f"Epoch {epoch + 1}/{self.num_epochs} - Batch {i + 1}/{num_batches} - Loss: {loss.item()}")
 
             average_loss = total_loss / num_batches
             print(f"Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
