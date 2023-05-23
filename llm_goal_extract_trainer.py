@@ -563,6 +563,11 @@ class GoalExtractor:
                 continue
 
             goal = self.query_agent_goal(input_string)
+            if len(goal) == 2:
+                goal, parameters = goal
+                print(f"Agent goal: {goal} parameters {parameters}")
+                continue
+
             input_token = input_string.split()
 
             if 'with' in input_string:
