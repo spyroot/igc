@@ -216,7 +216,7 @@ class GoalExtractor:
             average_loss = total_loss / num_batches
             print(f"Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
 
-    def train_goal_extractor(self):
+    def train_goal_and_parameter_extractor(self):
         """Train LLM model to extract goal and parameters from input text.
         It uses data set where target is target method that agent might invoke.
         i.e. in Redfish case it action.
@@ -573,22 +573,23 @@ class GoalExtractor:
             goal, parameters = self.extract_goal_and_parameters(goal_with_parameters_query)
             print(f"Agent goal: {goal} parameters {parameters}")
 
+
 def main():
     """
     :return:
     """
     goal_extractor = GoalExtractor()
     goal_extractor.train_goal_representation()
+    goal_extractor.train_goal_and_parameter_extractor()
     goal_extractor.agent_interaction()
 
 
 # using
 
-    # goal_extractor.train_goal_extractor()
-    # goal_extractor.agent_interaction()
-    # print(goal_extractor.targets_mapping)
+# goal_extractor.train_goal_extractor()
+# goal_extractor.agent_interaction()
+# print(goal_extractor.targets_mapping)
 
 
 if __name__ == '__main__':
     main()
-
