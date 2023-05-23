@@ -554,18 +554,24 @@ class GoalExtractor:
             if not input_string.endswith('.'):
                 input_string += '.'  # Add a period if it's not already present
 
-            goal = self.query_agent_goal(input_string)
-            print("Redfish goal", goal)
-            # construct new input after we resolved high level goal.
+            if len(input_string) == 0 or len(input_string) == 1:
+                print("Can you repeat query ?")
+                continue
 
-            first_token = input_string.split()[0]
-            with_token_index = input_string.index("with")
-            remaining_input = ' '.join(input_string[with_token_index + 1:])
-            goal_with_parameters_query = f"{first_token} {goal} {remaining_input}"
+            goal = self.query_agent_goal(input_string)
+            input_token = input_string.split()
+
+            if 'with' in input_string:
+                first_token = input_token[0]
+                with_token_index = input_string.index("with")
+                remaining_input = ''.join(input_string[with_token_index:])
+                goal_with_parameters_query = f"{first_token} {goal} {remaining_input}"
+            else:
+                goal_with_parameters_query = f"{input_token[0]} {goal}"
+
             print(f"Input query with goal and parameters {goal_with_parameters_query}")
             goal, parameters = self.extract_goal_and_parameters(goal_with_parameters_query)
             print(f"Agent goal: {goal} parameters {parameters}")
-
 
 def main():
     """
@@ -574,6 +580,9 @@ def main():
     goal_extractor = GoalExtractor()
     goal_extractor.train_goal_representation()
     goal_extractor.agent_interaction()
+
+
+# using
 
     # goal_extractor.train_goal_extractor()
     # goal_extractor.agent_interaction()
