@@ -78,6 +78,29 @@ class ActionWithParam(GoalAndAction):
         """
         super().__init__(action_type, goal, parameters, synonyms)
 
+    # def generate_prompt(self):
+    #     """
+    #     :return:
+    #     """
+    #     prompts = []
+    #     labels = []
+    #     for r in range(1, len(self.parameters) + 1):
+    #         for permutation in itertools.permutations(self.parameters, r):
+    #             values_str = ', '.join(permutation)
+    #             prompt = f"{self.action_type} {self.target} with {values_str}."
+    #             label = f"Goal: {self.target} Parameter: {values_str}."
+    #             prompts.append(prompt)
+    #             labels.append(label)
+    #
+    #     if len(self.parameters) > 1:
+    #         all_values_str = ', '.join(self.parameters)
+    #         prompt = f"{self.action_type} {self.target} with {all_values_str}."
+    #         label = f"Goal: {self.target} Parameter: {all_values_str}."
+    #         prompts.append(prompt)
+    #         labels.append(label)
+    #
+    #     return prompts, labels
+
     def generate_prompt(self):
         """
         :return:
@@ -87,26 +110,28 @@ class ActionWithParam(GoalAndAction):
         for r in range(1, len(self.parameters) + 1):
             for permutation in itertools.permutations(self.parameters, r):
                 values_str = ', '.join(permutation)
-                prompt = f"{self.action_type} {self.target} with {values_str}."
+                prompt = f"Input: {self.action_type} {self.target} with {values_str}. Goal: {self.target} Parameter: {values_str}."
                 label = f"Goal: {self.target} Parameter: {values_str}."
                 prompts.append(prompt)
                 labels.append(label)
 
         if len(self.parameters) > 1:
             all_values_str = ', '.join(self.parameters)
-            prompt = f"{self.action_type} {self.target} with {all_values_str}."
-            label = f"Goal: {self.target} Parameter: {all_values_str}."
+            prompt = f"Input: {self.action_type} {self.target} with {all_values_str}. Goal: {self.target} Parameter: {all_values_str}."
+            labels = f"Goal: {self.target} Parameter: {all_values_str}."
             prompts.append(prompt)
-            labels.append(label)
 
-        return prompts,labels
+        return prompts, labels
 
 
 class ActionWithoutParam(GoalAndAction):
     """Action without any parameters.
     """
+
+    # def generate_prompt(self):
+    #     return [f"{self.action_type} {self.target}."], [f"Goal: {self.action_type} Parameter: {self.target}."]
     def generate_prompt(self):
-        return [f"{self.action_type} {self.target}."], [f"Goal: {self.action_type} Parameter:{self.target}."]
+        return [f"Input: {self.action_type} {self.target}. Goal: {self.action_type} Parameter: {self.target}."], [f"Goal: {self.action_type} Parameter: {self.target}."]
 
 
 class RestActionSpace:
@@ -194,4 +219,4 @@ def test_action_factory():
         "query", "raid0")
     print(action_query_test.generate_prompt())
 
-
+# test_action_factory()

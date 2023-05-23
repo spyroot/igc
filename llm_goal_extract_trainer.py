@@ -43,7 +43,7 @@ class GoalExtractor:
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.model.config.pad_token_id = self.tokenizer.pad_token_id
 
-        self.num_epochs = 1000
+        self.num_epochs = 200
         self.batch_size = 4
 
         # this for test
@@ -153,6 +153,17 @@ class GoalExtractor:
                 prompts += _prompt
                 labels += _labels
 
+        # for action in self.actions:
+        #     for goal, goal_parameter in zip(self.targets, self.allowable_values):
+        #         action_and_goal = RestActionSpace.get_action(action, goal, goal_parameter)
+        #         _prompts, _labels = action_and_goal.generate_prompt()
+        #         # Concatenate prompts and labels with special token in between
+        #         prompts += [_prompt + ' <SEP> ' + _label for _prompt, _label in zip(_prompts, _labels)]
+        #         # Create labels with special start and end tokens for generation task
+        #         labels += ['<BOS> ' + _label + ' <EOS>' for _label in _labels]
+        #         # <BOS> Update raid with raid1 <SEP> Goal: raid parameters: raid1 <EOS>
+        #         # <BOS> Update raid with raid1 <SEP> Goal: raid parameters: raid1 <EOS>
+
         # Tokenize the prompts
         encoded_inputs = self.tokenizer(prompts, padding=True, truncation=True, return_tensors='pt')
         encoded_labels = self.tokenizer(labels, padding=True, truncation=True, return_tensors='pt')
@@ -168,30 +179,29 @@ class GoalExtractor:
                     'input_ids': encoded_inputs['input_ids'][i:i + self.batch_size],
                     'attention_mask': encoded_inputs['attention_mask'][i:i + self.batch_size]
                 }
-                batch_labels = {
-                    'input_ids': encoded_labels['input_ids'][i:i + self.batch_size],
-                    'attention_mask': encoded_labels['attention_mask'][i:i + self.batch_size]
-                }
+                # batch_labels = {
+                #     'input_ids': encoded_labels['input_ids'][i:i + self.batch_size],
+                #     'attention_mask': encoded_labels['attention_mask'][i:i + self.batch_size]
+                # }
 
-                max_label_length = max(batch_labels['input_ids'].size(1),
-                                       batch_labels['attention_mask'].size(1))
-
-                input_shape = batch_inputs['input_ids'].shape[1]
-                input_mask_shape = batch_inputs['attention_mask'].shape[1]
-
-                label_shape = batch_labels['input_ids'].shape[1]
-                label_mask_shape = batch_labels['attention_mask'].shape[1]
-
-                batch_inputs["input_ids"] = torch.nn.functional.pad(
-                    batch_inputs['input_ids'],
-                    (0, max_label_length - input_shape),
-                    value=self.tokenizer.pad_token_id)
-
-                batch_inputs["attention_mask"] = torch.nn.functional.pad(
-                    batch_inputs['attention_mask'],
-                    (0, max_label_length - input_shape),
-                    value=-100)
+                # max_label_length = max(batch_labels['input_ids'].size(1),
+                #                        batch_labels['attention_mask'].size(1))
                 #
+                # input_shape = batch_inputs['input_ids'].shape[1]
+                # # input_mask_shape = batch_inputs['attention_mask'].shape[1]
+                # # label_shape = batch_labels['input_ids'].shape[1]
+                # # label_mask_shape = batch_labels['attention_mask'].shape[1]
+                #
+                # batch_inputs["input_ids"] = torch.nn.functional.pad(
+                #     batch_inputs['input_ids'],
+                #     (0, max_label_length - input_shape),
+                #     value=self.tokenizer.pad_token_id)
+                #
+                # batch_inputs["attention_mask"] = torch.nn.functional.pad(
+                #     batch_inputs['attention_mask'],
+                #     (0, max_label_length - input_shape),
+                #     value=-100)
+
                 # print("batch_inputs_ids", batch_inputs["input_ids"].shape)
                 # print("batch_inputs_mask", batch_inputs["attention_mask"].shape)
                 # print("label_input_ids", batch_labels["input_ids"].shape)
@@ -206,12 +216,15 @@ class GoalExtractor:
                     k: v.to(self.device) for k, v in batch_inputs.items()
                 }
 
-                batch_labels = {
-                    k: v.to(self.device) for k, v in batch_labels.items()
-                }
+                # batch_labels = {
+                #     k: v.to(self.device) for k, v in batch_labels.items()
+                # }
+
+                # batch_inputs['labels'] = batch_labels['input_ids']
+                # # labels = batch_labels['input_ids']
 
                 # forward
-                outputs = self.model(**batch_inputs, labels=batch_labels['input_ids'])
+                outputs = self.model(**batch_inputs, labels=batch_inputs['input_ids'])
                 loss = outputs.loss
 
                 # Backward pass
@@ -338,14 +351,18 @@ class GoalExtractor:
         encoded_input = self.tokenizer(
             input_prompt, return_tensors='pt', padding=True, truncation=True)
 
-        # Set the model to evaluation mode
+        # encoded_input = {
+        #     k: v.to(self.device) for k, v in encoded_input.items()
+        # }
+        #
+
+        # # Set the model to evaluation mode
+        self.model.to("cpu")
         self.model.eval()
 
         # Move the input tensor to the GPU if available
-        input_ids = encoded_input['input_ids'].to(torch.device('cuda')) \
-            if torch.cuda.is_available() else encoded_input['input_ids']
-        attention_mask = encoded_input['attention_mask'].to(torch.device('cuda')) \
-            if torch.cuda.is_available() else encoded_input['attention_mask']
+        input_ids = encoded_input['input_ids'].to("cpu")
+        attention_mask = encoded_input['attention_mask'].to("cpu")
 
         # forward pass
         with torch.no_grad():
