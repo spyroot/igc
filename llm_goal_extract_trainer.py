@@ -475,7 +475,7 @@ class GoalExtractor:
 
         # decode the generated output
         generated_prompt = self.tokenizer.decode(
-            outputs[0], skip_special_tokens=True)
+            outputs[0], skip_special_tokens=True, max_length=128)
 
         print("Model output generated: ", generated_prompt)
         goal = GoalExtractor.extract_goal(generated_prompt)
