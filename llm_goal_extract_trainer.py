@@ -343,20 +343,16 @@ class GoalExtractor:
         return generated_target, generated_values
 
     def extract_goal_and_parameters(self, input_prompt):
-        """Evaluate the goal extraction by generating
-           a prompt and extracting the goal and values.
+        """Agent extract goal and parameters for the goal.
+        :param input_prompt:
+        :return:
         """
 
         # tokenize the prompt
         encoded_input = self.tokenizer(
             input_prompt, return_tensors='pt', padding=True, truncation=True)
 
-        # encoded_input = {
-        #     k: v.to(self.device) for k, v in encoded_input.items()
-        # }
-        #
-
-        # # Set the model to evaluation mode
+        # Set the model to evaluation mode
         self.model.to("cpu")
         self.model.eval()
 
@@ -376,17 +372,11 @@ class GoalExtractor:
 
         print("Model output generated: ", generated_prompt)
 
-        # # extract the goal and values from the generated prompt
-        # generated_target = generated_prompt.split("Update ")[1].split(" with ")[0]
-        # generated_values = generated_prompt.split(" with ")[1].split(", ")
-        # generated_action = generated_prompt.split(" ")[0]
-        # if isinstance(action_and_goal, ActionWithoutParam):
-        #     generated_target = generated_prompt.split(" ")[1]
-        #     generated_values = []
-        # else:
-        #     generated_target = generated_prompt.split(" with ")[0].split(" ")[1]
-        #     generated_values = generated_prompt.split(" with ")[1].split(", ")
-        return generated_prompt, generated_prompt
+        generated_target = generated_prompt.split("Goal ")[1].split(" with ")[0]
+        generated_values = generated_prompt.split(" Parameter ")[1].split(", ")
+        generated_action = generated_prompt.split(" ")[0]
+
+        return generated_values, generated_action
 
     def sample(self):
         """Sample goal and allowed values
