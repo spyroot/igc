@@ -482,11 +482,13 @@ class GoalExtractor:
         generated_prompt = self.tokenizer.decode(
             outputs[0], skip_special_tokens=True, max_length=128)
 
+        # model already know how to extract goal and parameter
         print("query_agent_goal generated: ", generated_prompt)
         if 'Goal' in generated_prompt:
             goal, goals_parameter = GoalExtractor.extract_goal_and_param(generated_prompt.strip())
             return goal, goals_parameter
 
+        # model only know how to extract goal
         extracted_goal = GoalExtractor.extract_goal(generated_prompt.strip())
         return extracted_goal, None
 
