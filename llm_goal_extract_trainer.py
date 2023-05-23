@@ -569,7 +569,7 @@ class GoalExtractor:
                 goal, parameters = goal
                 rest_action = goal.lower()
                 target_rest = self.goal_to_action[rest_action]
-                print(f"Agent goal: {goal} parameters {parameters} target api {target_rest}")
+                print(f"Agent goal: {goal} parameters {parameters} target api for {rest_action} url: {target_rest}")
                 continue
 
             input_token = input_string.split()
