@@ -160,7 +160,7 @@ class GoalExtractor:
         for i in range(min(num_permutations, len(permutations))):
             permutation = permutations[i]
             values_str = ' '.join(permutation)
-            prompt = f"{action} {goal} TextInput: {values_str}"
+            prompt = f"{action} {goal} RedfishQuery: {values_str}."
             prompts.append(prompt)
 
         return prompts
@@ -247,7 +247,6 @@ class GoalExtractor:
 
         # Tokenize the prompts
         encoded_inputs = self.tokenizer(prompts, padding=True, truncation=True, return_tensors='pt')
-        encoded_labels = self.tokenizer(labels, padding=True, truncation=True, return_tensors='pt')
         optimizer = AdamW(self.model.parameters(), lr=1e-5)
         self.model.to(self.device)
         self.model.train()
