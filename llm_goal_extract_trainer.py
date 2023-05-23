@@ -22,8 +22,8 @@ from typing import List
 
 import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, AdamW
-
 from rest_action import RestActionSpace, ActionWithoutParam
+from shared_torch_utils import get_device
 
 
 class GoalExtractor:
@@ -54,6 +54,8 @@ class GoalExtractor:
             ['On', 'ForceOff', 'ForceRestart']
         ]
         self.actions = ['Create', 'Update', 'Delete', 'Query']
+
+        self.device = get_device()
 
     @staticmethod
     def generate_prompts(target, allowable_values):
@@ -155,6 +157,7 @@ class GoalExtractor:
         encoded_inputs = self.tokenizer(prompts, padding=True, truncation=True, return_tensors='pt')
         encoded_labels = self.tokenizer(labels, padding=True, truncation=True, return_tensors='pt')
         optimizer = AdamW(self.model.parameters(), lr=1e-5)
+        self.model.to(self.device)
         self.model.train()
 
         for epoch in range(self.num_epochs):
@@ -200,15 +203,11 @@ class GoalExtractor:
 
                 # move input tensors to the GPU if available
                 batch_inputs = {
-                    k: v.to(torch.device('cuda'))
-                    if torch.cuda.is_available() else v for k, v in
-                    batch_inputs.items()
+                    k: v.to(self.device) for k, v in batch_inputs.items()
                 }
 
                 batch_labels = {
-                    k: v.to(torch.device('cuda'))
-                    if torch.cuda.is_available() else v for k, v in
-                    batch_labels.items()
+                    k: v.to(self.device) for k, v in batch_labels.items()
                 }
 
                 # forward
