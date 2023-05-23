@@ -482,11 +482,11 @@ class GoalExtractor:
         generated_prompt = self.tokenizer.decode(
             outputs[0], skip_special_tokens=True, max_length=128)
 
-        print("Model output generated: ", generated_prompt)
+        print("query_agent_goal generated: ", generated_prompt)
         goal = GoalExtractor.extract_goal(generated_prompt.strip())
         return goal
 
-    def extract_goal_and_parameters(self, input_prompt):
+    def query_goal_and_parameters(self, input_prompt):
         """Agent extract goal and parameters for the goal.
         :param input_prompt:
         :return:
@@ -514,7 +514,7 @@ class GoalExtractor:
         generated_prompt = self.tokenizer.decode(
             outputs[0], skip_special_tokens=True)
 
-        print("Model output generated: ", generated_prompt)
+        print("extract_goal_and_parameter generated: ", generated_prompt)
         generated_values, generated_action = GoalExtractor.extract_goal_and_param(generated_prompt)
         return generated_values, generated_action
 
@@ -570,7 +570,7 @@ class GoalExtractor:
                 goal_with_parameters_query = f"{input_token[0]} {goal}"
 
             print(f"Input query with goal and parameters {goal_with_parameters_query}")
-            goal, parameters = self.extract_goal_and_parameters(goal_with_parameters_query)
+            goal, parameters = self.query_goal_and_parameters(goal_with_parameters_query)
             print(f"Agent goal: {goal} parameters {parameters}")
 
 
