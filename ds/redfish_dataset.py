@@ -42,14 +42,20 @@ class JSONDataset(Dataset):
         # Dictionary to map hash values to action one-hot vectors
         self.num_actions = 0
 
+        self.goals = {}
+        self.action_space = {}
+        self.action_to_rest = {}
+
         if recreate_dataset or not os.path.exists(self._dataset_file_name):
             self._load_json_files()
             self._load_dicts_from_data()
+            self._construct_action_space()
             torch.save(self._data, self._dataset_file_name)
         else:
             print(f"Loading dataset from {self._dataset_file_name}")
             self._data = torch.load(self._dataset_file_name)
             self._load_dicts_from_data()
+            self._construct_action_space()
 
     def _load_dicts_from_data(self):
         """Load the dictionaries based on the data points in self.data.
@@ -149,23 +155,60 @@ class JSONDataset(Dataset):
 
         return chunks
 
-    @staticmethod
-    def extract_recursive(json_obj, allowable_values, targets):
+    def extract_recursive(self, json_obj, allowable_values, targets):
         """Recursively extracts values from a nested JSON structure.
         """
         if isinstance(json_obj, dict):
             for key, value in json_obj.items():
+                if '@odata.id' in key:
+                    targets["api_target"] = value
                 if "@Redfish.AllowableValues" in key:
                     allowable_values[key] = value
+                    # print(f"target: {allowable_values[key]} {action}")
                 if "target" in key:
-                    targets[key] = value
-                JSONDataset.extract_recursive(value, allowable_values, targets)
+                    targets["api_target"] = value
+                    rest = value
+                    action = rest.rsplit('/', 1)[-1]
+                    self.action_space[rest] = action
+                    self.action_to_rest[action] = rest
+                self.extract_recursive(value, allowable_values, targets)
         elif isinstance(json_obj, list):
             for item in json_obj:
-                JSONDataset.extract_recursive(item, allowable_values, targets)
+                self.extract_recursive(item, allowable_values, targets)
+
+    def _extrac_action(self, target):
+        """
+        :return:
+        """
+        action = target.rsplit('/', 1)[-1]
+        if action not in self.action_space:
+            self.action_space[target] = action
+        if target not in self.action_to_rest:
+            self.action_to_rest[action] = target
+
+    def _construct_action_space(self):
+        """
+        :return:
+        """
+        for d in self:
+            target = d["targets"]
+            if len(target) == 0:
+                continue
+
+            t = target['api_target']
+            self.goals[t] = []
+            allowable_values = d["allowable_values"]
+            if len(allowable_values) > 0:
+                for key, values in allowable_values.items():
+                    parameter, _ = key.split('@')
+                    self.goals[t].append({parameter: values})
+                    self._extrac_action(t)
+            else:
+                self._extrac_action(t)
 
     def _load_json_files(self) -> None:
-        """
+        """Load json file and construct from raw json presentation
+           a dataset.
         """
         self._data["hash_to_rest_api"] = {}
         self._data["hash_to_action_idx"] = {}
@@ -175,7 +218,6 @@ class JSONDataset(Dataset):
 
         def process_json_file(file_path: str, file_name: str) -> None:
             """
-
             :param file_path:
             :param file_name:
             :return:
@@ -192,7 +234,7 @@ class JSONDataset(Dataset):
                 json_data = json.loads(json_lines)
                 allowable_values = {}
                 targets = {}
-                JSONDataset.extract_recursive(json_data, allowable_values, targets)
+                self.extract_recursive(json_data, allowable_values, targets)
 
                 tokenizer = self.tokenizer(
                     json_lines,

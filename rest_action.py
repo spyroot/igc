@@ -10,8 +10,9 @@ Author:
 Mus mbayramo@stanford.edu
 """
 import itertools
+import json
 from abc import abstractmethod
-from typing import List, Optional, Iterator
+from typing import List, Optional, Iterator, Any
 
 
 class GoalAndAction:
@@ -19,7 +20,7 @@ class GoalAndAction:
                  action_type: str,
                  goal: str,
                  parameters: Optional[List[str]] = None,
-                 synonyms: List[str] = None) -> None:
+                 synonyms: List[Any] = None) -> None:
         """
         Initializes a GoalAndAction instance.
 
@@ -28,6 +29,9 @@ class GoalAndAction:
         :param parameters: Optional[List[str]], a list of parameters associated with the action if any.
         :param synonyms: List[str], a list of synonyms of the action_type.
         """
+        # print("Action", goal)
+        # print("Parameters", parameters)
+
         self.target = goal
         self.action_type = action_type
         self.parameters = parameters if parameters else []
@@ -68,7 +72,7 @@ class ActionWithParam(GoalAndAction):
 
     def __init__(self, action_type: str,
                  goal: str,
-                 parameters: Optional[List[str]] = None,
+                 parameters: Optional[List[Any]] = None,
                  synonyms: List[str] = None):
         """
         :param action_type:
@@ -78,60 +82,49 @@ class ActionWithParam(GoalAndAction):
         """
         super().__init__(action_type, goal, parameters, synonyms)
 
-    # def generate_prompt(self):
-    #     """
-    #     :return:
-    #     """
-    #     prompts = []
-    #     labels = []
-    #     for r in range(1, len(self.parameters) + 1):
-    #         for permutation in itertools.permutations(self.parameters, r):
-    #             values_str = ', '.join(permutation)
-    #             prompt = f"{self.action_type} {self.target} with {values_str}."
-    #             label = f"Goal: {self.target} Parameter: {values_str}."
-    #             prompts.append(prompt)
-    #             labels.append(label)
-    #
-    #     if len(self.parameters) > 1:
-    #         all_values_str = ', '.join(self.parameters)
-    #         prompt = f"{self.action_type} {self.target} with {all_values_str}."
-    #         label = f"Goal: {self.target} Parameter: {all_values_str}."
-    #         prompts.append(prompt)
-    #         labels.append(label)
-    #
-    #     return prompts, labels
-
     def generate_prompt(self):
         """
         :return:
         """
-        prompts = []
-        labels = []
-        for r in range(1, len(self.parameters) + 1):
-            for permutation in itertools.permutations(self.parameters, r):
-                values_str = ', '.join(permutation)
-                prompt = f"Input: {self.action_type} {self.target} with {values_str}. Goal: {self.target} Parameter: {values_str}."
-                label = f"Goal: {self.target} Parameter: {values_str}."
-                prompts.append(prompt)
-                labels.append(label)
 
-        if len(self.parameters) > 1:
-            all_values_str = ', '.join(self.parameters)
-            prompt = f"Input: {self.action_type} {self.target} with {all_values_str}. Goal: {self.target} Parameter: {all_values_str}."
-            labels = f"Goal: {self.target} Parameter: {all_values_str}."
+        prompts = []
+        parameters = self.parameters
+        action = self.target
+        goals = []
+        # Generate prompts with single parameters
+        for param_dict in parameters:
+            for param_name, values in param_dict.items():
+                for value in values:
+                    prompt = f"Input: {self.action_type} {action}" \
+                             f" with {param_name} {value} " \
+                             f"Goal: {action} Parameter: {json.dumps({param_name: value})}"
+                    prompts.append(prompt)
+                    goals.append(f"Goal: {self.action_type} Parameter: {json.dumps({param_name: value})}")
+
+        # Generate prompts with combinations of parameters
+        combinations = itertools.product(*[[(param_name, value) for value in values]
+                                           for param_dict in parameters
+                                           for param_name, values in param_dict.items()])
+        for combination in combinations:
+            prompt_values = ", ".join(f"{param_name} {value}" for param_name, value in combination)
+            prompt = f"Input: {self.action_type} {action} with {prompt_values} " \
+                     f"Goal: {action} Parameter: {json.dumps([dict(combination)])}"
+            goals.append(f"Goal: {action} Parameter: {json.dumps([dict(combination)])}")
             prompts.append(prompt)
 
-        return prompts, labels
+        return prompts, goals
 
 
 class ActionWithoutParam(GoalAndAction):
     """Action without any parameters.
     """
 
-    # def generate_prompt(self):
-    #     return [f"{self.action_type} {self.target}."], [f"Goal: {self.action_type} Parameter: {self.target}."]
     def generate_prompt(self):
-        return [f"Input: {self.action_type} {self.target}. Goal: {self.action_type} Parameter: {self.target}."], [f"Goal: {self.action_type} Parameter: {self.target}."]
+        """
+        :return:
+        """
+        return [f"Input: {self.action_type} {self.target}. Goal: {self.target} Parameter: []."], [
+            f"Goal: {self.action_type} Parameter: []."]
 
 
 class RestActionSpace:
@@ -170,7 +163,7 @@ class RestActionSpace:
         return flat_synonyms
 
     @staticmethod
-    def get_action(action_type: str, target: str, parameters: Optional[List[str]] = None) -> GoalAndAction:
+    def get_action(action_type: str, target: str, parameters: Optional[List[Any]] = None) -> GoalAndAction:
         """Factory method that returns an Action object based on
            the action_type, target and parameters.
 
@@ -202,33 +195,76 @@ def test_actions():
 
     :return:
     """
-    create_action = ActionWithParam('Create', 'raid', ['raid0', 'raid1', 'raid5'])
+    # multi parameter for action
+    with_multi_param = [
+        {
+            'TransferProtocol': ['HTTP', 'NFS', 'CIFS', 'TFTP', 'HTTPS']
+        },
+        {
+            'InstallUpon': ['Now', 'NowAndReboot', 'NextReboot']
+        }
+    ]
+
+    create_action = ActionWithParam('Create', 'DellMetricService.ExportThermalHistory', with_multi_param)
     create_prompts = create_action.generate_prompt()
-    print(create_prompts)
+    for p in create_prompts:
+        print(p)
 
-    update_actions = ActionWithParam('Create', 'raid', ['raid0', 'raid1', 'raid5'])
-    update_prompts = update_actions.generate_prompt()
-    print(update_prompts)
+    # single parameter for action
+    single_param = [
+        {
+            'TransferProtocol': ['HTTP', 'NFS', 'CIFS', 'TFTP', 'HTTPS']
+        },
+    ]
+    create_action = ActionWithParam('Update', 'DellMetricService.ExportThermalHistory', single_param)
+    create_prompts = create_action.generate_prompt()
+    for p in create_prompts:
+        print(p)
 
-    delete_action = ActionWithoutParam('Delete', 'raid')
-    delete_prompts = delete_action.generate_prompt()
-    print(delete_prompts)
-
-    query_action = ActionWithoutParam('Query', 'raid')
-    query_action = query_action.generate_prompt()
-    print(query_action)
+    # no parameter for action
+    create_action = ActionWithoutParam('Delete', 'DellMetricService.ExportThermalHistory')
+    create_prompts = create_action.generate_prompt()
+    for p in create_prompts:
+        print(p)
 
 
 def test_action_factory():
     """
     :return:
     """
-    action_create_test = RestActionSpace.get_action(
-        "create", "raid", ['raid0', 'raid1', 'raid5'])
-    print(action_create_test.generate_prompt())
+    print("Test action factory")
+    with_multi_param = [
+        {
+            'TransferProtocol': ['HTTP', 'NFS', 'CIFS', 'TFTP', 'HTTPS']
+        },
+        {
+            'InstallUpon': ['Now', 'NowAndReboot', 'NextReboot']
+        }
+    ]
 
-    action_query_test = RestActionSpace.get_action(
-        "query", "raid0")
-    print(action_query_test.generate_prompt())
+    action_create_test = RestActionSpace.get_action(
+        "create", "DellMetricService.ExportThermalHistory", with_multi_param)
+    prompts = action_create_test.generate_prompt()
+    for p in prompts:
+        print(p)
+
+    single_param = [
+        {
+            'TransferProtocol': ['HTTP', 'NFS', 'CIFS', 'TFTP', 'HTTPS']
+        },
+    ]
+
+    action_create_test = RestActionSpace.get_action(
+        "update", "DellMetricService.ExportThermalHistory", single_param)
+    prompts = action_create_test.generate_prompt()
+    for p in prompts:
+        print(p)
+
+    action_create_test = RestActionSpace.get_action(
+        "delete", "DellMetricService.ExportThermalHistory")
+    prompts = action_create_test.generate_prompt()
+    for p in prompts:
+        print(p)
 
 # test_action_factory()
+# test_actions()

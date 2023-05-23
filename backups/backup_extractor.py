@@ -17,15 +17,12 @@ Parameters just passed to agent. i.e. we don't train on parameters.
 Author:Mus mbayramo@stanford.edu
 """
 import itertools
-import os
 import random
 from typing import List
 import re
 
 import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, AdamW
-
-from ds.redfish_dataset import JSONDataset
 from rest_action import RestActionSpace, ActionWithoutParam
 from shared_torch_utils import get_device
 import readline
@@ -50,13 +47,72 @@ class GoalExtractor:
 
         self.num_epochs = 10
         self.batch_size = 4
-        self.high_level_actions = ['Create', 'Update', 'Delete', 'Query']
 
-        directory_path = os.path.expanduser("~/.json_responses")
-        self.dataset = JSONDataset(
-            directory_path, verbose=False)
+        # this for test
+        self.targets = [
+            "RaidLevelMigration",
+            "BootSourceOverrideTarget",
+            "ComputerSystem.Reset",
+            "SecureBoot.ResetKeys",
+            "ChangePDState",
+            "GetAvailableDisks"
+        ]
+
+        self.allowable_values = [
+            ['raid0', 'raid1', 'raid5'],
+            ['None', 'Pxe', 'Floppy'],
+            ['On', 'ForceOff', 'ForceRestart'],
+            ['ResetAllKeysToDefault', 'DeleteAllKeys', 'ResetPK'],
+            ["Offline", "Online"],
+            ["NoRAID", "RAID0", "RAID1"],
+        ]
+        self.actions = ['Create', 'Update', 'Delete', 'Query']
+
+        self.goal_to_action = {
+            "raidlevelmigration": "/redfish/v1/Systems/raid",
+            "bootsourceoverridetarget": "/redfish/v1/Systems/System.Embedded.1/BootOptions",
+            "Ccmputersystem.reset": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset",
+            "changeodstate": "/redfish/v1/Systems/System.Embedded.1/Oem/Dell/DellRaidService/Actions/DellRaidService.CancelRebuildPhysicalDisk",
+            "secureBoot.resetkeys": "/redfish/v1/Systems/System.Embedded.1/SecureBoot/Actions/SecureBoot.ResetKeys",
+            "getavailabledisks": "BootSourceOverrideTarget",
+        }
 
         self.device = get_device()
+        # self.modified_targets = [target.replace(".", " ") for target in self.targets]
+        # self.targets_mapping = {re.sub(r"([a-z])([A-Z])", r"\1 \2", target): target for target in self.modified_targets}
+
+    @staticmethod
+    def generate_prompts(target, allowable_values):
+        """Generate variations of prompts for a given target and its allowable values.
+        :param target:
+        :param allowable_values:
+        :return:
+        """
+        prompts = []
+        for r in range(1, len(allowable_values) + 1):
+            for combination in itertools.combinations(allowable_values, r):
+                prompt = f"Update {target} with "
+                values_str = ', '.join(combination)
+                prompt += values_str
+                prompts.append(prompt)
+        return prompts
+
+    @staticmethod
+    def generate_variation(target: str, allowable_values: List[str]):
+        """Generate permutation of prompts for a given
+          target and its allowable values.
+        :param target:
+        :param allowable_values:
+        :return:
+        """
+        prompts = []
+        for r in range(1, len(allowable_values) + 1):
+            for combination in itertools.combinations(allowable_values, r):
+                prompt = f"Update {target} with "
+                values_str = ', '.join(combination)
+                prompt += values_str
+                prompts.append(prompt)
+            return prompts
 
     @staticmethod
     def generate_prompts_permutation(action: str, goal: str, allowable_parameters: List[str]):
@@ -88,8 +144,7 @@ class GoalExtractor:
         return prompts
 
     @staticmethod
-    def generate_goal_permutation(
-            action: str, goal: str, allowable_parameters: List[str], num_permutations: int):
+    def generate_goal_permutation(action: str, goal: str, allowable_parameters: List[str], num_permutations: int):
         """Generate permutations of prompts based on the given parameters.
 
         :param action: Action word such as 'Create', 'Update'
@@ -107,6 +162,10 @@ class GoalExtractor:
             values_str = ' '.join(permutation)
             prompt_case_sensitive = f"{action.lower()} {values_str.lower()} RedfishGoal: {goal}."
             prompts.append(prompt_case_sensitive)
+            # # prompt_case_insensitive = prompt_case_sensitive.lower()
+            # # prompt_case_title = prompt_case_sensitive.title()
+            # # prompt_case_upper = prompt_case_sensitive.upper()
+            # prompts.extend([prompt_case_sensitive, prompt_case_insensitive, prompt_case_title, prompt_case_upper])
         return prompts
 
     def train_goal_representation(self):
@@ -118,13 +177,11 @@ class GoalExtractor:
         """
         flatten_high_level_action = RestActionSpace.high_level_actions()
         prompts = []
-        actions = self.dataset.action_to_rest
-        for goal in actions:
+        for goal in self.targets:
             goal_modified = goal.replace(".", " ")
             goal_modified = re.sub(r"([a-z])([A-Z])", r"\1 \2", goal_modified)
             for high_level_action in flatten_high_level_action:
-                prompt = self.generate_goal_permutation(high_level_action, goal, goal_modified.split(), 32)
-                prompts += prompt
+                prompts += self.generate_goal_permutation(high_level_action, goal, goal_modified.split(), 32)
 
         # tokenize the prompts
         encoded_inputs = self.tokenizer(prompts, padding=True, truncation=True, return_tensors='pt')
@@ -186,12 +243,9 @@ class GoalExtractor:
         """
         prompts = []
         labels = []
-        goals = self.dataset.goals
-        actions = self.dataset.action_space
-        for action_type in self.high_level_actions:
-            for g in goals:
-                action = actions[g]
-                action_and_goal = RestActionSpace.get_action(action_type, action, goals[g])
+        for action in self.actions:
+            for goal, goal_parameter in zip(self.targets, self.allowable_values):
+                action_and_goal = RestActionSpace.get_action(action, goal, goal_parameter)
                 _prompt, _labels = action_and_goal.generate_prompt()
                 prompts += _prompt
                 labels += _labels
@@ -210,11 +264,49 @@ class GoalExtractor:
                     'input_ids': encoded_inputs['input_ids'][i:i + self.batch_size],
                     'attention_mask': encoded_inputs['attention_mask'][i:i + self.batch_size]
                 }
+                # batch_labels = {
+                #     'input_ids': encoded_labels['input_ids'][i:i + self.batch_size],
+                #     'attention_mask': encoded_labels['attention_mask'][i:i + self.batch_size]
+                # }
+
+                # max_label_length = max(batch_labels['input_ids'].size(1),
+                #                        batch_labels['attention_mask'].size(1))
+                #
+                # input_shape = batch_inputs['input_ids'].shape[1]
+                # # input_mask_shape = batch_inputs['attention_mask'].shape[1]
+                # # label_shape = batch_labels['input_ids'].shape[1]
+                # # label_mask_shape = batch_labels['attention_mask'].shape[1]
+                #
+                # batch_inputs["input_ids"] = torch.nn.functional.pad(
+                #     batch_inputs['input_ids'],
+                #     (0, max_label_length - input_shape),
+                #     value=self.tokenizer.pad_token_id)
+                #
+                # batch_inputs["attention_mask"] = torch.nn.functional.pad(
+                #     batch_inputs['attention_mask'],
+                #     (0, max_label_length - input_shape),
+                #     value=-100)
+
+                # print("batch_inputs_ids", batch_inputs["input_ids"].shape)
+                # print("batch_inputs_mask", batch_inputs["attention_mask"].shape)
+                # print("label_input_ids", batch_labels["input_ids"].shape)
+                # print("label_input_mask", batch_labels["attention_mask"].shape)
+                # print("extended_input_ids", extended_input_ids.shape)
+                # print("extended_attention_mask", extended_attention_mask.shape)
+                # print("extended_input_ids", extended_input_ids)
+                # print("extended_attention_mask", extended_attention_mask)
 
                 # move input tensors to the GPU if available
                 batch_inputs = {
                     k: v.to(self.device) for k, v in batch_inputs.items()
                 }
+
+                # batch_labels = {
+                #     k: v.to(self.device) for k, v in batch_labels.items()
+                # }
+
+                # batch_inputs['labels'] = batch_labels['input_ids']
+                # # labels = batch_labels['input_ids']
 
                 # forward
                 outputs = self.model(**batch_inputs, labels=batch_inputs['input_ids'])
@@ -503,14 +595,8 @@ def main():
     goal_extractor = GoalExtractor()
     goal_extractor.train_goal_representation()
     goal_extractor.train_goal_and_parameter_extractor()
-    # goal_extractor.agent_interaction()
+    goal_extractor.agent_interaction()
 
 
 if __name__ == '__main__':
-    """
-    """
-    directory_path = os.path.expanduser("~/.json_responses")
-    dataset = JSONDataset(
-        directory_path, verbose=False)
-
     main()
