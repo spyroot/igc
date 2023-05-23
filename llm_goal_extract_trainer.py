@@ -25,6 +25,7 @@ import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, AdamW
 from rest_action import RestActionSpace, ActionWithoutParam
 from shared_torch_utils import get_device
+import readline
 
 
 class GoalExtractor:
@@ -383,7 +384,7 @@ class GoalExtractor:
             outputs[0], skip_special_tokens=True)
 
         print("Model output generated: ", generated_prompt)
-        generated_values, generated_action = extract_goal_and_param(generated_prompt)
+        generated_values, generated_action = GoalExtractor.extract_goal_and_param(generated_prompt)
         return generated_values, generated_action
 
     def sample(self):
@@ -421,7 +422,11 @@ class GoalExtractor:
         :return:
         """
         while True:
-            input_string = input("Ask agent to execute goal: (or 'quit' to exit): ")
+            try:
+                input_string = input("Ask agent to execute goal: (or 'quit' to exit): ")
+            except EOFError:
+                break  # User hit EOF (Ctrl-D)
+
             if input_string.lower() == 'quit':
                 break
             if not input_string.endswith('.'):
