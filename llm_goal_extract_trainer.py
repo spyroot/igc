@@ -147,14 +147,17 @@ class GoalExtractor:
         :param goals:
         :return:
         """
-        eval_device = self.device
-        # fix for RuntimeError: MPS does not support cumsum op with int64 input
-        if self.device.type == 'mps':
-            eval_device = torch.device("cpu")
+        # eval_device = self.device
+        # # fix for RuntimeError: MPS does not support cumsum op with int64 input
+        # if self.device.type == 'mps':
+        #     eval_device = torch.device("cpu")
 
         self.model.eval()
-        self.model.to(eval_device)
         eval_encoded_inputs = self.tokenizer(input_seqs, padding=True, truncation=True, return_tensors='pt')
+
+        print(type(input_seqs))
+        print(type(goals))
+        raise
 
         # eval
         for i in range(0, len(eval_encoded_inputs['input_ids']), self.batch_size):
