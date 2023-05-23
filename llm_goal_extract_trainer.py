@@ -439,15 +439,20 @@ class GoalExtractor:
         return goal, param
 
     @staticmethod
-    def extract_goal(model_output):
+    def extract_goal(model_output: str):
         """
+        Extract the goal from the model_output string.
 
-        :param model_output:
-        :return:
+        :param model_output: The output string from the model.
+        :return: The extracted goal or None.
         """
-        match_goal = re.search('RedfishGoal:\s*:\s*(.*?)\s', model_output)
-        goal = match_goal.group(1).rstrip('.') if match_goal else None
-        return goal
+        match_goal = re.search(r'RedfishGoal:\s*(.*?)', model_output)
+        if match_goal:
+            goal = model_output[match_goal.end():].strip('. ')
+            goal = re.sub(r'\.\s*.*$', '', goal).strip()
+            return goal
+        else:
+            return None
 
     def query_agent_goal(self, input_prompt):
         """Agent extract a particular goal from the input sentence.
@@ -561,8 +566,10 @@ def main():
     :return:
     """
     goal_extractor = GoalExtractor()
-    goal_extractor.train_goal_representation()
-    goal_extractor.agent_interaction()
+    goal = goal_extractor.extract_goal("create raid level migration with raid0. RedfishGoal: RaidLevelMigration.")
+    print(goal)
+    # goal_extractor.train_goal_representation()
+    # goal_extractor.agent_interaction()
 
     # goal_extractor.train_goal_extractor()
     # goal_extractor.agent_interaction()
@@ -571,3 +578,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
