@@ -19,6 +19,7 @@ Author:Mus mbayramo@stanford.edu
 import itertools
 import random
 from typing import List
+import re
 
 import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, AdamW
@@ -342,6 +343,17 @@ class GoalExtractor:
 
         return generated_target, generated_values
 
+    @staticmethod
+    def extract_goal_and_param(model_output):
+        """
+        :return:
+        """
+        match_goal = re.search('Goal\s*:\s*(.*?)\s', model_output)
+        goal = match_goal.group(1).rstrip('.') if match_goal else None
+        match_param = re.search('Parameter\s*:\s*(.*)', model_output)
+        param = match_param.group(1).rstrip('.') if match_param else None
+        return goal, param
+
     def extract_goal_and_parameters(self, input_prompt):
         """Agent extract goal and parameters for the goal.
         :param input_prompt:
@@ -371,11 +383,7 @@ class GoalExtractor:
             outputs[0], skip_special_tokens=True)
 
         print("Model output generated: ", generated_prompt)
-
-        generated_target = generated_prompt.split("Goal ")[1].split(" with ")[0]
-        generated_values = generated_prompt.split(" Parameter ")[1].split(", ")
-        generated_action = generated_prompt.split(" ")[0]
-
+        generated_values, generated_action = extract_goal_and_param(generated_prompt)
         return generated_values, generated_action
 
     def sample(self):
