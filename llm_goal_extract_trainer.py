@@ -566,10 +566,8 @@ def main():
     :return:
     """
     goal_extractor = GoalExtractor()
-    goal = goal_extractor.extract_goal("create raid level migration with raid0. RedfishGoal: RaidLevelMigration.")
-    print(goal)
-    # goal_extractor.train_goal_representation()
-    # goal_extractor.agent_interaction()
+    goal_extractor.train_goal_representation()
+    goal_extractor.agent_interaction()
 
     # goal_extractor.train_goal_extractor()
     # goal_extractor.agent_interaction()
