@@ -483,11 +483,11 @@ class GoalExtractor:
             outputs[0], skip_special_tokens=True, max_length=128)
 
         print("query_agent_goal generated: ", generated_prompt)
-        extracted_goal = GoalExtractor.extract_goal(generated_prompt.strip())
-        if 'Goal' in extracted_goal:
+        if 'Goal' in generated_prompt:
             goal, goals_parameter = GoalExtractor.extract_goal_and_param(generated_prompt.strip())
             return goal, goals_parameter
 
+        extracted_goal = GoalExtractor.extract_goal(generated_prompt.strip())
         return extracted_goal, None
 
     def query_goal_and_parameters(self, input_prompt):
