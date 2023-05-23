@@ -556,8 +556,15 @@ class GoalExtractor:
 
             goal = self.query_agent_goal(input_string)
             print("Redfish goal", goal)
-            # goal, parameters = self.extract_goal_and_parameters(input_string)
-            # print(f"Agent goal: {goal} parameters {parameters}")
+            # construct new input after we resolved high level goal.
+
+            first_token = input_string.split()[0]
+            with_token_index = input_string.index("with")
+            remaining_input = ' '.join(input_string[with_token_index + 1:])
+            goal_with_parameters_query = f"{first_token} {goal} {remaining_input}"
+            print(f"Input query with goal and parameters {goal_with_parameters_query}")
+            goal, parameters = self.extract_goal_and_parameters(goal_with_parameters_query)
+            print(f"Agent goal: {goal} parameters {parameters}")
 
 
 def main():
