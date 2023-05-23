@@ -160,7 +160,7 @@ class GoalExtractor:
         for i in range(min(num_permutations, len(permutations))):
             permutation = permutations[i]
             values_str = ' '.join(permutation)
-            prompt = f"{action} {goal} RedfishQuery: {values_str}."
+            prompt = f"{action} {values_str} RedfishGoal: {goal}."
             prompts.append(prompt)
 
         return prompts
@@ -172,11 +172,13 @@ class GoalExtractor:
                 "target": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
         :return:
         """
+        flatten_high_level_action = RestActionSpace.high_level_actions()
         prompts = []
         for goal in self.targets:
             goal_modified = goal.replace(".", " ")
             goal_modified = re.sub(r"([a-z])([A-Z])", r"\1 \2", goal_modified)
-            prompts += self.generate_goal_permutation("RedfishAction:", goal, goal_modified.split(), 16)
+            for high_level_action in flatten_high_level_action:
+                prompts += self.generate_goal_permutation(high_level_action, goal, goal_modified.split(), 32)
 
         # tokenize the prompts
         encoded_inputs = self.tokenizer(prompts, padding=True, truncation=True, return_tensors='pt')

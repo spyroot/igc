@@ -158,6 +158,18 @@ class RestActionSpace:
         pass
 
     @staticmethod
+    def high_level_actions() -> List[str]:
+        """Get the synonyms for the given action.
+        :return: List of synonyms for the action.
+        """
+
+        flat_synonyms = []
+        for action, synonyms in RestActionSpace.__synonyms.items():
+            flat_synonyms.append(action)
+            flat_synonyms.extend(synonyms)
+        return flat_synonyms
+
+    @staticmethod
     def get_action(action_type: str, target: str, parameters: Optional[List[str]] = None) -> GoalAndAction:
         """Factory method that returns an Action object based on
            the action_type, target and parameters.
