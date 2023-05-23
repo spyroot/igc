@@ -445,7 +445,7 @@ class GoalExtractor:
         :param model_output:
         :return:
         """
-        match_goal = re.search('RedfishGoal\s*:\s*(.*?)\s', model_output)
+        match_goal = re.search('RedfishGoal:\s*:\s*(.*?)\s', model_output)
         goal = match_goal.group(1).rstrip('.') if match_goal else None
         return goal
 
