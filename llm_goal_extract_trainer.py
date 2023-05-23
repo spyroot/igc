@@ -435,8 +435,19 @@ class GoalExtractor:
         param = match_param.group(1).rstrip('.') if match_param else None
         return goal, param
 
-    def extract_goal(self, input_prompt):
-        """Agent extract goal from the input sentence.
+    @staticmethod
+    def extract_goal(model_output):
+        """
+
+        :param model_output:
+        :return:
+        """
+        match_goal = re.search('RedfishGoal\s*:\s*(.*?)\s', model_output)
+        goal = match_goal.group(1).rstrip('.') if match_goal else None
+        return goal
+
+    def query_agent_goal(self, input_prompt):
+        """Agent extract a particular goal from the input sentence.
         :param input_prompt:
         :return:
         """
@@ -464,8 +475,8 @@ class GoalExtractor:
             outputs[0], skip_special_tokens=True)
 
         print("Model output generated: ", generated_prompt)
-        generated_values, generated_action = GoalExtractor.extract_goal_and_param(generated_prompt)
-        return generated_values, generated_action
+        goal = GoalExtractor.extract_goal(generated_prompt)
+        return goal
 
     def extract_goal_and_parameters(self, input_prompt):
         """Agent extract goal and parameters for the goal.
@@ -535,7 +546,9 @@ class GoalExtractor:
             if not input_string.endswith('.'):
                 input_string += '.'  # Add a period if it's not already present
 
-            goal = self.extract_goal(input_string)
+            goal = self.query_agent_goal(input_string)
+            print("Redfish goal", goal)
+
             # goal, parameters = self.extract_goal_and_parameters(input_string)
             # print(f"Agent goal: {goal} parameters {parameters}")
 
