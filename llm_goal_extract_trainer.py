@@ -483,7 +483,7 @@ class GoalExtractor:
             outputs[0], skip_special_tokens=True, max_length=128)
 
         print("Model output generated: ", generated_prompt)
-        goal = GoalExtractor.extract_goal(generated_prompt)
+        goal = GoalExtractor.extract_goal(generated_prompt.strip())
         return goal
 
     def extract_goal_and_parameters(self, input_prompt):
@@ -556,7 +556,6 @@ class GoalExtractor:
 
             goal = self.query_agent_goal(input_string)
             print("Redfish goal", goal)
-
             # goal, parameters = self.extract_goal_and_parameters(input_string)
             # print(f"Agent goal: {goal} parameters {parameters}")
 
