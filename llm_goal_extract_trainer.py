@@ -140,6 +140,34 @@ class GoalExtractor:
                         batch = []
                         goals = []
 
+    def val_goal_representation(self, input_seqs, goals):
+        """
+
+        :param input_seqs:
+        :param goals:
+        :return:
+        """
+        eval_device = self.device
+        # fix for RuntimeError: MPS does not support cumsum op with int64 input
+        if self.device.type == 'mps':
+            eval_device = torch.device("cpu")
+
+        self.model.eval()
+        self.model.to(eval_device)
+        eval_encoded_inputs = self.tokenizer(input_seqs, padding=True, truncation=True, return_tensors='pt')
+
+        # eval
+        for i in range(0, len(eval_encoded_inputs['input_ids']), self.batch_size):
+            eval_input_ids = eval_encoded_inputs['input_ids'].to(self.device)
+            eval_attr_mask = eval_encoded_inputs['attention_mask'].to(self.device)
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    input_ids=eval_input_ids, attention_mask=eval_attr_mask)
+                # decode the generated output
+                generated_prompt = self.tokenizer.decode(
+                    outputs[0], skip_special_tokens=True)
+                print("Model generated text: ", generated_prompt)
+
     def train_goal_representation(self):
         """Train LLM model to map high level goal to redfish actions.
 
@@ -156,7 +184,6 @@ class GoalExtractor:
             total_loss = 0.0
             num_batches = 0
             for i, (batch, input_seqs, goals) in enumerate(self.generate_prompts()):
-
                 encoded_inputs = self.tokenizer(batch, padding=True, truncation=True, return_tensors='pt')
                 # batch_size = len(encoded_inputs['input_ids'])
                 # input_ids = encoded_inputs["input_ids"]
@@ -187,18 +214,8 @@ class GoalExtractor:
                     total_loss += loss.item()
                     # Report batch loss
 
-                eval_encoded_inputs = self.tokenizer(input_seqs, padding=True, truncation=True, return_tensors='pt')
-                # eval
-                for i in range(0, len(eval_encoded_inputs['input_ids']), self.batch_size):
-                    eval_input_ids = eval_encoded_inputs['input_ids'].to(self.device)
-                    eval_attr_mask = eval_encoded_inputs['attention_mask'].to(self.device)
-                    with torch.no_grad():
-                        outputs = self.model.generate(
-                            input_ids=eval_input_ids, attention_mask=eval_attr_mask)
-                        # decode the generated output
-                        generated_prompt = self.tokenizer.decode(
-                            outputs[0], skip_special_tokens=True)
-                        print("Model generated text: ", generated_prompt)
+                # evaluate entire batch
+                self.val_goal_representation(input_seqs, goals)
 
             average_loss = total_loss / num_batches
             print(f"Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
