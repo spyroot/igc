@@ -12,7 +12,7 @@ Mus mbayramo@stanford.edu
 import itertools
 import json
 from abc import abstractmethod
-from typing import List, Optional, Iterator, Any
+from typing import List, Optional, Iterator, Any, Tuple
 
 
 class GoalAndAction:
@@ -37,10 +37,32 @@ class GoalAndAction:
         self.parameters = parameters if parameters else []
         self.synonyms = synonyms if synonyms else []
 
-    @abstractmethod
-    def generate_prompt(self):
-        """need generate example of prompts for a given action
+    def _prompt(self, action, param_name, param_values, sep=","):
+        """
+        :param action:
+        :param param_name:
+        :param param_values:
         :return:
+        """
+        if isinstance(param_values, dict):
+            param_name = ""
+            params = json.dumps(param_values)
+            params_text = f"{sep} ".join(f"{k}{v}" for k, v in param_values.items())
+        else:
+            params = json.dumps({param_name: param_values})
+            params_text = f"{param_name} {param_values}"
+
+        prompt = f"Input: {self.action_type} {action}" \
+                 f" with {param_name} {param_values}. " \
+                 f"Goal: {action} Parameter: {params}.<|endoftext|>"
+        goal = f"Goal: {action} Parameter: {params}"
+        input_seq = f"Input: {self.action_type} {action} with {params_text}."
+        return prompt, goal, input_seq
+
+    @abstractmethod
+    def generate_prompt(self) -> Tuple[List[str], List[str], List[str]]:
+        """need generate example of prompts for a given action
+        :return: full_prompts, input_seqs, goals
         """
         raise NotImplementedError
 
@@ -82,49 +104,54 @@ class ActionWithParam(GoalAndAction):
         """
         super().__init__(action_type, goal, parameters, synonyms)
 
-    def generate_prompt(self):
+    def generate_prompt(self) -> Tuple[List[str], List[str], List[str]]:
         """
         :return:
         """
-
-        prompts = []
         parameters = self.parameters
         action = self.target
         goals = []
+        prompts = []
+        input_seqs = []
         # Generate prompts with single parameters
         for param_dict in parameters:
             for param_name, values in param_dict.items():
                 for value in values:
-                    prompt = f"Input: {self.action_type} {action}" \
-                             f" with {param_name} {value} " \
-                             f"Goal: {action} Parameter: {json.dumps({param_name: value})}"
+                    # json.dumps([{param_name: value}])
+                    prompt, goal, input_seq = self._prompt(action, param_name, value)
                     prompts.append(prompt)
-                    goals.append(f"Goal: {self.action_type} Parameter: {json.dumps({param_name: value})}")
+                    goals.append(goal)
+                    input_seqs.append(input_seq)
 
-        # Generate prompts with combinations of parameters
-        combinations = itertools.product(*[[(param_name, value) for value in values]
-                                           for param_dict in parameters
-                                           for param_name, values in param_dict.items()])
-        for combination in combinations:
-            prompt_values = ", ".join(f"{param_name} {value}" for param_name, value in combination)
-            prompt = f"Input: {self.action_type} {action} with {prompt_values} " \
-                     f"Goal: {action} Parameter: {json.dumps([dict(combination)])}"
-            goals.append(f"Goal: {action} Parameter: {json.dumps([dict(combination)])}")
-            prompts.append(prompt)
+        if len(parameters) > 1:
+            # Generate prompts with combinations of parameters
+            combinations = itertools.product(*[[(param_name, value) for value in values]
+                                               for param_dict in parameters
+                                               for param_name, values in param_dict.items()])
+            for combination in combinations:
+                prompt_values = ", ".join(f"{param_name} {value}" for param_name, value in combination)
+                # combo = json.dumps([dict(combination)])
+                prompt, goal, input_seq = self._prompt(action, prompt_values, dict(combination))
+                prompts.append(prompt)
+                goals.append(goal)
+                input_seqs.append(input_seq)
 
-        return prompts, goals
+        return prompts, input_seqs, goals
 
 
 class ActionWithoutParam(GoalAndAction):
     """Action without any parameters.
     """
 
-    def generate_prompt(self):
-        """
+    def generate_prompt(self) -> Tuple[List[str], List[str], List[str]]:
+        """Generate prompts for the action without any parameters.
+        Example action that invoke something without any parameters.
+        action query something without any parameters.
         :return:
         """
-        return [f"Input: {self.action_type} {self.target}. Goal: {self.target} Parameter: []."], [
-            f"Goal: {self.action_type} Parameter: []."]
+        return [
+            f"Input: {self.action_type} {self.target}. Goal: {self.target} Parameter: [].<|endoftext|>"
+        ], [f"Input: {self.action_type} {self.target}."], [f"Goal: {self.action_type} Parameter: []."]
 
 
 class RestActionSpace:
@@ -206,11 +233,14 @@ def test_actions():
     ]
 
     create_action = ActionWithParam('Create', 'DellMetricService.ExportThermalHistory', with_multi_param)
-    create_prompts = create_action.generate_prompt()
-    for p in create_prompts:
-        print(p)
+    prompts, input_seq, goals = create_action.generate_prompt()
+    for i, p in enumerate(prompts):
+        print("prompt", p)
+        print("input_seq", input_seq[i])
+        print("goals", goals[i])
 
-    # single parameter for action
+    print("----------")
+    # # single parameter for action
     single_param = [
         {
             'TransferProtocol': ['HTTP', 'NFS', 'CIFS', 'TFTP', 'HTTPS']
@@ -218,9 +248,12 @@ def test_actions():
     ]
     create_action = ActionWithParam('Update', 'DellMetricService.ExportThermalHistory', single_param)
     create_prompts = create_action.generate_prompt()
-    for p in create_prompts:
-        print(p)
+    for i, p in enumerate(prompts):
+        print("prompt", p)
+        print("input_seq", input_seq[i])
+        print("goals", goals[i])
 
+    print("----------")
     # no parameter for action
     create_action = ActionWithoutParam('Delete', 'DellMetricService.ExportThermalHistory')
     create_prompts = create_action.generate_prompt()
@@ -244,27 +277,29 @@ def test_action_factory():
 
     action_create_test = RestActionSpace.get_action(
         "create", "DellMetricService.ExportThermalHistory", with_multi_param)
-    prompts = action_create_test.generate_prompt()
-    for p in prompts:
-        print(p)
+    prompts, input_seq, params = action_create_test.generate_prompt()
 
-    single_param = [
-        {
-            'TransferProtocol': ['HTTP', 'NFS', 'CIFS', 'TFTP', 'HTTPS']
-        },
-    ]
-
-    action_create_test = RestActionSpace.get_action(
-        "update", "DellMetricService.ExportThermalHistory", single_param)
-    prompts = action_create_test.generate_prompt()
-    for p in prompts:
-        print(p)
-
-    action_create_test = RestActionSpace.get_action(
-        "delete", "DellMetricService.ExportThermalHistory")
-    prompts = action_create_test.generate_prompt()
-    for p in prompts:
-        print(p)
+    # for p in prompts:
+    #     print(type(p))
+    #
+    #
+    # single_param = [
+    #     {
+    #         'TransferProtocol': ['HTTP', 'NFS', 'CIFS', 'TFTP', 'HTTPS']
+    #     },
+    # ]
+    #
+    # action_create_test = RestActionSpace.get_action(
+    #     "update", "DellMetricService.ExportThermalHistory", single_param)
+    # prompts = action_create_test.generate_prompt()
+    # for p in prompts:
+    #     print(type(p))
+    #
+    # action_create_test = RestActionSpace.get_action(
+    #     "delete", "DellMetricService.ExportThermalHistory")
+    # prompts = action_create_test.generate_prompt()
+    # for p in prompts:
+    #     print(p)
 
 # test_action_factory()
-# test_actions()
+test_actions()
