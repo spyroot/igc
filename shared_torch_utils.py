@@ -3,6 +3,7 @@ from typing import Optional
 
 import torch
 import torch.distributed as dist
+from torch import Tensor
 from torch.backends import cudnn
 from torch.cuda import nccl
 import numpy as np
@@ -427,3 +428,15 @@ def torch_distributed_operations_test(rank, world_size):
 
     # Cleanup
     dist.destroy_process_group()
+
+
+def batchify(data: Tensor, batch_size: int) -> Tensor:
+    """Divides the data into separate sequences, removing extra elements
+    :param data:  shape [N]
+    :param batch_size: int, batch size
+    :return:
+    """
+    seq_len = data.size(0) // batch_size
+    data = data[:seq_len * batch_size]
+    data = data.view(batch_size, seq_len).t().contiguous()
+    return data.to(batch_size)

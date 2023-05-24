@@ -19,20 +19,22 @@ Author:Mus mbayramo@stanford.edu
 import itertools
 import os
 import random
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import re
 
 import torch
+from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, AdamW
 
 import readline
-from ds.redfish_dataset import JSONDataset
+from ds.redfish_dataset import JSONDataset, MaskedSampler
 from shared_torch_utils import get_device
 from rest_action import RestActionSpace, ActionWithoutParam
 
 from collections import namedtuple
 from torch.utils.data import DataLoader, RandomSampler
+
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
 
@@ -136,13 +138,30 @@ class LlmEmbeddingsTrainer:
         #     # print(f"{i}attention_mask", s["attention_mask"])
         #     # print(f"{i}request_hash", s["request_hash"])
         #     batched_samples.append([s["input_ids"], s["attention_mask"], ["request_hash"]])
-
         included_keys = ['input_ids', 'attention_mask']
         batch = {key: torch.stack([s[key] for s in samples]) for key in included_keys}
         for i, s in enumerate(samples):
-            print(samples[i]["file_path"])
+            print("Collatting")
         return batch
         # return batched_samples
+
+    @staticmethod
+    def generate_square_subsequent_mask(sz: int) -> Tensor:
+        """Generates an upper-triangular matrix of ``-inf``, with zeros on ``diag``."""
+        return torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
+
+    @staticmethod
+    def get_batch(src: Tensor, idx: int, chunk_size=35) -> Tuple[Tensor, Tensor]:
+        """
+        :param src: [full_seq_len, batch_size]
+        :param idx
+        :param chunk_size:
+        :return: tuple (data, target),  shape [seq_len, batch_size], [seq_len * batch_size]
+        """
+        seq_len = min(chunk_size, len(src) - 1 - idx)
+        data = src[idx:idx + seq_len]
+        target = src[idx + 1:idx + 1 + seq_len].reshape(-1)
+        return data, target
 
     def train_observation(self, overfit: Optional[bool] = True):
         """Train LLM model to map high level goal to redfish actions.
@@ -156,27 +175,26 @@ class LlmEmbeddingsTrainer:
         self.model.to(self.device)
         self.model.train()
 
-        sampler = RandomSampler(self.dataset)
-        dataloader = DataLoader(self.dataset,
-                                batch_size=self.batch_size,
-                                sampler=sampler,
-                                num_workers=self.num_workers,
-                                shuffle=self.shuffle,
-                                collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)
-
-        # self.dataset.set_masked(True)
+        # sampler = RandomSampler(self.dataset)
+        # sampler = MaskedSampler(self.dataset)
+        dataloader1 = DataLoader(self.dataset,
+                                 batch_size=self.batch_size,
+                                 # sampler=sampler,
+                                 num_workers=self.num_workers,
+                                 shuffle=self.shuffle,
+                                 collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)
 
         if overfit:
-            dataloader_overfit = [next(iter(dataloader))]
+            dataloader_overfit = [next(iter(dataloader1))]
 
         for epoch in range(self.num_epochs):
             total_loss = 0.0
             num_batches = 0
+
             if overfit:
                 dataloader = iter(dataloader_overfit)
 
             for i, batch in enumerate(dataloader):
-
                 labels = batch["input_ids"][:, 1:].clone().detach()
                 mask = (batch["input_ids"] == self.pad_token_id)
                 labels = labels.masked_fill(mask[:, 1:], -100)
@@ -189,6 +207,18 @@ class LlmEmbeddingsTrainer:
                     'attention_mask': batch['attention_mask'].to(self.device)
                 }
 
+                if epoch % 10 == 0:
+                    for j in range(batch_inputs['input_ids'].size(0)):
+                        # def mask_json_key_and_value(encoding, target_key, tokenizer, debug=False):
+                        batch_inputs["attention_mask"] = self.dataset.mask_json_key_and_value(
+                            batch_inputs, "@odata.id", self.tokenizer)
+
+                batch_inputs = {
+                    'input_ids': batch['input_ids'].to(self.device),
+                    'attention_mask': batch['attention_mask'].to(self.device)
+                }
+
+                # print(f"Epoch {epoch + 1}/{self.num_epochs} - Batch {i + 1}/{len(dataloader)}")
                 # print("before", batch_inputs['input_ids'].shape)
                 # print("before", batch_inputs['attention_mask'].shape)
                 # print("before", batch_inputs['input_ids'].shape)

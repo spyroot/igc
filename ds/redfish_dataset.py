@@ -1,11 +1,14 @@
 import json
 import os
+from random import random
 from typing import Optional, Any, List, Tuple
 import time
 
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
+from torch.utils.data import Sampler
+
 from transformers import GPT2Tokenizer
 import logging
 
@@ -20,7 +23,9 @@ class JSONDataset(Dataset):
                  verbose: Optional[bool] = False,
                  recreate_dataset: Optional[bool] = False,
                  tokenizer: Optional[Any] = None,
-                 skip_creation: Optional[bool] = False):
+                 skip_creation: Optional[bool] = False,
+                 transform=None,
+                 target_transform=None):
         """
         :param directory_path:
         :param default_tokenize:
@@ -41,6 +46,9 @@ class JSONDataset(Dataset):
 
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(filename='dataset.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
+
+        self.transform = transform
+        self.target_transform = target_transform
 
         self._data = {}
         self._masked_data = {}
@@ -126,9 +134,6 @@ class JSONDataset(Dataset):
 
             end_time = time.time()  # End the timer
             self.logger.info(f"Loaded dataset, total time: {end_time - start_time}")
-
-            # set at the end
-            self.sample_masked = False
 
     def chunk_overlap_size(self):
         """Amount of overlap between two chunks
@@ -499,7 +504,7 @@ class JSONDataset(Dataset):
             """
             with open(file_path, "r") as json_file:
                 if self._verbose:
-                    print(f"reading {file_name}")
+                    self.logger.debug(f"reading {file_name}")
 
                 rest_api = self.convert_file_name(file_name)
                 json_lines = json_file.read()
@@ -606,6 +611,52 @@ class JSONDataset(Dataset):
         :return:
         """
         return self._data["train_data"][idx]
+
+    def sample_random_masked(self):
+        """Get item from dataset
+        :param idx:
+        :return:
+        """
+        index = random.choice(range(len(self._masked_data['train_data'])))
+        return self._masked_data['train_data'][index]
+
+    def sample_masked(self, idx):
+        """Get item from dataset
+        :param idx:
+        :return:
+        """
+        return self._masked_data['train_data'][idx]
+
+    def sample_masked_iter(self):
+        for s in self._masked_data['train_data']:
+            yield s
+
+    # >>> # xdoctest: +SKIP
+    #     >>> class AccedingSequenceLengthSampler(Sampler[int]):
+    #     >>>     def __init__(self, data: List[str]) -> None:
+    #     >>>         self.data = data
+    #     >>>
+    #     >>>     def __len__(self) -> int:
+    #     >>>         return len(self.data)
+    #     >>>
+    #     >>>     def __iter__(self) -> Iterator[int]:
+    #     >>>         sizes = torch.tensor([len(x) for x in self.data])
+    #     >>>         yield from torch.argsort(sizes).tolist()
+
+
+class MaskedSampler(Sampler[int]):
+    def __init__(self, data_source) -> None:
+        super().__init__()
+        self.data_source = data_source
+        self.max_samples = 4
+
+    def __iter__(self):
+        print("Sampling")
+        return iter(self.data_source.sample_masked_iter())
+
+    def __len__(self):
+        print("len")
+        return len(self.data_source._masked_data['train_data'])
 
 
 class PromptDataset(Dataset):
