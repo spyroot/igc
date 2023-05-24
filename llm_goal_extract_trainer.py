@@ -57,9 +57,9 @@ class GoalExtractor:
         self.batch_size = 4
         self.high_level_actions = ['Create', 'Update', 'Delete', 'Query']
 
-        directory_path = os.path.expanduser("~/.json_responses")
+        _directory_path = os.path.expanduser("~/.json_responses")
         self.dataset = JSONDataset(
-            directory_path, verbose=False)
+            _directory_path, verbose=False, tokenizer=self.tokenizer)
 
         self.device = get_device()
         self.writer = SummaryWriter(log_dir="logs")
@@ -383,6 +383,37 @@ class GoalExtractor:
 
         return epoch_accuracy / num_batches
 
+    def collate_input_shift_fn(self, batch):
+        """
+        :param batch:
+        :return:
+        """
+        input_ids = torch.cat(
+            [item['input_ids'].squeeze(1) for item in batch]
+        )
+
+        attention_mask = torch.cat(
+            [item['attention_mask'].squeeze(1) for item in batch]
+        )
+
+        input_ids = input_ids.squeeze(1)
+        attention_mask = attention_mask.squeeze(1)
+
+        # shifting
+        labels = input_ids[:, 1:].clone()
+        labels[:, -1] = -100  # ignore index
+        mask = torch.tensor(input_ids == self.pad_token_id)
+        labels = labels.masked_fill(mask, -100)
+
+        input_ids = input_ids[:, :-1]
+        attention_mask = attention_mask[:, :-1]
+
+        return {
+            'input_ids': input_ids,
+            'attention_mask': attention_mask,
+            'labels': labels,
+        }
+
     def train_goal_and_parameter_extractor(self, overfit: Optional[bool] = True):
         """Train LLM model to extract goal and parameters from input text.
         It uses data set where target is target method that agent might invoke.
@@ -408,18 +439,6 @@ class GoalExtractor:
 
         :return:
         """
-        # prompts = []
-        # labels = []
-        # goals = self.dataset.goals
-        # actions = self.dataset.action_space
-        # for action_type in self.high_level_actions:
-        #     for g in goals:
-        #         action = actions[g]
-        #         action_and_goal = RestActionSpace.get_action(action_type, action, goals[g])
-        #         _prompt, _labels = action_and_goal.generate_prompt()
-        #         prompts += _prompt
-        #         labels += _labels
-
         # Tokenize the prompts
         optimizer = AdamW(self.model.parameters(), lr=1e-5)
         self.model.to(self.device)
@@ -434,13 +453,6 @@ class GoalExtractor:
             else:
                 batch_generator = self.generator_goal_parameter()
 
-            # for i, (batch, input_seqs, parameters) in enumerate(batch_generator):
-            #     for j, e in enumerate(batch):
-            #         print("batch: ", e)
-            #         print("input seq: ", input_seqs[j])
-            #         print("goals: ", parameters[j])
-            # raise
-
             for i, (batch, input_seqs, parameters) in enumerate(batch_generator):
                 encoded_inputs = self.tokenizer(batch, padding=True, truncation=True, return_tensors='pt')
                 num_batches += 1
@@ -449,16 +461,12 @@ class GoalExtractor:
                         'input_ids': encoded_inputs['input_ids'][i:i + self.batch_size],
                         'attention_mask': encoded_inputs['attention_mask'][i:i + self.batch_size]
                     }
-
-                    # move input tensors to the GPU if available
                     batch_inputs = {
                         k: v.to(self.device) for k, v in batch_inputs.items()
                     }
-
                     # forward
                     outputs = self.model(**batch_inputs, labels=batch_inputs['input_ids'])
                     loss = outputs.loss
-
                     # Backward pass
                     optimizer.zero_grad()
                     loss.backward()

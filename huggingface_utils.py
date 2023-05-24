@@ -2,7 +2,11 @@
 This hugging face shared utility method, used in different places in the code.
 
 """
-from typing import Tuple, Any, Type, Dict
+import collections
+from typing import Tuple, Any, Type, Dict, List
+
+import numpy as np
+import torch
 import transformers
 from transformers import TrainerCallback
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
@@ -340,3 +344,82 @@ def generate_spec(
     }
 
 
+def data_collator(features: List[Any]) -> Dict[str, Any]:
+    """
+    :param features:
+    :return:
+    """
+    if not isinstance(features[0], collections.abc.Mapping):
+        features = [vars(f) for f in features]
+
+    first = features[0]
+    batch = {}
+
+    if "label" in first and first["label"] is not None:
+        label_col_name = "label"
+    elif "label_ids" in first and first["label_ids"] is not None:
+        label_col_name = "label_ids"
+    elif "labels" in first and first["labels"] is not None:
+        label_col_name = "labels"
+    else:
+        label_col_name = None
+
+    if label_col_name is not None:
+        if isinstance(first[label_col_name], torch.Tensor):
+            dtype = torch.int64 if first[label_col_name].dtype.is_integer else torch.float32
+        elif isinstance(first[label_col_name], np.ndarray) or isinstance(first[label_col_name], np.generic):
+            dtype = torch.int64 if np.issubdtype(first[label_col_name].dtype, np.integer) else torch.float32
+        elif isinstance(first[label_col_name], (tuple, list)):
+            dtype = torch.int64 if isinstance(first[label_col_name][0], int) else torch.float32
+        else:
+            dtype = torch.int64 if isinstance(first[label_col_name], int) else torch.float32
+        batch["labels"] = torch.tensor([f[label_col_name] for f in features], dtype=dtype)
+
+    for k, v in first.items():
+        if k not in ("label", "label_ids", "labels") and v is not None and not isinstance(v, str):
+            if isinstance(v, (torch.Tensor, np.ndarray)):
+                batch[k] = torch.stack([f[k] for f in features])
+            else:
+                batch[k] = torch.tensor([f[k] for f in features])
+
+    return batch
+
+
+def whole_word_masking_data_collator(
+        features, mask_token_id, wwm_probability=0.2, ignore_index=-100):
+    """Whole word masking
+
+    samples = [lm_datasets["train"][i] for i in range(2)]
+    batch = whole_word_masking_data_collator(samples)
+
+    :param ignore_index:
+    :param mask_token_id:
+    :param wwm_probability:
+    :param features:
+    :return:
+    """
+    for feature in features:
+        word_ids = feature.pop("word_ids")
+        mapping = collections.defaultdict(list)
+        current_word_index = -1
+        current_word = None
+        for idx, word_id in enumerate(word_ids):
+            if word_id is not None:
+                if word_id != current_word:
+                    current_word = word_id
+                    current_word_index += 1
+                mapping[current_word_index].append(idx)
+
+        # randomly mask words
+        mask = np.random.binomial(1, wwm_probability, (len(mapping),))
+        input_ids = feature["input_ids"]
+        labels = feature["labels"]
+        new_labels = [ignore_index] * len(labels)
+        for word_id in np.where(mask)[0]:
+            word_id = word_id.item()
+            for idx in mapping[word_id]:
+                new_labels[idx] = labels[idx]
+                input_ids[idx] = mask_token_id
+        feature["labels"] = new_labels
+
+    return data_collator(features)

@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Optional
+from typing import Optional, Any, List, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -16,8 +16,19 @@ class JSONDataset(Dataset):
                  overlap: Optional[int] = 256,
                  dataset_dir: Optional[str] = "datasets",
                  verbose: Optional[bool] = False,
-                 recreate_dataset: Optional[bool] = False):
+                 recreate_dataset: Optional[bool] = False,
+                 tokenizer: Optional[Any] = None,
+                 skip_creation: Optional[bool] = False):
         """
+        :param directory_path:
+        :param default_tokenize:
+        :param max_len:
+        :param overlap:
+        :param dataset_dir:
+        :param verbose:
+        :param recreate_dataset:
+        :param tokenizer:
+        :param skip_creation:
         """
         assert isinstance(directory_path, str), 'directory_path should be a string'
         assert isinstance(default_tokenize, str), 'default_tokenize should be a string'
@@ -26,18 +37,28 @@ class JSONDataset(Dataset):
         assert isinstance(dataset_dir, str), 'dataset_dir should be a string'
         assert isinstance(verbose, bool), 'verbose should be a boolean'
 
+        tok_name = default_tokenize
         self._data = {}
+        self._masked_data = {}
         self.directory_path = directory_path
         self._verbose = verbose
         self._max_len = max_len
         self._overlap = overlap
-        self.tokenizer = GPT2Tokenizer.from_pretrained(default_tokenize)
+
+        if tokenizer is not None:
+            self.tokenizer = tokenizer
+            tok_name = self.tokenizer.name_or_path
+        else:
+            self.tokenizer = GPT2Tokenizer.from_pretrained(default_tokenize)
+
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+
         self._default_dir = dataset_dir
         os.makedirs(self._default_dir, exist_ok=True)
 
-        self._dataset_file_name = f"./datasets/processed_dataset_{default_tokenize}.pt"
+        self._dataset_file_name = f"./datasets/processed_dataset_{tok_name}.pt"
+        self._dataset_masked_file_name = f"./datasets/processed_dataset_{tok_name}.pt"
 
         # Dictionary to map hash values to action one-hot vectors
         self.num_actions = 0
@@ -46,16 +67,27 @@ class JSONDataset(Dataset):
         self.action_space = {}
         self.action_to_rest = {}
 
-        if recreate_dataset or not os.path.exists(self._dataset_file_name):
-            self._load_json_files()
-            self._load_dicts_from_data()
-            self._construct_action_space()
-            torch.save(self._data, self._dataset_file_name)
-        else:
-            print(f"Loading dataset from {self._dataset_file_name}")
-            self._data = torch.load(self._dataset_file_name)
-            self._load_dicts_from_data()
-            self._construct_action_space()
+        self._list_masked_keys = ["@odata.id"]
+
+        if skip_creation is False:
+            if recreate_dataset or not os.path.exists(self._dataset_file_name):
+                self._load_json_files()
+                self._load_dicts_from_data()
+                self._construct_action_space()
+                torch.save(self._data, self._dataset_file_name)
+                torch.save(self._masked_data, self._dataset_masked_file_name)
+            else:
+                print(f"Loading dataset from {self._dataset_file_name}")
+                self._data = torch.load(self._dataset_file_name)
+                self._masked_data = torch.load(self._dataset_masked_file_name)
+                self._load_dicts_from_data()
+                self._construct_action_space()
+
+    def chunk_overlap_size(self):
+        """Amount of overlap between two chunks
+        :return:
+        """
+        return self._overlap
 
     def _load_dicts_from_data(self):
         """Load the dictionaries based on the data points in self.data.
@@ -72,7 +104,7 @@ class JSONDataset(Dataset):
                     data_point["labels"] = one_hot
                     # break
 
-    def hash_to_index(self, hash_value: str) -> int:
+    def hash_to_index(self, hash_value: int) -> int:
         """
         :param hash_value:
         :return:
@@ -87,7 +119,7 @@ class JSONDataset(Dataset):
         self._data["action_idx_to_hash"][index] = hash_value
         return index
 
-    def index_to_hash(self, action_index: int) -> Optional[str]:
+    def index_to_hash(self, action_index: int) -> Optional[int]:
         """
         :param action_index:
         :return:
@@ -125,17 +157,26 @@ class JSONDataset(Dataset):
         converted_name = file_name.replace("_", "/")
         return converted_name
 
-    def create_chunks(self, input_ids, attention_mask):
+    def create_chunks(
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor
+    ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
         """Create chunks of input_ids and attention_mask, this
         splits the input_ids and attention_mask for large json files.
+
         :param attention_mask:
         :param input_ids:
         :return:
         """
+        idx = 0
+        chunks = []
         num_tokens = input_ids.size(1)
 
-        chunks = []
-        idx = 0
+        if num_tokens <= self._max_len:
+            chunks.append((input_ids, attention_mask))
+            return chunks
+
         while idx < num_tokens:
             if idx + self._max_len < num_tokens:
                 chunk_input_ids = input_ids[:, idx:idx + self._max_len]
@@ -144,14 +185,16 @@ class JSONDataset(Dataset):
                 chunk_input_ids = input_ids[:, idx:]
                 chunk_attention_mask = attention_mask[:, idx:]
 
+            new_chunk_size = self._max_len - chunk_attention_mask.size(1)
             padded_input_ids = torch.nn.functional.pad(
-                chunk_input_ids, (0, self._max_len - chunk_input_ids.size(1)),
-                value=self.tokenizer.pad_token_id)
+                chunk_input_ids, (0, self._max_len - chunk_input_ids.size(1)), value=self.tokenizer.pad_token_id)
 
             padded_attention_mask = torch.nn.functional.pad(
                 chunk_attention_mask, (0, self._max_len - chunk_attention_mask.size(1)))
+
             chunks.append((padded_input_ids, padded_attention_mask))
-            idx += self._max_len - self._overlap
+            idx = idx + self._max_len - self._overlap
+            num_tokens -= new_chunk_size
 
         return chunks
 
@@ -206,6 +249,147 @@ class JSONDataset(Dataset):
             else:
                 self._extrac_action(t)
 
+    @staticmethod
+    def mask_specific_key(
+            json_data,
+            target_key: str,
+            tokenizer=None,
+            debug: Optional[bool] = False):
+        """Mask specific keu in json structure, technically will work in other cases
+        :param tokenizer:
+        :param debug:
+        :param json_data:
+        :param target_key:
+        :return:
+        """
+        if tokenizer is None:
+            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        else:
+            tokenizer = tokenizer
+
+        if isinstance(json_data, str):
+            json_lines = json.dumps(json_data)
+        else:
+            json_lines = json_data
+
+        encoding = tokenizer(json_lines, return_tensors="pt")
+        attention_mask = encoding['attention_mask'].clone()
+        attention_mask[:, :] = 0
+
+        target_tokens = tokenizer(target_key)['input_ids']
+        input_ids = encoding['input_ids']
+
+        target_len = len(target_tokens)
+        for i in range(input_ids.shape[1] - target_len + 1):
+            if input_ids[0, i:i + target_len].tolist() == target_tokens:
+                attention_mask[0, i:i + target_len] = 1
+                if debug:
+                    print(f"Unmasking tokens "
+                          f"at pos {i} to {i + target_len}: "
+                          f"{tokenizer.decode(input_ids[0, i:i + target_len])}")
+
+        return attention_mask
+
+    @staticmethod
+    def mask_json_key_and_value(encoding, target_key, tokenizer, debug=False):
+        """Mask specific key and value in json structure,
+         technically will work in other cases.
+
+        this simular to mask_specific_key_and_value but does so for already
+        computed mask.
+
+        Usage:
+            target_key = "@odata.id"
+            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+            json_lines = json.dumps(j_data)
+            attention_mask = mask_specific_key_and_value(json_lines,
+            target_key, tokenizer=tokenizer, debug=True)
+
+        :param tokenizer:
+        :param encoding:
+        :param target_key:
+        :param debug:
+        :return:
+        """
+        attention_mask = encoding['attention_mask'].clone()
+        attention_mask[:, :] = 0
+
+        target_tokens = tokenizer(target_key)['input_ids']
+        input_ids = encoding['input_ids']
+
+        period = tokenizer.encode(',', add_special_tokens=False)
+        target_len = len(target_tokens)
+        for i in range(input_ids.shape[1] - target_len + 1):
+            if input_ids[0, i:i + target_len].tolist() == target_tokens:
+                # umask the key tokens
+                attention_mask[0, i:i + target_len] = 1
+                #  assume the value starts  immediately after the key.
+                j = i + target_len
+                unmasked_tokens = []
+                while j < input_ids.shape[1] and input_ids[0, j].item() != period[0]:
+                    attention_mask[0, j] = 1
+                    if debug:
+                        unmasked_tokens.append(input_ids[0, j].item())
+                    j += 1
+                if debug:
+                    print(f"Unmasking tokens at positions {i} to {j}: {tokenizer.decode(unmasked_tokens)}")
+
+        return attention_mask
+
+    @staticmethod
+    def mask_specific_key_and_value(json_data, target_key, tokenizer=None, debug=False):
+        """Mask specific key and value in json structure,
+         technically will work in other cases.
+
+        Usage:
+            target_key = "@odata.id"
+            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+            json_lines = json.dumps(j_data)
+            attention_mask = mask_specific_key_and_value(json_lines,
+            target_key, tokenizer=tokenizer, debug=True)
+
+        :param tokenizer:
+        :param json_data:
+        :param target_key:
+        :param debug:
+        :return:
+        """
+        if tokenizer is None:
+            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        else:
+            tokenizer = tokenizer
+
+        if isinstance(json_data, str):
+            json_lines = json.dumps(json_data)
+        else:
+            json_lines = json_data
+
+        encoding = tokenizer(json_lines, return_tensors="pt")
+        attention_mask = encoding['attention_mask'].clone()
+        attention_mask[:, :] = 0
+
+        target_tokens = tokenizer(target_key)['input_ids']
+        input_ids = encoding['input_ids']
+
+        period = tokenizer.encode(',', add_special_tokens=False)
+        target_len = len(target_tokens)
+        for i in range(input_ids.shape[1] - target_len + 1):
+            if input_ids[0, i:i + target_len].tolist() == target_tokens:
+                # umask the key tokens
+                attention_mask[0, i:i + target_len] = 1
+                #  assume the value starts  immediately after the key.
+                j = i + target_len
+                unmasked_tokens = []
+                while j < input_ids.shape[1] and input_ids[0, j].item() != period[0]:
+                    attention_mask[0, j] = 1
+                    if debug:
+                        unmasked_tokens.append(input_ids[0, j].item())
+                    j += 1
+                if debug:
+                    print(f"Unmasking tokens at positions {i} to {j}: {tokenizer.decode(unmasked_tokens)}")
+
+        return attention_mask
+
     def _load_json_files(self) -> None:
         """Load json file and construct from raw json presentation
            a dataset.
@@ -215,6 +399,7 @@ class JSONDataset(Dataset):
         self._data["action_idx_to_hash"] = {}
         self._data["hash_to_rest_api"] = {}
         self._data["train_data"] = []
+        self._masked_data["train_data"] = []
 
         def process_json_file(file_path: str, file_name: str) -> None:
             """
@@ -236,6 +421,7 @@ class JSONDataset(Dataset):
                 targets = {}
                 self.extract_recursive(json_data, allowable_values, targets)
 
+                json_lines += json_lines + "<|endoftext|>"
                 tokenizer = self.tokenizer(
                     json_lines,
                     padding='max_length',
@@ -250,16 +436,62 @@ class JSONDataset(Dataset):
                 # for each chunk add it as a separate data point
                 for i, chunk_tuple in enumerate(chunks):
                     padded_chunk, padded_mask = chunk_tuple
+                    padded_chunk = padded_chunk.squeeze(dim=0)
+                    padded_mask = padded_mask.squeeze(dim=0)
+
                     self._data["hash_to_rest_api"][hash_value] = rest_api
                     self._data["train_data"].append(
                         {
-                            "rest_api": rest_api,  # this for debug
                             "request_hash": hash_value,
                             "request": rest_api,
                             "input_ids": padded_chunk,
                             "attention_mask": padded_mask,
-                            "allowable_values": allowable_values,
-                            "targets": targets,
+                            # "allowable_values": allowable_values,
+                            # "targets": targets,
+                            "file_path": file_path.split(".json_responses")[1],
+                        }
+                    )
+
+        def process_and_mask_json_file(
+                json_file_path: str,
+                json_file_name: str,
+                mask_target_key: str) -> None:
+            """This second pass we read the json file and mask what we need.
+            :param json_file_path:
+            :param json_file_name:
+            :param mask_target_key: a key:value that we want to mask
+            :return:
+            """
+            with open(json_file_path, "r") as json_file:
+                if self._verbose:
+                    print(f"reading {json_file_name}")
+
+                rest_api = self.convert_file_name(json_file_name)
+                json_lines = json_file.read()
+                hash_value = hash(rest_api)
+                json_lines += json_lines + "<|endoftext|>"
+                tokenized = self.tokenizer(
+                    json_lines,
+                    padding='max_length',
+                    max_length=self._max_len,
+                    truncation=False,
+                    return_tensors='pt')
+
+                input_ids = tokenized['input_ids']
+                attention_mask = JSONDataset.mask_json_key_and_value(
+                    tokenized, mask_target_key, tokenizer=self.tokenizer
+                )
+
+                chunks = self.create_chunks(input_ids, attention_mask)
+                # for each chunk add it as a separate data point
+                for i, chunk_tuple in enumerate(chunks):
+                    padded_chunk, padded_mask = chunk_tuple
+                    padded_chunk = padded_chunk.squeeze(dim=0)
+                    padded_mask = padded_mask.squeeze(dim=0)
+                    self._masked_data["train_data"].append(
+                        {
+                            "input_ids": padded_chunk,
+                            "attention_mask": padded_mask,
                             "file_path": file_path.split(".json_responses")[1],
                         }
                     )
@@ -269,9 +501,11 @@ class JSONDataset(Dataset):
                 if file_name.endswith(".json"):
                     file_path = os.path.join(root, file_name)
                     process_json_file(file_path, file_name)
+                    for jk in self._list_masked_keys:
+                        process_and_mask_json_file(file_path, file_name, jk)
 
     def action(self, one_hot_vec: torch.Tensor) -> str:
-        """return action from one hot vector representation
+        """Return action from one hot vector representation
         :param one_hot_vec:
         :return:
         """
@@ -281,11 +515,16 @@ class JSONDataset(Dataset):
 
     @staticmethod
     def preprocess_sample(sample):
+        """
+
+        :param sample:
+        :return:
+        """
         return sample
 
     @staticmethod
     def preprocess_json_data(json_data):
-        """ preprocess json data
+        """Preprocess json data
         :param json_data:
         :return:
         """
@@ -294,6 +533,15 @@ class JSONDataset(Dataset):
             preprocessed_sample = JSONDataset.preprocess_sample(item)
             preprocessed_data.append(preprocessed_sample)
         return preprocessed_data
+
+    def is_empty(self) -> bool:
+        """Return is dataset is empty or not.
+        :return:
+        """
+        if self._data is None or len(self._data) == 0:
+            return True
+
+        return False
 
     def __len__(self):
         """Return length of dataset"""

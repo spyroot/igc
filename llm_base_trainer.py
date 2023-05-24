@@ -74,7 +74,7 @@ class LLmBaseTrainer:
         self.directory_path = os.path.expanduser("~/.json_responses")
         self.dataset = JSONDataset(
             self.directory_path, verbose=False)
-        self.pad_token_id = self.dataset.tokenizer.pad_token
+        self.pad_token = self.dataset.tokenizer.pad_token
         self.pad_token_id = self.dataset.tokenizer.pad_token_id
 
         self.train_dataset = self.dataset

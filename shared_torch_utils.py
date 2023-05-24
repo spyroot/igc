@@ -44,6 +44,62 @@ def get_device(rank: Optional[int] = None) -> torch.device:
         return torch.device("cpu")
 
 
+def shift_and_mask(batch, pad_token_id, ignore=-100):
+    """
+    :return:
+    """
+    labels = batch["input_ids"][:, 1:].clone().detach()
+    mask = (batch["input_ids"] == pad_token_id).clone().detach()
+    labels = labels.masked_fill(mask[:, 1:], ignore)
+    batch['input_ids'] = batch['input_ids'][:, :-1]
+    batch['attention_mask'] = batch['attention_mask'][:, :-1]
+    return batch['input_ids'][:, :-1], batch['attention_mask'][:, :-1], labels
+
+
+def mask_random_span(self, input_ids, attention_mask):
+    """
+
+    :param self:
+    :param input_ids:
+    :param attention_mask:
+    :return:
+    """
+    batch_size = input_ids.shape[0]
+    labels = input_ids.clone()
+    input_ids_clone = input_ids.clone()
+
+    for i in range(batch_size):
+        input_length = input_ids[i].size(0)
+        # randomly choose start  and pos for masking
+        mask_start = torch.randint(1, input_length - 1, (1,)).item()
+        mask_end = mask_start + torch.randint(1, input_length - mask_start, (1,)).item()
+        #     # replace the selected span with pad_token_id
+        input_ids[i, mask_start:mask_end] = self.pad_token_id
+        #     # set the labels to the original span
+        labels[i, mask_start:mask_end] = input_ids[i, mask_start:mask_end]
+        # labels[i, :mask_start] = self.pad_token_id
+        # labels[i, mask_end:] = self.pad_token_id
+
+    input_ids = input_ids.squeeze(1)
+    attention_mask = attention_mask.squeeze(1)
+    return input_ids, attention_mask, labels
+
+
+def masked_select(inputs, token_logits, mask_token_id, tokn=10):
+    """Pick the [MASK] candidates with the highest logits
+    :param tokn:
+    :param inputs:
+    :param token_logits:
+    :param mask_token_id:
+    :return:
+    """
+    # [MASK] and extract its logits
+    mask_token_index = np.argwhere(inputs == mask_token_id)[0, 1]
+    mask_token_logits = token_logits[0, mask_token_index, :]
+    np.argsort(-mask_token_logits)[:tokn].tolist()
+    return np.argsort(-mask_token_logits)[:tokn].tolist()
+
+
 def get_network_interfaces():
     """Get a list of network interface names.
     :return: List of interface names.
@@ -191,19 +247,19 @@ def torch_runtime_details():
 
 def is_amp_supported():
     return (
-        torch.version.cuda
-        and torch.cuda.is_available()
-        and LooseVersion(torch.version.cuda) >= "11.0"
+            torch.version.cuda
+            and torch.cuda.is_available()
+            and LooseVersion(torch.version.cuda) >= "11.0"
     )
 
 
 def is_bf16_supported():
     return (
-        torch.version.cuda
-        and torch.cuda.is_bf16_supported()
-        and LooseVersion(torch.version.cuda) >= "11.0"
-        and torch.distributed.is_nccl_available()
-        and nccl.version() >= (2, 10)
+            torch.version.cuda
+            and torch.cuda.is_bf16_supported()
+            and LooseVersion(torch.version.cuda) >= "11.0"
+            and torch.distributed.is_nccl_available()
+            and nccl.version() >= (2, 10)
     )
 
 
