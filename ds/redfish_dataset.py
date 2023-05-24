@@ -446,8 +446,8 @@ class JSONDataset(Dataset):
                             "request": rest_api,
                             "input_ids": padded_chunk,
                             "attention_mask": padded_mask,
-                            # "allowable_values": allowable_values,
-                            # "targets": targets,
+                            "allowable_values": allowable_values,
+                            "targets": targets,
                             "file_path": file_path.split(".json_responses")[1],
                         }
                     )
