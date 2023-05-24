@@ -1,11 +1,13 @@
 import json
 import os
 from typing import Optional, Any, List, Tuple
+import time
 
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 from transformers import GPT2Tokenizer
+import logging
 
 
 class JSONDataset(Dataset):
@@ -37,7 +39,9 @@ class JSONDataset(Dataset):
         assert isinstance(dataset_dir, str), 'dataset_dir should be a string'
         assert isinstance(verbose, bool), 'verbose should be a boolean'
 
-        tok_name = default_tokenize
+        self.logger = logging.getLogger(__name__)
+        logging.basicConfig(filename='dataset.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
+
         self._data = {}
         self._masked_data = {}
         self.directory_path = directory_path
@@ -50,6 +54,7 @@ class JSONDataset(Dataset):
             tok_name = self.tokenizer.name_or_path
         else:
             self.tokenizer = GPT2Tokenizer.from_pretrained(default_tokenize)
+            tok_name = self.tokenizer.name_or_path
 
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
@@ -58,11 +63,10 @@ class JSONDataset(Dataset):
         os.makedirs(self._default_dir, exist_ok=True)
 
         self._dataset_file_name = f"./datasets/processed_dataset_{tok_name}.pt"
-        self._dataset_masked_file_name = f"./datasets/processed_dataset_{tok_name}.pt"
+        self._dataset_masked_file_name = f"./datasets/processed_masked_dataset_{tok_name}.pt"
 
-        # Dictionary to map hash values to action one-hot vectors
+        # dictionary to map hash values to action one-hot vectors
         self.num_actions = 0
-
         self.goals = {}
         self.action_space = {}
         self.action_to_rest = {}
@@ -70,18 +74,61 @@ class JSONDataset(Dataset):
         self._list_masked_keys = ["@odata.id"]
 
         if skip_creation is False:
+            start_time = time.time()  # Start the timer
+
             if recreate_dataset or not os.path.exists(self._dataset_file_name):
+                t1 = time.time()
                 self._load_json_files()
+                self.logger.debug(f"Time for _load_json_files: {time.time() - t1}")
+
+                t2 = time.time()
                 self._load_dicts_from_data()
+                self.logger.debug(f"Time for _load_dicts_from_data: {time.time() - t2}")
+
+                t3 = time.time()
                 self._construct_action_space()
+                self.logger.debug(f"Time for _construct_action_space: {time.time() - t3}")
+
+                t4 = time.time()
                 torch.save(self._data, self._dataset_file_name)
+                self.logger.debug(f"Time for saving _data: {time.time() - t4}")
+
+                t5 = time.time()
                 torch.save(self._masked_data, self._dataset_masked_file_name)
+                self.logger.debug(f"Time for saving _masked_data: {time.time() - t5}")
+
+                print(f"Saved dataset to disk. "
+                      f"size of dataset: {len(self)} "
+                      f"num hash entries: {len(self._data['hash_to_rest_api'])} "
+                      f"num hash to action entries: {len(self._data['hash_to_action_idx'])} \\n"
+                      f"num action to hash entries: {len(self._data['action_idx_to_hash'])} "
+                      f"num action to indices entries: {len(self._data['action_idx_to_hash'])} "
+                      f"num masked entries: {len(self._masked_data['train_data'])} ")
             else:
-                print(f"Loading dataset from {self._dataset_file_name}")
+                t1 = time.time()
+                self.logger.debug(f"Loading dataset from {self._dataset_file_name}")
+                self.logger.debug(f"Loading dataset from disk. {self._dataset_file_name}")
                 self._data = torch.load(self._dataset_file_name)
+                logging.debug(f"Time for loading _data: {time.time() - t1}")
+
+                t2 = time.time()
+                logging.debug(f"Loading masked dataset from disk. {self._dataset_masked_file_name}")
                 self._masked_data = torch.load(self._dataset_masked_file_name)
+                logging.debug(f"Time for loading _masked_data: {time.time() - t2}")
+
+                t3 = time.time()
                 self._load_dicts_from_data()
+                logging.debug(f"Time for _load_dicts_from_data: {time.time() - t3}")
+
+                t4 = time.time()
                 self._construct_action_space()
+                logging.debug(f"Time for _construct_action_space: {time.time() - t4}")
+
+            end_time = time.time()  # End the timer
+            self.logger.info(f"Loaded dataset, total time: {end_time - start_time}")
+
+            # set at the end
+            self.sample_masked = False
 
     def chunk_overlap_size(self):
         """Amount of overlap between two chunks
@@ -93,8 +140,10 @@ class JSONDataset(Dataset):
         """Load the dictionaries based on the data points in self.data.
         """
         # update num actions
-        self.num_actions = len(self._data["hash_to_rest_api"])
+        if "hash_to_rest_api" not in self._data:
+            print(f"looks like dataset corrupted is masked.")
 
+        self.num_actions = len(self._data["hash_to_rest_api"])
         for h in self._data["hash_to_rest_api"]:
             hash_idx = self.hash_to_index(h)
             one_hot = self.index_to_one_hot(hash_idx)
@@ -390,6 +439,47 @@ class JSONDataset(Dataset):
 
         return attention_mask
 
+    def process_and_mask_json_file(
+            self,
+            json_file_path: str,
+            json_file_name: str,
+            mask_target_key: str) -> None:
+        """This second pass we read the json file and mask what we need.
+        :param json_file_path:
+        :param json_file_name:
+        :param mask_target_key: a key:value that we want to mask
+        :return:
+        """
+        with open(json_file_path, "r") as json_file:
+            logging.debug(f"reading {json_file_name}")
+
+            json_lines = json_file.read()
+            json_lines += json_lines + "<|endoftext|>"
+            tokenized = self.tokenizer(
+                json_lines,
+                padding='max_length',
+                max_length=self._max_len,
+                truncation=False,
+                return_tensors='pt')
+
+            input_ids = tokenized['input_ids']
+            attention_mask = JSONDataset.mask_json_key_and_value(
+                tokenized, mask_target_key, tokenizer=self.tokenizer
+            )
+
+            chunks = self.create_chunks(input_ids, attention_mask)
+            # for each chunk add it as a separate data point
+            for i, chunk_tuple in enumerate(chunks):
+                padded_chunk, padded_mask = chunk_tuple
+                padded_chunk = padded_chunk.squeeze(dim=0)
+                padded_mask = padded_mask.squeeze(dim=0)
+                self._masked_data["train_data"].append(
+                    {
+                        "input_ids": padded_chunk,
+                        "attention_mask": padded_mask,
+                    }
+                )
+
     def _load_json_files(self) -> None:
         """Load json file and construct from raw json presentation
            a dataset.
@@ -452,57 +542,13 @@ class JSONDataset(Dataset):
                         }
                     )
 
-        def process_and_mask_json_file(
-                json_file_path: str,
-                json_file_name: str,
-                mask_target_key: str) -> None:
-            """This second pass we read the json file and mask what we need.
-            :param json_file_path:
-            :param json_file_name:
-            :param mask_target_key: a key:value that we want to mask
-            :return:
-            """
-            with open(json_file_path, "r") as json_file:
-                if self._verbose:
-                    print(f"reading {json_file_name}")
-
-                rest_api = self.convert_file_name(json_file_name)
-                json_lines = json_file.read()
-                hash_value = hash(rest_api)
-                json_lines += json_lines + "<|endoftext|>"
-                tokenized = self.tokenizer(
-                    json_lines,
-                    padding='max_length',
-                    max_length=self._max_len,
-                    truncation=False,
-                    return_tensors='pt')
-
-                input_ids = tokenized['input_ids']
-                attention_mask = JSONDataset.mask_json_key_and_value(
-                    tokenized, mask_target_key, tokenizer=self.tokenizer
-                )
-
-                chunks = self.create_chunks(input_ids, attention_mask)
-                # for each chunk add it as a separate data point
-                for i, chunk_tuple in enumerate(chunks):
-                    padded_chunk, padded_mask = chunk_tuple
-                    padded_chunk = padded_chunk.squeeze(dim=0)
-                    padded_mask = padded_mask.squeeze(dim=0)
-                    self._masked_data["train_data"].append(
-                        {
-                            "input_ids": padded_chunk,
-                            "attention_mask": padded_mask,
-                            "file_path": file_path.split(".json_responses")[1],
-                        }
-                    )
-
         for root, dirs, files in os.walk(self.directory_path):
             for file_name in files:
                 if file_name.endswith(".json"):
                     file_path = os.path.join(root, file_name)
                     process_json_file(file_path, file_name)
                     for jk in self._list_masked_keys:
-                        process_and_mask_json_file(file_path, file_name, jk)
+                        self.process_and_mask_json_file(file_path, file_name, jk)
 
     def action(self, one_hot_vec: torch.Tensor) -> str:
         """Return action from one hot vector representation
@@ -543,6 +589,13 @@ class JSONDataset(Dataset):
 
         return False
 
+    def set_masked(self, value):
+        """THis will switch to masked data
+        :param value:
+        :return:
+        """
+        self._masked_data = value
+
     def __len__(self):
         """Return length of dataset"""
         return len(self._data["train_data"])
@@ -559,6 +612,14 @@ class PromptDataset(Dataset):
 
     def __init__(self, prompt_dataset, chosen_dataset, reject_dataset,
                  pad_token_id, train_phase) -> None:
+        """
+
+        :param prompt_dataset:
+        :param chosen_dataset:
+        :param reject_dataset:
+        :param pad_token_id:
+        :param train_phase:
+        """
         super().__init__()
         self.prompt_dataset = prompt_dataset
         self.chosen_dataset = chosen_dataset
@@ -567,6 +628,10 @@ class PromptDataset(Dataset):
         self.train_phase = train_phase
 
     def __len__(self):
+        """
+
+        :return:
+        """
         length = len(self.chosen_dataset)
         if self.train_phase == 3:
             length = len(self.prompt_dataset)
@@ -580,8 +645,11 @@ class PromptDataset(Dataset):
                 "labels": self.chosen_dataset[idx]["input_ids"]
             }
         elif self.train_phase == 2:
-            return self.chosen_dataset[idx]["input_ids"], self.chosen_dataset[idx]["attention_mask"], \
-                self.reject_dataset[idx]["input_ids"], self.reject_dataset[idx]["attention_mask"]
+            return self.chosen_dataset[idx]["input_ids"], \
+                self.chosen_dataset[idx]["attention_mask"], \
+                self.reject_dataset[idx]["input_ids"], \
+                self.reject_dataset[idx]["attention_mask"]
         elif self.train_phase == 3:
-            return self.prompt_dataset[idx]["input_ids"], self.prompt_dataset[idx]["attention_mask"], \
+            return self.prompt_dataset[idx]["input_ids"], \
+                self.prompt_dataset[idx]["attention_mask"], \
                 self.pad_token_id

@@ -1,9 +1,37 @@
+import json
 import os
 import unittest
 import torch
 from transformers import GPT2Tokenizer
 from ds.redfish_dataset import JSONDataset
 
+
+j_data = {
+    "@odata.context": "/redfish/v1/$metadata#MetricReportDefinitionCollection.MetricReportDefinitionCollection",
+    "@odata.id": "/redfish/v1/TelemetryService/MetricReportDefinitions",
+    "@odata.type": "#MetricReportDefinitionCollection.MetricReportDefinitionCollection",
+    "Name": "MetricReportDefinitions",
+    "Members": [
+        {
+            "@odata.id": "/redfish/v1/TelemetryService/MetricReportDefinitions/AggregationMetrics"
+        },
+        {
+            "@odata.id": "/redfish/v1/TelemetryService/MetricReportDefinitions/CPUMemMetrics"
+        },
+        {
+            "@odata.id": "/redfish/v1/TelemetryService/MetricReportDefinitions/CPURegisters"
+        },
+        {
+            "@odata.id": "/redfish/v1/TelemetryService/MetricReportDefinitions/CPUSensor"
+        },
+        {
+            "@odata.id": "/redfish/v1/TelemetryService/MetricReportDefinitions/FCPortStatistics"
+        },
+        {
+            "@odata.id": "/redfish/v1/TelemetryService/MetricReportDefinitions/FCSensor"
+        }
+    ]
+}
 
 class YourClassTestCase(unittest.TestCase):
 
@@ -288,6 +316,15 @@ class YourClassTestCase(unittest.TestCase):
             self.assertEqual(torch.Size([1, 10]), chunk_input.shape)
             self.assertEqual(torch.Size([1, 10]), chunk_mask.shape)
             print(f"{chunk_input}, {chunk_mask}")
+
+    def test_create_single_token_overlap(self, model_name='gpt2'):
+        # Set up the necessary data
+        target_key = "@odata.id"
+        tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        # json_lines = json.dumps(j_data)
+        # attention_mask = mask_specific_key_and_value(json_lines, target_key, tokenizer=tokenizer, debug=True)
+        # print("Modified attention_mask:", attention_mask)
+
 
 
 if __name__ == '__main__':

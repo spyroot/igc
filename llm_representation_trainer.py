@@ -31,9 +31,8 @@ from ds.redfish_dataset import JSONDataset
 from shared_torch_utils import get_device
 from rest_action import RestActionSpace, ActionWithoutParam
 
-from torch.utils.data import DataLoader, RandomSampler
 from collections import namedtuple
-
+from torch.utils.data import DataLoader, RandomSampler
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
 
@@ -58,7 +57,7 @@ class LlmEmbeddingsTrainer:
 
         directory_path = os.path.expanduser("~/.json_responses")
         self.dataset = JSONDataset(
-            directory_path, verbose=False, tokenizer=self.tokenizer)
+            directory_path, verbose=True, tokenizer=self.tokenizer)
 
         self.device = get_device()
         self.writer = SummaryWriter(log_dir="logs")
@@ -68,6 +67,7 @@ class LlmEmbeddingsTrainer:
 
         self.pad_token = self.dataset.tokenizer.pad_token
         self.pad_token_id = self.dataset.tokenizer.pad_token_id
+        self._default_lr = 1e-5
 
     def val_observation_space_batch(self, input_seqs: List[List[str]], goals: List[str]):
         """Validate LLM model for goal extraction.
@@ -149,9 +149,10 @@ class LlmEmbeddingsTrainer:
 
         For example
                 "target": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
+        :param overfit:
         :return:
         """
-        optimizer = AdamW(self.model.parameters(), lr=1e-5)
+        optimizer = AdamW(self.model.parameters(), lr=self._default_lr)
         self.model.to(self.device)
         self.model.train()
 
@@ -163,6 +164,8 @@ class LlmEmbeddingsTrainer:
                                 shuffle=self.shuffle,
                                 collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)
 
+        # self.dataset.set_masked(True)
+
         if overfit:
             dataloader_overfit = [next(iter(dataloader))]
 
@@ -173,6 +176,14 @@ class LlmEmbeddingsTrainer:
                 dataloader = iter(dataloader_overfit)
 
             for i, batch in enumerate(dataloader):
+
+                labels = batch["input_ids"][:, 1:].clone().detach()
+                mask = (batch["input_ids"] == self.pad_token_id)
+                labels = labels.masked_fill(mask[:, 1:], -100)
+
+                batch['input_ids'] = batch['input_ids'][:, :-1]
+                batch['attention_mask'] = batch['attention_mask'][:, :-1]
+
                 batch_inputs = {
                     'input_ids': batch['input_ids'].to(self.device),
                     'attention_mask': batch['attention_mask'].to(self.device)
@@ -181,16 +192,11 @@ class LlmEmbeddingsTrainer:
                 # print("before", batch_inputs['input_ids'].shape)
                 # print("before", batch_inputs['attention_mask'].shape)
                 # print("before", batch_inputs['input_ids'].shape)
-
-                labels = batch["input_ids"][:, 1:].clone().detach()
-                mask = (batch["input_ids"] == self.pad_token_id)
-                labels = labels.masked_fill(mask[:, 1:], -100)
-                batch['input_ids'] = batch['input_ids'][:, :-1]
-                batch['attention_mask'] = batch['attention_mask'][:, :-1]
-
+                # # shifted
+                #
                 # print(batch_inputs['input_ids'].shape)
                 # print(batch_inputs['attention_mask'].shape)
-                # print(batch_inputs['input_ids'].shape)
+                # print(labels.shape)
 
                 outputs = self.model(**batch_inputs, labels=labels)
                 loss = outputs.loss
