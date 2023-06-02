@@ -3,9 +3,8 @@ from typing import Optional
 
 import deepspeed
 from accelerate import Accelerator
-from transformers import Trainer
-from shared_torch_builder import TorchBuilder
-from shared_torch_utils import get_device
+from .shared_torch_builder import TorchBuilder
+from .shared_torch_utils import get_device
 
 
 def add_optimizer_group(parser):
@@ -15,20 +14,21 @@ def add_optimizer_group(parser):
     """
     optimizer_group = parser.add_argument_group('Optimizer')
     optimizer_group.add_argument(
-        "--optimizer",
+        "--llm_optimizer",
         type=str,
-        default="AdamW",
+        default="AdamW2",
         choices=TorchBuilder.get_supported_optimizers(),
-        help="Optimizer to use."
+        help="LLM Optimizer to use."
     )
 
     optimizer_group.add_argument(
-        "--learning_rate",
-        type=float, default=5e-5,
+        "--llm_learning_rate",
+        type=float, default=1e-5,
+        # type=float, default=5e-5,
         help="Initial learning rate (after the potential warmup period) to use.")
 
     optimizer_group.add_argument(
-        "--weight_decay",
+        "--llm_weight_decay",
         type=float, default=0.0,
         help="Weight decay to use.")
 
@@ -53,8 +53,8 @@ def add_model_type_group(parser):
     model_type_group = parser.add_argument_group('Model Type')
     model_type_group.add_argument(
         "--model_type",
-        type=str, default="gpt2-medium",
-        choices=['gpt2-xl', 'gpt2-large', 'gpt2-medium'],
+        type=str, default="gpt2",
+        choices=['gpt2-xl', 'gpt2-large', 'gpt2-medium', 'gpt2'],
         help="Model type."
     )
     return parser
@@ -90,7 +90,7 @@ def add_trainer_group(parser):
 
     trainer_group.add_argument(
         "--per_device_train_batch_size",
-        type=int, default=8,
+        type=int, default=4,
         help="The batch size per GPU/TPU core/CPU for training.")
 
     trainer_group.add_argument(
@@ -108,7 +108,7 @@ def add_trainer_group(parser):
 
     trainer_group.add_argument(
         "--num_train_epochs",
-        type=int, default=10,
+        type=int, default=1000,
         help="Total number of training epochs to perform.")
 
     trainer_group.add_argument(
@@ -165,6 +165,11 @@ def add_trainer_group(parser):
         help="If set to a positive number, the total number of training steps to perform."
     )
 
+    parser.add_argument(
+        "--overfit",
+        type=bool, default=True,
+        help="By default do just overfit pass. This is mainly for debug."
+    )
     return parser
 
 
@@ -319,8 +324,13 @@ def add_dataset_dataloader(parser):
 
     group.add_argument(
         "--num_workers",
-        type=int, default=0,
+        type=int, default=1,
         help="Number of subprocesses to use for data loading.")
+
+    group.add_argument(
+        "--raw_data_dir",
+        type=str, default="~/.json_responses",
+        help="A directory where all discovered rest API json files.")
 
     return parser
 
@@ -332,10 +342,11 @@ def add_reporting_group(parser):
     """
     group = parser.add_argument_group('Reporting and Metric')
     group.add_argument(
-        "--report_to", type=str, default="tensorboard",
+        "--metric_report", type=str, default="tensorboard",
         choices=['comet_ml', 'mlflow',
                  'neptune', 'tensorboard',
-                 'wandb', 'clearml'])
+                 'wandb', 'clearml'],
+    help="Where we want report metrics.")
     return parser
 
 
@@ -379,9 +390,9 @@ def shared_arg_parser(
     if is_fairscale_arg_parser:
         optimizer_group = parser.add_argument_group('Optimizer')
         optimizer_group.add_argument("--optimizer",
-                                     type=str, default="adamw",
-                                     choices=['adamw', 'sgd', 'adagrad'],
-                                     help="Optimizer to use.")
+                                     type=str, default="adamw2",
+                                     choices=['adamw', 'adamw2', 'sgd', 'adagrad'],
+                                     help="Optimizer to use. adamw2 is default hugging face version of adam.")
 
         optimizer_group.add_argument(
             "--scale-loss", action='store_true',

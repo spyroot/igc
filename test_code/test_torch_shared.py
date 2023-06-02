@@ -2,10 +2,7 @@
 import argparse
 import os
 
-import torch
-from tabulate import tabulate
-
-from shared_torch_utils import (
+from igc.shared.shared_torch_utils import (
     get_device,
     is_bf16_supported,
     is_amp_supported,

@@ -16,6 +16,7 @@ Parameters just passed to agent. i.e. we don't train on parameters.
 
 Author:Mus mbayramo@stanford.edu
 """
+import argparse
 import itertools
 import os
 import random
@@ -26,44 +27,56 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, AdamW
 
-from ds.redfish_dataset import JSONDataset
+from igc.ds.redfish_dataset import JSONDataset
+from igc.modules.llm_base_module import LlmBaseModule
+from igc.modules.metric_logger import MetricLogger
+from igc.shared.shared_torch_builder import TorchBuilder
 from rest_action import RestActionSpace, ActionWithoutParam
-from shared_torch_utils import get_device
-import readline
+from igc.shared.shared_torch_utils import get_device
+from torch.utils.data import Dataset
 
 from collections import namedtuple
+from igc.ds.redfish_dataset import JSONDataset
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
 
-class GoalExtractor:
+class GoalExtractor(LlmBaseModule):
     """
     """
-
-    def __init__(self, model_name='gpt2'):
+    def __init__(self,
+                 args: argparse.Namespace,
+                 ds: JSONDataset,
+                 metric_logger: MetricLogger,
+                 llm_model,
+                 llm_tokenizer):
         """
 
-        :param model_name:
+        :param args:
+        :param metric_logger:
+        :param llm_model:
+        :param llm_tokenizer:
         """
         # Define the GPT model and tokenizer
-        self.model = GPT2LMHeadModel.from_pretrained(model_name)
-        self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+        super().__init__(args, ds, metric_logger, llm_model, llm_tokenizer)
 
-        self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-        self.model.config.pad_token_id = self.tokenizer.pad_token_id
-
-        self.num_epochs = 1000
-        self.batch_size = 4
+        self.num_epochs = args.num_train_epochs
+        self.batch_size = args.per_device_train_batch_size
         self.high_level_actions = ['Create', 'Update', 'Delete', 'Query']
 
-        _directory_path = os.path.expanduser("~/.json_responses")
-        self.dataset = JSONDataset(
-            _directory_path, verbose=False, tokenizer=self.tokenizer)
-
-        self.device = get_device()
-        self.writer = SummaryWriter(log_dir="logs")
         self.batch_log = 10
+
+        self.optimizer = TorchBuilder.create_optimizer(
+            args.llm_optimizer, self.model, args.llm_learning_rate, args.llm_weight_decay, **vars(args))
+
+        print(self.optimizer)
+
+        print(f"Creating "
+              f"GoalExtractor num epochs {self.num_epochs} "
+              f"batch_size {self.batch_size} "
+              f"dataset size {len(self.dataset)} "
+              f"is overfit {self._overfit} "
+              )
 
     @staticmethod
     def generate_prompts_permutation(action: str, goal: str, allowable_parameters: List[str]):
@@ -219,7 +232,6 @@ class GoalExtractor:
                 "target": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
         :return:
         """
-        optimizer = AdamW(self.model.parameters(), lr=1e-5)
         self.model.to(self.device)
         self.model.train()
 
@@ -252,9 +264,9 @@ class GoalExtractor:
                     loss = outputs.loss
 
                     # Backward pass
-                    optimizer.zero_grad()
+                    self.optimizer.zero_grad()
                     loss.backward()
-                    optimizer.step()
+                    self.optimizer.step()
                     total_loss += loss.item()
                     # Accumulate loss
                     total_loss += loss.item()
@@ -790,24 +802,24 @@ class GoalExtractor:
             goal, parameters = self.query_goal_and_parameters(goal_with_parameters_query)
             print(f"Agent goal: {goal} parameters {parameters}")
 
+#
+# def main():
+#     """
+#     :return:
+#     """
+#     goal_extractor = GoalExtractor()
+#     # goal_extractor.train_goal_representation()
+#     goal_extractor.train_goal_and_parameter_extractor()
+#     # goal_extractor.agent_interaction()
+#     # Close SummaryWriter
+#     goal_extractor.writer.close()
 
-def main():
-    """
-    :return:
-    """
-    goal_extractor = GoalExtractor()
-    # goal_extractor.train_goal_representation()
-    goal_extractor.train_goal_and_parameter_extractor()
-    # goal_extractor.agent_interaction()
-    # Close SummaryWriter
-    goal_extractor.writer.close()
-
-
-if __name__ == '__main__':
-    """
-    """
-    directory_path = os.path.expanduser("~/.json_responses")
-    dataset = JSONDataset(
-        directory_path, verbose=False)
-
-    main()
+#
+# if __name__ == '__main__':
+#     """
+#     """
+#     directory_path = os.path.expanduser("~/.json_responses")
+#     dataset = JSONDataset(
+#         directory_path, verbose=False)
+#
+#     main()

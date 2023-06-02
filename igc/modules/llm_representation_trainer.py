@@ -1,0 +1,303 @@
+"""
+This class is used to train a goal extractor from input query.
+
+Given input text provided by the user, or external system.
+The goal is to extract a goal for the agent and parameters
+that agent need used.
+
+For example given input text: "Update raid with raid0"
+The goal here update raid configuration and the
+parameter is raid0.
+
+In downstream task the goal encoded as one hot vector.
+This what used to train RL agent.
+
+Parameters just passed to agent. i.e. we don't train on parameters.
+
+Author:Mus mbayramo@stanford.edu
+"""
+import argparse
+import time
+from collections import namedtuple
+from typing import List, Optional, Tuple
+
+import torch
+from torch import Tensor
+from torch.utils.data import DataLoader, RandomSampler
+
+from igc.ds.redfish_dataset import JSONDataset
+from igc.modules.llm_base_module import LlmBaseModule
+from igc.modules.metric_logger import MetricLogger
+from igc.shared.shared_torch_builder import TorchBuilder
+
+BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
+
+from accelerate import Accelerator
+
+
+class LlmEmbeddingsTrainer(LlmBaseModule):
+    """
+    """
+
+    def __init__(self,
+                 args: argparse.Namespace,
+                 ds: JSONDataset,
+                 metric_logger:
+                 MetricLogger,
+                 llm_model,
+                 llm_tokenizer):
+        """
+        
+        :param args: 
+        :param ds: 
+        :param metric_logger: 
+        :param llm_model: 
+        :param llm_tokenizer: 
+        """
+        # Define the GPT model and tokenizer
+        super().__init__(args, ds, metric_logger, llm_model, llm_tokenizer)
+
+        self.num_epochs = args.num_train_epochs
+        self.batch_size = args.per_device_train_batch_size
+
+        self.batch_log = 10
+        self.num_workers = args.num_workers
+        self.shuffle = False
+
+        self._default_mask_token = "@odata.id"
+
+        self.optimizer = TorchBuilder.create_optimizer(
+            args.llm_optimizer,
+            self.model,
+            args.llm_learning_rate,
+            args.llm_weight_decay,
+            **vars(args)
+        )
+
+        print(self.optimizer)
+        print(f"Creating "
+              f"LlmEmbeddingsTrainer num epochs {self.num_epochs} "
+              f"batch_size {self.batch_size} "
+              f"dataset size {len(self.dataset)} "
+              f"is overfit {self._overfit} "
+              )
+
+        self._mask_probability = 0.15
+        self._best_validation_metric = float('-inf')
+        self._best_saved_validation_metric = float('-inf')
+
+    @staticmethod
+    def custom_collate_fn(samples):
+        """
+
+        :param samples:
+        :return:
+        """
+        included_keys = ['input_ids', 'attention_mask']
+        batch = {key: torch.stack([s[key] for s in samples]) for key in included_keys}
+        return batch
+
+    @staticmethod
+    def generate_square_subsequent_mask(sz: int) -> Tensor:
+        """Generates an upper-triangular matrix of ``-inf``, with zeros on ``diag``."""
+        return torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
+
+    @staticmethod
+    def get_batch(src: Tensor, idx: int, chunk_size=35) -> Tuple[Tensor, Tensor]:
+        """
+        :param src: [full_seq_len, batch_size]
+        :param idx
+        :param chunk_size:
+        :return: tuple (data, target),  shape [seq_len, batch_size], [seq_len * batch_size]
+        """
+        seq_len = min(chunk_size, len(src) - 1 - idx)
+        data = src[idx:idx + seq_len]
+        target = src[idx + 1:idx + 1 + seq_len].reshape(-1)
+        return data, target
+
+    def dataset_sampler(self):
+        """
+
+        :return:
+        """
+        if 'random_sampler_enabled' in self.trainer_args:
+            sampler = RandomSampler(self.dataset) if self.trainer_args.random_sampler_enabled else None
+            return sampler
+        return None
+
+    def validate(self, validation_dataset, accelerator: Accelerator):
+        """ Perform validation on the emb llm model.
+        :param validation_dataset: Dataset for validation
+        :return: Accuracy on the validation dataset
+        """
+        self.model.eval()
+        correct_predictions = 0
+        total_predictions = 0
+
+        with torch.no_grad():
+            for i, batch in enumerate(validation_dataset):
+                labels = batch["input_ids"][:, 1:].clone().detach()
+                mask = (batch["input_ids"] == self.pad_token_id)
+                labels = labels.masked_fill(mask[:, 1:], -100)
+
+                batch['input_ids'] = batch['input_ids'][:, :-1]
+                batch['attention_mask'] = batch['attention_mask'][:, :-1]
+
+                batch_inputs = {
+                    'input_ids': batch['input_ids'].to(self.device),
+                    'attention_mask': batch['attention_mask'].to(self.device),
+                    'labels': labels.to(self.device)
+                }
+
+                masked_input_ids = batch["input_ids"].clone().detach()
+                mask_indices = torch.rand(batch["input_ids"].shape) < self._mask_probability
+                masked_input_ids[mask_indices] = -100
+
+                outputs = self.model(**batch_inputs)
+                predicted_tokens = torch.argmax(outputs.logits, dim=-1)
+
+                # if self.is_distributed():
+                #     predicted_tokens = accelerator.gather(predicted_argmax)
+                # else:
+                #     predicted_tokens = predicted_argmax
+
+                predicted_masked_tokens = predicted_tokens[mask_indices]
+                predicted_masked_tokens = predicted_masked_tokens.to(self.device)
+
+                # compare predicted masked tokens with original tokens
+                original_tokens = batch["input_ids"][mask_indices].to(self.device)
+                correct_predictions += torch.sum(predicted_masked_tokens == original_tokens).item()
+                total_predictions += original_tokens.numel()
+
+        accuracy = correct_predictions / total_predictions * 100.0
+        # if self.is_distributed():
+        # accuracy = accelerator.gather(accuracy)
+
+        return accuracy
+
+    def is_distributed(self):
+        return self.rank != -1
+
+    def is_rank_zero(self):
+        return self.rank == -1 or self.rank == 0
+
+    def train_observation(self, overfit: Optional[bool] = True):
+        """Train LLM model to map high level goal to redfish actions.
+
+        For example
+                "target": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
+        :param overfit:
+        :return:
+        """
+        torch.cuda.empty_cache()
+
+        accelerator = Accelerator(device_placement=True)
+        # if accelerator.is_main_process:
+        #     time.sleep(2)
+        # else:
+        #     print("I'm waiting for the main process to finish its sleep...")
+        # accelerator.wait_for_everyone()
+
+        self.device = accelerator.device
+        validation_accuracy = float('-inf')
+        self.model.to(self.device)
+
+        if self.checkpoint_dir is not None:
+            last_epoch = self.load_checkpoint(self.checkpoint_dir)
+        else:
+            last_epoch = 0
+
+        self.model.train()
+        train_dataset, eval_dataset = self.split_dataset()
+
+        sampler = self.dataset_sampler()
+        train_dataloader = DataLoader(train_dataset,
+                                      batch_size=self.batch_size,
+                                      sampler=sampler,
+                                      num_workers=self.num_workers,
+                                      shuffle=True,
+                                      collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)
+
+        eval_dataloader = DataLoader(eval_dataset,
+                                     batch_size=self.batch_size,
+                                     sampler=sampler,
+                                     num_workers=self.num_workers,
+                                     shuffle=False,
+                                     collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)
+
+        self.model, self.optimizer, train_dataloader, eval_dataset = accelerator.prepare(
+            [self.model, self.optimizer, train_dataloader, eval_dataset],
+            device_placement=[True])
+
+        overfit = False
+        if overfit:
+            dataloader_overfit = [next(iter(train_dataloader))]
+            eval_dataloader_overfit = [next(iter(eval_dataloader))]
+
+        for epoch in range(last_epoch, self.num_epochs):
+            total_loss = 0.0
+            num_batches = 0
+
+            if overfit:
+                train_dataloader = iter(dataloader_overfit)
+                eval_dataloader = iter(eval_dataloader_overfit)
+
+            for i, batch in enumerate(train_dataloader):
+                labels = batch["input_ids"][:, 1:].clone().detach()
+                mask = (batch["input_ids"] == self.pad_token_id)
+                labels = labels.masked_fill(mask[:, 1:], -100)
+
+                batch['input_ids'] = batch['input_ids'][:, :-1]
+                batch['attention_mask'] = batch['attention_mask'][:, :-1]
+
+                batch_inputs = {
+                    'input_ids': batch['input_ids'].to(self.device),
+                    'attention_mask': batch['attention_mask'].to(self.device)
+                }
+
+                if epoch % 10 == 0:
+                    for j in range(batch_inputs['input_ids'].size(0)):
+                        batch_inputs["attention_mask"] = JSONDataset.mask_json_key_and_value(
+                            batch_inputs, self._default_mask_token, self.tokenizer)
+
+                batch_inputs = {
+                    'input_ids': batch['input_ids'].to(self.device),
+                    'attention_mask': batch['attention_mask'].to(self.device)
+                }
+
+                outputs = self.model(**batch_inputs, labels=labels)
+                loss = outputs.loss
+
+                # Backward pass
+                self.optimizer.zero_grad()
+                accelerator.backward(loss)
+                # loss.backward()
+                self.optimizer.step()
+                total_loss += loss.item()
+                # accumulate loss
+                total_loss += loss.item()
+                num_batches += 1
+
+            # validation
+            if (epoch + 1) % 10 == 0:
+                validation_accuracy = self.validate(eval_dataloader, accelerator)
+                if self.rank == 0 or self.rank == -1:
+                    self.metric_logger.log_metric("llm_emb_accuracy", validation_accuracy, epoch)
+                print(f"Rank {self.rank} Epoch {epoch + 1} - Validation Accuracy: {validation_accuracy}")
+
+            if num_batches > 0:
+                average_loss = total_loss / num_batches
+                if self.rank == 0 or self.rank == -1:
+                    self.metric_logger.log_metric("llm_emb_accuracy", validation_accuracy, epoch)
+                print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
+
+            # save best checkpoint
+            if validation_accuracy > self._best_validation_metric:
+                self._best_validation_metric = validation_accuracy
+                if self.is_rank_zero():
+                    if self.checkpoint_dir is not None:
+                        self.save_checkpoint(self.checkpoint_dir, epoch + 1)
+
+        print("Embedding extractor training complete.")
+
+# CUDA_VISIBLE_DEVICES=0,1 NCCL_DEBUG=INFO accelerate launch --config_file /home/spyroot/.cache/huggingface/accelerate/default_config.yaml trainer.py

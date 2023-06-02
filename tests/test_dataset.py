@@ -1,9 +1,8 @@
-import json
 import os
 import unittest
 import torch
 from transformers import GPT2Tokenizer
-from ds.redfish_dataset import JSONDataset
+from igc.ds.redfish_dataset import JSONDataset
 
 
 j_data = {

@@ -1,5 +1,10 @@
-class RandomDataset(Dataset):
+import torch
+from torch.utils.data import Dataset
 
+
+class RandomDataset(Dataset):
+    """Random dataset for basic testing.
+    """
     def __init__(self, size, length):
         self.len = length
         self.data = torch.randn(length, size)

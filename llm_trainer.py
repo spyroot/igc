@@ -19,27 +19,21 @@ allows the model to capture a broader range of language understanding and genera
 """
 import argparse
 import os
-from random import random
-from typing import Tuple, Optional, List
+from typing import Optional
 
-import evaluate
 import nltk
-import numpy as np
 import torch
-from tqdm import tqdm
 from transformers import (
     GPT2LMHeadModel,
     TrainingArguments,
     Trainer, GPT2Tokenizer
 )
-from ds.redfish_dataset import JSONDataset
+from igc.ds.redfish_dataset import JSONDataset
 from huggingface_utils import LossMonitorCallback
 from llm_base_trainer import LLmBaseTrainer
-from shared_main import shared_main
-from torch.utils.data import random_split
+from igc.shared.shared_main import shared_main
 
-from shared_torch_utils import cuda_memory
-from torch.nn import functional as F
+from igc.shared.shared_torch_utils import cuda_memory
 
 #
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"  # Set to the index of the GPU you want to use

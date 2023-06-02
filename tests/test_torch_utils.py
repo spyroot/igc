@@ -1,9 +1,7 @@
-import os
 import unittest
 import torch
 from transformers import GPT2Tokenizer
-from ds.redfish_dataset import JSONDataset
-from shared_torch_utils import shift_and_mask
+from igc.shared.shared_torch_utils import shift_and_mask
 
 
 class YourClassTestCase(unittest.TestCase):

@@ -3,8 +3,8 @@ import re
 import torch
 from datetime import datetime
 from transformers import deepspeed
-from shared_arg_parser import shared_arg_parser
-from shared_torch_utils import get_device
+from .shared_arg_parser import shared_arg_parser
+from .shared_torch_utils import get_device
 
 
 def shared_main(
@@ -40,15 +40,15 @@ def shared_main(
 
     # create output directory if not provided
     if args.output_dir is None:
-        now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        # now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         run_name = f"{args.model_type}_" \
                    f"{args.per_device_train_batch_size}_" \
-                   f"{args.optimizer}_" \
+                   f"{args.llm_optimizer}_" \
                    f"{args.scheduler}_lr_" \
-                   f"{args.learning_rate}"
-        args.output_dir = os.path.join("experiments", run_name, now)
+                   f"{args.llm_learning_rate}"
+        args.output_dir = os.path.join("experiments", run_name)
 
-    args.log_dir = os.path.join(args.output_dir, "logs")
+    args.log_dir = os.path.join(args.output_dir, "../../logs")
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(args.log_dir, exist_ok=True)
 

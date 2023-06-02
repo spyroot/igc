@@ -32,7 +32,7 @@ from rouge_score import rouge_scorer
 from torch import tensor
 from torch.utils.data import random_split
 from enum import Enum
-from ds.redfish_dataset import JSONDataset
+from igc.ds.redfish_dataset import JSONDataset
 
 
 torch.cuda.empty_cache()
