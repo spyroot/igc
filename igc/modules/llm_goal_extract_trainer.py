@@ -476,6 +476,7 @@ class GoalExtractor(LlmBaseModule):
                     batch_inputs = {
                         k: v.to(self.device) for k, v in batch_inputs.items()
                     }
+
                     # forward
                     outputs = self.model(**batch_inputs, labels=batch_inputs['input_ids'])
                     loss = outputs.loss
@@ -487,6 +488,7 @@ class GoalExtractor(LlmBaseModule):
                     # Accumulate loss
                     total_loss += loss.item()
                     self.writer.add_scalar("Parameters extractor batch Loss", loss.item(), epoch * num_batches + i)
+
                     if (i + 1) % self.batch_log == 0:
                         formatted_loss = "{:.4f}".format(loss.item())
                         # print(f"Parameters extractor batch Loss [{i + 1}/{num_batches}]: {formatted_loss}")

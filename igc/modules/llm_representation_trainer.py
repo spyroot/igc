@@ -17,10 +17,10 @@ Parameters just passed to agent. i.e. we don't train on parameters.
 Author:Mus mbayramo@stanford.edu
 """
 import argparse
-import time
 from collections import namedtuple
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
+import numpy as np
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, RandomSampler
@@ -84,7 +84,6 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
 
         self._mask_probability = 0.15
         self._best_validation_metric = float('-inf')
-        self._best_saved_validation_metric = float('-inf')
 
     @staticmethod
     def custom_collate_fn(samples):
@@ -170,15 +169,18 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                 total_predictions += original_tokens.numel()
 
         accuracy = correct_predictions / total_predictions * 100.0
-        # if self.is_distributed():
-        # accuracy = accelerator.gather(accuracy)
-
         return accuracy
 
     def is_distributed(self):
+        """
+        :return:
+        """
         return self.rank != -1
 
     def is_rank_zero(self):
+        """
+        :return:
+        """
         return self.rank == -1 or self.rank == 0
 
     def train_observation(self, overfit: Optional[bool] = True):
@@ -189,8 +191,6 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         :param overfit:
         :return:
         """
-        torch.cuda.empty_cache()
-
         accelerator = Accelerator(device_placement=True)
         # if accelerator.is_main_process:
         #     time.sleep(2)
@@ -207,8 +207,10 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         else:
             last_epoch = 0
 
+        torch.cuda.empty_cache()
+
         self.model.train()
-        train_dataset, eval_dataset = self.split_dataset()
+        train_dataset, eval_dataset = self.split_slice_dataset()
 
         sampler = self.dataset_sampler()
         train_dataloader = DataLoader(train_dataset,
@@ -234,6 +236,15 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             dataloader_overfit = [next(iter(train_dataloader))]
             eval_dataloader_overfit = [next(iter(eval_dataloader))]
 
+        total_batches = len(train_dataloader)
+        dataset_size = len(train_dataset)
+        calculated_total_batches = dataset_size // self.batch_size
+        batch_log_frequency = round(32 * 0.2)
+        if total_batches == calculated_total_batches:
+            print(f"Staring training total_batches: {total_batches} "
+                  f"train dataset size: {dataset_size} "
+                  f"batch stats freq: {batch_log_frequency}.")
+
         for epoch in range(last_epoch, self.num_epochs):
             total_loss = 0.0
             num_batches = 0
@@ -241,6 +252,8 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             if overfit:
                 train_dataloader = iter(dataloader_overfit)
                 eval_dataloader = iter(eval_dataloader_overfit)
+
+            batch_losses = np.zeros(total_batches)
 
             for i, batch in enumerate(train_dataloader):
                 labels = batch["input_ids"][:, 1:].clone().detach()
@@ -271,11 +284,19 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                 # Backward pass
                 self.optimizer.zero_grad()
                 accelerator.backward(loss)
-                # loss.backward()
                 self.optimizer.step()
+
+                batch_losses[num_batches] = loss.item()
                 total_loss += loss.item()
-                # accumulate loss
-                total_loss += loss.item()
+
+                # calculate the progress percentage
+                progress_percentage = int(round((num_batches + 1) / total_batches * 100))
+                if (num_batches % batch_log_frequency == 0) or (num_batches == total_batches - 1):
+                    print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Batch "
+                          f"{num_batches + 1}/{total_batches} "
+                          f"- Progress: {progress_percentage:.2f}% - Batch Loss mean: {batch_losses.mean():.4f}")
+                    self.metric_logger.log_metric("llm_emb_batch_loss", batch_losses.mean(), epoch)
+
                 num_batches += 1
 
             # validation
@@ -283,20 +304,20 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                 validation_accuracy = self.validate(eval_dataloader, accelerator)
                 if self.rank == 0 or self.rank == -1:
                     self.metric_logger.log_metric("llm_emb_accuracy", validation_accuracy, epoch)
-                print(f"Rank {self.rank} Epoch {epoch + 1} - Validation Accuracy: {validation_accuracy}")
+                print(f"Rank {self.rank} Epoch {epoch + 1} - Validation Accuracy: "
+                      f"{validation_accuracy} Best: {self._best_validation_metric}")
 
             if num_batches > 0:
                 average_loss = total_loss / num_batches
                 if self.rank == 0 or self.rank == -1:
-                    self.metric_logger.log_metric("llm_emb_accuracy", validation_accuracy, epoch)
+                    self.metric_logger.log_metric("llm_emb_epoch_loss", average_loss, epoch)
                 print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
 
             # save best checkpoint
-            if validation_accuracy > self._best_validation_metric:
+            if validation_accuracy > self._best_validation_metric and self.is_rank_zero():
                 self._best_validation_metric = validation_accuracy
-                if self.is_rank_zero():
-                    if self.checkpoint_dir is not None:
-                        self.save_checkpoint(self.checkpoint_dir, epoch + 1)
+                if self.checkpoint_dir is not None:
+                    self.save_checkpoint(self.checkpoint_dir, epoch + 1)
 
         print("Embedding extractor training complete.")
 

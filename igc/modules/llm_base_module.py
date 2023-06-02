@@ -86,28 +86,28 @@ class LlmBaseModule:
             raise ValueError("Indicate path to checkpoint dir.")
 
         self.checkpoint_dir = str(checkpoint_path_dir)
-        self.rank = os.environ.get('LOCAL_RANK', -1)
+        self.rank = int(os.environ.get('LOCAL_RANK', -1))
 
-    # def split_dataset(self, ratio: float = 0.8):
-    #     """split dataset
-    #     :param ratio:
-    #     :return:
-    #     """
-    #     if ratio <= 0 or ratio >= 1:
-    #         raise ValueError(
-    #             "Invalid ratio. The ratio value should be between 0 and 1 (exclusive).")
-    #
-    #     train_size = int(len(self.dataset) * ratio)
-    #     eval_size = len(self.dataset) - train_size
-    #
-    #     if train_size <= 0 or eval_size <= 0:
-    #         raise ValueError(
-    #             "Invalid dataset sizes. Adjust the ratio value to ensure non-zero splits.")
-    #
-    #     return random_split(
-    #         self.dataset, [train_size, eval_size])
+    def split_dataset(self, ratio: float = 0.8):
+        """split dataset
+        :param ratio:
+        :return:
+        """
+        if ratio <= 0 or ratio >= 1:
+            raise ValueError(
+                "Invalid ratio. The ratio value should be between 0 and 1 (exclusive).")
 
-    def split_dataset(self, train_ratio: float = 0.8, sample_ratio: float = 0.01):
+        train_size = int(len(self.dataset) * ratio)
+        eval_size = len(self.dataset) - train_size
+
+        if train_size <= 0 or eval_size <= 0:
+            raise ValueError(
+                "Invalid dataset sizes. Adjust the ratio value to ensure non-zero splits.")
+
+        return random_split(
+            self.dataset, [train_size, eval_size])
+
+    def split_slice_dataset(self, train_ratio: float = 0.8, sample_ratio: float = 0.01):
         """split dataset
         :param train_ratio:
         :param sample_ratio:
@@ -142,7 +142,6 @@ class LlmBaseModule:
 
     def save_checkpoint(self, checkpoint_dir, epoch):
         """
-
         :param checkpoint_dir:
         :param epoch:
         :return:
@@ -161,11 +160,10 @@ class LlmBaseModule:
             'optimizer_state_dict': self.optimizer.state_dict(),
             'epoch': epoch
         }, checkpoint_file)
-        print(f"Checkpoint saved to {checkpoint_file}")
+        print(f"Rank: {self.rank} checkpoint saved to {checkpoint_file}")
 
     def load_checkpoint(self, checkpoint_dir):
         """
-
         :param checkpoint_dir:
         :return:
         """
@@ -184,7 +182,7 @@ class LlmBaseModule:
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             epoch = checkpoint['epoch']
-            print(f"Checkpoint loaded from {checkpoint_file}, epoch: {epoch}")
+            print(f"Rank: {self.rank} loading checkpoint loaded from {checkpoint_file}, epoch: {epoch}")
             return epoch
         else:
             print(f"No checkpoint files found in dir {checkpoint_dir}")
