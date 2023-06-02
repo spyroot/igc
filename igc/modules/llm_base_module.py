@@ -20,6 +20,7 @@ import argparse
 import os
 from collections import namedtuple
 from pathlib import Path
+from typing import Optional
 
 import torch
 from torch.utils.data import random_split
@@ -187,3 +188,47 @@ class LlmBaseModule:
         else:
             print(f"No checkpoint files found in dir {checkpoint_dir}")
             return 0
+
+    @staticmethod
+    def load_model_inference(
+        model: torch.nn.Module,
+        args: argparse.Namespace,
+        device: torch.device = "cpu"
+    ) -> Optional[int]:
+        """Load model from checkpoint for inference.
+
+        :param model: The model to load the checkpoint into.
+        :type model: torch.nn.Module
+        :param args: The command-line arguments.
+        :type args: argparse.Namespace
+        :param device: The device to load the model onto, defaults to "cpu".
+        :type device: str, optional
+        :return: The epoch of the loaded checkpoint, or None if no checkpoint is found.
+        :rtype: Optional[int]
+        """
+
+        checkpoint_path_dir = Path(args.output_dir)
+        checkpoint_path_dir = checkpoint_path_dir.resolve()
+        if not checkpoint_path_dir.is_dir():
+            raise ValueError("Indicate path to checkpoint dir.")
+
+        checkpoint_dir = str(checkpoint_path_dir)
+        checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pt')]
+        checkpoint_files = [os.path.join(checkpoint_dir, f) for f in checkpoint_files]
+        checkpoint_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+
+        if checkpoint_files:
+            checkpoint_file = checkpoint_files[0]
+            checkpoint = torch.load(checkpoint_file, map_location=device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            epoch = checkpoint['epoch']
+            print(f"Loading checkpoint loaded from {checkpoint_file}, epoch: {epoch}")
+
+            model.eval()
+            for param in model.parameters():
+                param.requires_grad = False
+
+            return epoch
+
+        return 0
+
