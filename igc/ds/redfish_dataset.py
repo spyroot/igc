@@ -15,6 +15,7 @@ import numpy as np
 from transformers import GPT2Tokenizer
 import logging
 
+from igc.ds.ds_utils import create_tar_gz
 from igc.interfaces.rest_mapping_interface import RestMappingInterface
 from igc.interfaces.rest_one_hot_interface import RestActionEncoderInterface
 import zlib
@@ -52,6 +53,26 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         assert isinstance(dataset_dir, str), 'dataset_dir should be a string'
         assert isinstance(verbose, bool), 'verbose should be a boolean'
 
+        # numpy dataset mirror
+        self._mirrors_numpy = [
+            {'train_small': 'https://drive.google.com/u/0/uc?id=1VKqpe3RaZ4ev1RgDuUZ1vRi7iJy6KIBS&export=download'}
+        ]
+        self._resources_numpy = [
+            ("subset.npy", "f526cb36b33aa0295166ba1cdc5204ee", "train_small"),
+        ]
+
+        # torch dataset mirror
+        self._mirrors__torch = [
+            {"train_small": 'https://drive.google.com/u/0/uc?id=1IgqBB6uZzXBQikvfloYMmf6jFPTy7EoY&export=download'},
+            {"val_small": 'https://drive.google.com/u/0/uc?id=1Cyn7DRvITjLdswDHNCDzYyxrHWKHNB21&export=download'},
+        ]
+
+        self._resources_torch = [
+            ("LJSpeechSmallRaw_train_num_sam_129_filter_80.pt", "d44feaa301c1a0aa51b361adc5332b1b", "train_small"),
+            ("LJSpeechSmallRaw_validate_num_sam_18_filter_80.pt", "8c4fb3dacf23f07c85f9ccda297437d3", "val_small"),
+            ("LJSpeechSmallRaw_test_num_sam_500_filter_80.pt", "f6e14f27609cd1570c2365581726a91c", "test_small"),
+        ]
+
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(filename='dataset.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
 
@@ -83,6 +104,14 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         self._rest_api_to_method_file_name = f"./datasets/rest_api_to_method_{tok_name}.pt"
         self._rest_api_to_respond_file_name = f"./datasets/rest_api_to_respond_{tok_name}.pt"
 
+        # all dataset files
+        self._dataset_file_names = [
+            self._dataset_file_name,
+            self._dataset_masked_file_name,
+            self._rest_api_to_method_file_name,
+            self._rest_api_to_respond_file_name,
+        ]
+
         # dictionary to map hash values to action one-hot vectors
         self.num_actions = 0
         self.goals = {}
@@ -92,71 +121,85 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         self._list_masked_keys = ["@odata.id"]
 
         if skip_creation is False:
-            # all  mapping
-            self._rest_api_to_respond, self._rest_api_to_method = self._load_rest_api_mapping()
-            self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
+            self._build_dataset(recreate_dataset)
+        else:
+            self._load_dataset()
 
-            start_time = time.time()  # Start the timer
-            if recreate_dataset or not os.path.exists(self._dataset_file_name):
-                t1 = time.time()
-                self._load_json_files()
-                self.logger.debug(f"Time for _load_json_files: {time.time() - t1}")
+        self._check_consistency()
 
-                t2 = time.time()
-                self._load_dicts_from_data()
-                self.logger.debug(f"Time for _load_dicts_from_data: {time.time() - t2}")
+    def _build_dataset(self, recreate_dataset):
+        """
+        :return:
+        """
+        # all  mapping
+        self._rest_api_to_respond, self._rest_api_to_method = self._load_rest_api_mapping()
+        self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
 
-                t3 = time.time()
-                self._construct_action_space()
-                self.logger.debug(f"Time for _construct_action_space: {time.time() - t3}")
+        start_time = time.time()  # Start the timer
+        if recreate_dataset or not os.path.exists(self._dataset_file_name):
+            t1 = time.time()
+            self._load_json_files()
+            self.logger.debug(f"Time for _load_json_files: {time.time() - t1}")
 
-                t4 = time.time()
-                torch.save(self._data, self._dataset_file_name)
-                self.logger.debug(f"Time for saving _data: {time.time() - t4}")
+            t2 = time.time()
+            self._load_dicts_from_data()
+            self.logger.debug(f"Time for _load_dicts_from_data: {time.time() - t2}")
 
-                t5 = time.time()
-                torch.save(self._masked_data, self._dataset_masked_file_name)
-                self.logger.debug(f"Time for saving _masked_data: {time.time() - t5}")
+            t3 = time.time()
+            self._construct_action_space()
+            self.logger.debug(f"Time for _construct_action_space: {time.time() - t3}")
 
-                torch.save(self._rest_api_to_respond, self._rest_api_to_respond_file_name)
-                torch.save(self._rest_api_to_method, self._rest_api_to_method_file_name)
+            t4 = time.time()
+            torch.save(self._data, self._dataset_file_name)
+            self.logger.debug(f"Time for saving _data: {time.time() - t4}")
 
-                print(f"Saved dataset to disk. "
-                      f"size of dataset: {len(self)} "
-                      f"num hash entries: {len(self._data['hash_to_rest_api'])} "
-                      f"num hash to action entries: {len(self._data['hash_to_action_idx'])} \\n"
-                      f"num action to hash entries: {len(self._data['action_idx_to_hash'])} "
-                      f"num action to indices entries: {len(self._data['action_idx_to_hash'])} "
-                      f"num masked entries: {len(self._masked_data['train_data'])} ")
-            else:
-                t1 = time.time()
-                self.logger.debug(f"Loading dataset from {self._dataset_file_name}")
-                self.logger.debug(f"Loading dataset from disk. {self._dataset_file_name}")
+            t5 = time.time()
+            torch.save(self._masked_data, self._dataset_masked_file_name)
+            self.logger.debug(f"Time for saving _masked_data: {time.time() - t5}")
 
-                self._data = torch.load(self._dataset_file_name)
-                logging.debug(f"Time for loading _data: {time.time() - t1}")
+            torch.save(self._rest_api_to_respond, self._rest_api_to_respond_file_name)
+            torch.save(self._rest_api_to_method, self._rest_api_to_method_file_name)
 
-                t2 = time.time()
-                logging.debug(f"Loading masked dataset from disk. {self._dataset_masked_file_name}")
-                self._masked_data = torch.load(self._dataset_masked_file_name)
-                logging.debug(f"Time for loading _masked_data: {time.time() - t2}")
+            print(f"Saved dataset to disk. "
+                  f"size of dataset: {len(self)} "
+                  f"num hash entries: {len(self._data['hash_to_rest_api'])} "
+                  f"num hash to action entries: {len(self._data['hash_to_action_idx'])} \\n"
+                  f"num action to hash entries: {len(self._data['action_idx_to_hash'])} "
+                  f"num action to indices entries: {len(self._data['action_idx_to_hash'])} "
+                  f"num masked entries: {len(self._masked_data['train_data'])} ")
 
-                t3 = time.time()
-                self._load_dicts_from_data()
-                logging.debug(f"Time for _load_dicts_from_data: {time.time() - t3}")
+            create_tar_gz(self._default_dir, self._dataset_file_name)
 
-                t4 = time.time()
-                self._construct_action_space()
-                logging.debug(f"Time for _construct_action_space: {time.time() - t4}")
+    def _load_dataset(self):
+        """
+        :return:
+        """
+        start_time = time.time()
+        self.logger.debug(f"Loading dataset from {self._dataset_file_name}")
+        self.logger.debug(f"Loading dataset from disk. {self._dataset_file_name}")
 
-                self._rest_api_to_respond = torch.load(self._rest_api_to_respond_file_name)
-                self._rest_api_to_method = torch.load(self._rest_api_to_method_file_name)
-                self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
+        self._data = torch.load(self._dataset_file_name)
+        logging.debug(f"Time for loading _data: {time.time() - start_time}")
 
-            end_time = time.time()  # End the timer
-            self.logger.info(f"Loaded dataset, total time: {end_time - start_time}")
+        t2 = time.time()
+        logging.debug(f"Loading masked dataset from disk. {self._dataset_masked_file_name}")
+        self._masked_data = torch.load(self._dataset_masked_file_name)
+        logging.debug(f"Time for loading _masked_data: {time.time() - t2}")
 
-            self._check_consistency()
+        t3 = time.time()
+        self._load_dicts_from_data()
+        logging.debug(f"Time for _load_dicts_from_data: {time.time() - t3}")
+
+        t4 = time.time()
+        self._construct_action_space()
+        logging.debug(f"Time for _construct_action_space: {time.time() - t4}")
+
+        self._rest_api_to_respond = torch.load(self._rest_api_to_respond_file_name)
+        self._rest_api_to_method = torch.load(self._rest_api_to_method_file_name)
+        self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
+
+        end_time = time.time()
+        self.logger.info(f"Loaded dataset, total time: {end_time - start_time}")
 
     @staticmethod
     def load_url_file_mapping(discovery_dir: str):
@@ -309,9 +352,9 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         return converted_name
 
     def create_chunks(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor
     ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
         """Create chunks of input_ids and attention_mask, this
         splits the input_ids and attention_mask for large json files.
@@ -408,10 +451,10 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
 
     @staticmethod
     def mask_specific_key(
-        json_data,
-        target_key: str,
-        tokenizer=None,
-        debug: Optional[bool] = False):
+            json_data,
+            target_key: str,
+            tokenizer=None,
+            debug: Optional[bool] = False):
         """Mask specific keu in json structure, technically will work in other cases
         :param tokenizer:
         :param debug:
@@ -548,10 +591,10 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         return attention_mask
 
     def process_and_mask_json_file(
-        self,
-        json_file_path: str,
-        json_file_name: str,
-        mask_target_key: str) -> None:
+            self,
+            json_file_path: str,
+            json_file_name: str,
+            mask_target_key: str) -> None:
         """This second pass we read the json file and mask what we need.
         :param json_file_path:
         :param json_file_name:

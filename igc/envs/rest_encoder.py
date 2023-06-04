@@ -19,6 +19,8 @@ class RestBaseEncoder:
         input_shape = self.encoder_model.wpe.weight.shape
         self.emb_shape = (input_shape[0] - 1, input_shape[1])
 
+        self.cache = {}
+
     # def encode(self, observation: str) -> torch.Tensor:
     #     """Encode the given observation into embeddings.
     #     :param observation:
@@ -45,6 +47,10 @@ class RestBaseEncoder:
         :param max_chunk_length: The maximum length of each output chunk.
         :return: torch.Tensor: The encoded embeddings with shape torch.Size([batch_size, seq_len, 768])
         """
+
+        if observation in self.cache:
+            return self.cache[observation]
+
         tokens = self.tokenizer.encode(observation, truncation=True, add_special_tokens=True)
         embeddings = []
 
@@ -62,4 +68,7 @@ class RestBaseEncoder:
         # concat
         embeddings = torch.cat(embeddings, dim=1)
         print("emb return", embeddings.shape)
+
+        self.cache[observation] = embeddings
+
         return embeddings
