@@ -266,6 +266,11 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
             else:
                 self._build_dataset()
 
+        # if tarball of all api responds.
+        if os.path.exists(self._json_data_tarball_name):
+            print(f"Found tarball unpack {self._json_data_tarball_name } files to {self._default_original_dir}")
+            unpack_tar_gz(self._json_data_tarball_name, self._default_original_dir)
+
         self.logger.debug(f"Loading dataset from {self._dataset_file_name}")
         self.logger.debug(f"Loading dataset from disk. {self._dataset_file_name}")
 
