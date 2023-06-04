@@ -1,25 +1,33 @@
 import json
 import os
+import shutil
 from pathlib import Path
 from random import random
-from typing import Optional, Any, List, Tuple, Union, Dict, Iterator
+from typing import Optional, Any, List, Tuple, Union, Iterator
 import time
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
-from torch.utils.data import Sampler
 import numpy as np
 
 from transformers import GPT2Tokenizer
 import logging
 
-from igc.ds.ds_utils import create_tar_gz
+from .ds_rest_trajectories import RestTrajectory
+from .ds_utils import (
+    create_tar_gz,
+    unpack_tar_gz
+)
 from igc.interfaces.rest_mapping_interface import RestMappingInterface
 from igc.interfaces.rest_one_hot_interface import RestActionEncoderInterface
 import zlib
 import random
+
+
+class DatasetConsistencyError(Exception):
+    """Base class for other exceptions"""
+    pass
 
 
 class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
@@ -32,7 +40,6 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
                  verbose: Optional[bool] = False,
                  recreate_dataset: Optional[bool] = False,
                  tokenizer: Optional[Any] = None,
-                 skip_creation: Optional[bool] = False,
                  transform=None,
                  target_transform=None):
         """
@@ -44,7 +51,6 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         :param verbose:
         :param recreate_dataset:
         :param tokenizer:
-        :param skip_creation:
         """
         assert isinstance(directory_path, str), 'directory_path should be a string'
         assert isinstance(default_tokenize, str), 'default_tokenize should be a string'
@@ -53,13 +59,7 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         assert isinstance(dataset_dir, str), 'dataset_dir should be a string'
         assert isinstance(verbose, bool), 'verbose should be a boolean'
 
-        # numpy dataset mirror
-        self._mirrors_numpy = [
-            {'train_small': 'https://drive.google.com/u/0/uc?id=1VKqpe3RaZ4ev1RgDuUZ1vRi7iJy6KIBS&export=download'}
-        ]
-        self._resources_numpy = [
-            ("subset.npy", "f526cb36b33aa0295166ba1cdc5204ee", "train_small"),
-        ]
+        self._recreate_dataset = recreate_dataset
 
         # torch dataset mirror
         self._mirrors__torch = [
@@ -68,9 +68,8 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         ]
 
         self._resources_torch = [
-            ("LJSpeechSmallRaw_train_num_sam_129_filter_80.pt", "d44feaa301c1a0aa51b361adc5332b1b", "train_small"),
-            ("LJSpeechSmallRaw_validate_num_sam_18_filter_80.pt", "8c4fb3dacf23f07c85f9ccda297437d3", "val_small"),
-            ("LJSpeechSmallRaw_test_num_sam_500_filter_80.pt", "f6e14f27609cd1570c2365581726a91c", "test_small"),
+            ("igc.tar.gz", "d44feaa301c1a0aa51b361adc5332b1b", "train_small"),
+            ("json_data.tar.gz", "8c4fb3dacf23f07c85f9ccda297437d3", "val_small"),
         ]
 
         self.logger = logging.getLogger(__name__)
@@ -81,7 +80,9 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
 
         self._data = {}
         self._masked_data = {}
-        self.directory_path = directory_path
+        _unprocessed = os.path.abspath(directory_path)
+        _unprocessed = Path(_unprocessed).resolve()
+        self._unprocessed = str(_unprocessed)
         self._verbose = verbose
         self._max_len = max_len
         self._overlap = overlap
@@ -96,13 +97,33 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
-        self._default_dir = dataset_dir
-        os.makedirs(self._default_dir, exist_ok=True)
+        dataset_path = os.path.abspath(dataset_dir)
+        dataset_path = Path(dataset_path).resolve()
 
-        self._dataset_file_name = f"./datasets/processed_dataset_{tok_name}.pt"
-        self._dataset_masked_file_name = f"./datasets/processed_masked_dataset_{tok_name}.pt"
-        self._rest_api_to_method_file_name = f"./datasets/rest_api_to_method_{tok_name}.pt"
-        self._rest_api_to_respond_file_name = f"./datasets/rest_api_to_respond_{tok_name}.pt"
+        self._default_dir = str(dataset_path)
+        self._default_raw_dir = str(dataset_path / 'raw')
+        self._default_original_dir = str(dataset_path / 'orig')
+        self._json_directory_path = self._default_original_dir
+
+        os.makedirs(self._default_dir, exist_ok=True)
+        os.makedirs(self._default_raw_dir, exist_ok=True)
+
+        self._dataset_file_name = str(
+            Path(self._default_raw_dir) / f"processed_dataset_{tok_name}.pt")
+        self._dataset_masked_file_name = str(
+            Path(self._default_raw_dir) / f"processed_masked_dataset_{tok_name}.pt")
+        self._rest_api_to_method_file_name = str(
+            Path(self._default_raw_dir) / f"rest_api_to_method_{tok_name}.pt")
+        self._rest_api_to_respond_file_name = str(
+            Path(self._default_raw_dir) / f"rest_api_to_respond_{tok_name}.pt")
+        self._dataset_tarball_name = str(
+            Path(self._default_dir) / 'igc.tar.gz')
+        self._json_data_tarball_name = str(
+            Path(self._default_dir) / 'json_data.tar.gz')
+        self._tarball_hash = ""
+
+        print(f"Dataset dir {self._default_dir}")
+        print(f"Dataset dir {self._default_raw_dir}")
 
         # all dataset files
         self._dataset_file_names = [
@@ -120,160 +141,152 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
 
         self._list_masked_keys = ["@odata.id"]
 
-        if skip_creation is False:
-            self._build_dataset(recreate_dataset)
-        else:
-            self._load_dataset()
+        self._rest_trajectories = None
 
+        self._create_tarball()
+        self._load_dataset()
         self._check_consistency()
 
-    def _build_dataset(self, recreate_dataset):
+    @staticmethod
+    def required_keys():
         """
         :return:
         """
-        # all  mapping
-        self._rest_api_to_respond, self._rest_api_to_method = self._load_rest_api_mapping()
+
+        required_keys = ["hash_to_rest_api",
+                         "hash_to_action_idx",
+                         "action_idx_to_hash",
+                         "train_data"]
+        return required_keys
+
+    def _check_dataset_files(self) -> bool:
+        """Check if all dataset files are present.
+        :return: True if all files are present, False otherwise.
+        """
+        dataset_files = [
+            self._dataset_file_name,
+            self._dataset_masked_file_name,
+            self._rest_api_to_respond_file_name,
+            self._rest_api_to_method_file_name,
+        ]
+
+        result = all(os.path.exists(file) for file in dataset_files)
+        if result:
+            print("Found all required dataset file.")
+
+        return all(os.path.exists(file) for file in dataset_files)
+
+    def _create_tarball(self):
+        """Create tarball if needed.
+        :return:
+        """
+        # copy all json if not present already
+        if not os.path.exists(self._json_directory_path):
+            print(f"Copy all discovered data to {self._json_directory_path}")
+            shutil.copytree(self._unprocessed, f"{self._json_directory_path}/")
+
+        # create tarball if not present.
+        if not os.path.exists(self._json_data_tarball_name):
+            print(f"Creating tarball {self._json_data_tarball_name}")
+            full_path_tarball, self._tarball_hash = create_tar_gz(
+                self._json_directory_path, self._json_data_tarball_name)
+
+        if self._check_dataset_files():
+            if not os.path.exists(self._dataset_tarball_name):
+                os.makedirs(self._default_dir, exist_ok=True)
+                print(f"Creating tarball {self._dataset_tarball_name} file.")
+                full_path_tarball, self._tarball_hash = create_tar_gz(
+                    self._default_raw_dir, self._dataset_tarball_name)
+
+    def _build_dataset(self):
+        """Build a dataset from all json responds
+        :return:
+        """
+
+        # self._default_dir, self._default_original_dir
+        self._rest_trajectories = RestTrajectory(self._unprocessed, self._default_original_dir)
+        self._rest_trajectories.load()
+
+        # all api mapping
+        self._rest_api_to_respond, self._rest_api_to_method = self._rest_trajectories.merged_view()
         self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
 
-        start_time = time.time()  # Start the timer
-        if recreate_dataset or not os.path.exists(self._dataset_file_name):
-            t1 = time.time()
+        # build a dataset
+        if not self._check_dataset_files():
+            print(f"Re-building dataset {self._dataset_file_name}")
+
             self._load_json_files()
-            self.logger.debug(f"Time for _load_json_files: {time.time() - t1}")
-
-            t2 = time.time()
             self._load_dicts_from_data()
-            self.logger.debug(f"Time for _load_dicts_from_data: {time.time() - t2}")
-
-            t3 = time.time()
             self._construct_action_space()
-            self.logger.debug(f"Time for _construct_action_space: {time.time() - t3}")
 
-            t4 = time.time()
+            print(f"Saving data to: {self._dataset_file_name}")
             torch.save(self._data, self._dataset_file_name)
-            self.logger.debug(f"Time for saving _data: {time.time() - t4}")
 
-            t5 = time.time()
+            print(f"Saving masked data to: {self._dataset_masked_file_name}")
             torch.save(self._masked_data, self._dataset_masked_file_name)
-            self.logger.debug(f"Time for saving _masked_data: {time.time() - t5}")
 
+            print(f"Saving api respond data to: {self._rest_api_to_respond_file_name}")
             torch.save(self._rest_api_to_respond, self._rest_api_to_respond_file_name)
+
+            print(f"Saving api respond method data to: {self._rest_api_to_respond_file_name}")
             torch.save(self._rest_api_to_method, self._rest_api_to_method_file_name)
 
             print(f"Saved dataset to disk. "
                   f"size of dataset: {len(self)} "
-                  f"num hash entries: {len(self._data['hash_to_rest_api'])} "
-                  f"num hash to action entries: {len(self._data['hash_to_action_idx'])} \\n"
+                  f"num hash entries: {len(self._data['hash_to_rest_api'])} \n"
+                  f"num hash to action entries: {len(self._data['hash_to_action_idx'])} \n"
                   f"num action to hash entries: {len(self._data['action_idx_to_hash'])} "
                   f"num action to indices entries: {len(self._data['action_idx_to_hash'])} "
                   f"num masked entries: {len(self._masked_data['train_data'])} ")
 
-            create_tar_gz(self._default_dir, self._dataset_file_name)
+            self._check_consistency()
+
+            # create tarball
+            self._create_tarball()
 
     def _load_dataset(self):
         """
         :return:
         """
         start_time = time.time()
+        print("Loading dataset.")
+
+        if self._recreate_dataset:
+            print("Forcing rebuild a dataset.")
+            self._build_dataset()
+
+        # if some file not present and tar present unpack
+        if not self._check_dataset_files():
+            # if tar file present unpack other create new dataset.
+            if os.path.exists(self._dataset_tarball_name):
+                print(f"Found tarball unpack {self._dataset_tarball_name} files to {self._default_raw_dir}")
+                unpack_tar_gz(self._dataset_tarball_name, self._default_raw_dir)
+                if not self._check_dataset_files():
+                    raise FileNotFoundError("Dataset files not found after unpacking the tarball.")
+            else:
+                self._build_dataset()
+
         self.logger.debug(f"Loading dataset from {self._dataset_file_name}")
         self.logger.debug(f"Loading dataset from disk. {self._dataset_file_name}")
 
         self._data = torch.load(self._dataset_file_name)
-        logging.debug(f"Time for loading _data: {time.time() - start_time}")
+        for k in JSONDataset.required_keys():
+            if k not in self._data:
+                raise DatasetConsistencyError(f"Loaded dataset has no mandatory key {k}")
 
-        t2 = time.time()
-        logging.debug(f"Loading masked dataset from disk. {self._dataset_masked_file_name}")
         self._masked_data = torch.load(self._dataset_masked_file_name)
-        logging.debug(f"Time for loading _masked_data: {time.time() - t2}")
+        if 'train_data' not in self._masked_data:
+            raise DatasetConsistencyError(f"Loaded dataset has no mandatory key train_data")
 
-        t3 = time.time()
         self._load_dicts_from_data()
-        logging.debug(f"Time for _load_dicts_from_data: {time.time() - t3}")
-
-        t4 = time.time()
         self._construct_action_space()
-        logging.debug(f"Time for _construct_action_space: {time.time() - t4}")
 
         self._rest_api_to_respond = torch.load(self._rest_api_to_respond_file_name)
         self._rest_api_to_method = torch.load(self._rest_api_to_method_file_name)
         self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
 
-        end_time = time.time()
-        self.logger.info(f"Loaded dataset, total time: {end_time - start_time}")
-
-    @staticmethod
-    def load_url_file_mapping(discovery_dir: str):
-        """Load the URL-to-file mapping from a JSON file
-        numpy contains two dictionary
-
-        url_file_mapping map rest api to json output
-        allowed_methods_mapping map rest api to allowed methods.
-
-        :param discovery_dir: The path to the JSON file
-        :return: The URL-to-file mapping and the allowed methods mapping
-        """
-
-        discovery_out_dir = Path(discovery_dir)
-        discovery_out_dir = discovery_out_dir.resolve()
-        if not discovery_out_dir.is_dir():
-            raise ValueError("Indicate path for "
-                             "discovery_out_dir dir. "
-                             "This dir created during agent discovery phase")
-
-        url_file_mapping = None
-        allowed_methods_mapping = None
-
-        discovery_out_dir = str(discovery_out_dir)
-        rest_api_map_files = [f for f in os.listdir(discovery_out_dir) if f.endswith('.npy')]
-        rest_api_map_files = [os.path.join(discovery_out_dir, f) for f in rest_api_map_files]
-        rest_api_map_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
-        if rest_api_map_files:
-            rest_api_map_files = rest_api_map_files[0]
-            print("Loading rest-api-to-responds mapping from file: {}".format(rest_api_map_files))
-            mappings = np.load(rest_api_map_files, allow_pickle=True).item()
-            url_file_mapping = mappings.get("url_file_mapping")
-            allowed_methods_mapping = mappings.get("allowed_methods_mapping")
-
-        if url_file_mapping:
-            print("rest-api-to-responds mapping loaded. "
-                  "Total entries: {}".format(len(url_file_mapping)))
-        else:
-            print("rest-api-to-responds mapping found.")
-
-        if allowed_methods_mapping:
-            print("Allowed methods mapping loaded. "
-                  "Total entries: {}".format(len(allowed_methods_mapping)))
-        else:
-            print("No allowed methods mapping found.")
-
-        count = 0
-        for key, value in list(url_file_mapping.items())[:3]:
-            print(f"Key: {key}, Value: {value}")
-            count += 1
-
-        count = 0
-        for key, value in list(allowed_methods_mapping.items())[:3]:
-            print(f"Key: {key}, Value: {value}")
-            count += 1
-
-        return url_file_mapping, allowed_methods_mapping
-
-    def _load_rest_api_mapping(self):
-        """Load the rest api to respond mapping and allowed
-        HTTP methods mapping from Numpy files inside the specified directory.
-        """
-        merged_url_file_mapping = {}
-        merged_allowed_methods_mapping = {}
-
-        for root, dirs, files in os.walk(self.directory_path):
-            for dir_name in dirs:
-                dir_path = os.path.join(root, dir_name)
-                url_file_mapping, allowed_methods_mapping = JSONDataset.load_url_file_mapping(dir_path)
-
-                merged_url_file_mapping.update(url_file_mapping)
-                merged_allowed_methods_mapping.update(allowed_methods_mapping)
-
-        return merged_url_file_mapping, merged_allowed_methods_mapping
+        self.logger.debug(f"Loaded dataset length: {len(self._data)}")
+        self.logger.info(f"Loaded dataset, total time: {time.time() - start_time}")
 
     def chunk_overlap_size(self):
         """Amount of overlap between two chunks
@@ -286,7 +299,7 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         """
         # update num actions
         if "hash_to_rest_api" not in self._data:
-            print(f"looks like dataset corrupted is masked.")
+            DatasetConsistencyError("looks like dataset corrupted hash_to_rest_api not present")
 
         self.num_actions = len(self._data["hash_to_rest_api"])
         for h in self._data["hash_to_rest_api"]:
@@ -299,23 +312,23 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
                     # break
 
     def hash_to_index(self, hash_value: int) -> int:
-        """
-        :param hash_value:
-        :return:
+        """Method take a hash of rest api and return index of hash.
+        Index used to map hash to index and index to one hot vector.
+        :param hash_value: a hash of rest api
+        :return: index of hash
         """
         hash_to_action_idx = self._data["hash_to_action_idx"]
         if hash_value in hash_to_action_idx:
             return hash_to_action_idx[hash_value]
 
-        # assign action index for the unseen hash value
         index = len(hash_to_action_idx)
         self._data["hash_to_action_idx"][hash_value] = index
         self._data["action_idx_to_hash"][index] = hash_value
         return index
 
     def index_to_hash(self, action_index: int) -> Optional[int]:
-        """
-        :param action_index:
+        """Method take index of hash and return corresponding hash.
+        :param action_index:  index of hash
         :return:
         """
         action_idx = self._data["action_idx_to_hash"]
@@ -352,9 +365,9 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         return converted_name
 
     def create_chunks(
-            self,
-            input_ids: torch.Tensor,
-            attention_mask: torch.Tensor
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor
     ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
         """Create chunks of input_ids and attention_mask, this
         splits the input_ids and attention_mask for large json files.
@@ -451,10 +464,10 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
 
     @staticmethod
     def mask_specific_key(
-            json_data,
-            target_key: str,
-            tokenizer=None,
-            debug: Optional[bool] = False):
+        json_data,
+        target_key: str,
+        tokenizer=None,
+        debug: Optional[bool] = False):
         """Mask specific keu in json structure, technically will work in other cases
         :param tokenizer:
         :param debug:
@@ -591,10 +604,10 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         return attention_mask
 
     def process_and_mask_json_file(
-            self,
-            json_file_path: str,
-            json_file_name: str,
-            mask_target_key: str) -> None:
+        self,
+        json_file_path: str,
+        json_file_name: str,
+        mask_target_key: str) -> None:
         """This second pass we read the json file and mask what we need.
         :param json_file_path:
         :param json_file_name:
@@ -668,14 +681,15 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
                 if self._verbose:
                     self.logger.debug(f"reading {file_name}")
 
-                # extract the extra file name it key so we get rest api
-                # rest_api_resp_file = os.path.basename(file_name)
+                # extract the extra file name it key so, we get rest api
                 json_lines = json_file.read()
+
                 if file_path not in self._respond_to_api:
-                    raise ValueError("Inconsistency we have file but no rest api.")
+                    raise DatasetConsistencyError(
+                        f"Inconsistency we have file {file_path} but no corresponding "
+                        f"rest api size of resp_api {len(self._respond_to_api)}.")
 
                 _rest_api = self._respond_to_api[file_path]
-                # hash_value = hash(_rest_api)
                 hash_value = zlib.adler32(_rest_api.encode())
 
                 # load JSON as a dictionary
@@ -706,7 +720,6 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
                     padded_mask = padded_mask.squeeze(dim=0)
 
                     self._data["hash_to_rest_api"][hash_value] = _rest_api
-
                     self._data["train_data"].append(
                         {
                             "request_hash": hash_value,
@@ -715,11 +728,11 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
                             "attention_mask": padded_mask,
                             "allowable_values": allowable_values,
                             "targets": targets,
-                            "file_path": file_path.split(".json_responses")[1],
+                            "file_path": file_path.split(self._default_original_dir)[1],
                         }
                     )
 
-        for root, dirs, files in os.walk(self.directory_path):
+        for root, dirs, files in os.walk(self._json_directory_path):
             for file_name in files:
                 if file_name.endswith(".json"):
                     file_path = os.path.join(root, file_name)
@@ -861,7 +874,6 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
 
     def _get_unique_values(self):
         """
-
         :return:
         """
         unique_requests = set()
@@ -880,6 +892,12 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
          want Check the consistency between data structures.
         """
 
+        _required_keys = JSONDataset.required_keys()
+        for key in _required_keys:
+            if key not in self._data:
+                raise ValueError(f"Consistency check failed. Missing mandatory key: {key}")
+            print(f"Length of {key}: {len(self._data[key])}")
+
         hash_to_rest_api = self._data["hash_to_rest_api"]
         hash_to_action_idx = self._data["hash_to_action_idx"]
         action_idx_to_hash = self._data["action_idx_to_hash"]
@@ -894,18 +912,11 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         print(f"Number of unique hash to action: {len(hash_to_action_idx)}")
         print(f"Number of unique action to hash: {len(action_idx_to_hash)}")
 
-        # we check consistency
-        required_keys = ["hash_to_rest_api", "hash_to_action_idx", "action_idx_to_hash", "train_data"]
-        for key in required_keys:
-            if key not in self._data:
-                raise ValueError(f"Consistency check failed. Missing key: {key}")
-            print(f"Length of {key}: {len(self._data[key])}")
-
         # a) check consistency between _rest_api_to_respond and _rest_api_to_method
         for rest_api in self._rest_api_to_respond:
             if rest_api not in self._rest_api_to_method:
                 print(f"Error consistence check 1: Missing method for REST API: {rest_api}")
-                raise ValueError(f"Consistency check failed. Missing key: {key}")
+                raise ValueError(f"Consistency check failed. Missing key: {rest_api}")
 
         # b) Check consistency between _rest_api_to_method and _data["hash_to_rest_api"]
         for rest_api in self._rest_api_to_respond:
@@ -914,7 +925,8 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
                 print(f"Error consistence check 2: Inconsistent "
                       f"REST API mapping for method: api {rest_api} no in dataset hash_to_rest_api")
                 raise ValueError(f"Error consistence check 2: Inconsistent "
-                                 f"REST API mapping for method: api {rest_api} no in dataset hash_to_rest_api")
+                                 f"REST API mapping for method: api {rest_api} "
+                                 f"no in dataset hash_to_rest_api")
 
         # c) Check consistency between _data["hash_to_action_idx"] and _data["action_idx_to_hash"]
         for index in self._data["action_idx_to_hash"]:
@@ -960,63 +972,3 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
                 print(f"Error: Inconsistent recovery for hash value: {hash_value}")
 
         print("Consistency check completed.")
-
-
-class MaskedSampler(Sampler[int]):
-    def __init__(self, data_source) -> None:
-        super().__init__()
-        self.data_source = data_source
-        self.max_samples = 4
-
-    def __iter__(self):
-        return iter(self.data_source.sample_masked_iter())
-
-    def __len__(self):
-        return len(self.data_source._masked_data['train_data'])
-
-
-class PromptDataset(Dataset):
-
-    def __init__(self, prompt_dataset, chosen_dataset, reject_dataset,
-                 pad_token_id, train_phase) -> None:
-        """
-
-        :param prompt_dataset:
-        :param chosen_dataset:
-        :param reject_dataset:
-        :param pad_token_id:
-        :param train_phase:
-        """
-        super().__init__()
-        self.prompt_dataset = prompt_dataset
-        self.chosen_dataset = chosen_dataset
-        self.reject_dataset = reject_dataset
-        self.pad_token_id = pad_token_id
-        self.train_phase = train_phase
-
-    def __len__(self):
-        """
-
-        :return:
-        """
-        length = len(self.chosen_dataset)
-        if self.train_phase == 3:
-            length = len(self.prompt_dataset)
-        return length
-
-    def __getitem__(self, idx):
-        if self.train_phase == 1:
-            return {
-                "input_ids": self.chosen_dataset[idx]["input_ids"],
-                "attention_mask": self.chosen_dataset[idx]["attention_mask"],
-                "labels": self.chosen_dataset[idx]["input_ids"]
-            }
-        elif self.train_phase == 2:
-            return self.chosen_dataset[idx]["input_ids"], \
-                self.chosen_dataset[idx]["attention_mask"], \
-                self.reject_dataset[idx]["input_ids"], \
-                self.reject_dataset[idx]["attention_mask"]
-        elif self.train_phase == 3:
-            return self.prompt_dataset[idx]["input_ids"], \
-                self.prompt_dataset[idx]["attention_mask"], \
-                self.pad_token_id

@@ -55,6 +55,7 @@ def unpack_tar_gz(archive_path: str, output_dir: str) -> None:
 
 def create_tar_gz(directory_path: str, output_file: str) -> Tuple[str, str]:
     """Create a tarball and gzip archive of all files in the specified directory.
+
     :param directory_path: Path to the directory containing the files.
     :param output_file: Name of the output tarball file with the ".tar.gz" extension.
     :return: Tuple full path to tarball and respected file that store hash.
@@ -96,7 +97,6 @@ def create_tar_gz(directory_path: str, output_file: str) -> Tuple[str, str]:
     return os.path.abspath(output_file), os.path.abspath(hash_file)
 
 
-
 def do_http_head(url: str, max_redirect: int = 5, max_timeout=10) -> str:
     """
     :param url:
@@ -118,7 +118,7 @@ def do_http_head(url: str, max_redirect: int = 5, max_timeout=10) -> str:
 
 
 def get_chunk(
-        content: Iterator[bytes], destination: str, length: Optional[int] = None) -> None:
+    content: Iterator[bytes], destination: str, length: Optional[int] = None) -> None:
     """Get a chunk of data.
     :param content:
     :param destination:

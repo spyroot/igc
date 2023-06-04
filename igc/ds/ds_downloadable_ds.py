@@ -73,8 +73,7 @@ class DownloadableDataset(Dataset):
 
         #
         super().__init__()
-        self._create()
-
+        # self._create()
 
     def _create(self):
         """First call each callback in pre_transforms list.

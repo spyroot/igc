@@ -22,38 +22,40 @@ def create_test_env(cmd):
     dataset = JSONDataset(
         directory_path, verbose=True, tokenizer=tokenizer)
 
-    env = RestApiEnv(
-        args=cmd, model=model,
-        tokenizer=tokenizer,
-        discovered_rest_api=dataset
-    )
+    # env = RestApiEnv(
+    #     args=cmd, model=model,
+    #     tokenizer=tokenizer,
+    #     discovered_rest_api=dataset
+    # )
 
-    print("obs space", env.observation_space)
-    print("ac space ", env.action_shape())
-
-    # Randomly select a method
-    method = random.choice(RestApiEnv.METHOD_MAPPING)
-    method_index = RestApiEnv.METHOD_MAPPING.index(method)
-
-    method_one_hot = torch.zeros(len(RestApiEnv.METHOD_MAPPING))
-    method_one_hot[method_index] = 1
-
-    rest_api, supported_method, action_to_one_hot = dataset.sample_rest_api()
-    action_and_method = torch.cat((action_to_one_hot, method_one_hot))
-    print("action to one hot", action_to_one_hot.shape)
-    print("action and method", action_and_method.shape)
-
-    observation, reward, done, terminated, info = env.step(action_and_method)
-
-    # reconstruct back
-    action = action_and_method
-    method_sz = len(RestApiEnv.METHOD_MAPPING)
-    rest_api_one_hot, method_one_hot = action[:-method_sz], action[-method_sz:]
-    method = RestApiEnv.METHOD_MAPPING[method_one_hot.nonzero().item()]
-
-    print("Method", method)
-    rest_api_recovered = dataset.one_hot_vector_to_action(rest_api_one_hot)
-    print(rest_api, rest_api, " decoded ", rest_api_recovered)
+    #
+    #
+    # print("obs space", env.observation_space)
+    # print("ac space ", env.action_shape())
+    #
+    # # Randomly select a method
+    # method = random.choice(RestApiEnv.METHOD_MAPPING)
+    # method_index = RestApiEnv.METHOD_MAPPING.index(method)
+    #
+    # method_one_hot = torch.zeros(len(RestApiEnv.METHOD_MAPPING))
+    # method_one_hot[method_index] = 1
+    #
+    # rest_api, supported_method, action_to_one_hot = dataset.sample_rest_api()
+    # action_and_method = torch.cat((action_to_one_hot, method_one_hot))
+    # print("action to one hot", action_to_one_hot.shape)
+    # print("action and method", action_and_method.shape)
+    #
+    # observation, reward, done, terminated, info = env.step(action_and_method)
+    #
+    # # reconstruct back
+    # action = action_and_method
+    # method_sz = len(RestApiEnv.METHOD_MAPPING)
+    # rest_api_one_hot, method_one_hot = action[:-method_sz], action[-method_sz:]
+    # method = RestApiEnv.METHOD_MAPPING[method_one_hot.nonzero().item()]
+    #
+    # print("Method", method)
+    # rest_api_recovered = dataset.one_hot_vector_to_action(rest_api_one_hot)
+    # print(rest_api, rest_api, " decoded ", rest_api_recovered)
 
     # # reconstruct back
     # action = action_and_method
