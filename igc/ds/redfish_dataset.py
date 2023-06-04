@@ -18,6 +18,7 @@ import logging
 from igc.interfaces.rest_mapping_interface import RestMappingInterface
 from igc.interfaces.rest_one_hot_interface import RestActionEncoderInterface
 import zlib
+import random
 
 
 class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
@@ -804,6 +805,16 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         found, or raise a KeyError if not found.
         """
         return self._rest_api_to_method.get(rest_api, None)
+
+    def sample_rest_api(self) -> Tuple[str, List[str], torch.Tensor]:
+        """Randomly sample a REST API endpoint from the dataset.
+        It good for testing etc.
+        :return: A tuple containing the sampled REST API endpoint,
+                supported method, and one-hot vector representation.
+        """
+        rest_api = random.choice(list(self._rest_api_to_respond.keys()))
+        supported_method = self._rest_api_to_method[rest_api]
+        return rest_api, supported_method, self.action_to_one_hot(rest_api)
 
     def _get_unique_values(self):
         """

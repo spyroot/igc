@@ -1,10 +1,12 @@
+import json
 import os
 import argparse
-
 from igc.interfaces.rest_mapping_interface import RestMappingInterface
 
 
 class MockServer:
+    """
+    """
     def __init__(self, args: argparse.Namespace, rest_mapping: RestMappingInterface = None):
         """Initialize the MockServer object.
         :param args:
@@ -19,14 +21,15 @@ class MockServer:
         self.responses = {}
         self.dir_mock_resp = os.path.expanduser(args.raw_data_dir)
         # Read JSON files and populate the responses dictionary
-        self._construct_json_mocks()
         self.mock_callbacks = {}
 
         # this what we expect it might change for different system
         self._default_rest_prefix = "/redfish/v1"
         self._default_success_code = 200
 
-    def register_callback(self, url, method, callback):
+        self._construct_json_mocks()
+
+    def register_callback(self, url: str, method: str, callback):
         """Register a callback for a specific endpoint and method.
           It might positive or something we expect or not.
         :param url: The URL of the endpoint.
@@ -34,6 +37,45 @@ class MockServer:
         :param callback: The callback function.
         """
         self.mock_callbacks[(url, method)] = callback
+
+    @staticmethod
+    def generate_error_response():
+        """
+
+        :return:
+        """
+        error_response = {
+            "error": {
+                "@Message.ExtendedInfo": [
+                    {
+                        "Message": "Unable to complete the operation because the JSON data format entered is invalid.",
+                        "MessageArgs": [],
+                        "MessageArgs@odata.count": 0,
+                        "MessageId": "IDRAC.1.6.SYS405",
+                        "RelatedProperties": [],
+                        "RelatedProperties@odata.count": 0,
+                        "Resolution": "Do the following and the retry the operation: "
+                                      "1) Enter the correct JSON data format and retry the operation.",
+                        "Severity": "Critical"
+                    },
+                    {
+                        "Message": "The request body submitted was malformed JSON "
+                                   "and could not be parsed by the receiving service.",
+                        "MessageArgs": [],
+                        "MessageArgs@odata.count": 0,
+                        "MessageId": "Base.1.2.MalformedJSON",
+                        "RelatedProperties": [],
+                        "RelatedProperties@odata.count": 0,
+                        "Resolution": "Ensure that the request body is valid JSON and resubmit the request.",
+                        "Severity": "Critical"
+                    }
+                ],
+                "code": "Base.1.2.GeneralError",
+                "message": "A general error has occurred. See ExtendedInfo for more information"
+            }
+        }
+
+        return json.dumps(error_response)
 
     def _load_responses(self, file_path, file_name):
         """Load json file from a file and convert file back to rest api
@@ -96,7 +138,6 @@ class MockServer:
         else:
             for root, dirs, files in os.walk(self.dir_mock_resp):
                 for file_name in files:
-                    print(f"Reading file_name {file_name}")
                     if file_name.endswith(".json"):
                         file_path = os.path.join(root, file_name)
                         self._load_responses(file_path, file_name)
@@ -113,14 +154,6 @@ class MockServer:
             return json_data
         else:
             return None
-
-    def show_rest_endpoints(self):
-        """
-        :return:
-        """
-        print("REST Endpoints:")
-        for url in self.responses.keys():
-            print(url)
 
     def add_response(self, url, method, json_data, status_code):
         """
@@ -147,6 +180,17 @@ class MockServer:
         :param accept_header:
         :return:
         """
+        valid_methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
+        if method not in valid_methods:
+            return MockResponse({}, 400)
+
+        if json_data is not None:
+            try:
+                json.loads(json_data)
+            except json.JSONDecodeError:
+                return MockResponse({}, 400)
+
+        # dispatch
         callback = self.mock_callbacks.get((url, method))
         if callback:
             return callback(json_data)

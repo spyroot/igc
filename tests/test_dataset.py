@@ -4,7 +4,6 @@ import torch
 from transformers import GPT2Tokenizer
 from igc.ds.redfish_dataset import JSONDataset
 
-
 j_data = {
     "@odata.context": "/redfish/v1/$metadata#MetricReportDefinitionCollection.MetricReportDefinitionCollection",
     "@odata.id": "/redfish/v1/TelemetryService/MetricReportDefinitions",
@@ -32,7 +31,8 @@ j_data = {
     ]
 }
 
-class YourClassTestCase(unittest.TestCase):
+
+class DatasetTest(unittest.TestCase):
 
     def test_create_chunks(self, model_name='gpt2'):
         """
@@ -323,7 +323,6 @@ class YourClassTestCase(unittest.TestCase):
         # json_lines = json.dumps(j_data)
         # attention_mask = mask_specific_key_and_value(json_lines, target_key, tokenizer=tokenizer, debug=True)
         # print("Modified attention_mask:", attention_mask)
-
 
 
 if __name__ == '__main__':

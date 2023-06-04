@@ -58,14 +58,20 @@ class IgcLllModule:
         :param device: The device to load the model onto, defaults to "cpu".
         :return: The loaded model, tokenizer, and the last epoch from the checkpoint.
         """
+        print(Path(args.output_dir).absolute())
+
         checkpoint_path_dir = Path(args.output_dir)
         checkpoint_path_dir = checkpoint_path_dir.resolve()
+        checkpoint_path_dir = checkpoint_path_dir.absolute()
+
+        print(F"absolute {str(args.output_dir)}")
         if not checkpoint_path_dir.is_dir():
             raise ValueError("Invalid checkpoint directory.")
 
         checkpoint_files = [f for f in os.listdir(checkpoint_path_dir) if f.endswith('.pt')]
         checkpoint_files = [os.path.join(checkpoint_path_dir, f) for f in checkpoint_files]
         checkpoint_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+        print(F"FILS {checkpoint_files}")
 
         if not checkpoint_files:
             raise ValueError(
@@ -76,4 +82,5 @@ class IgcLllModule:
         tokenizer = GPT2Tokenizer.from_pretrained(args.model_type)
         last_epoch = LlmEmbeddingsTrainer.load_model_inference(
             model, args, device=device)
+
         return model, tokenizer, last_epoch

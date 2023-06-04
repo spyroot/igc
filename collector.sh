@@ -1,0 +1,1 @@
+python idrac_ctl_test.py --idrac_ip ip --idrac_password pass

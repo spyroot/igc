@@ -48,8 +48,7 @@ TermList = ["xterm", "linux", "ansi", "xterm-256color"]
 
 
 def collect_schemas(cmd_args):
-    """
-
+    """Invoke discovery action and collection all responses.
     """
     redfish_api = IDracManager(
         idrac_ip=cmd_args.idrac_ip,
@@ -66,13 +65,13 @@ def collect_schemas(cmd_args):
     )
 
 
-def idrac_main_ctl():
+def igc_main_ctl():
     """
     """
     logger.setLevel(logging.ERROR)
     parser = argparse.ArgumentParser(
-        prog="idrac_ctl", add_help=True,
-        description='''iDrac command line tools. |n
+        prog="igc_ctl", add_help=True,
+        description='''IGC Discover offline tools. |n
                                      It a standalone command line tool provide option to interact with  |n 
                                      Dell iDRAC via Redfish REST API. It supports both asynchronous and |n
                                      synchronous options to interact with iDRAC.|n
@@ -84,7 +83,7 @@ def idrac_main_ctl():
                                              ''',
         formatter_class=CustomArgumentDefaultsHelpFormatter)
 
-    credentials = parser.add_argument_group('credentials', '# idrac credentials details.')
+    credentials = parser.add_argument_group('credentials', '# igc credentials details.')
 
     # global args
     credentials.add_argument(
@@ -119,7 +118,9 @@ def idrac_main_ctl():
         '--use_http', action='store_true', required=False, default=False,
         help="use http instead https as a transport.")
 
-    verbose_group = parser.add_argument_group('verbose', '# verbose and debug options')
+    verbose_group = parser.add_argument_group(
+        'verbose', '# verbose and debug options'
+    )
 
     verbose_group.add_argument(
         '--debug', action='store_true', required=False,
@@ -207,4 +208,4 @@ def idrac_main_ctl():
 
 
 if __name__ == "__main__":
-    idrac_main_ctl()
+    igc_main_ctl()
