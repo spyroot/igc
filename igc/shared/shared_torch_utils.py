@@ -1,5 +1,5 @@
 from distutils.version import LooseVersion
-from typing import Optional
+from typing import Optional, List, Tuple
 
 import torch
 import torch.distributed as dist
@@ -440,3 +440,11 @@ def batchify(data: Tensor, batch_size: int) -> Tensor:
     data = data[:seq_len * batch_size]
     data = data.view(batch_size, seq_len).t().contiguous()
     return data.to(batch_size)
+
+
+def stack_tensors(list_of_tensor_iterators: List) -> Tuple[torch.Tensor]:
+    """Zips a list of iterables containing tensor-like objects and stacks the resulting lists of tensors together.
+    :param list_of_tensor_iterators: Sequence containing similar iterators
+    :return:
+    """
+    return tuple(torch.stack(tensors, 0) for tensors in zip(*list_of_tensor_iterators))

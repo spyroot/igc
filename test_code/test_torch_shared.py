@@ -1,6 +1,7 @@
 # this will download all models
-import argparse
 import os
+import socket
+import argparse
 
 from igc.shared.shared_torch_utils import (
     get_device,
@@ -17,10 +18,6 @@ def main(args):
     torch_distributed_operations_test(args.local_rank, args.world_size)
 
 
-
-
-import socket
-
 def get_network_interfaces():
     """
     Get a list of network interface names.
@@ -31,6 +28,7 @@ def get_network_interfaces():
     for interface in socket.if_nameindex():
         interfaces.append(interface[1])
     return interfaces
+
 
 if __name__ == '__main__':
     dev = get_device()
@@ -54,4 +52,3 @@ if __name__ == '__main__':
     # Example usage
     interface_names = get_network_interfaces()
     print(interface_names)
-

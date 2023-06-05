@@ -7,7 +7,6 @@ from igc.interfaces.rest_mapping_interface import RestMappingInterface
 class MockServer:
     """
     """
-
     def __init__(self, args: argparse.Namespace, rest_mapping: RestMappingInterface = None):
         """Initialize the MockServer object.
         :param args:
@@ -30,8 +29,9 @@ class MockServer:
         # this what we expect it might change for different system
         self._default_rest_prefix = "/redfish/v1"
         self._default_success_code = 200
-        self._construct_json_mocks()
 
+        #  load all the json files
+        self._construct_json_mocks()
         self._error_respond = None
 
     def register_callback(self, url: str, method: str, callback):

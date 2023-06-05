@@ -12,7 +12,6 @@ class RestTrajectory:
                  raw_json_dir: str = "/home/spyroot/.json_responses",
                  rest_new_prefix: str = "/home/spyroot/dev/igc/datasets/orig"):
         """
-
         :param raw_json_dir:  raw_json_dir: The directory path for the raw JSON responses.
         :param rest_new_prefix: The new prefix for the updated file paths.
         """

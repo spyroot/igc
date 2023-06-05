@@ -20,7 +20,8 @@ def create_test_env(cmd):
     dataset = JSONDataset(
         directory_path, verbose=True, tokenizer=tokenizer)
 
-
+    for rest_api, path in dataset.get_rest_api_mappings():
+        print(f"rest api {rest_api} path {path}")
 
     # env = RestApiEnv(
     #     args=cmd, model=model,

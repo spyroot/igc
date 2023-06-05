@@ -51,13 +51,22 @@ class IgcAgentTrainer:
         self.current_goal_action = None
         self.steps_per_episode = 10
 
-        action_dim = self.env.action_space.shape[0]
-        self.model = q_network.QNetwork(self.env.observation_space.shape[1], action_dim)
-        self.target_model = q_network.QNetwork(self.env.observation_space.shape[1], action_dim)
+        self.action_dim = self.env.action_space.shape[0]
+        self.model = q_network.QNetwork(self.env.observation_space.shape[1], self.action_dim)
+        self.target_model = q_network.QNetwork(self.env.observation_space.shape[1], self.action_dim)
         self.optimizer = optim.Adam(model.parameters(), lr=1e-3)
+
+        # set a goal
+        self.current_goal = None
 
     @staticmethod
     def update_target(model: nn.Module, target_model: nn.Module):
+        """
+
+        :param model:
+        :param target_model:
+        :return:
+        """
         target_model.load_state_dict(model.state_dict())
 
     def create_action(self):
@@ -112,8 +121,8 @@ class IgcAgentTrainer:
 
         return episode_experience, episodic_return, succeeded
 
-    def train_goal(self):
-        """
+    def create_goal(self, method="GET"):
+        """Sample a goal from the dataset,
         :return:
         """
         rest_api, supported_method, one_hot_action = self.dataset.sample_rest_api()
@@ -129,12 +138,18 @@ class IgcAgentTrainer:
             "parameters": None,
         }
 
-        _state, info = self.env.reset(goal=goal, goal_type=GoalTypeState.State)
-        goal["goal_state"] = info["goal"]
-        if not torch.is_same_size(_state, goal["goal_state"]):
+        return goal
+
+    def train_goal(self):
+        """
+        :return:
+        """
+        _state, info = self.env.reset(goal=self.current_goal, goal_type=GoalTypeState.State)
+        self.current_goal["goal_state"] = info["goal"]
+        if not torch.is_same_size(_state, self.current_goal["goal_state"]):
             raise ValueError("State and goal have different dimensions.")
 
-        if not isinstance(_state, torch.Tensor) or not isinstance(goal["goal_state"], torch.Tensor):
+        if not isinstance(_state, torch.Tensor) or not isinstance(self.current_goal["goal_state"], torch.Tensor):
             raise TypeError("State and goal must be tensors.")
 
         episodic_return = 0
@@ -142,7 +157,7 @@ class IgcAgentTrainer:
 
         for _ in range(self.steps_per_episode):
 
-            input_state = torch.cat([_state, goal["goal_state"]])
+            input_state = torch.cat([_state, self.current_goal["goal_state"]])
             input_state = input_state.unsqueeze(0)
 
             # print("Input state", input_state.shape)
@@ -159,10 +174,21 @@ class IgcAgentTrainer:
 
             print("action_one_hot shape out", action_one_hot.shape)
             print("action_one_hot shape out", action_one_hot.dtype)
+
             next_state, reward, done, truncated, info = self.env.step(action_one_hot)
             episodic_return += reward
 
-            episode_experience.append((_state.copy(), action_one_hot, reward, next_state, goal["goal_state"]))
+            episode_experience.append(
+                (_state.copy(), action_one_hot, reward, next_state, self.current_goal["goal_state"]))
+
+            # Print types of all elements in episode_experience
+            for exp in episode_experience:
+                state_type = type(exp[0])
+                action_type = type(exp[1])
+                reward_type = type(exp[2])
+                next_state_type = type(exp[3])
+                goal_state_type = type(exp[4])
+                print("Experience types:", state_type, action_type, reward_type, next_state_type, goal_state_type)
 
             _state = next_state
             # break the episode if done=True
@@ -172,67 +198,63 @@ class IgcAgentTrainer:
         print(f"episode reward {episodic_return}")
         return episodic_return, episode_experience
 
+    def update_replay_buffer(self,
+                             replay_buffer,
+                             episode_experience,
+                             env_reward_function=None,
+                             num_relabeled=4,):
+        """Adds past experience to the replay buffer. Training is done with
+        episodes from the replay buffer. When HER is used, relabeled
+        experiences are also added to the replay buffer.
 
-    # def update_replay_buffer(self,
-    #                          replay_buffer,
-    #                          episode_experience,
-    #                          her_type=HERType.NO_HINDSIGHT,
-    #                          env_reward_function=None,  # pylint: disable=unused-argument
-    #                          num_relabeled=4,  # pylint: disable=unused-argument
-    #                          ):
-    #     """Adds past experience to the replay buffer. Training is done with
-    #     episodes from the replay buffer. When HER is used, relabeled
-    #     experiences are also added to the replay buffer.
-    #
-    #     Args:
-    #
-    #         replay_buffer (ReplayBuffer): replay buffer to store experience
-    #
-    #         episode_experience (list): list containing the transitions
-    #             (state, action, reward, next_state, goal_state)
-    #
-    #         HER (HERType): type of hindsight experience replay to use
-    #
-    #         env_reward_function ((ndarray, ndarray) -> float):
-    #             reward function for relabelling transitions
-    #
-    #         num_relabeled (int): number of relabeled transition per transition
-    #     """
-    #     for timestep in range(len(episode_experience)):
-    #         # copy experience from episode_experience to replay_buffer
-    #         state, action, reward, next_state, goal = episode_experience[timestep]
-    #         # use replay_buffer.add
-    #         replay_buffer.add(np.append(state, goal), action, reward, np.append(next_state, goal))
-    #
-    #         # get final goal
-    #         final_state, _, _, _, _ = episode_experience[-1]
-    #         relabeled_goal = final_state
-    #
-    #         # compute new reward
-    #         relabeled_reward = env_reward_function(next_state, relabeled_goal)
-    #
-    #         # add to buffer
-    #         replay_buffer.add(np.append(state.copy(), relabeled_goal.copy()),
-    #                           action,
-    #                           relabeled_reward,
-    #                           np.append(next_state.copy(), relabeled_goal.copy()))
-    #
+        Args:
+
+            replay_buffer (ReplayBuffer): replay buffer to store experience
+
+            episode_experience (list): list containing the transitions
+                (state, action, reward, next_state, goal_state)
+
+            HER (HERType): type of hindsight experience replay to use
+
+            env_reward_function ((ndarray, ndarray) -> float):
+                reward function for relabelling transitions
+
+            num_relabeled (int): number of relabeled transition per transition
+        """
+        for timestep in range(len(episode_experience)):
+            # copy experience from episode_experience to replay_buffer
+            state, action, reward, next_state, goal = episode_experience[timestep]
+            # use replay_buffer.add
+            replay_buffer.add(np.append(state, goal), action, reward, np.append(next_state, goal))
+
+            # # get final goal
+            # final_state, _, _, _, _ = episode_experience[-1]
+            # relabeled_goal = final_state
+            #
+            # # compute new reward
+            # relabeled_reward = env_reward_function(next_state, relabeled_goal)
+            #
+            # # add to buffer
+            # replay_buffer.add(np.append(state.copy(), relabeled_goal.copy()),
+            #                   action,
+            #                   relabeled_reward,
+            #                   np.append(next_state.copy(), relabeled_goal.copy()))
+
     def train(
-        self,
-        input_dim,
-        action_dim,
-        num_epochs,
-        writer,
-        env_reward_function=None,
-        num_relabeled=4,
-        buffer_size=1e6,
-        num_episodes=16,
-        steps_per_episode=50,
-        gamma=0.98,
-        opt_steps=40,
-        batch_size=128,
-        log_interval=5,
+            self,
+            num_epochs,
+            env_reward_function=None,
+            num_relabeled=4,
+            buffer_size=1e6,
+            num_episodes=16,
+            steps_per_episode=50,
+            gamma=0.98,
+            opt_steps=40,
+            batch_size=128,
+            log_interval=5,
     ):
+
+        self.current_goal = self.create_goal()
 
         # create replay buffer
         replay_buffer = experience_buffer.Buffer(buffer_size, batch_size)
@@ -284,7 +306,7 @@ class IgcAgentTrainer:
                 # calculate predictions and loss
                 model_predict = self.model(state)
                 model_action_taken = torch.reshape(action, [-1])
-                action_one_hot = nn.functional.one_hot(model_action_taken, action_dim)
+                action_one_hot = nn.functional.one_hot(model_action_taken, self.action_dim)
                 q_val = torch.sum(model_predict * action_one_hot, axis=1)
                 criterion = nn.MSELoss()
                 loss = criterion(q_val, q_loss_target)
@@ -302,51 +324,9 @@ class IgcAgentTrainer:
                     f"{total_reward} Success rate: {np.mean(successes)} Mean loss: {np.mean(losses)}"
                     # pylint: disable=line-too-long
                 )
-                writer.add_scalar(
-                    "eval_metrics/total_reward", total_reward, epoch_idx)
-                writer.add_scalar(
-                    "eval_metrics/success_rate", np.mean(successes), epoch_idx)
-                writer.add_scalar(
-                    "train_metrics/td_loss", np.mean(losses), epoch_idx)
-
-def main_create_env():
-    """
-    :return:
-    """
-
-    args = shared_main()
-    igc_agent = IgcAgentTrainer(args)
-    igc_agent.train_goal()
-
-    #
-    # obs, info = env.reset(goal=goal_action)
-    # self.assertTrue(torch.allclose(env.goal_action, goal_action), "last obs must same as next")
-    #
-    # total_reward = 0.0
-    # for n in range(0, 2):
-    #     rest_api, supported_method, one_hot_action = dataset.sample_rest_api()
-    #     http_method_one_hot = RestApiEnv.encode_rest_api_method("GET")
-    #     action = RestApiEnv.concat_rest_api_method(one_hot_action, http_method_one_hot)
-    #     next_observation, reward, done, terminated, info = env.step(action)
-    #     total_reward += reward
-    #     self.assertEqual(reward, 0.1, "Reward is not equal to 0.1")
-    #     self.assertTrue(torch.allclose(env.last_observation, next_observation),
-    #                     "last obs must same as next")
-    #     self.assertEqual(next_observation.shape, obs.shape,
-    #                      "next observation shape does not match observation shape")
-    #     self.assertEqual(done, False, "single get should not set done")
-    #     self.assertEqual(terminated, False, "single get should not set terminated")
-    #     self.assertEqual(env.step_count, n + 1, "Step count does not increase")
-    #
-    # # execute action with goal for this task episode
-    # next_observation, reward, done, terminated, info = env.step(goal_action)
-    # self.assertEqual(reward, 1.0, "Last reward should be 1.0")
-    # self.assertTrue(torch.allclose(env.last_observation, next_observation), "last obs must same as next")
-    # self.assertEqual(next_observation.shape, obs.shape, "next observation shape does not match observation shape")
-    # self.assertEqual(done, True, "last episode should set done to True")
-    # self.assertEqual(terminated, False, "last episode should set terminated to True")
-    # self.assertEqual(env.step_count, 3, "Step count does not increase")
-
-
-if __name__ == '__main__':
-    main_create_env()
+                # writer.add_scalar(
+                #     "eval_metrics/total_reward", total_reward, epoch_idx)
+                # writer.add_scalar(
+                #     "eval_metrics/success_rate", np.mean(successes), epoch_idx)
+                # writer.add_scalar(
+                #     "train_metrics/td_loss", np.mean(losses), epoch_idx)

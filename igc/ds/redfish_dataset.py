@@ -68,6 +68,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
         # torch dataset mirror
         # dataset mirror
+        self._default_dataset_spec = "dataset.json"
         self._mirrors = [
             {"spec": 'http://192.168.254.78/ds/dataset.json'},
             {"train_dataset": 'http://192.168.254.78/ds/igc.tar.gz'},
@@ -178,7 +179,6 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._load_dataset()
         # check consistency
         self._check_consistency()
-
         # state
         self._entry_rest_api_result = None
 
@@ -186,7 +186,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         """Read dataset spec and update mirror and resources.
         :return:
         """
-        json_file_path = Path(self._dataset_root_dir) / "dataset.json"
+        json_file_path = Path(self._dataset_root_dir) / self._default_dataset_spec
         with open(json_file_path, "r") as json_file:
             json_data = json.load(json_file)
             self._mirrors = json_data["mirrors"]
@@ -304,8 +304,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
          The hash we use
         :return:
         """
-        # self._default_dir, self._default_original_dir
-        self._rest_trajectories = RestTrajectory(self._unprocessed, self._default_original_dir)
+        self._rest_trajectories = RestTrajectory(
+            self._unprocessed, self._default_original_dir)
         self._rest_trajectories.load()
 
         # all api mapping
@@ -422,6 +422,12 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                 f"files to {self._default_original_dir}")
             unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
 
+        print("Data so far")
+        print(f"self._rest_api_to_respond {len(self._rest_api_to_respond)}")
+        print(f"self._rest_api_to_respond {len(self._rest_api_to_method)}")
+        print(f"self._rest_api_to_respond {len(self._respond_to_api)}")
+
+
         # load dataset json file, and
         # so we have all hash values for each file.
         self._load_dataset_spec()
@@ -447,8 +453,34 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._rest_api_to_method = torch.load(self._rest_api_to_method_file_name)
         self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
 
+        self._rest_trajectories = RestTrajectory(
+            self._unprocessed, self._default_original_dir)
+        self._rest_trajectories.load()
+
+        print(f" Unprocessed dir {self._unprocessed}")
+        print(f"self._default_original_dir dir {self._default_original_dir}")
+
+        # # all api mapping
+        # self._rest_api_to_respond, self._rest_api_to_method = self._rest_trajectories.merged_view()
+        # self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
+
         self.logger.debug(f"Loaded dataset length: {len(self._data)}")
         self.logger.info(f"Loaded dataset, total time: {time.time() - start_time}")
+
+        for k in self._rest_api_to_respond:
+            print(f"a {k} val {self._rest_api_to_respond[k]}")
+            break
+
+        for k in self._rest_api_to_method:
+            print(f"b {k} val {self._rest_api_to_method[k]}")
+            break
+
+        for k in self._respond_to_api:
+            print(f"c {k} val {self._respond_to_api[k]}")
+            break
+
+        raise
+
 
     def chunk_overlap_size(self):
         """Amount of overlap between two chunks
