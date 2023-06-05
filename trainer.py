@@ -11,9 +11,19 @@ def main(cmd):
     """
     # igc = IgcLllModule(cmd)
     # igc.train()
+    igc_agent = IgcAgentTrainer(cmd)
+    ds = igc_agent.dataset
 
-    args = shared_main()
-    igc_agent = IgcAgentTrainer(args)
+    for entry in ds.rest_api_iterator():
+        rest_api, path = entry
+        print(f" path {path} ")
+
+    # for rest_api, methods in ds.get_rest_api_methods():
+    #     print(f" {rest_api} path {methods} ")
+
+    # for resp_files in ds.respond_to_api_iterator():
+    #     resp_file, api = resp_files
+    #     print(f" resp files {resp_file} ")
 
 
 if __name__ == '__main__':

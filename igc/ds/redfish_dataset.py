@@ -164,10 +164,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._list_masked_keys = ["@odata.id"]
         self._rest_trajectories = None
 
-        # # call super method to download dataset
-        # if not self._check_tarballs_files() or is_force_download:
-        #     logging.info("Downloading dataset.")
-        #     super().__init__(dataset_root_dir=self._dataset_root_dir)
+        # call super method to download dataset
+        if not self._check_tarballs_files() or is_force_download:
+            logging.info("Downloading dataset.")
+            super().__init__(dataset_root_dir=self._dataset_root_dir)
 
         # unpack tarballs.
         self._unpack_tarballs()
@@ -308,6 +308,13 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             return True
 
         return False
+
+    def respond_to_api_iterator(self):
+        """
+        :return:
+        """
+        for k in self._respond_to_api:
+            yield k, self._respond_to_api[k]
 
     def respond_to_api(self, rest_api_respond_file):
         """
