@@ -295,7 +295,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         :return:
         """
         for rest_api in self._rest_api_to_respond_:
-            yield rest_api, f"{self._default_original_dir}{self._rest_api_to_respond_}"
+            yield rest_api, f"{self._default_original_dir}{self._rest_api_to_respond_[rest_api]}"
 
     def get_rest_api(self, rest_api: str) -> Tuple[str, str]:
         """Return rest api based on local directory structure..
