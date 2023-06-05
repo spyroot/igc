@@ -1,3 +1,4 @@
+import glob
 import json
 import os
 import shutil
@@ -74,7 +75,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         ]
 
         self._resources = [
-            {"dataset.json", "", "spec"},
+            ("dataset.json", "", "spec"),
             ("igc.tar.gz", "", "train_dataset"),
             ("json_data.tar.gz", "", "json_data"),
         ]
@@ -166,6 +167,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
         # call super method to download dataset
         if not self._check_tarballs_files() or is_force_download:
+            logging.info("Downloading dataset.")
             super().__init__(dataset_root_dir=self._dataset_root_dir)
 
         # unpack tarballs.
@@ -222,7 +224,6 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         result = all(os.path.exists(file) for file in self._dataset_tarballs)
         if result:
             logging.info("Found all required tarball file.")
-
         return result
 
     @staticmethod
@@ -365,20 +366,24 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                     f"No matching resource found for tarball: {tarball_name}")
 
     def _unpack_tarballs(self):
-        """Unpack tarballs to raw directory.
-          if mandatory files not present,  first try to locate tarball and if tarball
+        """Unpack tarballs files directory.
+
+          if mandatory files not present, first try to locate tarball and if tarball
           present unpack.
+
         :return:
         """
         # if tar file present unpack other create new dataset.
-        if os.path.exists(self._dataset_tarball_name):
+        if os.path.exists(self._dataset_tarball_name) and not glob.glob(
+            os.path.join(self._default_raw_dir, '*')):
             logging.debug(
                 f"Found tarball unpack {self._dataset_tarball_name} "
                 f"files to {self._default_raw_dir}")
             unpack_tar_gz(self._dataset_tarball_name, self._default_raw_dir)
 
         # if tarball of all api responds present, unpack.
-        if os.path.exists(self._dataset_json_tarball_name):
+        if os.path.exists(self._dataset_json_tarball_name) and not glob.glob(
+            os.path.join(self._default_original_dir, '*')):
             logging.debug(
                 f"Found tarball unpack {self._dataset_json_tarball_name} "
                 f"files to {self._default_original_dir}")
@@ -403,7 +408,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         if not self._check_dataset_files():
             self._unpack_tarballs()
             if not self._check_dataset_files():
-                raise FileNotFoundError("Dataset files not found after unpacking the tarball.")
+                self._build_dataset()
         else:
             self._build_dataset()
 

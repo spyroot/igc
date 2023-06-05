@@ -369,15 +369,15 @@ class DownloadableDataset(Dataset):
 
         # Download spec file if needed
         for spec_mirror_url in self.spec_mirror():
-            print(f"passing spec mirror url {spec_mirror_url}")
             self.download_file(spec_mirror_url, self.dataset_spec_file_name(), checksum=None)
 
         spec_file_path = os.path.join(self.root_dir(), self.dataset_spec_file_name())
-        with open(spec_file_path, "r") as spec_file:
-            spec_data = json.load(spec_file)
-            for resource in spec_data["resources"]:
-                file_name, file_md5, data_type = resource
-                spec_hash_values[file_name] = file_md5
+        if os.path.exists(spec_file_path):
+            with open(spec_file_path, "r") as spec_file:
+                spec_data = json.load(spec_file)
+                for resource in spec_data["resources"]:
+                    file_name, file_md5, data_type = resource
+                    spec_hash_values[file_name] = file_md5
 
         return spec_hash_values
 
