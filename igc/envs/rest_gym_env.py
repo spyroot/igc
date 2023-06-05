@@ -1,4 +1,5 @@
 import argparse
+from enum import Enum
 from typing import Optional, Tuple, List
 
 import gym
@@ -12,6 +13,15 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 from igc.ds.redfish_dataset import JSONDataset
 from igc.envs.rest_encoder import RestBaseEncoder
 from igc.envs.rest_mock_server import MockServer
+
+
+class HttpMethod(Enum):
+    GET = "GET"
+    POST = "POST"
+    PUT = "PUT"
+    DELETE = "DELETE"
+    PATCH = "PATCH"
+    HEAD = "HEAD"
 
 
 class RestApiEnv(gym.Env):
@@ -29,7 +39,8 @@ class RestApiEnv(gym.Env):
                  default_rest_base: Optional[str] = "http://localhost",
                  max_episode: int = 200,
                  render_mode: Optional[str] = None,
-                 directory_path=None):
+                 directory_path=None,
+                 goal=None):
         """
         Initialize the RestApiEnv environment.
 
@@ -43,6 +54,7 @@ class RestApiEnv(gym.Env):
         super().__init__()
 
         self.last_observation = None
+        self.goal_action = goal
         self.max_steps = max_episode
         self.step_count = 0
 
@@ -59,7 +71,8 @@ class RestApiEnv(gym.Env):
         self.encoder = RestBaseEncoder(model=model, tokenizer=tokenizer)
 
         self.action_space = spaces.Box(
-            low=0, high=1, shape=(len(list(self._rest_api_methods)),), dtype=np.float32)
+            low=0, high=1,
+            shape=(len(list(self._rest_api_methods)) + len(RestApiEnv.METHOD_MAPPING),), dtype=np.float32)
 
         self.observation_space = spaces.Box(
             low=-np.inf,
@@ -70,6 +83,9 @@ class RestApiEnv(gym.Env):
 
         self.reward_range = (-1, 1)
         self.base_url = default_rest_base
+
+    def mock_server(self) -> MockServer:
+        return self._mock_rest
 
     def max_reward(self) -> float:
         """Max reward value.
@@ -139,47 +155,44 @@ class RestApiEnv(gym.Env):
             reward = -1.0
 
         if not done:
+            self.extract_action_method(action)
+            rest_api_one_hot, method_one_hot = RestApiEnv.extract_action_method(action)
+            method = RestApiEnv.one_hot_to_method_string(method_one_hot)
 
             # Remove the additional dimension from the one-hot vector
-            rest_api_one_hot = action[:-len(RestApiEnv.METHOD_MAPPING)]
-            method_one_hot = action[-len(RestApiEnv.METHOD_MAPPING):]
-            action_index = torch.argmax(rest_api_one_hot)
-            method_index = torch.argmax(method_one_hot)
-
-            print(f"Action index {action_index}")
-            print(f"method_index {method_index} ")
-
-            method = RestApiEnv.METHOD_MAPPING[method_index.item()]
-            print(f"method {method} ")
-
-            rest_api_one_hot, method_index = action[:-1], int(action[-1].item())
-            # split the action into the one-hot vector and method
-            # rest_api_one_hot, method_index = action[:-1], action[-1]
-            action_index = np.argmax(rest_api_one_hot)
-            method = RestApiEnv.METHOD_MAPPING[method_index]
             if method not in RestApiEnv.METHOD_MAPPING:
+                print("Method not in mapping")
                 reward = -0.1
                 observation = self._mock_rest.generate_error_response()
-                encoded_observation = self.encoder.encode(observation)
+                self.last_observation = self.encoder.encode(observation)
             else:
                 rest_api = self._discovered_rest_api.one_hot_vector_to_action(rest_api_one_hot)
+                print(f"rest api {rest_api} method {method}")
                 response = self._mock_rest.request(rest_api, method)
-                if 200 <= response.status_code <= 300:
+                # agent execute goal action
+                if torch.allclose(action, self.goal_action):
+                    reward = 1.0
+                    done = True
                     observation = response.json()
-                    encoded_observation = self.encoder.encode(observation)
+                    self.last_observation = self.encoder.encode(observation)
+                elif 200 <= response.status_code <= 300:
+                    print(f"status code {response.status_code}")
+                    observation = response.json()
+                    self.last_observation = self.encoder.encode(observation)
                     reward = 0.1
                     done = False
                     # Update the current observation with the successful observation
-                    self.last_observation = encoded_observation
                 elif response.status_code == 500:
+                    print(f"status code {response.status_code}")
                     reward = -0.5
                     done = True
                     terminated = False
                     observation = self._mock_rest.generate_error_response()
-                    encoded_observation = self.encoder.encode(observation)
+                    self.last_observation = self.encoder.encode(observation)
                 else:
+                    print(f"status code {response.status_code}")
                     observation = self._mock_rest.generate_error_response()
-                    encoded_observation = self.encoder.encode(observation)
+                    self.last_observation = self.encoder.encode(observation)
                     reward = -0.2
 
         # # Check if the current observation is the same as the previous one
@@ -189,7 +202,7 @@ class RestApiEnv(gym.Env):
         #     reward = -0.1
 
         reward = np.clip(reward, -1.0, 1.0)
-        return encoded_observation, reward, done, terminated, info
+        return self.last_observation, reward, done, terminated, info
 
     def reset(
         self,
@@ -197,13 +210,20 @@ class RestApiEnv(gym.Env):
         seed: Optional[int] = None,
         options: Optional[dict] = None,
     ) -> Tuple[ObsType, dict]:
+        """Set initial observation to entry point to rest API.
+        :param seed:
+        :param options:
+        :return:
+        """
         if seed is not None:
             super().reset(seed=seed, options=options)
 
         self.step_count = 0
 
-        observation, info = super().reset(options=options)
-        return observation, info
+        rest_api, one_hot_vector = self._discovered_rest_api.entry_rest_api()
+        response = self.mock_server().request(rest_api, HttpMethod.GET.value)
+        self.last_observation = self.encoder.encode(response.json_data)
+        return self.last_observation, {}
 
     def goal(self) -> float:
         """
@@ -277,7 +297,6 @@ class RestApiEnv(gym.Env):
         method_strings = [RestApiEnv.METHOD_MAPPING[index.item()] for index in method_indices]
         return method_strings
 
-
     @staticmethod
     def extract_single_action_method(input_tensor: torch.Tensor):
         """
@@ -320,4 +339,3 @@ class RestApiEnv(gym.Env):
             return RestApiEnv.extract_single_action_method(input_tensor)
         else:
             raise ValueError("Invalid input tensor dimensions. Expected 1 or 2.")
-

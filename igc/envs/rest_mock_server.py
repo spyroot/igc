@@ -7,10 +7,14 @@ from igc.interfaces.rest_mapping_interface import RestMappingInterface
 class MockServer:
     """
     """
+
     def __init__(self, args: argparse.Namespace, rest_mapping: RestMappingInterface = None):
         """Initialize the MockServer object.
         :param args:
         """
+
+        self._valid_methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'PATCH', "HEAD"]
+
         if not isinstance(args, argparse.Namespace):
             raise TypeError("Invalid args type. Expected argparse.Namespace.")
 
@@ -26,8 +30,9 @@ class MockServer:
         # this what we expect it might change for different system
         self._default_rest_prefix = "/redfish/v1"
         self._default_success_code = 200
-
         self._construct_json_mocks()
+
+        self._error_respond = None
 
     def register_callback(self, url: str, method: str, callback):
         """Register a callback for a specific endpoint and method.
@@ -41,7 +46,6 @@ class MockServer:
     @staticmethod
     def generate_error_response():
         """
-
         :return:
         """
         error_response = {
@@ -74,8 +78,16 @@ class MockServer:
                 "message": "A general error has occurred. See ExtendedInfo for more information"
             }
         }
-
         return json.dumps(error_response)
+
+    def generic_error_response(self):
+        """
+        :return:
+        """
+        if self._error_respond is None:
+            self._error_respond = MockServer.generate_error_response()
+
+        return self._error_respond
 
     def _load_responses(self, file_path, file_name):
         """Load json file from a file and convert file back to rest api
@@ -118,7 +130,7 @@ class MockServer:
             raise TypeError("Invalid file_path type. Expected str.")
 
         if not rest_api_uri.startswith(self._default_rest_prefix):
-            raise ValueError(f"Invalid rest_api_uri format. Must start with {self._default_rest_prefix }.")
+            raise ValueError(f"Invalid rest_api_uri format. Must start with {self._default_rest_prefix}.")
 
         if file_path.endswith('.json'):
             with open(file_path, 'r') as f:
@@ -180,15 +192,14 @@ class MockServer:
         :param accept_header:
         :return:
         """
-        valid_methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
-        if method not in valid_methods:
-            return MockResponse({}, 400)
+        if method not in self._valid_methods:
+            return MockResponse(MockServer.generate_error_response(), 400, error=True)
 
         if json_data is not None:
             try:
                 json.loads(json_data)
             except json.JSONDecodeError:
-                return MockResponse({}, 400)
+                return MockResponse(MockServer.generate_error_response(), 400, error=True)
 
         # dispatch
         callback = self.mock_callbacks.get((url, method))
@@ -203,28 +214,30 @@ class MockServer:
             for endpoint, data in self.responses.items():
                 endpoint_url, endpoint_method = endpoint
                 if endpoint_url == url and endpoint_method != method:
-                    return MockResponse({}, 405)
+                    return MockResponse(MockServer.generate_error_response(), 405, error=True)
 
-            # Check if the Accept header is specified and the requested resource cannot generate
+            # check if the Accept header is specified and the requested resource cannot generate
             # a representation that corresponds to one of the media types in the Accept header
             if accept_header is not None:
-                return MockResponse({}, 406)
+                return MockResponse(MockServer.generate_error_response(), 406, error=True)
 
             # Return 404 Not Found if the endpoint doesn't exist
-            return MockResponse({}, 404)
+            return MockResponse(MockServer.generate_error_response(), 404, error=True)
 
 
 class MockResponse:
     """
     """
 
-    def __init__(self, json_data, status_code):
+    def __init__(self, json_data, status_code, error=False):
         """
         :param json_data:
         :param status_code:
+        :param error:
         """
         self.json_data = json_data
         self.status_code = status_code
+        self.error = error
 
     def json(self):
         """

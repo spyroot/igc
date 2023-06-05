@@ -36,7 +36,7 @@ class DatasetConsistencyError(Exception):
 class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderInterface):
 
     def __init__(self,
-                 directory_path: str,
+                 raw_json_directory_path: str,
                  default_tokenize: Optional[str] = "gpt2-xl",
                  max_len: Optional[int] = 1024,
                  overlap: Optional[int] = 256,
@@ -48,7 +48,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                  target_transform=None,
                  is_force_download=False):
         """
-        :param directory_path:
+        :param raw_json_directory_path:
         :param default_tokenize:
         :param max_len:
         :param overlap:
@@ -57,7 +57,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         :param recreate_dataset:
         :param tokenizer:
         """
-        assert isinstance(directory_path, str), 'directory_path should be a string'
+        assert isinstance(raw_json_directory_path, str), 'directory_path should be a string'
         assert isinstance(default_tokenize, str), 'default_tokenize should be a string'
         assert isinstance(max_len, int), 'max_len should be an integer'
         assert isinstance(overlap, int), 'overlap should be an integer'
@@ -92,7 +92,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         # all rest api train data loaded to data, masked data container masked dataset.
         self._data = {}
         self._masked_data = {}
-        _unprocessed = os.path.abspath(directory_path)
+        _unprocessed = os.path.abspath(raw_json_directory_path)
         _unprocessed = Path(_unprocessed).resolve()
         self._unprocessed = str(_unprocessed)
         self._verbose = verbose
@@ -178,6 +178,9 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._load_dataset()
         # check consistency
         self._check_consistency()
+
+        # state
+        self._entry_rest_api_result = None
 
     def _load_dataset_spec(self):
         """Read dataset spec and update mirror and resources.
@@ -1014,6 +1017,22 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         """
         for s in self._masked_data['train_data']:
             yield s
+
+    def entry_rest_api(self) -> Tuple[str, Union[np.ndarray, torch.Tensor]]:
+        """Return the root entry point for the REST API and the corresponding one-hot vector.
+
+         A tuple containing the root entry point (e.g., "/redfish/v1") as a string,
+         and the corresponding one-hot vector as either a NumPy array (np.ndarray)
+         or a PyTorch tensor (torch.Tensor).
+
+        :return:
+        """
+        if self._entry_rest_api_result is None:
+            shortest_key = min(self._rest_api_to_respond.keys(), key=len)
+            self._entry_rest_api_result = (str(shortest_key), self.action_to_one_hot(str(shortest_key)))
+
+        return self._entry_rest_api_result
+
 
     def lookup_rest_api_to_respond(self, rest_api: str):
         """Lookup the response for a given REST API.

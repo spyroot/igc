@@ -46,7 +46,10 @@ def shared_main(
                    f"{args.llm_optimizer}_" \
                    f"{args.scheduler}_lr_" \
                    f"{args.llm_learning_rate}"
-        args.output_dir = os.path.join("experiments", run_name)
+
+        package_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        args.output_dir = os.path.join(package_dir, "experiments")
+        args.output_dir = os.path.join(args.output_dir, run_name)
 
     args.log_dir = os.path.join(args.output_dir, "../../logs")
     os.makedirs(args.output_dir, exist_ok=True)

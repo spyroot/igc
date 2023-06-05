@@ -51,7 +51,8 @@ class RestBaseEncoder:
         if observation in self.cache:
             return self.cache[observation]
 
-        tokens = self.tokenizer.encode(observation, truncation=True, add_special_tokens=True)
+        tokens = self.tokenizer.encode(
+            observation, truncation=True, add_special_tokens=True, padding="max_length", max_length=max_chunk_length)
         embeddings = []
 
         # Process input in chunks
@@ -61,14 +62,10 @@ class RestBaseEncoder:
 
             with torch.no_grad():
                 chunk_embeddings = self.encoder_model(input_tensor).last_hidden_state
-                print(f"chunk_embeddings shape {chunk_embeddings.shape}")
-
+                # print(f"FIRST {chunk_embeddings.shape}")
             embeddings.append(chunk_embeddings)
 
         # concat
-        embeddings = torch.cat(embeddings, dim=1)
-        print("emb return", embeddings.shape)
-
+        embeddings = torch.cat(embeddings, dim=1).squeeze(0)
         self.cache[observation] = embeddings
-
         return embeddings
