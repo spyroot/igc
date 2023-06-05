@@ -73,7 +73,7 @@ class DownloadableDataset(Dataset):
 
         #
         super().__init__()
-        # self._create()
+        self._create()
 
     def _create(self):
         """First call each callback in pre_transforms list.
@@ -109,7 +109,7 @@ class DownloadableDataset(Dataset):
         self._post_process_dir.mkdir(parents=True, exist_ok=True)
 
     @abstractmethod
-    def get_resource_numpy(self) -> Tuple:
+    def get_resource_numpy(self) -> Tuple[str, str, str]:
         """If the data is a numpy array, return the tuple of resource.
         Where resource is numpy file hash and size
         [
@@ -120,21 +120,40 @@ class DownloadableDataset(Dataset):
         pass
 
     @abstractmethod
-    def mirrors_numpy(self) -> Tuple:
+    def resources_tarball(self) -> Tuple[str, str, str]:
+        """
+        Implementation should return list of tuples where
+        each type structure file , hash and type
+
+            [
+            ("file_train.tar.gz", "d44feaa301c1a0aa51b361adc5332b1b", "train_small"),
+            ("file_val.tar", "8c4fb3dacf23f07c85f9ccda297437d3", "val_small"),
+            ("file_test.tar.gz", "f6e14f27609cd1570c2365581726a91c", "test_small"),
+        ]
+        :return:
+        """
         pass
 
     @abstractmethod
-    def resources_torch(self) -> Tuple:
+    def resources_torch(self) -> Tuple[str, str, str]:
         """
         :return:
         """
         pass
 
     @abstractmethod
-    def mirrors_torch(self) -> Tuple:
+    def mirrors_torch(self) -> Tuple[str, str]:
         """
         :return:
         """
+        pass
+
+    @abstractmethod
+    def mirrors_numpy(self) -> Tuple[str, str]:
+        pass
+
+    @abstractmethod
+    def mirrors_tarballs(self) -> Tuple[str, str]:
         pass
 
     @abstractmethod
@@ -163,48 +182,55 @@ class DownloadableDataset(Dataset):
         pass
 
     @abstractmethod
-    def resources_tarball(self):
-        """
-        Implementation should return list of tuples where
-        each type structure file , hash and type
-
-            [
-            ("file_train.tar.gz", "d44feaa301c1a0aa51b361adc5332b1b", "train_small"),
-            ("file_val.tar", "8c4fb3dacf23f07c85f9ccda297437d3", "val_small"),
-            ("file_test.tar.gz", "f6e14f27609cd1570c2365581726a91c", "test_small"),
-        ]
-        :return:
-        """
-        pass
-
-    @abstractmethod
-    def mirrors_tarballs(self):
-        pass
-
-    @abstractmethod
     def data_format(self) -> str:
         pass
+
+    def _mirror_resources(self):
+        """
+        :return:
+        """
+        if self.is_numpy():
+            print("Downloading numpy dataset")
+            _resource = self.get_resource_numpy()
+            _mirrors = self.mirrors_numpy()
+        elif self.is_tensor():
+            print("Downloading tensor dataset")
+            _resource = self.resources_torch()
+            _mirrors = self.mirrors_torch()
+        elif self.is_tarball():
+            print("Downloading tarball")
+            _resource = self.resources_tarball()
+            print("Resource ")
+            _mirrors = self.mirrors_tarballs()
+            print("_mirrors")
+        else:
+            raise DatasetError(f"Can't download data format {self.data_format()} it unsupported.")
+
+        return _resource, _mirrors
 
     def mirrors(self) -> tuple[str, str, str]:
         """Generator emit link for each file and mirror based on type, size etc.
         :return:
         """
-        if self.is_numpy():
-            resource = self.get_resource_numpy()
-            mirrors = self.mirrors_numpy()
-        elif self.is_tensor():
-            resource = self.resources_torch()
-            mirrors = self.mirrors_torch()
-        elif self.is_tensor():
-            resource = self.resources_tarball()
-            mirrors = self.mirrors_tarballs()
-        else:
-            raise DatasetError(f"Can't download data format {self.data_format()} it unsupported.")
+        resource, mirrors = self._mirror_resources()
+        data_types = self.dataset_types()
 
-        # ensure that each mirror has the required dataset_type key
+        # ensure that each mirror properly.
         for mirror in mirrors:
-            if "dataset_type" not in mirror:
-                raise DatasetError("The mirror dictionary is missing the 'dataset_type' key.")
+            if not isinstance(mirror, dict):
+                raise DatasetError(f"The mirror is not a dictionary.")
+            if not isinstance(data_types, list):
+                raise DatasetError(f"The dataset types must a list.")
+
+        # Ensure that each dataset type has at least one mirror
+        for d_type in data_types:
+            mirror_found = False
+            for mirror in mirrors:
+                if d_type in mirror:
+                    mirror_found = True
+                    break
+            if not mirror_found:
+                raise DatasetError(f"No mirror found for the {d_type} key.")
 
         # for each file in resource we download it from a mirror.
         for filename, checksum, dataset_type in resource:

@@ -7,7 +7,8 @@ from .ds_downloadable_ds import DownloadableDataset
 
 class TestDataset(DownloadableDataset, ABC):
     def __init__(self,
-                 dataset_root_dir, dataset_dir: Optional[str] = "datasets",
+                 dataset_root_dir,
+                 dataset_dir: Optional[str] = "datasets_test",
                  default_tokenize: Optional[str] = "gpt2",
                  verbose: Optional[bool] = False, transform=None,
                  target_transform=None):
@@ -15,22 +16,23 @@ class TestDataset(DownloadableDataset, ABC):
         :param dataset_dir:
         :param verbose:
         """
-        super().__init__(dataset_root_dir)
         self.dataset_root_dir = dataset_root_dir
-
         assert isinstance(dataset_dir, str), 'dataset_dir should be a string'
         assert isinstance(verbose, bool), 'verbose should be a boolean'
 
-        # torch dataset mirror
+        # dataset mirror
         self._mirrors = [
-            {"train_small": 'https://192.168.254.78/ds/igc_train.tar.gz'},
-            {"val_small": 'https://192.168.254.78/ds/igc_val.tar.gz'},
+            {"train_dataset": 'http://192.168.254.78/ds/igc.tar.gz'},
+            {"json_data": 'http://192.168.254.78/ds/json_data.tar.gz'},
         ]
 
         self._resources = [
-            ("igc_train.tar.gz", "d44feaa301c1a0aa51b361adc5332b1b", "train_small"),
-            ("igc_val.tar.gz", "8c4fb3dacf23f07c85f9ccda297437d3", "val_small"),
+            ("igc.tar.gz", "12af9db8f37d80b695bf84117e53cb05", "train_dataset"),
+            ("json_data.tar.gz", "f5f3f54b39a2e2b8f63ec099fed8e677", "json_data"),
         ]
+
+        # this could types train val if we want store separately.
+        self._dataset_file_type = ["train_dataset", "json_data"]
 
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(filename='dataset.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
@@ -55,6 +57,8 @@ class TestDataset(DownloadableDataset, ABC):
             self._rest_api_to_respond_file_name,
         ]
 
+        super().__init__(dataset_root_dir=dataset_root_dir)
+
     def dataset_files(self) -> List[str]:
         return self._dataset_file_names
 
@@ -63,6 +67,12 @@ class TestDataset(DownloadableDataset, ABC):
         :return:
         """
         return self._resources
+
+    def is_tarball(self) -> bool:
+        """Implement this method indicate yes tarball.
+        :return:
+        """
+        return True
 
     def mirrors_tarballs(self):
         return self._mirrors
@@ -77,7 +87,14 @@ class TestDataset(DownloadableDataset, ABC):
         """This should return the root directory of the dataset.
         :return:
         """
-        return self.dataset_root_dir
+        return self._dataset_root_dir
+
+    def dataset_types(self):
+        """Caller can overwrite this if dataset has different types.
+        i.e. dataset type implied small , medium , large etc or some or other type.
+        :return:
+        """
+        return self._dataset_file_type
 
     def __len__(self):
         """Return length of dataset"""

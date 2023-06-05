@@ -14,6 +14,7 @@ import numpy as np
 from transformers import GPT2Tokenizer
 import logging
 
+from .ds_downloadable_ds import DownloadableDataset
 from .ds_rest_trajectories import RestTrajectory
 from .ds_utils import (
     create_tar_gz,
@@ -30,7 +31,8 @@ class DatasetConsistencyError(Exception):
     pass
 
 
-class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
+class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderInterface):
+
     def __init__(self,
                  directory_path: str,
                  default_tokenize: Optional[str] = "gpt2-xl",
@@ -62,15 +64,19 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         self._recreate_dataset = recreate_dataset
 
         # torch dataset mirror
-        self._mirrors__torch = [
-            {"train_small": 'https://drive.google.com/u/0/uc?id=1IgqBB6uZzXBQikvfloYMmf6jFPTy7EoY&export=download'},
-            {"val_small": 'https://drive.google.com/u/0/uc?id=1Cyn7DRvITjLdswDHNCDzYyxrHWKHNB21&export=download'},
+        # dataset mirror
+        self._mirrors = [
+            {"train_dataset": 'http://192.168.254.78/ds/igc.tar.gz'},
+            {"json_data": 'http://192.168.254.78/ds/json_data.tar.gz'},
         ]
 
-        self._resources_torch = [
-            ("igc.tar.gz", "d44feaa301c1a0aa51b361adc5332b1b", "train_small"),
-            ("json_data.tar.gz", "8c4fb3dacf23f07c85f9ccda297437d3", "val_small"),
+        self._resources = [
+            ("igc.tar.gz", "12af9db8f37d80b695bf84117e53cb05", "train_dataset"),
+            ("json_data.tar.gz", "f5f3f54b39a2e2b8f63ec099fed8e677", "json_data"),
         ]
+
+        # this could types train val if we want store separately.
+        self._dataset_file_type = ["train_dataset", "json_data"]
 
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(filename='dataset.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
@@ -140,11 +146,15 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         self.action_to_rest = {}
 
         self._list_masked_keys = ["@odata.id"]
-
         self._rest_trajectories = None
 
+        # call super method to download dataset
+        super().__init__(dataset_root_dir=self._default_dir)
+        # create all tarballs if we have raw files.
         self._create_tarball()
+        # load or build dataset
         self._load_dataset()
+        # check consistency
         self._check_consistency()
 
     @staticmethod
@@ -876,6 +886,43 @@ class JSONDataset(Dataset, RestMappingInterface, RestActionEncoderInterface):
         rest_api = random.choice(list(self._rest_api_to_respond.keys()))
         supported_method = self._rest_api_to_method[rest_api]
         return rest_api, supported_method, self.action_to_one_hot(rest_api)
+
+    def resources_tarball(self):
+        """We need return list of resources.
+        :return:
+        """
+        return self._resources
+
+    def is_tarball(self) -> bool:
+        """Implement this method indicate yes tarball.
+        :return:
+        """
+        return True
+
+    def mirrors_tarballs(self):
+        """Our dataset in tarball
+        :return:
+        """
+        return self._mirrors
+
+    def is_overwrite(self):
+        """Implement this method indicate yes overwrite.
+        :return:
+        """
+        return True
+
+    def root_dir(self) -> str:
+        """Downloaded dataset return the root directory of the dataset.
+        :return:
+        """
+        return self._default_dir
+
+    def dataset_types(self):
+        """Downloaded dataset requires each file has dataset type.
+        i.e. dataset type implied small , medium , large, or any other keys.
+        :return:
+        """
+        return self._dataset_file_type
 
     def _get_unique_values(self):
         """
