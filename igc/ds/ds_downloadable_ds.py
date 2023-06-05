@@ -70,7 +70,6 @@ class DownloadableDataset(Dataset):
         self._is_downloaded_done = False
         # default dataset types. i.e small , large etc.
         self._dataset_default_types = ['train_small', 'val_small']
-
         #
         super().__init__()
         self._create()
@@ -190,19 +189,14 @@ class DownloadableDataset(Dataset):
         :return:
         """
         if self.is_numpy():
-            print("Downloading numpy dataset")
             _resource = self.get_resource_numpy()
             _mirrors = self.mirrors_numpy()
         elif self.is_tensor():
-            print("Downloading tensor dataset")
             _resource = self.resources_torch()
             _mirrors = self.mirrors_torch()
         elif self.is_tarball():
-            print("Downloading tarball")
             _resource = self.resources_tarball()
-            print("Resource ")
             _mirrors = self.mirrors_tarballs()
-            print("_mirrors")
         else:
             raise DatasetError(f"Can't download data format {self.data_format()} it unsupported.")
 

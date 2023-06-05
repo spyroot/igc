@@ -1,6 +1,5 @@
 import os
 import random
-
 import numpy as np
 import torch
 
@@ -16,11 +15,12 @@ def create_test_env(cmd):
     :return:
     """
     print(cmd)
-
-    model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(cmd)
+    tokenizer = IgcLllModule.load_llm_embeddings_model(cmd, only_tokenizer=True)
     directory_path = os.path.expanduser(cmd.raw_data_dir)
     dataset = JSONDataset(
         directory_path, verbose=True, tokenizer=tokenizer)
+
+
 
     # env = RestApiEnv(
     #     args=cmd, model=model,

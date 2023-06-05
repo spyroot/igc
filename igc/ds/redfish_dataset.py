@@ -128,8 +128,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             Path(self._default_dir) / 'json_data.tar.gz')
         self._tarball_hash = ""
 
-        print(f"Dataset dir {self._default_dir}")
-        print(f"Dataset dir {self._default_raw_dir}")
+        logging.debug(f"Dataset root directory {self._default_dir}")
+        logging.debug(f"Dataset raw directory {self._default_raw_dir}")
 
         # all dataset files
         self._dataset_file_names = [
@@ -182,7 +182,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
         result = all(os.path.exists(file) for file in dataset_files)
         if result:
-            print("Found all required dataset file.")
+            logging.info("Found all required dataset file.")
 
         return all(os.path.exists(file) for file in dataset_files)
 
@@ -192,19 +192,19 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         """
         # copy all json if not present already
         if not os.path.exists(self._json_directory_path):
-            print(f"Copy all discovered data to {self._json_directory_path}")
+            logging.debug(f"Copy all discovered data to {self._json_directory_path}")
             shutil.copytree(self._unprocessed, f"{self._json_directory_path}/")
 
         # create tarball if not present.
         if not os.path.exists(self._json_data_tarball_name):
-            print(f"Creating tarball {self._json_data_tarball_name}")
+            logging.debug(f"Creating tarball {self._json_data_tarball_name}")
             full_path_tarball, self._tarball_hash = create_tar_gz(
                 self._json_directory_path, self._json_data_tarball_name)
 
         if self._check_dataset_files():
             if not os.path.exists(self._dataset_tarball_name):
                 os.makedirs(self._default_dir, exist_ok=True)
-                print(f"Creating tarball {self._dataset_tarball_name} file.")
+                logging.debug(f"Creating tarball {self._dataset_tarball_name} file.")
                 full_path_tarball, self._tarball_hash = create_tar_gz(
                     self._default_raw_dir, self._dataset_tarball_name)
 
@@ -223,22 +223,22 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
         # build a dataset
         if not self._check_dataset_files():
-            print(f"Re-building dataset {self._dataset_file_name}")
+            logging.debug(f"Re-building dataset {self._dataset_file_name}")
 
             self._load_json_files()
             self._load_dicts_from_data()
             self._construct_action_space()
 
-            print(f"Saving data to: {self._dataset_file_name}")
+            logging.debug(f"Saving data to: {self._dataset_file_name}")
             torch.save(self._data, self._dataset_file_name)
 
-            print(f"Saving masked data to: {self._dataset_masked_file_name}")
+            logging.debug(f"Saving masked data to: {self._dataset_masked_file_name}")
             torch.save(self._masked_data, self._dataset_masked_file_name)
 
-            print(f"Saving api respond data to: {self._rest_api_to_respond_file_name}")
+            logging.debug(f"Saving api respond data to: {self._rest_api_to_respond_file_name}")
             torch.save(self._rest_api_to_respond, self._rest_api_to_respond_file_name)
 
-            print(f"Saving api respond method data to: {self._rest_api_to_respond_file_name}")
+            logging.debug(f"Saving api respond method data to: {self._rest_api_to_respond_file_name}")
             torch.save(self._rest_api_to_method, self._rest_api_to_method_file_name)
 
             print(f"Saved dataset to disk. "
@@ -259,17 +259,17 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         :return:
         """
         start_time = time.time()
-        print("Loading dataset.")
+        logging.info("Loading dataset.")
 
         if self._recreate_dataset:
-            print("Forcing rebuild a dataset.")
+            logging.info("Forcing rebuild a dataset.")
             self._build_dataset()
 
         # if some file not present and tar present unpack
         if not self._check_dataset_files():
             # if tar file present unpack other create new dataset.
             if os.path.exists(self._dataset_tarball_name):
-                print(f"Found tarball unpack {self._dataset_tarball_name} files to {self._default_raw_dir}")
+                logging.debug(f"Found tarball unpack {self._dataset_tarball_name} files to {self._default_raw_dir}")
                 unpack_tar_gz(self._dataset_tarball_name, self._default_raw_dir)
                 if not self._check_dataset_files():
                     raise FileNotFoundError("Dataset files not found after unpacking the tarball.")
@@ -278,7 +278,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
         # if tarball of all api responds.
         if os.path.exists(self._json_data_tarball_name):
-            print(f"Found tarball unpack {self._json_data_tarball_name } files to {self._default_original_dir}")
+            logging.debug(f"Found tarball unpack {self._json_data_tarball_name } files to {self._default_original_dir}")
             unpack_tar_gz(self._json_data_tarball_name, self._default_original_dir)
 
         self.logger.debug(f"Loading dataset from {self._dataset_file_name}")
