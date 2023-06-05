@@ -67,15 +67,15 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         # torch dataset mirror
         # dataset mirror
         self._mirrors = [
+            {"spec": 'http://192.168.254.78/ds/dataset.json'},
             {"train_dataset": 'http://192.168.254.78/ds/igc.tar.gz'},
             {"json_data": 'http://192.168.254.78/ds/json_data.tar.gz'},
-            {"spec": 'http://192.168.254.78/ds/dataset.json'}
         ]
 
         self._resources = [
+            {"dataset.json", "", "spec"},
             ("igc.tar.gz", "", "train_dataset"),
             ("json_data.tar.gz", "", "json_data"),
-            {"dataset.json", "", "spec"},
         ]
 
         # this required for dataset download
