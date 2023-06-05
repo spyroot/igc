@@ -19,7 +19,7 @@ from .ds_downloadable_ds import DownloadableDataset
 from .ds_rest_trajectories import RestTrajectory
 from .ds_utils import (
     create_tar_gz,
-    unpack_tar_gz, md5_checksum
+    unpack_tar_gz, md5_checksum, delete_directory_with_confirmation
 )
 from igc.interfaces.rest_mapping_interface import RestMappingInterface
 from igc.interfaces.rest_one_hot_interface import RestActionEncoderInterface
@@ -44,7 +44,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                  recreate_dataset: Optional[bool] = False,
                  tokenizer: Optional[Any] = None,
                  transform=None,
-                 target_transform=None):
+                 target_transform=None,
+                 is_force_download=False):
         """
         :param directory_path:
         :param default_tokenize:
@@ -115,6 +116,9 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._default_original_dir = str(dataset_path / 'orig')
         self._json_directory_path = self._default_original_dir
 
+        if is_force_download:
+            delete_directory_with_confirmation(self._dataset_root_dir)
+
         os.makedirs(self._dataset_root_dir, exist_ok=True)
         os.makedirs(self._default_raw_dir, exist_ok=True)
 
@@ -161,10 +165,12 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._rest_trajectories = None
 
         # call super method to download dataset
-        if not self._check_tarballs_files():
+        if not self._check_tarballs_files() or is_force_download:
             super().__init__(dataset_root_dir=self._dataset_root_dir)
 
-        # create all tarballs if we have raw files.
+        # unpack tarballs.
+        self._unpack_tarballs()
+        # create all tarballs if we have raw files, rebuilding.
         self._create_tarball()
         # load or build dataset
         self._load_dataset()
@@ -255,6 +261,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                     regenerate_hash = True
 
         if self._check_dataset_files():
+            # create tarball if not present, for all raw json
             if not os.path.exists(self._dataset_tarball_name):
                 os.makedirs(self._dataset_root_dir, exist_ok=True)
                 logging.debug(f"Creating tarball {self._dataset_tarball_name} file.")
@@ -357,6 +364,26 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                 raise DatasetConsistencyError(
                     f"No matching resource found for tarball: {tarball_name}")
 
+    def _unpack_tarballs(self):
+        """Unpack tarballs to raw directory.
+          if mandatory files not present,  first try to locate tarball and if tarball
+          present unpack.
+        :return:
+        """
+        # if tar file present unpack other create new dataset.
+        if os.path.exists(self._dataset_tarball_name):
+            logging.debug(
+                f"Found tarball unpack {self._dataset_tarball_name} "
+                f"files to {self._default_raw_dir}")
+            unpack_tar_gz(self._dataset_tarball_name, self._default_raw_dir)
+
+        # if tarball of all api responds present, unpack.
+        if os.path.exists(self._dataset_json_tarball_name):
+            logging.debug(
+                f"Found tarball unpack {self._dataset_json_tarball_name} "
+                f"files to {self._default_original_dir}")
+            unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
+
     def _load_dataset(self):
         """Load dataset.  If required file not present, it will first check if tarball
         in dataset root dir,  if tarballs in root dir it will unpack and loaded
@@ -371,18 +398,14 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             self._build_dataset()
 
         # if mandatory files not present,
-        # first try to locate tarball and if tarball present unpack, otherwise build dataset.
+        # first try to locate tarball and if tarball
+        # present unpack, otherwise build dataset.
         if not self._check_dataset_files():
-            # if tar file present unpack other create new dataset.
-            if os.path.exists(self._dataset_tarball_name):
-                logging.debug(
-                    f"Found tarball unpack {self._dataset_tarball_name} "
-                    f"files to {self._default_raw_dir}")
-                unpack_tar_gz(self._dataset_tarball_name, self._default_raw_dir)
-                if not self._check_dataset_files():
-                    raise FileNotFoundError("Dataset files not found after unpacking the tarball.")
-            else:
-                self._build_dataset()
+            self._unpack_tarballs()
+            if not self._check_dataset_files():
+                raise FileNotFoundError("Dataset files not found after unpacking the tarball.")
+        else:
+            self._build_dataset()
 
         # if tarball of all api responds present, unpack.
         if os.path.exists(self._dataset_json_tarball_name):

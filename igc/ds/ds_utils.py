@@ -1,5 +1,6 @@
 import hashlib
 import os.path
+import shutil
 import sys
 import urllib
 import urllib.error
@@ -117,12 +118,14 @@ def do_http_head(url: str, max_redirect: int = 5, max_timeout=10) -> str:
 
 
 def get_chunk(
-    content: Iterator[bytes], destination: str, length: Optional[int] = None) -> None:
-    """Get a chunk of data.
-    :param content:
-    :param destination:
-    :param length:
-    :return:
+        content: Iterator[bytes],
+        destination: str,
+        length: Optional[int] = None) -> None:
+    """Get a chunk of data and write it to the specified destination.
+    :param content: Iterator yielding chunks of data as bytes.
+    :param destination: Path to the file where the data will be written.
+    :param length: Optional length of the data in bytes.
+    :return: None
     """
     with open(destination, "wb") as fh, tqdm(total=length) as pbar:
         for chunk in content:
@@ -144,7 +147,8 @@ def fetch_content(url: str, filename: str, chunk_size: int = 1024 * 32) -> None:
         get_chunk(iter(lambda: resp.read(chunk_size), b""), filename, length=resp.length)
 
 
-def download_dataset(url: str, path: str,
+def download_dataset(url: str,
+                     path: str,
                      filename: Optional[str] = None,
                      checksum: Optional[str] = None,
                      overwrite: Optional[bool] = False,
@@ -195,6 +199,7 @@ def download_dataset(url: str, path: str,
         logger.info(f"Fetching {url} "
                     f"location {full_path}.")
         fetch_content(final_url, str(full_path))
+
     except (urllib.error.URLError, OSError) as e:
         warnings.warn("Failed to fetch".format(final_url))
         if is_strict:
@@ -251,3 +256,21 @@ def check_integrity(path: str, md5: Optional[str] = None) -> bool:
     checksum_result = "matched" if result else "mismatched"
     logger.debug(f"Comparing checksum result: {checksum_result}")
     return result
+
+
+def delete_directory_with_confirmation(directory_path: str) -> None:
+    """
+    Delete a directory with confirmation prompt.
+    :param directory_path: The path to the directory to be deleted.
+    :return: None
+    """
+    print(f"WARNING: You are about to delete the directory:\n{directory_path}")
+    confirm = input("Are you sure you want to proceed? (y/n): ")
+    if confirm.lower() == "y":
+        try:
+            shutil.rmtree(directory_path)
+            print("Directory deleted successfully.")
+        except OSError as e:
+            print(f"Error occurred while deleting the directory: {e}")
+    else:
+        print("Directory deletion cancelled.")

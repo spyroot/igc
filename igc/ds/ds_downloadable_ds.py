@@ -8,12 +8,13 @@ A dataset can have different types of files (i.e. tar, zip, numpy , torch.)
 
 Mus mbayramo@stanford.edu
 """
+import json
 import os
 import subprocess
 import warnings
 from abc import abstractmethod
 from pathlib import Path
-from typing import Optional, Tuple, List, Callable, Iterable
+from typing import Optional, Tuple, List, Callable, Iterable, Generator, Dict
 from urllib.error import URLError
 
 from loguru import logger
@@ -202,15 +203,24 @@ class DownloadableDataset(Dataset):
 
         return _resource, _mirrors
 
-    def mirrors(self) -> tuple[str, str, str]:
+    def spec_mirror(self) -> Iterable[str]:
+        """
+        :return:
+        """
+        _resource, _mirrors = self._mirror_resources()
+        for mirror in _mirrors:
+            if "spec" in mirror:
+                yield mirror["spec"]
+
+    def mirrors(self) -> Iterable[Tuple[str, str, str]]:
         """Generator emit link for each file and mirror based on type, size etc.
         :return:
         """
-        resource, mirrors = self._mirror_resources()
+        _resource, _mirrors = self._mirror_resources()
         data_types = self.dataset_types()
 
         # ensure that each mirror properly.
-        for mirror in mirrors:
+        for mirror in _mirrors:
             if not isinstance(mirror, dict):
                 raise DatasetError(f"The mirror is not a dictionary.")
             if not isinstance(data_types, list):
@@ -219,7 +229,7 @@ class DownloadableDataset(Dataset):
         # Ensure that each dataset type has at least one mirror
         for d_type in data_types:
             mirror_found = False
-            for mirror in mirrors:
+            for mirror in _mirrors:
                 if d_type in mirror:
                     mirror_found = True
                     break
@@ -227,8 +237,8 @@ class DownloadableDataset(Dataset):
                 raise DatasetError(f"No mirror found for the {d_type} key.")
 
         # for each file in resource we download it from a mirror.
-        for filename, checksum, dataset_type in resource:
-            for mirror in mirrors:
+        for filename, checksum, dataset_type in _resource:
+            for mirror in _mirrors:
                 if dataset_type in mirror:
                     if mirror[dataset_type].endswith("/"):
                         yield f"{mirror[dataset_type]}{filename}", filename, checksum
@@ -321,38 +331,74 @@ class DownloadableDataset(Dataset):
         """
         return self._post_process_dir
 
-    def download_if_need(self) -> bool:
-        """Download a dataset, either tar.gz, numpy or torch file.
-           if file present it will set flag is_download.
+    def dataset_spec_file_name(self):
+        return "dataset.json"
+
+    def download_file(self, mirror_url: str, _filename: str, checksum: str = None):
+        """
+        :param mirror_url:
+        :param _filename:
+        :param checksum:
         :return:
+        """
+        dataset_filter = self.dataset_types()
+        try:
+            logger.debug("Downloading from mirror: {} file: {}".format(mirror_url, _filename))
+            self._is_downloaded_done, file_path = download_dataset(
+                url=mirror_url,
+                path=self.root_dir(),
+                filename=_filename,
+                checksum=checksum,
+                overwrite=self.is_overwrite()
+            )
+            self._dataset_file.append(file_path)
+            if self.is_downloaded and len(dataset_filter) == len(self._dataset_file):
+                logger.debug("File in the system: {}".format(file_path))
+                return True
+        except URLError as e:
+            logger.debug("Failed to download {} {}. "
+                         "Moving to the next mirror.".format(mirror_url, _filename))
+            logger.error(e)
+        return False
+
+    def download_spec_and_get_hashes(self) -> Dict[str, str]:
+        """Download the dataset spec file and extract the hash values.
+        :return: A dictionary mapping file names to their corresponding hash values.
+        """
+        spec_hash_values = {}
+
+        # Download spec file if needed
+        for spec_mirror_url in self.spec_mirror():
+            print(f"passing spec mirror url {spec_mirror_url}")
+            self.download_file(spec_mirror_url, self.dataset_spec_file_name(), checksum=None)
+
+        spec_file_path = os.path.join(self.root_dir(), self.dataset_spec_file_name())
+        with open(spec_file_path, "r") as spec_file:
+            spec_data = json.load(spec_file)
+            for resource in spec_data["resources"]:
+                file_name, file_md5, data_type = resource
+                spec_hash_values[file_name] = file_md5
+
+        return spec_hash_values
+
+    def download_if_need(self) -> bool:
+        """Download a dataset, either tar.gz, numpy, or torch file.
+        If the file is present, it will set the is_downloaded flag.
+
+        :return: True if the dataset is downloaded, False otherwise.
         """
         if not self.is_overwrite():
             if self.is_downloaded():
                 warnings.warn("File already downloaded.")
 
-        dataset_filter = self.dataset_types()
         os.makedirs(self.root_dir(), exist_ok=True)
+        spec_hash_values = self.download_spec_and_get_hashes()
 
-        # download if needed
-        self._is_downloaded_done = False
-        for (mirror, filename, md5) in self.mirrors():
-            try:
-                logger.debug("downloading from mirror {} file {}".format(mirror, filename))
-                self._is_downloaded_done, file_path = download_dataset(
-                    url=mirror,
-                    path=self.root_dir(),
-                    filename=filename,
-                    checksum=md5,
-                    overwrite=self.is_overwrite())
-                self._dataset_file.append(file_path)
-                if self.is_downloaded and len(dataset_filter) == self._dataset_file:
-                    logger.debug(f"File in the system {file_path}.")
-                    break
-
-            except URLError as e:
-                logger.debug("Failed to download {} {}. Moving to next mirror.".format(mirror, filename))
-                logger.error(e)
-                continue
+        # Download other files
+        for (m, f, md5) in self.mirrors():
+            if md5 is None or len(md5) == 0 and f in spec_hash_values:
+                md5 = spec_hash_values[f]
+            self.download_file(m, f, md5)
 
         if self.is_downloaded:
             logger.info("File downloaded.")

@@ -15,13 +15,9 @@ class RestTrajectory:
 
         :param raw_json_dir:  raw_json_dir: The directory path for the raw JSON responses.
         :param rest_new_prefix: The new prefix for the updated file paths.
-
         """
-
-        if not os.path.isdir(raw_json_dir):
-            raise ValueError("Invalid raw_json_dir. The directory does not exist.")
         if not os.path.isdir(rest_new_prefix):
-            raise ValueError("Invalid rest_new_prefix. The directory does not exist.")
+            raise ValueError(f"Invalid {rest_new_prefix}. The directory does not exist.")
 
         self._rest_map_data = {}
         self._hosts = []
