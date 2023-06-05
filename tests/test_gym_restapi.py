@@ -8,6 +8,7 @@ from igc.ds.redfish_dataset import JSONDataset
 from igc.envs.rest_gym_env import RestApiEnv, HttpMethod
 from igc.modules.llm_module import IgcLllModule
 from igc.shared.shared_main import shared_main
+from .test_utils import register_reset_goal
 
 
 class TestRestApiEnv(unittest.TestCase):
@@ -502,6 +503,139 @@ class TestRestApiEnv(unittest.TestCase):
         self.assertEqual(done, True, "last episode should set done to True")
         self.assertEqual(terminated, False, "last episode should set terminated to True")
         self.assertEqual(env.step_count, 3, "Step count does not increase")
+
+    def test_reset_goal_reached(self):
+        """Test reset env with goal and execute two action last action is goal action.
+        Expectation agent should receive reward 1.0
+        :return:
+        """
+
+        max_episode_len = 5
+        args = shared_main()
+        package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+        json_directory_path = os.path.expanduser(args.raw_data_dir)
+        dataset = JSONDataset(
+            raw_json_directory_path=json_directory_path,
+            dataset_dir=f"{package_dir}/datasets",
+            verbose=True, tokenizer=tokenizer)
+
+        # sample some random goal and choose method
+        # this our goal
+        rest_api, supported_method, one_hot_action = dataset.sample_rest_api()
+        http_method_one_hot = RestApiEnv.encode_rest_api_method("GET")
+        goal_action = RestApiEnv.concat_rest_api_method(one_hot_action, http_method_one_hot)
+
+        env = RestApiEnv(
+            args=args, model=model,
+            tokenizer=tokenizer,
+            discovered_rest_api=dataset,
+            max_episode=max_episode_len)
+
+        obs, info = env.reset(goal=goal_action)
+        self.assertTrue(torch.allclose(env.goal_action, goal_action), "last obs must same as next")
+
+        total_reward = 0.0
+        for n in range(0, 2):
+            rest_api, supported_method, one_hot_action = dataset.sample_rest_api()
+            http_method_one_hot = RestApiEnv.encode_rest_api_method("GET")
+            action = RestApiEnv.concat_rest_api_method(one_hot_action, http_method_one_hot)
+            next_observation, reward, done, terminated, info = env.step(action)
+            total_reward += reward
+            self.assertEqual(reward, 0.1, "Reward is not equal to 0.1")
+            self.assertTrue(torch.allclose(env.last_observation, next_observation),
+                            "last obs must same as next")
+            self.assertEqual(next_observation.shape, obs.shape,
+                             "next observation shape does not match observation shape")
+            self.assertEqual(done, False, "single get should not set done")
+            self.assertEqual(terminated, False, "single get should not set terminated")
+            self.assertEqual(env.step_count, n + 1, "Step count does not increase")
+
+        # execute action with goal for this task episode
+        next_observation, reward, done, terminated, info = env.step(goal_action)
+        self.assertEqual(reward, 1.0, "Last reward should be 1.0")
+        self.assertTrue(torch.allclose(env.last_observation, next_observation), "last obs must same as next")
+        self.assertEqual(next_observation.shape, obs.shape, "next observation shape does not match observation shape")
+        self.assertEqual(done, True, "last episode should set done to True")
+        self.assertEqual(terminated, False, "last episode should set terminated to True")
+        self.assertEqual(env.step_count, 3, "Step count does not increase")
+
+    def test_mutate_state(self):
+        """Test reset env with goal and execute action last action is goal action.
+        Expectation agent should receive reward 1.0
+        :return:
+        """
+
+        max_episode_len = 5
+        args = shared_main()
+        package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+        json_directory_path = os.path.expanduser(args.raw_data_dir)
+        dataset = JSONDataset(
+            raw_json_directory_path=json_directory_path,
+            dataset_dir=f"{package_dir}/datasets",
+            verbose=True, tokenizer=tokenizer)
+
+        # sample some random goal and choose method
+        # this our goal
+        # rest_api, supported_method, one_hot_action = dataset.sample_rest_api()
+        # http_method_one_hot = RestApiEnv.encode_rest_api_method("GET")
+        # goal_action = RestApiEnv.concat_rest_api_method(one_hot_action, http_method_one_hot)
+
+        env = RestApiEnv(
+            args=args, model=model,
+            tokenizer=tokenizer,
+            discovered_rest_api=dataset,
+            max_episode=max_episode_len)
+
+        # register handler, which is our final goal state that we mutate.
+        goal_reset_api = register_reset_goal(env.mock_server())
+        # rest_action = dataset.action_to_rest[goal_reset_api]
+        # print(rest_action)
+
+        for a in dataset.action_space:
+            if "ComputerSystem.Reset" in a:
+                print(f"a {a}")
+                print(f"a val {dataset.action_space[a]}")
+
+        for a in dataset.action_to_rest:
+            if "ComputerSystem.Reset" in a:
+                print(f"a {a}")
+                print(f"a val {dataset.action_to_rest[a]}")
+
+        # one_hot_action = dataset.action(goal_reset_api)
+        # print(f"one hot action {one_hot_action}")
+
+        # obs, info = env.reset(goal=goal_action)
+        #
+        # self.assertTrue(torch.allclose(env.goal_action, goal_action), "last obs must same as next")
+        #
+        # total_reward = 0.0
+        # for n in range(0, 2):
+        #     rest_api, supported_method, one_hot_action = dataset.sample_rest_api()
+        #     http_method_one_hot = RestApiEnv.encode_rest_api_method("GET")
+        #     action = RestApiEnv.concat_rest_api_method(one_hot_action, http_method_one_hot)
+        #     next_observation, reward, done, terminated, info = env.step(action)
+        #     total_reward += reward
+        #     self.assertEqual(reward, 0.1, "Reward is not equal to 0.1")
+        #     self.assertTrue(torch.allclose(env.last_observation, next_observation),
+        #                     "last obs must same as next")
+        #     self.assertEqual(next_observation.shape, obs.shape,
+        #                      "next observation shape does not match observation shape")
+        #     self.assertEqual(done, False, "single get should not set done")
+        #     self.assertEqual(terminated, False, "single get should not set terminated")
+        #     self.assertEqual(env.step_count, n + 1, "Step count does not increase")
+        #
+        # # execute action with goal for this task episode
+        # next_observation, reward, done, terminated, info = env.step(goal_action)
+        # self.assertEqual(reward, 1.0, "Last reward should be 1.0")
+        # self.assertTrue(torch.allclose(env.last_observation, next_observation), "last obs must same as next")
+        # self.assertEqual(next_observation.shape, obs.shape, "next observation shape does not match observation shape")
+        # self.assertEqual(done, True, "last episode should set done to True")
+        # self.assertEqual(terminated, False, "last episode should set terminated to True")
+        # self.assertEqual(env.step_count, 3, "Step count does not increase")
 
 
 if __name__ == "__main__":

@@ -24,6 +24,17 @@ class HttpMethod(Enum):
     HEAD = "HEAD"
 
 
+class GoalTypeState(Enum):
+    # State represent a state that agent need reach
+    State = 0
+    # Action is goal that agent need execute with
+    # particular method and/or list of parameters
+    # i.e. HTTP post with particular payload
+    Action = 1
+    # fixed state client provide state
+    FixedState = 2
+
+
 class RestApiEnv(gym.Env):
     """
     """
@@ -54,8 +65,9 @@ class RestApiEnv(gym.Env):
         super().__init__()
 
         self.last_observation = None
-        self.goal_action = goal
         self.max_steps = max_episode
+        self.goal_action = goal
+        self.goal_type = None
         self.step_count = 0
 
         if default_rest_base is None:
@@ -138,6 +150,32 @@ class RestApiEnv(gym.Env):
             raise ValueError("Unsupported action space")
         return action_shape
 
+    def is_goal_reached(self, action: ActType, response=None) -> bool:
+        """
+        Check if the given action is the goal action.
+
+        :param response:
+        :param action: The action to check.
+        :return: True if the action is the goal action, False otherwise.
+        """
+        if self.goal_type == GoalTypeState.State.value:
+            if response is not None:
+                observation = self.encoder.encode(response.json())
+                if torch.allclose(observation, self.goal_action) and 200 <= response.status_code <= 300:
+                    return True
+        # simple goal execute particular http api with particular method.
+        elif self.goal_type == GoalTypeState.Action.value:
+            if torch.allclose(action, self.goal_action):
+                return True
+        # fixed state goal provided as a tensor
+        elif self.goal_type == GoalTypeState.FixedState.value:
+            if response is not None:
+                observation = self.encoder.encode(response.json())
+                if torch.allclose(observation, self.goal_action) and 200 <= response.status_code <= 300:
+                    return True
+
+        return False
+
     def step(self, action: ActType) -> Tuple[ObsType, float, bool, bool, dict]:
         """
         :param action:
@@ -158,7 +196,6 @@ class RestApiEnv(gym.Env):
             self.extract_action_method(action)
             rest_api_one_hot, method_one_hot = RestApiEnv.extract_action_method(action)
             method = RestApiEnv.one_hot_to_method_string(method_one_hot)
-
             # Remove the additional dimension from the one-hot vector
             if method not in RestApiEnv.METHOD_MAPPING:
                 print("Method not in mapping")
@@ -170,15 +207,13 @@ class RestApiEnv(gym.Env):
                 print(f"rest api {rest_api} method {method}")
                 response = self._mock_rest.request(rest_api, method)
                 # agent execute goal action
-                if torch.allclose(action, self.goal_action):
+                if self.is_goal_reached(action, response):
                     reward = 1.0
                     done = True
-                    observation = response.json()
-                    self.last_observation = self.encoder.encode(observation)
+                    self.last_observation = self.encoder.encode(response.json())
                 elif 200 <= response.status_code <= 300:
                     print(f"status code {response.status_code}")
-                    observation = response.json()
-                    self.last_observation = self.encoder.encode(observation)
+                    self.last_observation = self.encoder.encode(response.json())
                     reward = 0.1
                     done = False
                     # Update the current observation with the successful observation
@@ -209,8 +244,12 @@ class RestApiEnv(gym.Env):
         *,
         seed: Optional[int] = None,
         options: Optional[dict] = None,
+        goal: Optional[ObsType] = None,
+        goal_type: GoalTypeState = None
     ) -> Tuple[ObsType, dict]:
         """Set initial observation to entry point to rest API.
+        :param goal_type:
+        :param goal:
         :param seed:
         :param options:
         :return:
@@ -219,11 +258,36 @@ class RestApiEnv(gym.Env):
             super().reset(seed=seed, options=options)
 
         self.step_count = 0
+        self.goal_action = goal
+        self.goal_type = goal_type
 
+        # add option to execute list of action and get final goal
+        if goal_type == GoalTypeState.State:
+            if goal is not None and isinstance(goal, dict):
+                # execute rest api and observe goal
+                response = self.mock_server().request(
+                    goal["rest_api"], goal["method"], goal["parameters"])
+                if 200 <= response.status_code <= 300:
+                    self.goal_action = self.encoder.encode(response.json())
+                else:
+                    # Handle the case where the goal REST API returns an error code
+                    raise ValueError("Goal REST API returned an error code.")
+        # simple goal execute particular http api with particular method.
+        elif goal_type == GoalTypeState.Action:
+            self.goal_action = goal
+        # fixed state goal provided as a tensor
+        elif goal_type == GoalTypeState.FixedState:
+            if goal.shape != self.observation_space.shape:
+                raise ValueError("Fixed state goal dimensions do not match observation space dimensions.")
+            self.goal_action = goal
+
+        # initial observation
         rest_api, one_hot_vector = self._discovered_rest_api.entry_rest_api()
         response = self.mock_server().request(rest_api, HttpMethod.GET.value)
-        self.last_observation = self.encoder.encode(response.json_data)
-        return self.last_observation, {}
+        self.last_observation = self.encoder.encode(response.json())
+        print(f"Last self.last_observation.shape  {self.last_observation.shape}")
+        print(f"Last self.goal_action shape {self.goal_action.shape}")
+        return self.last_observation, {"goal": self.goal_action}
 
     def goal(self) -> float:
         """
