@@ -69,15 +69,17 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._mirrors = [
             {"train_dataset": 'http://192.168.254.78/ds/igc.tar.gz'},
             {"json_data": 'http://192.168.254.78/ds/json_data.tar.gz'},
+            {"spec": 'http://192.168.254.78/ds/dataset.json'}
         ]
 
         self._resources = [
             ("igc.tar.gz", "", "train_dataset"),
             ("json_data.tar.gz", "", "json_data"),
+            {"dataset.json", "", "spec"},
         ]
 
-        # this could types train val if we want store separately.
-        self._dataset_file_type = ["train_dataset", "json_data"]
+        # this required for dataset download
+        self._dataset_file_type = ["train_dataset", "json_data", "spec"]
 
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(filename='dataset.log', level=logging.DEBUG, format='%(asctime)s %(message)s')

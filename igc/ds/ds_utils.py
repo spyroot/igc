@@ -156,7 +156,7 @@ def download_dataset(url: str, path: str,
     :param path: where want to save a file.
     :param url: link to a file.
     :param filename:  Name to save the file under. If None, use the basename of the URL.
-    :param checksum:  Checksum of the download. If None, do not check.
+    :param checksum:  Checksum of the download. If None, or empty string will not do check.
     :param retry: num retry
     :return:
     """
@@ -174,7 +174,7 @@ def download_dataset(url: str, path: str,
     # check if file is already present locally
     if not overwrite:
         # we check checksum if needed.
-        if checksum is not None and full_path.exists():
+        if checksum is not None and len(checksum) > 0 and full_path.exists():
             # check integrity
             if not check_integrity(str(full_path), checksum):
                 warnings.warn(f"Checksum mismatched for a file: {str(full_path)}")
