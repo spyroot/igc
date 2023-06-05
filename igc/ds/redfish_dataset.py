@@ -454,15 +454,17 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
 
         self._rest_trajectories = RestTrajectory(
-            self._unprocessed, self._default_original_dir)
+            raw_json_dir=self._default_original_dir,
+            rest_new_prefix=self._default_original_dir
+        )
         self._rest_trajectories.load()
 
         print(f" Unprocessed dir {self._unprocessed}")
         print(f"self._default_original_dir dir {self._default_original_dir}")
 
         # # all api mapping
-        # self._rest_api_to_respond, self._rest_api_to_method = self._rest_trajectories.merged_view()
-        # self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
+        self._rest_api_to_respond, self._rest_api_to_method = self._rest_trajectories.merged_view()
+        self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
 
         self.logger.debug(f"Loaded dataset length: {len(self._data)}")
         self.logger.info(f"Loaded dataset, total time: {time.time() - start_time}")
