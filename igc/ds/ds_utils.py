@@ -1,5 +1,4 @@
 import hashlib
-import os
 import os.path
 import sys
 import urllib
@@ -68,33 +67,33 @@ def create_tar_gz(directory_path: str, output_file: str) -> Tuple[str, str]:
     if not output_file.endswith(".tar.gz"):
         output_file += ".tar.gz"
         output_file = os.path.join(directory_name, output_file)
-        print(f"Final file name {output_file}")
+        logger.debug(f"Final file name {output_file}")
     else:
         output_file = os.path.join(directory_name, output_file)
-        print(f"Final file name {output_file}")
+        logger.debug(f"Final file name {output_file}")
 
     tar_file = os.path.join(os.path.dirname(directory_path), f"{directory_name}.tar")
     with tarfile.open(tar_file, "w") as tar:
         for root, dirs, files in os.walk(directory_path):
             for file in files:
                 file_path = os.path.join(root, file)
-                print("adding file to tar file: ", file_path)
+                logger.debug("Adding file to tar file: ", file_path)
                 tar.add(file_path, arcname=file)
 
     with open(tar_file, "rb") as f_in, gzip.open(output_file, "wb") as f_out:
-        print(f"write gzip {output_file}")
+        logger.debug(f"Write gzip {output_file}")
         f_out.writelines(f_in)
 
     os.remove(tar_file)
     # compute the hash value of the tar.gz file
 
     hash_value = md5_checksum(output_file)
-    hash_file = os.path.join(os.path.dirname(directory_path), f"{directory_name}.md5")
+    hash_file = os.path.join(os.path.dirname(directory_path), f"{output_file}.md5")
     with open(hash_file, "w") as f:
         f.write(hash_value)
 
-    print("Tar file created:", os.path.abspath(tar_file))
-    return os.path.abspath(output_file), os.path.abspath(hash_file)
+    logger.debug("Tar file created:", os.path.abspath(tar_file))
+    return os.path.abspath(output_file), hash_value
 
 
 def do_http_head(url: str, max_redirect: int = 5, max_timeout=10) -> str:
@@ -151,9 +150,7 @@ def download_dataset(url: str, path: str,
                      overwrite: Optional[bool] = False,
                      retry: int = 5,
                      is_strict=False) -> tuple[bool, str]:
-    """
-    Download a file.
-
+    """Download a file.
     :param overwrite: if we need overwrite, no checksum check.
     :param is_strict:  if we couldn't find any raise exception otherwise it just warnings.
     :param path: where want to save a file.
@@ -206,7 +203,7 @@ def download_dataset(url: str, path: str,
     # check integrity of downloaded file
     if checksum is not None and full_path.exists():
         if not check_integrity(str(full_path), checksum):
-            warnings.warn("Checksum mismatch.")
+            warnings.warn(f"Checksum {checksum} mismatch.")
             return False, ""
 
     logger.info(f"Dataset exists {full_path.exists()} and path {str(full_path)}")

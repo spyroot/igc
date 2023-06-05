@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 import numpy as np
+from tqdm import tqdm
 
 from transformers import GPT2Tokenizer
 import logging
@@ -18,7 +19,7 @@ from .ds_downloadable_ds import DownloadableDataset
 from .ds_rest_trajectories import RestTrajectory
 from .ds_utils import (
     create_tar_gz,
-    unpack_tar_gz
+    unpack_tar_gz, md5_checksum
 )
 from igc.interfaces.rest_mapping_interface import RestMappingInterface
 from igc.interfaces.rest_one_hot_interface import RestActionEncoderInterface
@@ -71,8 +72,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         ]
 
         self._resources = [
-            ("igc.tar.gz", "12af9db8f37d80b695bf84117e53cb05", "train_dataset"),
-            ("json_data.tar.gz", "f5f3f54b39a2e2b8f63ec099fed8e677", "json_data"),
+            ("igc.tar.gz", "", "train_dataset"),
+            ("json_data.tar.gz", "", "json_data"),
         ]
 
         # this could types train val if we want store separately.
@@ -84,6 +85,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self.transform = transform
         self.target_transform = target_transform
 
+        # all rest api train data loaded to data, masked data container masked dataset.
         self._data = {}
         self._masked_data = {}
         _unprocessed = os.path.abspath(directory_path)
@@ -106,14 +108,15 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         dataset_path = os.path.abspath(dataset_dir)
         dataset_path = Path(dataset_path).resolve()
 
-        self._default_dir = str(dataset_path)
+        self._dataset_root_dir = str(dataset_path)
         self._default_raw_dir = str(dataset_path / 'raw')
         self._default_original_dir = str(dataset_path / 'orig')
         self._json_directory_path = self._default_original_dir
 
-        os.makedirs(self._default_dir, exist_ok=True)
+        os.makedirs(self._dataset_root_dir, exist_ok=True)
         os.makedirs(self._default_raw_dir, exist_ok=True)
 
+        # this file create during build process.
         self._dataset_file_name = str(
             Path(self._default_raw_dir) / f"processed_dataset_{tok_name}.pt")
         self._dataset_masked_file_name = str(
@@ -122,13 +125,15 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             Path(self._default_raw_dir) / f"rest_api_to_method_{tok_name}.pt")
         self._rest_api_to_respond_file_name = str(
             Path(self._default_raw_dir) / f"rest_api_to_respond_{tok_name}.pt")
+
+        # tar ball file names
         self._dataset_tarball_name = str(
-            Path(self._default_dir) / 'igc.tar.gz')
-        self._json_data_tarball_name = str(
-            Path(self._default_dir) / 'json_data.tar.gz')
+            Path(self._dataset_root_dir) / 'igc.tar.gz')
+        self._dataset_json_tarball_name = str(
+            Path(self._dataset_root_dir) / 'json_data.tar.gz')
         self._tarball_hash = ""
 
-        logging.debug(f"Dataset root directory {self._default_dir}")
+        logging.debug(f"Dataset root directory {self._dataset_root_dir}")
         logging.debug(f"Dataset raw directory {self._default_raw_dir}")
 
         # all dataset files
@@ -138,10 +143,15 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             self._rest_api_to_method_file_name,
             self._rest_api_to_respond_file_name,
         ]
+        # all tarball file
+        self._dataset_tarballs = [
+            self._dataset_tarball_name,
+            self._dataset_json_tarball_name,
+        ]
 
         # dictionary to map hash values to action one-hot vectors
-        self.num_actions = 0
         self.goals = {}
+        self.num_actions = 0
         self.action_space = {}
         self.action_to_rest = {}
 
@@ -149,7 +159,9 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._rest_trajectories = None
 
         # call super method to download dataset
-        super().__init__(dataset_root_dir=self._default_dir)
+        if not self._check_tarballs_files():
+            super().__init__(dataset_root_dir=self._dataset_root_dir)
+
         # create all tarballs if we have raw files.
         self._create_tarball()
         # load or build dataset
@@ -157,12 +169,21 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         # check consistency
         self._check_consistency()
 
-    @staticmethod
-    def required_keys():
-        """
+    def _load_dataset_spec(self):
+        """Read dataset spec and update mirror and resources.
         :return:
         """
+        json_file_path = Path(self._dataset_root_dir) / "dataset.json"
+        with open(json_file_path, "r") as json_file:
+            json_data = json.load(json_file)
+            self._mirrors = json_data["mirrors"]
+            self._resources = json_data["resources"]
 
+    @staticmethod
+    def required_keys() -> List[str]:
+        """List of keys that data store.
+        :return: list of keys
+        """
         required_keys = ["hash_to_rest_api",
                          "hash_to_action_idx",
                          "action_idx_to_hash",
@@ -184,35 +205,92 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         if result:
             logging.info("Found all required dataset file.")
 
-        return all(os.path.exists(file) for file in dataset_files)
+        return result
+
+    def _check_tarballs_files(self) -> bool:
+        """Check if all dataset files are present.
+        :return: True if all files are present, False otherwise.
+        """
+        result = all(os.path.exists(file) for file in self._dataset_tarballs)
+        if result:
+            logging.info("Found all required tarball file.")
+
+        return result
+
+    @staticmethod
+    def _update_hash_values(json_file_path, data):
+        """Update dataset.json file, this mainly to update all hash values.
+        :param json_file_path: Path to the JSON file
+        """
+        data_json = json.dumps(data, indent=4)
+        with open(json_file_path, "w") as json_file:
+            json_file.write(data_json)
 
     def _create_tarball(self):
-        """Create tarball if needed.
-        :return:
+        """Create tarballs if needed, and updates dataset.json
+          where dataset.json stores all mirrors,
+
+          It will update all hash values for each tarball file.
+        :return: Nothing.
         """
         # copy all json if not present already
         if not os.path.exists(self._json_directory_path):
             logging.debug(f"Copy all discovered data to {self._json_directory_path}")
             shutil.copytree(self._unprocessed, f"{self._json_directory_path}/")
 
-        # create tarball if not present.
-        if not os.path.exists(self._json_data_tarball_name):
-            logging.debug(f"Creating tarball {self._json_data_tarball_name}")
-            full_path_tarball, self._tarball_hash = create_tar_gz(
-                self._json_directory_path, self._json_data_tarball_name)
+        regenerate_hash = False
+
+        # create tarball if not present, for all raw json
+        if not os.path.exists(self._dataset_json_tarball_name):
+            logging.debug(f"Creating tarball {self._dataset_json_tarball_name}")
+            _, _tarball_hash = create_tar_gz(
+                self._json_directory_path, self._dataset_json_tarball_name)
+            # update hash values in _resources
+            tarball_name = os.path.basename(self._dataset_json_tarball_name)
+            for i, resource in enumerate(self._resources):
+                if resource[0] == tarball_name:
+                    self._resources[i] = (resource[0], _tarball_hash, resource[2])
+                    regenerate_hash = True
 
         if self._check_dataset_files():
             if not os.path.exists(self._dataset_tarball_name):
-                os.makedirs(self._default_dir, exist_ok=True)
+                os.makedirs(self._dataset_root_dir, exist_ok=True)
                 logging.debug(f"Creating tarball {self._dataset_tarball_name} file.")
-                full_path_tarball, self._tarball_hash = create_tar_gz(
+                _, _tarball_hash = create_tar_gz(
                     self._default_raw_dir, self._dataset_tarball_name)
 
+                # update hash
+                tarball_name = os.path.basename(self._dataset_tarball_name)
+                for i, resource in enumerate(self._resources):
+                    if resource[0] == tarball_name:
+                        self._resources[i] = (resource[0], _tarball_hash, resource[2])
+                        regenerate_hash = True
+
+        if regenerate_hash:
+            # update dataset.json
+            json_data = {
+                "mirrors": self._mirrors,
+                "resources": self._resources
+            }
+            json_file_path = Path(self._dataset_root_dir) / "dataset.json"
+            self._update_hash_values(str(json_file_path), json_data)
+
     def _build_dataset(self):
-        """Build a dataset from all json responds
+        """Build a dataset from all rest api json responds.
+        During build process, we create separate files that store all dataset
+        data with following structure.
+
+        - all rest api to particular rest api hashed
+        - each hash value mapped to hash index, so we have a map hash -> index
+            - and inverse index -> hash
+        - each index hash respected one hot vector.  index of hash -> one hot vector.
+            - inverse one hot vector to index.
+
+        We use Adler-32 , since it fast and likelihood collision very small.
+
+         The hash we use
         :return:
         """
-
         # self._default_dir, self._default_original_dir
         self._rest_trajectories = RestTrajectory(self._unprocessed, self._default_original_dir)
         self._rest_trajectories.load()
@@ -254,8 +332,33 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             # create tarball
             self._create_tarball()
 
-    def _load_dataset(self):
+    def _check_tarball_hash(self):
+        """This method called, post load, datasets.json
+         loaded and each tarball hash verified.
+        :return:
         """
+        for tarball_path in self._dataset_tarballs:
+            tarball_name = os.path.basename(tarball_path)
+            for i, resource in enumerate(self._resources):
+                resource_name = resource[0]
+                resource_hash = resource[1]
+                if resource_name == tarball_name:
+                    computed_hash = md5_checksum(tarball_path)
+                    if computed_hash != resource_hash:
+                        raise DatasetConsistencyError(
+                            f"Hash mismatch for resource: {resource_name}\n"
+                            f"File: {tarball_path}\n"
+                            f"Computed Hash: {computed_hash}\n"
+                            f"Expected Hash: {resource_hash}")
+                    break
+            else:
+                raise DatasetConsistencyError(
+                    f"No matching resource found for tarball: {tarball_name}")
+
+    def _load_dataset(self):
+        """Load dataset.  If required file not present, it will first check if tarball
+        in dataset root dir,  if tarballs in root dir it will unpack and loaded
+        from unpacked files,  if tarball not present it will rebuild a dataset.
         :return:
         """
         start_time = time.time()
@@ -265,21 +368,31 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             logging.info("Forcing rebuild a dataset.")
             self._build_dataset()
 
-        # if some file not present and tar present unpack
+        # if mandatory files not present,
+        # first try to locate tarball and if tarball present unpack, otherwise build dataset.
         if not self._check_dataset_files():
             # if tar file present unpack other create new dataset.
             if os.path.exists(self._dataset_tarball_name):
-                logging.debug(f"Found tarball unpack {self._dataset_tarball_name} files to {self._default_raw_dir}")
+                logging.debug(
+                    f"Found tarball unpack {self._dataset_tarball_name} "
+                    f"files to {self._default_raw_dir}")
                 unpack_tar_gz(self._dataset_tarball_name, self._default_raw_dir)
                 if not self._check_dataset_files():
                     raise FileNotFoundError("Dataset files not found after unpacking the tarball.")
             else:
                 self._build_dataset()
 
-        # if tarball of all api responds.
-        if os.path.exists(self._json_data_tarball_name):
-            logging.debug(f"Found tarball unpack {self._json_data_tarball_name } files to {self._default_original_dir}")
-            unpack_tar_gz(self._json_data_tarball_name, self._default_original_dir)
+        # if tarball of all api responds present, unpack.
+        if os.path.exists(self._dataset_json_tarball_name):
+            logging.debug(
+                f"Found tarball unpack {self._dataset_json_tarball_name} "
+                f"files to {self._default_original_dir}")
+            unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
+
+        # load dataset json file, and
+        # so we have all hash values for each file.
+        self._load_dataset_spec()
+        self._check_tarball_hash()
 
         self.logger.debug(f"Loading dataset from {self._dataset_file_name}")
         self.logger.debug(f"Loading dataset from disk. {self._dataset_file_name}")
@@ -291,7 +404,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
         self._masked_data = torch.load(self._dataset_masked_file_name)
         if 'train_data' not in self._masked_data:
-            raise DatasetConsistencyError(f"Loaded dataset has no mandatory key train_data")
+            raise DatasetConsistencyError(
+                f"Loaded dataset has no mandatory key train_data")
 
         self._load_dicts_from_data()
         self._construct_action_space()
@@ -314,7 +428,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         """
         # update num actions
         if "hash_to_rest_api" not in self._data:
-            DatasetConsistencyError("looks like dataset corrupted hash_to_rest_api not present")
+            DatasetConsistencyError(
+                "looks like dataset corrupted hash_to_rest_api not present")
 
         self.num_actions = len(self._data["hash_to_rest_api"])
         for h in self._data["hash_to_rest_api"]:
@@ -551,7 +666,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             if input_ids[0, i:i + target_len].tolist() == target_tokens:
                 # umask the key tokens
                 attention_mask[0, i:i + target_len] = 1
-                #  assume the value starts  immediately after the key.
+                #  assuming the value starts  immediately after the key.
                 j = i + target_len
                 unmasked_tokens = []
                 while j < input_ids.shape[1] and input_ids[0, j].item() != period[0]:
@@ -623,7 +738,9 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         json_file_path: str,
         json_file_name: str,
         mask_target_key: str) -> None:
-        """This second pass we read the json file and mask what we need.
+        """This second pass,  we read the json file and mask what we need.
+        this data added to masked data.
+
         :param json_file_path:
         :param json_file_name:
         :param mask_target_key: a key:value that we want to mask
@@ -747,13 +864,20 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                         }
                     )
 
+        total_files = sum(len(files) for _, _, files in os.walk(self._json_directory_path))
+        processed_files = 0
+
         for root, dirs, files in os.walk(self._json_directory_path):
-            for file_name in files:
+            for file_name in tqdm(files, total=total_files, desc="Processing JSON Files"):
                 if file_name.endswith(".json"):
                     file_path = os.path.join(root, file_name)
                     process_json_file(file_path, file_name)
                     for jk in self._list_masked_keys:
                         self.process_and_mask_json_file(file_path, file_name, jk)
+
+                processed_files += 1
+                if processed_files >= total_files:
+                    break
 
     def action(self, one_hot_vec: torch.Tensor) -> str:
         """Return action from one hot vector representation
@@ -915,7 +1039,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         """Downloaded dataset return the root directory of the dataset.
         :return:
         """
-        return self._default_dir
+        return self._dataset_root_dir
 
     def dataset_types(self):
         """Downloaded dataset requires each file has dataset type.
