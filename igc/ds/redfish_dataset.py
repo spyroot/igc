@@ -1,31 +1,29 @@
 import glob
 import json
+import logging
 import os
+import random
 import shutil
+import time
+import zlib
 from pathlib import Path
 from random import random
 from typing import Optional, Any, List, Tuple, Union, Iterator
-import time
 
+import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset
-import numpy as np
 from tqdm import tqdm
-
 from transformers import GPT2Tokenizer
-import logging
 
+from igc.interfaces.rest_mapping_interface import RestMappingInterface
+from igc.interfaces.rest_one_hot_interface import RestActionEncoderInterface
 from .ds_downloadable_ds import DownloadableDataset
 from .ds_rest_trajectories import RestTrajectory
 from .ds_utils import (
     create_tar_gz,
     unpack_tar_gz, md5_checksum, delete_directory_with_confirmation
 )
-from igc.interfaces.rest_mapping_interface import RestMappingInterface
-from igc.interfaces.rest_one_hot_interface import RestActionEncoderInterface
-import zlib
-import random
 
 
 class DatasetConsistencyError(Exception):
@@ -166,10 +164,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._list_masked_keys = ["@odata.id"]
         self._rest_trajectories = None
 
-        # call super method to download dataset
-        if not self._check_tarballs_files() or is_force_download:
-            logging.info("Downloading dataset.")
-            super().__init__(dataset_root_dir=self._dataset_root_dir)
+        # # call super method to download dataset
+        # if not self._check_tarballs_files() or is_force_download:
+        #     logging.info("Downloading dataset.")
+        #     super().__init__(dataset_root_dir=self._dataset_root_dir)
 
         # unpack tarballs.
         self._unpack_tarballs()
@@ -288,10 +286,61 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             json_file_path = Path(self._dataset_root_dir) / "dataset.json"
             self._update_hash_values(str(json_file_path), json_data)
 
+    def rest_api_iterator(self) -> Iterator[Tuple[str, str]]:
+        """Iterator that emit rest api and rest api
+        respond based on local directory structure.
+        :return:
+        """
+        for rest_api in self._rest_api_to_respond_:
+            yield rest_api, f"{self._default_original_dir}{self._rest_api_to_respond_}"
+
+    def get_rest_api(self, rest_api: str) -> Tuple[str, str]:
+        """Return rest api based on local directory structure..
+        :return:
+        """
+        return self._rest_api_to_respond_[rest_api], f"{self._default_original_dir}{self._rest_api_to_respond_}"
+
+    def rest_api_contains(self, rest_api: str) -> bool:
+        """Return the REST API and REST API response based on the local directory structure,
+        or False if the key is not present.
+        """
+        if rest_api in self._rest_api_to_respond_:
+            return True
+
+        return False
+
+    def respond_to_api(self, rest_api_respond_file):
+        """
+        :param rest_api_respond_file:
+        :return:
+        """
+        return self._respond_to_api[rest_api_respond_file]
+
+    def respond_to_api_contains(self, rest_api_respond_file) -> bool:
+        """Return true if datastructure has respected mapping
+        from rest respond to rest api.
+
+        :param rest_api_respond_file:
+        :return:
+        """
+        if rest_api_respond_file in self._respond_to_api:
+            return True
+
+        return False
+
+    def _build_respond_to_api(self):
+        """
+        :return:
+        """
+        self._respond_to_api = {f"{self._default_original_dir}{value}": key
+                                for key, value in self._rest_api_to_respond_.items()}
+        return self._respond_to_api
+
     def _build_dataset(self):
         """Build a dataset from all rest api json responds.
-        During build process, we create separate files that store all dataset
-        data with following structure.
+
+          During build process, we create separate files that store all dataset
+          data with following structure.
 
         - all rest api to particular rest api hashed
         - each hash value mapped to hash index, so we have a map hash -> index
@@ -304,13 +353,15 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
          The hash we use
         :return:
         """
+
+        # load all rest trajectories.
         self._rest_trajectories = RestTrajectory(
             self._unprocessed, self._default_original_dir)
         self._rest_trajectories.load()
 
-        # all api mapping
-        self._rest_api_to_respond, self._rest_api_to_method = self._rest_trajectories.merged_view()
-        self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
+        # all mapping that we save.
+        self._rest_api_to_respond_, self._rest_api_to_method = self._rest_trajectories.merged_view()
+        self._build_respond_to_api()
 
         # build a dataset
         if not self._check_dataset_files():
@@ -327,7 +378,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             torch.save(self._masked_data, self._dataset_masked_file_name)
 
             logging.debug(f"Saving api respond data to: {self._rest_api_to_respond_file_name}")
-            torch.save(self._rest_api_to_respond, self._rest_api_to_respond_file_name)
+            torch.save(self._rest_api_to_respond_, self._rest_api_to_respond_file_name)
 
             logging.debug(f"Saving api respond method data to: {self._rest_api_to_respond_file_name}")
             torch.save(self._rest_api_to_method, self._rest_api_to_method_file_name)
@@ -346,8 +397,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             self._create_tarball()
 
     def _check_tarball_hash(self):
-        """This method called, post load, datasets.json
-         loaded and each tarball hash verified.
+        """
+        This method called, post load, it read datasets.json
+        and checks each tarball hash.
+
         :return:
         """
         for tarball_path in self._dataset_tarballs:
@@ -369,10 +422,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                     f"No matching resource found for tarball: {tarball_name}")
 
     def _unpack_tarballs(self):
-        """Unpack tarballs files directory.
-
-          if mandatory files not present, first try to locate tarball and if tarball
-          present unpack.
+        """
+        Unpack tarballs files directory.
+        if mandatory files not present, first try to locate tarballs and
+        if tarball present unpack all.
 
         :return:
         """
@@ -393,9 +446,17 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
 
     def _load_dataset(self):
-        """Load dataset.  If required file not present, it will first check if tarball
-        in dataset root dir,  if tarballs in root dir it will unpack and loaded
-        from unpacked files,  if tarball not present it will rebuild a dataset.
+        """
+        Load dataset from files.
+
+        If required file not present, it will first check for a tarballs.
+        in dataset root dir.
+
+        if tarballs in root dir it will try to unpack and loaded
+        from unpacked files all dataset files,
+
+        if tarball not present it will rebuild a dataset.
+
         :return:
         """
         start_time = time.time()
@@ -422,11 +483,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                 f"files to {self._default_original_dir}")
             unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
 
-        print("Data so far")
-        print(f"self._rest_api_to_respond {len(self._rest_api_to_respond)}")
-        print(f"self._rest_api_to_respond {len(self._rest_api_to_method)}")
-        print(f"self._rest_api_to_respond {len(self._respond_to_api)}")
-
+        # print("Data so far")
+        # print(f"self._rest_api_to_respond {len(self._rest_api_to_respond)}")
+        # print(f"self._rest_api_to_respond {len(self._rest_api_to_method)}")
+        # print(f"self._rest_api_to_respond {len(self._respond_to_api)}")
 
         # load dataset json file, and
         # so we have all hash values for each file.
@@ -449,40 +509,17 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._load_dicts_from_data()
         self._construct_action_space()
 
-        self._rest_api_to_respond = torch.load(self._rest_api_to_respond_file_name)
+        # load rest api and remap, based on local structure
+        # where local is structure on client side when client pulled dataset.
+        self._rest_api_to_respond_ = torch.load(self._rest_api_to_respond_file_name)
         self._rest_api_to_method = torch.load(self._rest_api_to_method_file_name)
-        self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
-
-        self._rest_trajectories = RestTrajectory(
-            raw_json_dir=self._default_original_dir,
-            rest_new_prefix=self._default_original_dir
-        )
-        self._rest_trajectories.load()
+        self._build_respond_to_api()
 
         print(f" Unprocessed dir {self._unprocessed}")
         print(f"self._default_original_dir dir {self._default_original_dir}")
 
-        # # all api mapping
-        self._rest_api_to_respond, self._rest_api_to_method = self._rest_trajectories.merged_view()
-        self._respond_to_api = {value: key for key, value in self._rest_api_to_respond.items()}
-
         self.logger.debug(f"Loaded dataset length: {len(self._data)}")
         self.logger.info(f"Loaded dataset, total time: {time.time() - start_time}")
-
-        for k in self._rest_api_to_respond:
-            print(f"a {k} val {self._rest_api_to_respond[k]}")
-            break
-
-        for k in self._rest_api_to_method:
-            print(f"b {k} val {self._rest_api_to_method[k]}")
-            break
-
-        for k in self._respond_to_api:
-            print(f"c {k} val {self._respond_to_api[k]}")
-            break
-
-        raise
-
 
     def chunk_overlap_size(self):
         """Amount of overlap between two chunks
@@ -491,7 +528,12 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return self._overlap
 
     def _load_dicts_from_data(self):
-        """Load the dictionaries based on the data points in self.data.
+        """
+
+        Load the dict mapping, from the data points in self.data
+        and update all labels, this done as last phase when all
+        json parsed , all action , target etc extracted..
+
         """
         # update num actions
         if "hash_to_rest_api" not in self._data:
@@ -509,8 +551,13 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                     # break
 
     def hash_to_index(self, hash_value: int) -> int:
-        """Method take a hash of rest api and return index of hash.
+        """
+        Method takes a hash of rest api and returns index of hash.
         Index used to map hash to index and index to one hot vector.
+
+        hash -> index_of_hash -> one_hot_vector
+        one_hot_vector < - index <- hash
+
         :param hash_value: a hash of rest api
         :return: index of hash
         """
@@ -535,7 +582,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return None
 
     @staticmethod
-    def one_hot_to_index(one_hot_tensor):
+    def one_hot_to_index(one_hot_tensor: torch.Tensor):
         """Take one hot tensor and return index
         :param one_hot_tensor:
         :return:
@@ -544,8 +591,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return index.item() if index is not None else None
 
     def index_to_one_hot(self, hash_index: int) -> torch.Tensor:
-        """Convert an index to its corresponding one-hot tensor.
-        :param hash_index:
+        """Convert hash index to its corresponding one-hot tensor.
+        :param hash_index: index of hash
         :return:
         """
         hash_index = torch.tensor(hash_index)
@@ -566,8 +613,11 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor
     ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
-        """Create chunks of input_ids and attention_mask, this
-        splits the input_ids and attention_mask for large json files.
+        """
+
+        Create chunks of input_ids and attention_mask, this
+        method splits the input_ids and attention_mask
+        for large json response.
 
         :param attention_mask:
         :param input_ids:
@@ -603,7 +653,11 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return chunks
 
     def extract_recursive(self, json_obj, allowable_values, targets):
-        """Recursively extracts values from a nested JSON structure.
+        """
+
+        Recursively walk and extracts values from a nested JSON structure.
+        The value could a links, action etc.
+
         """
         if isinstance(json_obj, dict):
             for key, value in json_obj.items():
@@ -664,8 +718,11 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         json_data,
         target_key: str,
         tokenizer=None,
-        debug: Optional[bool] = False):
-        """Mask specific keu in json structure, technically will work in other cases
+        debug: Optional[bool] = False
+    ) -> torch.Tensor:
+        """
+        Masks specific key in json structure.
+
         :param tokenizer:
         :param debug:
         :param json_data:
@@ -701,7 +758,12 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return attention_mask
 
     @staticmethod
-    def mask_json_key_and_value(encoding, target_key, tokenizer, debug=False):
+    def mask_json_key_and_value(
+        encoding,
+        target_key,
+        tokenizer,
+        debug=False
+    ) -> torch.Tensor:
         """Mask specific key and value in json structure,
          technically will work in other cases.
 
@@ -747,9 +809,15 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return attention_mask
 
     @staticmethod
-    def mask_specific_key_and_value(json_data, target_key, tokenizer=None, debug=False):
-        """Mask specific key and value in json structure,
-         technically will work in other cases.
+    def mask_specific_key_and_value(
+        json_data,
+        target_key,
+        tokenizer=None,
+        debug=False
+    ):
+        """
+        Mask specific key and value in json structure,
+        technically will work in other cases.
 
         Usage:
             target_key = "@odata.id"
@@ -764,10 +832,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         :param debug:
         :return:
         """
-        if tokenizer is None:
-            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-        else:
-            tokenizer = tokenizer
+        tokenizer = tokenizer if tokenizer is not None \
+            else GPT2Tokenizer.from_pretrained("gpt2")
 
         if isinstance(json_data, str):
             json_lines = json.dumps(json_data)
@@ -804,9 +870,13 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self,
         json_file_path: str,
         json_file_name: str,
-        mask_target_key: str) -> None:
-        """This second pass,  we read the json file and mask what we need.
-        this data added to masked data.
+        mask_target_key: str
+    ) -> None:
+        """
+
+        This second pass over json files, in this pass,
+        we read the json file and mask what we need, this new
+        data added to masked data.
 
         :param json_file_path:
         :param json_file_name:
@@ -845,23 +915,31 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
     def get_rest_api_mappings(self) -> Iterator[Tuple[str, str]]:
         """
-        Abstract method to provide the dict of all mapping of REST APIs.
-        :return: An iterator of tuples, each containing the REST API and its corresponding response.
+        Method implements interface to provide a dict view
+         of all rest API mapping of REST APIs.
+
+        :return: An iterator of tuples, each containing the
+                 REST API and its corresponding response.
         """
-        for rest_api, resp in self._rest_api_to_respond.items():
-            yield rest_api, resp
+        return self.rest_api_iterator()
 
     def get_rest_api_methods(self) -> Iterator[Tuple[str, str]]:
         """
-        Abstract method to provide the dict of all mapping of REST APIs. Methods
-        :return: An iterator of tuples, each containing the REST API and its corresponding method.
+        Method implements interface  to provide the view
+        dict of REST API mapping to allowed methods.
+        i.e. HTTP Method that REST API accepts.
+
+        :return: An iterator of tuples, each containing the REST API
+                and its corresponding method.
         """
         for rest_api, method in self._rest_api_to_method.items():
             yield rest_api, method
 
     def _load_json_files(self) -> None:
-        """Load json file and construct from raw json presentation
-           a dataset.
+        """
+            Load json file and construct from raw json presentation
+            a dataset.
+
         """
         self._data["hash_to_rest_api"] = {}
         self._data["hash_to_action_idx"] = {}
@@ -870,25 +948,24 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._data["train_data"] = []
         self._masked_data["train_data"] = []
 
-        def process_json_file(file_path: str, file_name: str) -> None:
+        def process_json_file(_file_path: str, json_file_name: str) -> None:
             """
-            :param file_path:
-            :param file_name:
+            :param _file_path:
+            :param json_file_name:
             :return:
             """
-            with open(file_path, "r") as json_file:
+            with open(_file_path, "r") as json_file:
                 if self._verbose:
-                    self.logger.debug(f"reading {file_name}")
+                    self.logger.debug(f"reading {json_file_name}")
 
                 # extract the extra file name it key so, we get rest api
                 json_lines = json_file.read()
-
-                if file_path not in self._respond_to_api:
+                if not self.respond_to_api_contains(_file_path):
                     raise DatasetConsistencyError(
-                        f"Inconsistency we have file {file_path} but no corresponding "
-                        f"rest api size of resp_api {len(self._respond_to_api)}.")
+                        f"Inconsistency we have file {_file_path} but no corresponding "
+                        f"rest api, size of resp_api {len(self._respond_to_api)}.")
 
-                _rest_api = self._respond_to_api[file_path]
+                _rest_api = self.respond_to_api(file_path)
                 hash_value = zlib.adler32(_rest_api.encode())
 
                 # load JSON as a dictionary
@@ -947,32 +1024,50 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                     break
 
     def action(self, one_hot_vec: torch.Tensor) -> str:
-        """Return action from one hot vector representation
+        """Return rest api action from a one hot
+           vector representation.
+
         :param one_hot_vec: is action in rest api
         :return: returns api /redfish/v1/Fabrics
         """
+
         label_index = self.one_hot_to_index(one_hot_vec)
         hash_value = self.index_to_hash(label_index)
+
         return self._data["hash_to_rest_api"][hash_value]
 
     def get_accepted_method(self, action: str) -> str:
         """Returns the accepted method for the given action.
+
         :param action: The action for which to retrieve the accepted method.
         :return: The accepted method for the given action.
         """
         return self._rest_api_to_method.get(action, "Unknown")
 
-    def action_to_one_hot(self, rest_api: str) -> Union[np.ndarray, torch.Tensor]:
+    def action_to_one_hot(
+        self,
+        rest_api: str
+    ) -> Union[np.ndarray, torch.Tensor]:
+
         """Must take a string and return one hot vector either as tensor or ndarray
+
         :param rest_api: The REST API to lookup.
         :return: The response associated with the REST API.
         """
+
+        if rest_api is None or rest_api == "":
+            raise ValueError("REST API must be a non-empty string.")
+
         hash_value = zlib.adler32(rest_api.encode())
         action_index = self.hash_to_index(hash_value)
         one_hot_tensor = self.index_to_one_hot(action_index)
+
         return one_hot_tensor
 
-    def one_hot_vector_to_action(self, one_hot_vector: Union[np.ndarray, torch.Tensor]) -> str:
+    def one_hot_vector_to_action(
+        self,
+        one_hot_vector: Union[np.ndarray, torch.Tensor]
+    ) -> str:
         """
         Takes a one-hot vector and returns the corresponding REST API.
 
@@ -985,15 +1080,15 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
     @staticmethod
     def preprocess_sample(sample):
         """
-
         :param sample:
         :return:
         """
         return sample
 
     @staticmethod
-    def preprocess_json_data(json_data):
-        """Preprocess json data
+    def preprocess_json_data(json_data) -> List[Any]:
+        """Preprocess json data.
+
         :param json_data:
         :return:
         """
@@ -1001,6 +1096,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         for item in json_data:
             preprocessed_sample = JSONDataset.preprocess_sample(item)
             preprocessed_data.append(preprocessed_sample)
+
         return preprocessed_data
 
     def is_empty(self) -> bool:
@@ -1013,7 +1109,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return False
 
     def set_masked(self, value):
-        """THis will switch to masked data
+        """This will switch to masked data
+
         :param value:
         :return:
         """
@@ -1032,7 +1129,6 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
     def sample_random_masked(self):
         """Get item from dataset
-        :param idx:
         :return:
         """
         index = random.choice(range(len(self._masked_data['train_data'])))
@@ -1053,7 +1149,9 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             yield s
 
     def entry_rest_api(self) -> Tuple[str, Union[np.ndarray, torch.Tensor]]:
-        """Return the root entry point for the REST API and the corresponding one-hot vector.
+        """
+         Returns the root entry point for the REST API and
+         the corresponding one-hot vector, that represent actions.
 
          A tuple containing the root entry point (e.g., "/redfish/v1") as a string,
          and the corresponding one-hot vector as either a NumPy array (np.ndarray)
@@ -1061,23 +1159,30 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
         :return:
         """
+
         if self._entry_rest_api_result is None:
-            shortest_key = min(self._rest_api_to_respond.keys(), key=len)
-            self._entry_rest_api_result = (str(shortest_key), self.action_to_one_hot(str(shortest_key)))
+            shortest_key = min(self._rest_api_to_respond_.keys(), key=len)
+            self._entry_rest_api_result = (
+                str(shortest_key), self.action_to_one_hot(str(shortest_key))
+            )
 
         return self._entry_rest_api_result
 
-
     def lookup_rest_api_to_respond(self, rest_api: str):
-        """Lookup the response for a given REST API.
+        """
+        Lookup the response for a particular REST API.
+
         :param rest_api: The REST API to lookup.
         :return: The response associated with the REST API
-        if found, or a default value if not found.
+                 if found, or a default value if not found.
         """
-        return self._rest_api_to_respond.get(rest_api, None)
+        _, rest_api_respond = self.get_rest_api(rest_api)
+        return rest_api_respond
 
     def lookup_rest_api_to_method(self, rest_api: str):
-        """Lookup the method for a given REST API.
+        """
+        Lookup rest api methods it accepts.
+
         :param rest_api: The REST API to lookup.
         :return: The method associated with the REST API if
         found, or raise a KeyError if not found.
@@ -1085,12 +1190,17 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return self._rest_api_to_method.get(rest_api, None)
 
     def sample_rest_api(self) -> Tuple[str, List[str], torch.Tensor]:
-        """Randomly sample a REST API endpoint from the dataset.
-        It good for testing etc.
+        """
+        Randomly sample a REST API endpoint from the dataset
+        and return rest api , method api accept and one hot vector
+        that represent action.
+
         :return: A tuple containing the sampled REST API endpoint,
                 supported method, and one-hot vector representation.
         """
-        rest_api = random.choice(list(self._rest_api_to_respond.keys()))
+
+        # sample rest api action and method
+        rest_api = random.choice(list(self._rest_api_to_respond_.keys()))
         supported_method = self._rest_api_to_method[rest_api]
         return rest_api, supported_method, self.action_to_one_hot(rest_api)
 
@@ -1119,20 +1229,24 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return True
 
     def root_dir(self) -> str:
-        """Downloaded dataset return the root directory of the dataset.
+        """Download  dataset interface return requires
+          the root directory of the dataset.
+
+          It dir where download will serialize data.
+
         :return:
         """
         return self._dataset_root_dir
 
     def dataset_types(self):
-        """Downloaded dataset requires each file has dataset type.
+        """Download dataset interface requires each file has dataset type.
         i.e. dataset type implied small , medium , large, or any other keys.
         :return:
         """
         return self._dataset_file_type
 
     def _get_unique_values(self):
-        """
+        """Return unique values from train data..
         :return:
         """
         unique_requests = set()
@@ -1147,10 +1261,15 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return unique_requests, unique_hashes, unique_labels
 
     def _check_consistency(self):
-        """Now because we have bunch data structure data and mapping
-         want Check the consistency between data structures.
         """
+         Now because we have bunch data structure data and mapping
+         we want check the consistency between data structures.
 
+         This method called when build and when load and
+         verify all mappings, so we don't dead keys, all rest api resolved
+         and each has respond.
+
+        """
         _required_keys = JSONDataset.required_keys()
         for key in _required_keys:
             if key not in self._data:
@@ -1165,20 +1284,22 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         print(f"Number of unique REST API requests: {len(unique_requests)}")
         print(f"Number of unique hashes: {len(unique_hashes)}")
         print(f"Number of unique labels: {len(unique_labels)}")
-        print(f"Number of unique rest_api: {len(self._rest_api_to_respond)}")
+        print(f"Number of unique rest_api: {len(self._rest_api_to_respond_)}")
         print(f"Number of unique rest_api: {len(self._rest_api_to_method)}")
         print(f"Number of unique hash to rest: {len(hash_to_rest_api)}")
         print(f"Number of unique hash to action: {len(hash_to_action_idx)}")
         print(f"Number of unique action to hash: {len(action_idx_to_hash)}")
 
         # a) check consistency between _rest_api_to_respond and _rest_api_to_method
-        for rest_api in self._rest_api_to_respond:
+        for rest_entry in self.rest_api_iterator():
+            rest_api, respond_file = rest_entry
             if rest_api not in self._rest_api_to_method:
                 print(f"Error consistence check 1: Missing method for REST API: {rest_api}")
                 raise ValueError(f"Consistency check failed. Missing key: {rest_api}")
 
         # b) Check consistency between _rest_api_to_method and _data["hash_to_rest_api"]
-        for rest_api in self._rest_api_to_respond:
+        for rest_entry in self.rest_api_iterator():
+            rest_api, respond_file = rest_entry
             rest_api_hash = zlib.adler32(rest_api.encode())
             if rest_api_hash not in self._data["hash_to_rest_api"]:
                 print(f"Error consistence check 2: Inconsistent "
@@ -1191,11 +1312,13 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         for index in self._data["action_idx_to_hash"]:
             if index not in self._data["hash_to_action_idx"].values():
                 print(f"Error consistence check 3: Inconsistent action "
-                      f"index mapping for hash value: {self._data['action_idx_to_hash'][index]}")
+                      f"index mapping for hash value: "
+                      f"{self._data['action_idx_to_hash'][index]}")
 
         # d) Iterate over all REST APIs and perform checks
         #   that we can recover hash -> one hot and reverse
-        for rest_api in self._rest_api_to_respond:
+        for rest_entry in self.rest_api_iterator():
+            rest_api, respond_file = rest_entry
             rest_api_req_hash = zlib.adler32(rest_api.encode())
             # check if rest_api exists in hash_to_rest_api
             if rest_api_req_hash not in self._data["hash_to_rest_api"]:

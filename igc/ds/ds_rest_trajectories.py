@@ -76,10 +76,8 @@ class RestTrajectory:
         data = self._rest_map_data[host]["rest_api_map"]
         for key, value in data.items():
             if value.startswith(self.raw_json_dir):
-                updated_value = self.rest_new_prefix + value[len(self.raw_json_dir):]
+                updated_value = value[len(self.raw_json_dir):]
                 data[key] = updated_value
-                if not os.path.isfile(data[key]):
-                    raise ValueError("Contains key with no respond")
 
     def load(self) -> None:
         """
