@@ -60,6 +60,8 @@ def create_tar_gz(directory_path: str, output_file: str) -> Tuple[str, str]:
     :param output_file: Name of the output tarball file with the ".tar.gz" extension.
     :return: Tuple full path to tarball and respected file that store hash.
     """
+    print(f"Create tar directory {directory_path}")
+
     if not os.path.isdir(directory_path):
         raise ValueError(
             "Invalid directory path. Please provide a valid directory.")
@@ -79,8 +81,8 @@ def create_tar_gz(directory_path: str, output_file: str) -> Tuple[str, str]:
             for file in files:
                 file_path = os.path.join(root, file)
                 logger.debug("Adding file to tar file: ", file_path)
-                tar.add(file_path, arcname=file)
-
+                tar.add(file_path, arcname=os.path.relpath(file_path, directory_path))
+    
     with open(tar_file, "rb") as f_in, gzip.open(output_file, "wb") as f_out:
         logger.debug(f"Write gzip {output_file}")
         f_out.writelines(f_in)

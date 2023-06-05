@@ -537,6 +537,7 @@ class TestRestApiEnv(unittest.TestCase):
         self.assertTrue(torch.allclose(env.goal_action, goal_action), "last obs must same as next")
 
         total_reward = 0.0
+
         for n in range(0, 2):
             rest_api, supported_method, one_hot_action = dataset.sample_rest_api()
             http_method_one_hot = RestApiEnv.encode_rest_api_method("GET")

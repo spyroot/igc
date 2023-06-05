@@ -243,6 +243,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
           It will update all hash values for each tarball file.
         :return: Nothing.
         """
+
         # copy all json if not present already
         if not os.path.exists(self._json_directory_path):
             logging.debug(f"Copy all discovered data to {self._json_directory_path}")
@@ -255,6 +256,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             logging.debug(f"Creating tarball {self._dataset_json_tarball_name}")
             _, _tarball_hash = create_tar_gz(
                 self._json_directory_path, self._dataset_json_tarball_name)
+
             # update hash values in _resources
             tarball_name = os.path.basename(self._dataset_json_tarball_name)
             for i, resource in enumerate(self._resources):
@@ -277,6 +279,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                         self._resources[i] = (resource[0], _tarball_hash, resource[2])
                         regenerate_hash = True
 
+        # update dataset spec and add hash values.
         if regenerate_hash:
             # update dataset.json
             json_data = {
@@ -480,8 +483,9 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             self._unpack_tarballs()
             if not self._check_dataset_files():
                 self._build_dataset()
+                return
         else:
-            self._build_dataset()
+            print("Loading dataset.")
 
         # if tarball of all api responds present, unpack.
         if os.path.exists(self._dataset_json_tarball_name):
@@ -489,11 +493,6 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                 f"Found tarball unpack {self._dataset_json_tarball_name} "
                 f"files to {self._default_original_dir}")
             unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
-
-        # print("Data so far")
-        # print(f"self._rest_api_to_respond {len(self._rest_api_to_respond)}")
-        # print(f"self._rest_api_to_respond {len(self._rest_api_to_method)}")
-        # print(f"self._rest_api_to_respond {len(self._respond_to_api)}")
 
         # load dataset json file, and
         # so we have all hash values for each file.
@@ -522,9 +521,6 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._rest_api_to_method = torch.load(self._rest_api_to_method_file_name)
         self._build_respond_to_api()
 
-        print(f" Unprocessed dir {self._unprocessed}")
-        print(f"self._default_original_dir dir {self._default_original_dir}")
-
         self.logger.debug(f"Loaded dataset length: {len(self._data)}")
         self.logger.info(f"Loaded dataset, total time: {time.time() - start_time}")
 
@@ -537,7 +533,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
     def _load_dicts_from_data(self):
         """
 
-        Load the dict mapping, from the data points in self.data
+        Load the dict mapping, from the data points in self data
         and update all labels, this done as last phase when all
         json parsed , all action , target etc extracted..
 

@@ -14,9 +14,9 @@ def main(cmd):
     igc_agent = IgcAgentTrainer(cmd)
     ds = igc_agent.dataset
 
-    for entry in ds.rest_api_iterator():
-        rest_api, path = entry
-        print(f" path {path} ")
+    # for entry in ds.rest_api_iterator():
+    #     rest_api, path = entry
+    #     print(f" path {path} ")
 
     # for rest_api, methods in ds.get_rest_api_methods():
     #     print(f" {rest_api} path {methods} ")
