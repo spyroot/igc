@@ -1,5 +1,5 @@
 import argparse
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import gym
 import numpy as np
@@ -18,8 +18,7 @@ class RestApiEnv(gym.Env):
     """
     """
     METHOD_MAPPING = [
-        "GET", "POST", "PUT", "DELETE", "PATCH",
-        "HEAD", "OPTIONS", "CONNECT", "TRACE"
+        "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"
     ]
 
     def __init__(self,
@@ -217,13 +216,108 @@ class RestApiEnv(gym.Env):
             return -1.0  # Negative reward for not reaching the goal
 
     @staticmethod
-    def extract_action_method(input_tensor):
+    def concat_rest_api_method(rest_api_vector: torch.Tensor, method_vector: torch.Tensor) -> torch.Tensor:
         """
-        :param input_tensor:
-        :return:
+        Concatenate the one-hot encoded vectors representing the REST API and method.
+        :param rest_api_vector: The one-hot encoded vector representing the REST API.
+        :param method_vector: The one-hot encoded vector representing the method.
+        :return: The concatenated vector.
         """
-        action = input_tensor
+
+        if rest_api_vector.dim() != method_vector.dim():
+            raise ValueError("Input tensors must have the same number of dimensions.")
+
+        concatenated_vector = torch.cat((rest_api_vector, method_vector), dim=rest_api_vector.dim() - 1)
+        return concatenated_vector
+
+    @staticmethod
+    def encode_rest_api_method(method: str) -> torch.Tensor:
+        """
+        Encode the REST API method as a one-hot encoded tensor.
+
+        :param method: The REST API method as a string.
+        :return: A one-hot encoded tensor representing the method.
+        """
+        if method not in RestApiEnv.METHOD_MAPPING:
+            raise ValueError("Invalid REST API method.")
+
+        method_index = RestApiEnv.METHOD_MAPPING.index(method)
+        one_hot_tensor = torch.zeros(len(RestApiEnv.METHOD_MAPPING))
+        one_hot_tensor[method_index] = 1
+        return one_hot_tensor
+
+    @staticmethod
+    def one_hot_to_method_string(method_vector: torch.Tensor) -> str:
+        """
+        Convert a one-hot encoded tensor representing a
+        REST API method to its string representation.
+
+        :param method_vector: The one-hot encoded tensor representing the method.
+        :return: The string representation of the REST API method.
+        """
+        if method_vector.dim() != 1:
+            raise ValueError("Input vector must be 1-dimensional.")
+
+        method_index = torch.argmax(method_vector).item()
+        return RestApiEnv.METHOD_MAPPING[method_index]
+
+    @staticmethod
+    def batch_one_hot_to_method_string(method_vector: torch.Tensor) -> List[str]:
+        """
+        Convert a batch of one-hot encoded tensors representing
+        REST API methods (GET,POST) to their string representations.
+
+        :param method_vector: The batched one-hot encoded tensor representing the methods.
+                              Shape: (batch_size, method_dim)
+        :return: The list of string representations of the REST API methods for each element in the batch.
+        """
+        if method_vector.dim() != 2:
+            raise ValueError("Input tensor must have 2 dimensions (batch_size, method_dim).")
+        method_indices = torch.argmax(method_vector, dim=1)
+        method_strings = [RestApiEnv.METHOD_MAPPING[index.item()] for index in method_indices]
+        return method_strings
+
+
+    @staticmethod
+    def extract_single_action_method(input_tensor: torch.Tensor):
+        """
+        Extract the rest_api_one_hot and method_one_hot from the input_tensor without batch dimension.
+
+        :param input_tensor: The input tensor with concatenated rest_api_one_hot and method_one_hot.
+        :return: The extracted rest_api_one_hot and method_one_hot tensors.
+        """
         method_sz = len(RestApiEnv.METHOD_MAPPING)
-        rest_api_one_hot, method_one_hot = action[:-method_sz], action[-method_sz:]
-        method = RestApiEnv.METHOD_MAPPING[method_one_hot.nonzero().item()]
-        return rest_api_one_hot, method
+        rest_api_one_hot = input_tensor[:-method_sz]
+        method_one_hot = input_tensor[-method_sz:]
+        return rest_api_one_hot, method_one_hot
+
+    @staticmethod
+    def extract_batched_action_method(input_tensor: torch.Tensor):
+        """
+        Extract the rest_api_one_hot and method_one_hot from the input_tensor.
+
+        :param input_tensor: The input tensor with concatenated rest_api_one_hot and method_one_hot.
+                             Shape: (batch_size, rest_api_dim + method_dim)
+        :return: The extracted rest_api_one_hot and method_one_hot tensors.
+                 Shapes: (batch_size, rest_api_dim), (batch_size, method_dim)
+        """
+        method_sz = len(RestApiEnv.METHOD_MAPPING)
+        rest_api_one_hot = input_tensor[:, :-method_sz]
+        method_one_hot = input_tensor[:, -method_sz:]
+        return rest_api_one_hot, method_one_hot
+
+    @staticmethod
+    def extract_action_method(input_tensor: torch.Tensor):
+        """
+        Extract the rest_api_one_hot and method_one_hot from the input_tensor.
+
+        :param input_tensor: The input tensor with concatenated rest_api_one_hot and method_one_hot.
+        :return: The extracted rest_api_one_hot and method_one_hot tensors.
+        """
+        if input_tensor.dim() == 2:
+            return RestApiEnv.extract_batched_action_method(input_tensor)
+        elif input_tensor.dim() == 1:
+            return RestApiEnv.extract_single_action_method(input_tensor)
+        else:
+            raise ValueError("Invalid input tensor dimensions. Expected 1 or 2.")
+
