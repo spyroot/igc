@@ -1,3 +1,4 @@
+import json
 import os
 
 import torch
@@ -6,10 +7,47 @@ from igc.ds.redfish_dataset import JSONDataset
 from igc.envs.rest_gym_base import RestApiBaseEnv
 from igc.envs.rest_gym_batch_env import VectorizedRestApiEnv
 from igc.envs.rest_gym_env import RestApiEnv
-from igc.envs.rest_mock_server import MockServer
+from igc.envs.rest_mock_server import MockServer, MockResponse
 from igc.modules.llm_module import IgcLllModule
 from igc.shared.shared_main import shared_main
 import time
+
+
+def enable_secure_boot_callback(json_data, handler_state) -> MockResponse:
+    """Register single callback for enabling secure boot.
+
+    :param handler_state:
+    :param json_data: The JSON data received in the request.
+    :return: A mock response indicating the status of enabling secure boot.
+    """
+    try:
+        new_data = json.loads(json_data)
+    except json.JSONDecodeError:
+        return MockResponse({"message": "Invalid JSON data"}, 400)
+
+    current_data = handler_state.get("json_data")
+    if current_data:
+        if isinstance(current_data, str):
+            current_data = json.loads(current_data)
+        current_data.update(new_data)
+
+    if "SecureBootCurrentBoot" in current_data:
+        return MockResponse({"message": "Invalid SecureBootCurrentBoot value"}, 400)
+
+    if "SecureBootEnable" in current_data:
+        return MockResponse({"message": "Invalid SecureBootEnable value"}, 400)
+
+    if "SecureBootMode" in current_data:
+        return MockResponse({"message": "Invalid SecureBootMode value"}, 400)
+
+    print(f"NEW DATA1")
+
+    resp = MockResponse(
+        {"message": "Secure boot is enabled"},
+        200, error=False, new_state=new_data)
+
+    print(f"NEW DATA2")
+    return resp
 
 
 def mock_test_all_rest_api(cmd):
@@ -537,33 +575,16 @@ class EnvChecker:
             max_episode=10,
             num_envs=4)
 
-        for i in self.dataset.rest_api_iterator():
-            print(i)
+        env.mock_server().register_callback(
+            "/redfish/v1/Systems/System.Embedded.1/SecureBoot", "PATCH", enable_secure_boot_callback)
 
-        # env.mock_server().register_callback("", "", register_reset_goal)
-        # observation, info = env.reset()
-        # goal_observation, goal_action_vector, rest_apis, supported_methods = env.sample_same_goal()
-        # env.add_goal_state(goal_observation)
-        #
-        # # actions
-        # rest_apis, supported_methods, one_hot_vectors = self.dataset.sample_batch_of_rest_api(4)
-        # http_methods_one_hot = RestApiBaseEnv.encode_batched_rest_api_method("GET", 4)
-        # action_vector = RestApiBaseEnv.concat_batch_rest_api_method(
-        #     one_hot_vectors, http_methods_one_hot)
-        #
-        # i = 0
-        # rewards_per_trajectory = []
-        # terminated = [False] * env.num_envs
-        # while not any(terminated) and i < max_episode:
-        #     if i == 2:
-        #         next_states, rewards, terminated, truncated, infos = env.step(goal_action_vector)
-        #     else:
-        #         next_states, rewards, terminated, truncated, infos = env.step(action_vector)
-        #     rewards_per_trajectory.append(rewards)
-        #     i += 1
-        #
-        # rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
-        # print(rewards_sum_per_trajectory)
+        json_data = '{"SecureBootCurrentBoot": "Enabled"}'
+        response = env.mock_server().request("/redfish/v1/Systems/System.Embedded.1/SecureBoot",
+                                             "PATCH", json_data)
+
+        response = env.mock_server().request("/redfish/v1/Systems/System.Embedded.1/SecureBoot", "GET")
+        print(response.json_data)
+
 
 def main(cmd):
     """

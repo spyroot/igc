@@ -300,7 +300,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         """Return rest api based on local directory structure..
         :return:
         """
-        return self._rest_api_to_respond_[rest_api], f"{self._default_original_dir}{self._rest_api_to_respond_}"
+        return self._rest_api_to_respond_[rest_api], f"{self._default_original_dir}{self._rest_api_to_respond_[rest_api]}"
 
     def rest_api_contains(self, rest_api: str) -> bool:
         """Return the REST API and REST API response based on the local directory structure,

@@ -163,7 +163,6 @@ def test_junk_url(cmd):
     print(f"Response Status Code for {rest_api}: {response.status_code}")
 
 
-def main(cmd):
     """
     :return:
     """
@@ -176,3 +175,5 @@ def main(cmd):
 if __name__ == '__main__':
     args = shared_main()
     main(args)
+
+def main(cmd):

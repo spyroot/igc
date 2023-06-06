@@ -4,6 +4,32 @@ import argparse
 from igc.interfaces.rest_mapping_interface import RestMappingInterface
 
 
+class MockResponse:
+    def __init__(self, json_data, status_code, error=False, new_state=None):
+        """
+        :param json_data:
+        :param status_code:
+        :param error:
+        """
+        self.json_data = json_data
+        self.status_code = status_code
+        self.error = error
+        self.new_state = new_state
+
+    def json(self):
+        """
+        :return:
+        """
+        return self.json_data
+
+    def state(self):
+        """
+        :return:
+        """
+        return self.new_state
+
+
+
 class MockServer:
     """
     """
@@ -213,8 +239,10 @@ class MockServer:
         # dispatch
         callback = self.mock_callbacks.get((url, method))
         if callback:
-            return callback(json_data)
+            # handler_view = self.responses.get((url, "GET"))
+            return callback(json_data, self.responses.get((url, "GET")))
 
+        # get handler
         response_data = self.responses.get((url, method))
         if response_data:
             return MockResponse(response_data["json_data"],
@@ -239,24 +267,3 @@ class MockServer:
         :return:
         """
         self._is_error_500 = val
-
-
-class MockResponse:
-    """
-    """
-
-    def __init__(self, json_data, status_code, error=False):
-        """
-        :param json_data:
-        :param status_code:
-        :param error:
-        """
-        self.json_data = json_data
-        self.status_code = status_code
-        self.error = error
-
-    def json(self):
-        """
-        :return:
-        """
-        return self.json_data
