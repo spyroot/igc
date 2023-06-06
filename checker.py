@@ -537,29 +537,33 @@ class EnvChecker:
             max_episode=10,
             num_envs=4)
 
-        observation, info = env.reset()
-        goal_observation, goal_action_vector, rest_apis, supported_methods = env.sample_same_goal()
-        env.add_goal_state(goal_observation)
+        for i in self.dataset.rest_api_iterator():
+            print(i)
 
-        # actions
-        rest_apis, supported_methods, one_hot_vectors = self.dataset.sample_batch_of_rest_api(4)
-        http_methods_one_hot = RestApiBaseEnv.encode_batched_rest_api_method("GET", 4)
-        action_vector = RestApiBaseEnv.concat_batch_rest_api_method(
-            one_hot_vectors, http_methods_one_hot)
-
-        i = 0
-        rewards_per_trajectory = []
-        terminated = [False] * env.num_envs
-        while not any(terminated) and i < max_episode:
-            if i == 2:
-                next_states, rewards, terminated, truncated, infos = env.step(goal_action_vector)
-            else:
-                next_states, rewards, terminated, truncated, infos = env.step(action_vector)
-            rewards_per_trajectory.append(rewards)
-            i += 1
-
-        rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
-        print(rewards_sum_per_trajectory)
+        # env.mock_server().register_callback("", "", register_reset_goal)
+        # observation, info = env.reset()
+        # goal_observation, goal_action_vector, rest_apis, supported_methods = env.sample_same_goal()
+        # env.add_goal_state(goal_observation)
+        #
+        # # actions
+        # rest_apis, supported_methods, one_hot_vectors = self.dataset.sample_batch_of_rest_api(4)
+        # http_methods_one_hot = RestApiBaseEnv.encode_batched_rest_api_method("GET", 4)
+        # action_vector = RestApiBaseEnv.concat_batch_rest_api_method(
+        #     one_hot_vectors, http_methods_one_hot)
+        #
+        # i = 0
+        # rewards_per_trajectory = []
+        # terminated = [False] * env.num_envs
+        # while not any(terminated) and i < max_episode:
+        #     if i == 2:
+        #         next_states, rewards, terminated, truncated, infos = env.step(goal_action_vector)
+        #     else:
+        #         next_states, rewards, terminated, truncated, infos = env.step(action_vector)
+        #     rewards_per_trajectory.append(rewards)
+        #     i += 1
+        #
+        # rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
+        # print(rewards_sum_per_trajectory)
 
 def main(cmd):
     """
@@ -579,7 +583,8 @@ def main(cmd):
     # env_checker.batch_vectorized_4_envs(cmd)
 
     # env_checker.goal_reward_state_goal_set_no_reward(cmd)
-    env_checker.goal_reward_state_goal_set_get_reward(cmd)
+    # env_checker.goal_reward_state_goal_set_get_reward(cmd)
+    env_checker.goal_for_registered_callback(cmd)
 
 
 if __name__ == '__main__':

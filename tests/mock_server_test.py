@@ -170,7 +170,6 @@ def main(cmd):
     # test_all_get_rest_query(cmd)
     # simulate_embedding(cmd)
     # test_register_goal(cmd)
-
     test_junk_url(cmd)
 
 
