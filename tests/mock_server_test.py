@@ -6,7 +6,6 @@ from igc.ds.redfish_dataset import JSONDataset
 from igc.envs.rest_encoder import RestBaseEncoder
 from igc.envs.rest_mock_server import (MockServer, MockResponse)
 from igc.modules.llm_module import IgcLllModule
-from igc.shared.shared_main import shared_main
 from testing_tools import get_difference_stats
 
 
@@ -96,8 +95,8 @@ def test_all_get_rest_query(cmd):
     """We construct dataset and in implement right interface Mock expect
     :return:
     """
-    model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args)
-    directory_path = os.path.expanduser(args.raw_data_dir)
+    model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(cmd)
+    directory_path = os.path.expanduser(cmd.raw_data_dir)
     dataset = JSONDataset(
         directory_path, verbose=True, tokenizer=tokenizer)
 
@@ -128,8 +127,8 @@ def test_register_goal(cmd):
     :param cmd:
     :return:
     """
-    model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args)
-    directory_path = os.path.expanduser(args.raw_data_dir)
+    model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(cmd)
+    directory_path = os.path.expanduser(cmd.raw_data_dir)
     dataset = JSONDataset(
         directory_path, verbose=True, tokenizer=tokenizer)
     mock_rest = MockServer(cmd, dataset)
@@ -143,8 +142,8 @@ def test_register_goal(cmd):
 def test_junk_url(cmd):
     """Test sending a request to a junk URL (unregistered REST API endpoint).
     """
-    model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args)
-    directory_path = os.path.expanduser(args.raw_data_dir)
+    model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(cmd)
+    directory_path = os.path.expanduser(cmd.raw_data_dir)
     dataset = JSONDataset(
         directory_path, verbose=True, tokenizer=tokenizer)
 
@@ -162,7 +161,7 @@ def test_junk_url(cmd):
     response = mock_rest.request(rest_api, "POST", json_data="asdasd")
     print(f"Response Status Code for {rest_api}: {response.status_code}")
 
-
+def tests(cmd):
     """
     :return:
     """
@@ -170,10 +169,3 @@ def test_junk_url(cmd):
     # simulate_embedding(cmd)
     # test_register_goal(cmd)
     test_junk_url(cmd)
-
-
-if __name__ == '__main__':
-    args = shared_main()
-    main(args)
-
-def main(cmd):
