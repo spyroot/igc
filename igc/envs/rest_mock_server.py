@@ -12,6 +12,8 @@ class MockServer:
         :param args:
         """
 
+        # flag to generate error 500
+        self._is_error_500 = False
         self._valid_methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'PATCH', "HEAD"]
 
         if not isinstance(args, argparse.Namespace):
@@ -109,7 +111,9 @@ class MockServer:
             url = url.replace('//', '/')
             with open(file_path, 'r') as f:
                 json_data = f.read()
+
             self.add_response(url, 'GET', json_data, self._default_success_code)
+            self.add_response(url, 'HEAD', None, self._default_success_code)
 
     def _load_responses_from_path(self, rest_api_uri: str, file_path: str):
         """
@@ -185,13 +189,14 @@ class MockServer:
             self.responses[(url, method)] = {"json_data": None, "status_code": 404}
 
     def request(self, url, method='GET', json_data=None, accept_header=None):
-        """
+        """Main interface to mock server
         :param url:
         :param method:
         :param json_data:
         :param accept_header:
         :return:
         """
+
         if method not in self._valid_methods:
             return MockResponse(MockServer.generate_error_response(), 400, error=True)
 
@@ -200,6 +205,10 @@ class MockServer:
                 json.loads(json_data)
             except json.JSONDecodeError:
                 return MockResponse(MockServer.generate_error_response(), 400, error=True)
+
+        # generate critical errors if flag set
+        if self._is_error_500:
+            return MockResponse(MockServer.generate_error_response(), 500, error=True)
 
         # dispatch
         callback = self.mock_callbacks.get((url, method))
@@ -223,6 +232,13 @@ class MockServer:
 
             # Return 404 Not Found if the endpoint doesn't exist
             return MockResponse(MockServer.generate_error_response(), 404, error=True)
+
+    def set_simulate_http_500_error(self, val: bool):
+        """Set the flag to simulate HTTP 500 error.
+        :param val:
+        :return:
+        """
+        self._is_error_500 = val
 
 
 class MockResponse:

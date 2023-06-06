@@ -7,7 +7,6 @@ import shutil
 import time
 import zlib
 from pathlib import Path
-from random import random
 from typing import Optional, Any, List, Tuple, Union, Iterator
 
 import numpy as np
@@ -319,8 +318,9 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         for k in self._respond_to_api:
             yield k, self._respond_to_api[k]
 
-    def respond_to_api(self, rest_api_respond_file):
-        """
+    def respond_to_api(self, rest_api_respond_file: str) -> str:
+        """Return respond for particular rest api.
+
         :param rest_api_respond_file:
         :return:
         """
@@ -532,7 +532,6 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
     def _load_dicts_from_data(self):
         """
-
         Load the dict mapping, from the data points in self data
         and update all labels, this done as last phase when all
         json parsed , all action , target etc extracted..
@@ -918,7 +917,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
     def get_rest_api_mappings(self) -> Iterator[Tuple[str, str]]:
         """
-        Method implements interface to provide a dict view
+         Method implements interface to provide a dict view
          of all rest API mapping of REST APIs.
 
         :return: An iterator of tuples, each containing the
@@ -940,8 +939,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
     def _load_json_files(self) -> None:
         """
-            Load json file and construct from raw json presentation
-            a dataset.
+          Load json file and construct from raw json presentation
+          a dataset.
 
         """
         self._data["hash_to_rest_api"] = {}
@@ -1206,6 +1205,63 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         rest_api = random.choice(list(self._rest_api_to_respond_.keys()))
         supported_method = self._rest_api_to_method[rest_api]
         return rest_api, supported_method, self.action_to_one_hot(rest_api)
+
+    def sample_batch_of_rest_api(
+            self, batch_size: int
+    ) -> Tuple[List[str], List[List[str]], torch.Tensor]:
+        """
+        Randomly sample REST API endpoints from the dataset
+        and return rest APIs, supported methods, and one-hot vectors.
+
+        :param batch_size: The number of samples to generate.
+        :return: A tuple containing the sampled REST API endpoints,
+                supported methods, and one-hot vectors.
+        """
+        rest_apis = []
+        one_hot_vectors = []
+        supported_methods = []
+
+        for _ in range(batch_size):
+            rest_api = random.choice(list(self._rest_api_to_respond_.keys()))
+            supported_method = self._rest_api_to_method[rest_api]
+            one_hot_vector = self.action_to_one_hot(rest_api)
+
+            rest_apis.append(rest_api)
+            supported_methods.append(supported_method)
+            one_hot_vectors.append(one_hot_vector)
+
+        return rest_apis, supported_methods, torch.stack(one_hot_vectors)
+
+    def sample_batch(self, batch_size: int) -> Tuple[List[str], List[List[str]], torch.Tensor]:
+        """
+        Randomly sample REST API endpoints from the dataset
+        and return rest APIs, supported methods, and one-hot vectors.
+
+        This method sample single rest API and return as batch.
+
+        :param batch_size: The number of samples to generate.
+        :return: A tuple containing the sampled REST API endpoints,
+                supported methods, and one-hot vectors.
+        """
+        rest_api = random.choice(list(self._rest_api_to_respond_.keys()))
+        supported_method = self._rest_api_to_method[rest_api]
+        one_hot_vector = self.action_to_one_hot(rest_api)
+
+        rest_apis = [rest_api] * batch_size
+        supported_methods = [supported_method] * batch_size
+        one_hot_vectors = torch.stack([one_hot_vector] * batch_size)
+
+        return rest_apis, supported_methods, one_hot_vectors
+
+    def sample_all_rest_api(self) -> Iterator[Tuple[str, str, torch.Tensor]]:
+        """
+        This method return iterator for all rest api in dataset.
+        It good for testing and full scan Mock Server etc.
+
+        :yield: A tuple containing the REST API endpoint and its response.
+        """
+        for rest_api, resp_file in self.rest_api_iterator():
+            yield rest_api, resp_file, self.action_to_one_hot(rest_api)
 
     def resources_tarball(self):
         """We need return list of resources.

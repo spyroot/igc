@@ -176,6 +176,74 @@ class RestApiEnv(gym.Env):
 
         return False
 
+    def batch_step(
+            self,
+            action_batch: List[ActType]
+    ) -> Tuple[List[ObsType], List[float], List[bool], List[bool], List[dict]]:
+        """
+        Perform a batch of steps for the given action batch.
+
+        :param action_batch: A list of actions.
+        :return: Tuple containing lists of observations, rewards, done flags, terminated flags, and info dictionaries.
+        """
+
+        batch_size = len(action_batch)
+        self.step_count += batch_size
+        info = [{}] * batch_size
+
+        done = [False] * batch_size
+        terminated = [False] * batch_size
+
+        if self.step_count >= self.max_steps:
+            done = [True] * batch_size
+            terminated = [True] * batch_size
+            reward = [-1.0] * batch_size
+
+        observations = []
+        rewards = []
+
+        for i, action in enumerate(action_batch):
+            if not done[i]:
+                self.extract_action_method(action)
+                rest_api_one_hot, method_one_hot = RestApiEnv.extract_action_method(action)
+                method = RestApiEnv.one_hot_to_method_string(method_one_hot)
+                # Remove the additional dimension from the one-hot vector
+                if method not in RestApiEnv.METHOD_MAPPING:
+                    print("Method not in mapping")
+                    rewards.append(-0.1)
+                    observation = self._mock_rest.generate_error_response()
+                    observations.append(self.encoder.encode(observation))
+                else:
+                    rest_api = self._discovered_rest_api.one_hot_vector_to_action(rest_api_one_hot)
+                    print(f"rest api {rest_api} method {method}")
+                    response = self._mock_rest.request(rest_api, method)
+                    # agent execute goal action
+                    if self.is_goal_reached(action, response):
+                        rewards.append(1.0)
+                        done[i] = True
+                        observations.append(self.encoder.encode(response.json()))
+                    elif 200 <= response.status_code <= 300:
+                        print(f"status code {response.status_code}")
+                        observations.append(self.encoder.encode(response.json()))
+                        rewards.append(0.1)
+                        done[i] = False
+                        # Update the current observation with the successful observation
+                    elif response.status_code == 500:
+                        print(f"status code {response.status_code}")
+                        rewards.append(-0.5)
+                        done[i] = True
+                        terminated[i] = False
+                        observation = self._mock_rest.generate_error_response()
+                        observations.append(self.encoder.encode(observation))
+                    else:
+                        print(f"status code {response.status_code}")
+                        observation = self._mock_rest.generate_error_response()
+                        observations.append(self.encoder.encode(observation))
+                        rewards.append(-0.2)
+
+        rewards = np.clip(rewards, -1.0, 1.0)
+        return observations, rewards, done, terminated, info
+
     def step(self, action: ActType) -> Tuple[ObsType, float, bool, bool, dict]:
         """
         :param action:
@@ -240,12 +308,12 @@ class RestApiEnv(gym.Env):
         return self.last_observation, reward, done, terminated, info
 
     def reset(
-        self,
-        *,
-        seed: Optional[int] = None,
-        options: Optional[dict] = None,
-        goal: Optional[ObsType] = None,
-        goal_type: GoalTypeState = None
+            self,
+            *,
+            seed: Optional[int] = None,
+            options: Optional[dict] = None,
+            goal: Optional[ObsType] = None,
+            goal_type: GoalTypeState = None
     ) -> Tuple[ObsType, dict]:
         """Set initial observation to entry point to rest API.
         :param goal_type:
@@ -278,15 +346,15 @@ class RestApiEnv(gym.Env):
         # fixed state goal provided as a tensor
         elif goal_type == GoalTypeState.FixedState:
             if goal.shape != self.observation_space.shape:
-                raise ValueError("Fixed state goal dimensions do not match observation space dimensions.")
+                raise ValueError(
+                    "Fixed state goal dimensions do not match observation space dimensions.")
             self.goal_action = goal
 
         # initial observation
         rest_api, one_hot_vector = self._discovered_rest_api.entry_rest_api()
         response = self.mock_server().request(rest_api, HttpMethod.GET.value)
         self.last_observation = self.encoder.encode(response.json())
-        print(f"Last self.last_observation.shape  {self.last_observation.shape}")
-        print(f"Last self.goal_action shape {self.goal_action.shape}")
+
         return self.last_observation, {"goal": self.goal_action}
 
     def goal(self) -> float:
