@@ -19,7 +19,6 @@ class QNetwork(nn.Module):
         # print("x shape x", x.shape)
         # x = x.squeeze()
         output = self.out(x)
-        print("out shape", output.shape)
         return output
 
 
