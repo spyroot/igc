@@ -274,15 +274,15 @@ class IgcAgentTrainer:
             # update target model by copying Q-policy to Q-target
             self.update_target(self.agent_model, self.target_model)
 
-            f"Epoch: {epoch_idx} Cumulative reward: "
-            f"{total_reward} Success rate: {np.mean(successes)} Mean loss: {np.mean(losses)}"
+            f"Epoch: {epoch_idx} Cumulative reward: {total_reward} Success rate: {np.mean(successes)} Mean loss: {np.mean(losses)}"
+            # f"Epoch: {epoch_idx} Cumulative reward: {total_reward} Success rate: {np.mean(successes)} Mean loss: {np.mean(losses)}"
 
             # if epoch_idx % log_interval == 0:
             #     print(
             #         f"Epoch: {epoch_idx} Cumulative reward: "
             #         f"{total_reward} Success rate: {np.mean(successes)} Mean loss: {np.mean(losses)}"
             #         # pylint: disable=line-too-long
-                )
+            #     )
                 # writer.add_scalar(
                 #     "eval_metrics/total_reward", total_reward, epoch_idx)
                 # writer.add_scalar(
