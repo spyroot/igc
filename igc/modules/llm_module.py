@@ -51,6 +51,8 @@ class IgcLllModule:
         :return:
         """
         self.llm_embeddings.train_observation()
+        self.llm_autoencoder.train_autoencoder()
+
         # self.goal_extractor.train_goal_and_parameter_extractor()
         # self.goal_extractor.train_goal_representation()
 

@@ -61,9 +61,8 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         self.batch_size = args.per_device_train_batch_size
 
         self.batch_log = 10
-        self.num_workers = args.num_workers
         self.shuffle = False
-
+        self.num_workers = args.num_workers
         self._default_mask_token = "@odata.id"
 
         self.optimizer = TorchBuilder.create_optimizer(
@@ -74,8 +73,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             **vars(args)
         )
 
-        print(self.optimizer)
-        print(f"Creating "
+        print(f"Rank {self.rank} creating "
               f"LlmEmbeddingsTrainer num epochs {self.num_epochs} "
               f"batch_size {self.batch_size} "
               f"dataset size {len(self.dataset)} "
@@ -87,8 +85,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
 
     @staticmethod
     def custom_collate_fn(samples):
-        """
-
+        """Collate data before we pass to the model.
         :param samples:
         :return:
         """
@@ -155,11 +152,6 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
 
                 outputs = self.model(**batch_inputs)
                 predicted_tokens = torch.argmax(outputs.logits, dim=-1)
-
-                # if self.is_distributed():
-                #     predicted_tokens = accelerator.gather(predicted_argmax)
-                # else:
-                #     predicted_tokens = predicted_argmax
 
                 predicted_masked_tokens = predicted_tokens[mask_indices]
                 predicted_masked_tokens = predicted_masked_tokens.to(self.device)
@@ -236,11 +228,6 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             self.model, self.optimizer, train_dataloader, eval_dataset,
             device_placement=[True, True, True, True])
 
-        overfit = False
-        if overfit:
-            dataloader_overfit = [next(iter(train_dataloader))]
-            eval_dataloader_overfit = [next(iter(eval_dataloader))]
-
         total_batches = len(train_dataloader)
         dataset_size = len(train_dataset)
         calculated_total_batches = dataset_size // self.batch_size
@@ -255,12 +242,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             total_loss = 0.0
             num_batches = 0
 
-            if overfit:
-                train_dataloader = iter(dataloader_overfit)
-                eval_dataloader = iter(eval_dataloader_overfit)
-
             batch_losses = np.zeros(total_batches)
-
             for i, batch in enumerate(train_dataloader):
                 labels = batch["input_ids"][:, 1:].clone().detach()
                 mask = (batch["input_ids"] == self.pad_token_id)
