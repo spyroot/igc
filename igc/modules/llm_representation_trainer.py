@@ -116,7 +116,6 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
 
     def dataset_sampler(self):
         """
-
         :return:
         """
         if 'random_sampler_enabled' in self.trainer_args:
@@ -229,8 +228,12 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                                      shuffle=False,
                                      collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)
 
+        # self.model, self.optimizer, train_dataloader, eval_dataset = accelerator.prepare(
+        #     [self.model, self.optimizer, train_dataloader, eval_dataset],
+        #     device_placement=[True])
+
         self.model, self.optimizer, train_dataloader, eval_dataset = accelerator.prepare(
-            [self.model, self.optimizer, train_dataloader, eval_dataset],
+            self.model, self.optimizer, train_dataloader, eval_dataset,
             device_placement=[True])
 
         overfit = False
@@ -242,6 +245,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         dataset_size = len(train_dataset)
         calculated_total_batches = dataset_size // self.batch_size
         batch_log_frequency = round(32 * 0.2)
+
         if total_batches == calculated_total_batches:
             print(f"Staring training total_batches: {total_batches} "
                   f"train dataset size: {dataset_size} "
@@ -323,4 +327,3 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
 
         print("Embedding extractor training complete.")
 
-# CUDA_VISIBLE_DEVICES=0,1 NCCL_DEBUG=INFO accelerate launch --config_file /home/spyroot/.cache/huggingface/accelerate/default_config.yaml trainer.py
