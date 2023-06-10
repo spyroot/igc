@@ -30,6 +30,7 @@ from .rest_gym_base import (
 class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
     """
     """
+
     def __init__(self,
                  args: argparse.Namespace,
                  model: PreTrainedModel,
@@ -89,9 +90,9 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         self.base_url = default_rest_base
 
         self.responses = []
-        self.dones = [False] * num_envs
-        self.rewards = [0.0] * num_envs
-        self.terminateds = [False] * num_envs
+        self.dones = [False] * self._num_envs
+        self.rewards = [0.0] * self._num_envs
+        self.terminateds = [False] * self._num_envs
 
         # unit testing.
         self._simulate_goal_reward = False
@@ -165,12 +166,12 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         return action_shape
 
     def reset(
-            self,
-            *,
-            seed: Optional[Union[int, List[int]]] = None,
-            options: Optional[dict] = None,
-            goal: Optional[ObsType] = None,
-            goal_type: GoalTypeState = None
+        self,
+        *,
+        seed: Optional[Union[int, List[int]]] = None,
+        options: Optional[dict] = None,
+        goal: Optional[ObsType] = None,
+        goal_type: GoalTypeState = None
     ):
         """
         Reset the environment.
@@ -209,7 +210,6 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
 
         for i, (rest_api_one_hot, method) in enumerate(zip(rest_api_one_hot_batch, methods)):
             if self.terminateds[i] or self.dones[i]:
-                print("#### Skipping terminated environment")
                 # Skip processing for already terminated environment
                 continue
 
@@ -227,14 +227,15 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
             # add response to list
             self.responses.append(response)
 
-            # Mark the environment as terminated if the termination condition is met
             if self.step_count >= self.max_steps:
+                if not self.dones[i]:
+                    self.rewards[i] = -1.0
+
                 self.dones[i] = True
                 self.terminateds[i] = True
-                self.rewards[i] = -1.0
 
     def step_wait(
-            self
+        self
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[dict]]:
         """
         Wait for the asynchronous actions to complete and return the results.
@@ -243,52 +244,58 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
                  rewards, done flags, terminated flags, and info dictionaries.
         """
         observations = []
-        terminateds = []
-        dones = []
-
         info = [{}] * self.num_envs
 
         _responses = 0
         for response in self.responses:
             if 200 <= response.status_code <= 300:
                 observations.append(self.encoder.encode(response.json()))
-                dones.append(False)
-                terminateds.append(False)
                 _responses += 1
             else:
                 observations.append(self.encoder.encode(
                     self._mock_rest.generate_error_response())
                 )
-                dones.append(True)
-                terminateds.append(False)
                 _responses += 1
 
-        # print(f"Total responses {_responses} observations len {len(observations)}")
         done = torch.tensor(self.dones, dtype=torch.bool)
+        done_mask = torch.logical_not(done)
         terminated = torch.tensor(self.terminateds, dtype=torch.bool)
         _observations = torch.stack(observations, dim=0)
         rewards = torch.tensor(self.rewards, dtype=torch.float32)
 
-        # pass list of observations to check if any of batch reached goal
-        # if self.check_goal(observations):
-        #     goal_reward = torch.tensor([1.0] * self.num_envs, dtype=torch.float32)
-        #     rewards = torch.cat((rewards, goal_reward), dim=0)
-        #     done.fill_(True)
-        #     terminated.fill_(False)
-
         goal_reached = self.check_goal(_observations)
-        print("Goal reached: ", goal_reached)
-        rewards[goal_reached] = 1.0
-        done[goal_reached] = True
-        terminated[goal_reached] = False
+        goal_reached_mask = torch.logical_and(goal_reached, done_mask)
+        rewards[goal_reached_mask] = 1.0
+        done[goal_reached_mask] = True
+        terminated[goal_reached_mask] = False
 
         if self.step_count >= self.max_steps:
             done.fill_(True)
             terminated.fill_(True)
 
+        info = [{'goal_reached': gr} for gr in goal_reached]
         self.last_observation = _observations
+
+        for i, done_val in enumerate(done.tolist()):
+            if not self.dones[i] and done_val:
+                self.dones[i] = done_val
+
+        for i, terminated_val in enumerate(terminated.tolist()):
+            if not self.terminateds[i] and terminated_val:
+                self.terminateds[i] = terminated_val
+
+        self.rewards = [0.0] * self._num_envs
         return _observations, rewards, done, terminated, info
 
+    # self.dones = [
+    #     done_val if not (term or done_val) else self.dones[i]
+    #     for i, (done_val, term) in enumerate(zip(done.tolist(), terminated.tolist()))
+    # ]
+    # self.terminateds = [
+    #     term_val if not (done_val or term_val) else self.terminateds[i]
+    #     for i, (term_val, done_val) in enumerate(zip(terminated.tolist(), done.tolist()))
+    # ]
+    #
     def simulate_goal_reached(self, batch_id: int):
         """Simulate that particular trajectory in batch reached a goal state.
 
@@ -329,21 +336,15 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         """
         # case when we want to simulate some goal reached
         goal_reached = torch.zeros(self.num_envs, dtype=torch.bool)
+
         if self._simulate_goal_reward:
             goal_reached = torch.zeros(self.num_envs, dtype=torch.bool)
             goal_reached[self._simulate_goal_reward_idx] = True
 
         if self.goal is not None:
-            print(type(self.goal))
-            print(type(observations))
-
-            goal_reached = torch.allclose(
-                observations, self.goal, rtol=1e-3, atol=1e-3, equal_nan=True)
-
-            # goal_reached_check2 = self.is_goal_reached(observations, self.goal)
-            # goal_reached3 = torch.all(observations == self.goal)
-            # print(f"goal compare methods m1: {goal_reached}, m2: {goal_reached_check2}, m3: {goal_reached3}")
-
+            for i in range(observations.size(0)):
+                goal_reached[i] = torch.allclose(
+                    observations[i], self.goal[i], rtol=1e-3, atol=1e-3, equal_nan=True)
         return goal_reached
 
     def sample_different_goals(self):
@@ -351,7 +352,8 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         :return:
         """
         # sample goal
-        rest_apis, supported_methods, one_hot_vectors = self._discovered_rest_api.sample_batch_of_rest_api(self._num_envs)
+        rest_apis, supported_methods, one_hot_vectors = self._discovered_rest_api.sample_batch_of_rest_api(
+            self._num_envs)
         http_methods_one_hot = RestApiBaseEnv.encode_batched_rest_api_method("GET", self._num_envs)
         goal_action_vector = RestApiBaseEnv.concat_batch_rest_api_method(
             one_hot_vectors, http_methods_one_hot
@@ -371,6 +373,13 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         return goal_observation, goal_action_vector, rest_apis, supported_methods
 
     def _do_sanity_check(self, rest_apis, goal_action_vector, goal_state):
+        """
+
+        :param rest_apis:
+        :param goal_action_vector:
+        :param goal_state:
+        :return:
+        """
 
         # we do reverse sanity, that emb goal we can compare
         # and recover the goal state.
@@ -424,8 +433,8 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         return goal_observation, goal_action_vector, rest_apis, supported_methods
 
     def add_goal_state(
-            self, goal_observation: torch.Tensor,
-            goal_type: GoalTypeState = GoalTypeState.State
+        self, goal_observation: torch.Tensor,
+        goal_type: GoalTypeState = GoalTypeState.State
     ):
         """
         :param goal_observation:
@@ -437,10 +446,3 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
 
         self.goal = goal_observation
         self.goal_type = goal_type
-
-
-
-
-
-
-

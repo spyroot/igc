@@ -29,7 +29,7 @@ def enable_secure_boot_callback(json_data, handler_state) -> MockResponse:
         if isinstance(current_data, str):
             print("Loading from string")
             current_data = json.loads(current_data)
-        print("updateding current_data")
+        print("updating current_data")
         current_data.update(new_data)
 
     # if "SecureBootCurrentBoot" in current_data:
@@ -44,7 +44,7 @@ def enable_secure_boot_callback(json_data, handler_state) -> MockResponse:
     # if "SecureBootMode" in current_data:
     #     return MockResponse({"message": "Invalid SecureBootMode value"}, 400)
 
-    print("current data datype", type(current_data))
+    print("current data data type", type(current_data))
     resp = MockResponse(
         {"message": "Secure boot is enabled"},
         200, error=False, new_state=current_data)
@@ -562,6 +562,191 @@ class EnvChecker:
         rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
         print(rewards_sum_per_trajectory)
 
+    def goal_reward_state_goal_single_trajectory(self, cmd, max_episode: int = 10):
+        """
+
+        We set goal and check execute a couple of steps and then pass action
+        that should lead to goal state and get reward.
+
+        :param max_episode:
+        :param cmd:
+        :return:
+        """
+        # max episode 3
+        env = VectorizedRestApiEnv(
+            args=args,
+            model=self.model,
+            tokenizer=self.tokenizer,
+            discovered_rest_api=self.dataset,
+            max_episode=10,
+            num_envs=4)
+
+        observation, info = env.reset()
+        goal_observation, goal_action_vector, rest_apis, supported_methods = env.sample_same_goal()
+        env.add_goal_state(goal_observation)
+
+        # actions
+        rest_apis, supported_methods, one_hot_vectors = self.dataset.sample_batch_of_rest_api(4)
+        http_methods_one_hot = RestApiBaseEnv.encode_batched_rest_api_method("GET", 4)
+        action_vector = RestApiBaseEnv.concat_batch_rest_api_method(
+            one_hot_vectors, http_methods_one_hot)
+
+        i = 0
+        rewards_per_trajectory = []
+        terminated = [False] * env.num_envs
+        truncated = [False] * env.num_envs
+
+        while (not any(terminated) or not any(truncated)) and i < max_episode:
+            if i == 2:
+                # Set goal action vector for one trajectory in the batch
+                action_vector[1] = goal_action_vector[1]
+                next_states, rewards, terminated, truncated, infos = env.step(action_vector)
+            else:
+                next_states, rewards, terminated, truncated, infos = env.step(action_vector)
+            rewards_per_trajectory.append(rewards)
+            i += 1
+
+        rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
+        print(rewards_sum_per_trajectory)
+
+    def goal_two_trajectory_reward_state_goal_single_trajectory(self, cmd, max_episode: int = 10):
+        """Two trajectory should reach goal.
+        :param max_episode:
+        :param cmd:
+        :return:
+        """
+        # max episode 3
+        env = VectorizedRestApiEnv(
+            args=args,
+            model=self.model,
+            tokenizer=self.tokenizer,
+            discovered_rest_api=self.dataset,
+            max_episode=10,
+            num_envs=4)
+
+        observation, info = env.reset()
+        goal_observation, goal_action_vector, rest_apis, supported_methods = env.sample_same_goal()
+        env.add_goal_state(goal_observation)
+
+        # actions
+        rest_apis, supported_methods, one_hot_vectors = self.dataset.sample_batch_of_rest_api(4)
+        http_methods_one_hot = RestApiBaseEnv.encode_batched_rest_api_method("GET", 4)
+        action_vector = RestApiBaseEnv.concat_batch_rest_api_method(
+            one_hot_vectors, http_methods_one_hot)
+
+        i = 0
+        rewards_per_trajectory = []
+        terminated = [False] * env.num_envs
+        truncated = [False] * env.num_envs
+
+        while (not any(terminated) or not any(truncated)) and i < max_episode:
+            if i == 2:
+                # Set goal action vector for one trajectory in the batch
+                action_vector[1] = goal_action_vector[1]
+                action_vector[2] = goal_action_vector[2]
+                next_states, rewards, terminated, truncated, infos = env.step(action_vector)
+            else:
+                next_states, rewards, terminated, truncated, infos = env.step(action_vector)
+            rewards_per_trajectory.append(rewards)
+            i += 1
+
+        rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
+        print(rewards_sum_per_trajectory)
+
+    def goal_all_4_trajectory_reward_state_goal_single_trajectory(self, cmd, max_episode: int = 10):
+        """All 4  trajectory should reach goal.
+        :param max_episode:
+        :param cmd:
+        :return:
+        """
+        # max episode 3
+        env = VectorizedRestApiEnv(
+            args=args,
+            model=self.model,
+            tokenizer=self.tokenizer,
+            discovered_rest_api=self.dataset,
+            max_episode=10,
+            num_envs=4)
+
+        observation, info = env.reset()
+        goal_observation, goal_action_vector, rest_apis, supported_methods = env.sample_same_goal()
+        env.add_goal_state(goal_observation)
+
+        # actions
+        rest_apis, supported_methods, one_hot_vectors = self.dataset.sample_batch_of_rest_api(4)
+        http_methods_one_hot = RestApiBaseEnv.encode_batched_rest_api_method("GET", 4)
+        action_vector = RestApiBaseEnv.concat_batch_rest_api_method(
+            one_hot_vectors, http_methods_one_hot)
+
+        i = 0
+        rewards_per_trajectory = []
+        terminated = [False] * env.num_envs
+        truncated = [False] * env.num_envs
+
+        while (not any(terminated) or not any(truncated)) and i < max_episode:
+            if i == 2:
+                # Set goal action vector for one trajectory in the batch
+                action_vector[0] = goal_action_vector[0]
+                action_vector[1] = goal_action_vector[1]
+                action_vector[2] = goal_action_vector[2]
+                action_vector[3] = goal_action_vector[3]
+                next_states, rewards, terminated, truncated, infos = env.step(action_vector)
+            else:
+                next_states, rewards, terminated, truncated, infos = env.step(action_vector)
+            rewards_per_trajectory.append(rewards)
+            i += 1
+
+        rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
+        print(rewards_sum_per_trajectory)
+
+    def goal_two_trajectory_reward_two_terminated(self, cmd, max_episode: int = 10):
+        """
+        Two trajectory reached goal , two terminated.
+
+        :param max_episode:
+        :param cmd:
+        :return:
+        """
+        # max episode 3
+        env = VectorizedRestApiEnv(
+            args=args,
+            model=self.model,
+            tokenizer=self.tokenizer,
+            discovered_rest_api=self.dataset,
+            max_episode=10,
+            num_envs=4)
+
+        observation, info = env.reset()
+        goal_observation, goal_action_vector, rest_apis, supported_methods = env.sample_same_goal()
+        env.add_goal_state(goal_observation)
+
+        # actions
+        rest_apis, supported_methods, one_hot_vectors = self.dataset.sample_batch_of_rest_api(4)
+        http_methods_one_hot = RestApiBaseEnv.encode_batched_rest_api_method("GET", 4)
+        action_vector = RestApiBaseEnv.concat_batch_rest_api_method(
+            one_hot_vectors, http_methods_one_hot)
+
+        i = 0
+        rewards_per_trajectory = []
+        terminated = [False] * env.num_envs
+        truncated = [False] * env.num_envs
+
+        while (not any(terminated) or not any(truncated)) and i < max_episode:
+            if i == 2:
+                # Set goal action vector for one trajectory in the batch
+                action_vector[0] = goal_action_vector[0]
+                action_vector[1] = goal_action_vector[1]
+                action_vector[2] = goal_action_vector[2]
+                action_vector[3] = goal_action_vector[3]
+                next_states, rewards, terminated, truncated, infos = env.step(action_vector)
+            else:
+                next_states, rewards, terminated, truncated, infos = env.step(action_vector)
+            rewards_per_trajectory.append(rewards)
+            i += 1
+
+        rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
+        print(rewards_sum_per_trajectory)
+
     def goal_for_registered_callback(self, cmd, max_episode: int = 10):
         """
          We set goal and check execute a couple of steps and then pass action
@@ -609,7 +794,11 @@ def main(cmd):
     # env_checker.batch_vectorized_4_envs(cmd)
 
     # env_checker.goal_reward_state_goal_set_no_reward(cmd)
-    env_checker.goal_reward_state_goal_set_get_reward(cmd)
+    # env_checker.goal_reward_state_goal_set_get_reward(cmd)
+    env_checker.goal_reward_state_goal_single_trajectory(cmd)
+    env_checker.goal_two_trajectory_reward_state_goal_single_trajectory(cmd)
+    env_checker.goal_all_4_trajectory_reward_state_goal_single_trajectory(cmd)
+    env_checker.goal_two_trajectory_reward_two_terminated(cmd)
     # env_checker.goal_for_registered_callback(cmd)
 
 

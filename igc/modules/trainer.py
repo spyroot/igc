@@ -24,6 +24,12 @@ class IgcAgentTrainer:
         """
         self.args = args
         self.env = None
+        self.batch_size = 4
+        self.max_episode_len = 10
+
+        self.buffer_size = 1e6
+        self.num_episodes = 16
+        self.steps_per_episode = 10
 
         package_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         print(package_dir)
@@ -33,9 +39,6 @@ class IgcAgentTrainer:
             dataset_dir=f"{package_dir}/datasets",
             verbose=True, tokenizer=tokenizer)
 
-        self.max_episode_len = 10
-        self.batch_size = 4
-
         self.env = VectorizedRestApiEnv(
             args=args,
             model=model,
@@ -44,31 +47,25 @@ class IgcAgentTrainer:
             max_episode=self.max_episode_len,
             num_envs=self.batch_size
         )
-        # self.env = VectorizedRestApiEnv(
-        #     args=args, model=model,
-        #     tokenizer=tokenizer,
-        #     discovered_rest_api=self.dataset,
-        #     max_episode=max_episode_len,
-        #     num_envs=2
-        # )
-        #
 
         self.current_goal_action = None
         self.steps_per_episode = 10
 
         self.action_dim = self.env.action_space.shape[-1]
+        self.observation_space = (self.env.observation_space.shape[1] * self.env.observation_space.shape[2]) * 2
 
         self.agent_model = q_network.QNetwork(
-            1571328,
-            self.action_dim, hidden_dim=self.env.observation_space.shape[-1])
+            self.observation_space,
+            self.action_dim,
+            hidden_dim=self.env.observation_space.shape[-1])
+
         self.target_model = q_network.QNetwork(
-            1571328,
-            self.action_dim, hidden_dim=self.env.observation_space.shape[-1]
+            self.observation_space,
+            self.action_dim,
+            hidden_dim=self.env.observation_space.shape[-1]
         )
 
         self.optimizer = optim.Adam(model.parameters(), lr=1e-3)
-
-        # set a goal
         self.current_goal = None
 
     @staticmethod
@@ -88,12 +85,11 @@ class IgcAgentTrainer:
         http_method_one_hot = RestApiEnv.encode_rest_api_method("GET")
         action = RestApiEnv.concat_rest_api_method(one_hot_action, http_method_one_hot)
 
-    def create_goal(self, http_method="GET"):
-        """Sample a goal from the dataset,
+    def create_goal(self, http_method="GET") -> dict:
+        """Sample a goal from the dataset.
         :return:
         """
         goal_state, action_vector, rest_apis, supported_methods = self.env.sample_same_goal()
-
         goal = {
             "state": goal_state,
             "rest_apis": rest_apis,
@@ -108,10 +104,6 @@ class IgcAgentTrainer:
         """
         :return:
         """
-
-        print("train goal")
-        print("Training goal:", self.current_goal["state"].shape)
-
         _state, info = self.env.reset(
             goal=self.current_goal["state"],
             goal_type=GoalTypeState.State
@@ -123,7 +115,7 @@ class IgcAgentTrainer:
             raise ValueError("State and goal have different dimensions.")
 
         if not isinstance(_state, torch.Tensor) or not isinstance(
-                self.current_goal["state"], torch.Tensor):
+            self.current_goal["state"], torch.Tensor):
             raise TypeError("State and goal must be tensors.")
 
         episode_experience = []
@@ -133,7 +125,7 @@ class IgcAgentTrainer:
         terminated = [False] * self.env.num_envs
         truncated = [False] * self.env.num_envs
 
-        while (not any(terminated) or not any (truncated)) and i < self.max_episode_len:
+        while (not any(terminated) or not any(truncated)) and i < self.max_episode_len:
             goal_state = self.current_goal["state"]
             state_flat = _state.view(_state.size(0), -1)
             goal_state_flat = goal_state.view(goal_state.size(0), -1)
@@ -162,12 +154,12 @@ class IgcAgentTrainer:
 
             concatenated_vector = torch.cat([rest_api_one_hot, rest_api_method_one_hot], dim=1)
             next_state, rewards, done, truncated, info = self.env.step(concatenated_vector)
-            rewards_per_trajectory.append(rewards)
-
             next_state_flat = next_state.view(next_state.size(0), -1)
             episode_experience.append(
                 (state_flat, concatenated_vector, rewards, next_state_flat, goal_state_flat)
             )
+
+            rewards_per_trajectory.append(rewards)
             _state = next_state
             i += 1
 
@@ -175,7 +167,7 @@ class IgcAgentTrainer:
         print("train goal done")
         print(f"episode reward {rewards_sum_per_trajectory}")
 
-        return episode_experience
+        return episode_experience, rewards_sum_per_trajectory
 
     def update_replay_buffer(self,
                              replay_buffer,
@@ -222,20 +214,18 @@ class IgcAgentTrainer:
             #                   np.append(next_state.copy(), relabeled_goal.copy()))
 
     def train(
-            self,
-            num_epochs,
-            env_reward_function=None,
-            num_relabeled=4,
-            buffer_size=1e6,
-            num_episodes=16,
-            steps_per_episode=50,
-            gamma=0.98,
-            opt_steps=40,
-            log_interval=5,
+        self,
+        num_epochs,
+        env_reward_function=None,
+        num_relabeled=4,
+        steps_per_episode=50,
+        gamma=0.98,
+        opt_steps=40,
+        log_interval=5,
     ):
 
         self.current_goal = self.create_goal()
-        replay_buffer = experience_buffer.Buffer(buffer_size, self.batch_size)
+        replay_buffer = experience_buffer.Buffer(self.buffer_size, self.batch_size)
 
         # start by making Q-target and Q-policy the same
         self.update_target(self.agent_model, self.target_model)
@@ -249,8 +239,8 @@ class IgcAgentTrainer:
             # loss at the end of each epoch
             losses = []
 
-            for _ in range(num_episodes):
-                episode_experience = self.train_goal()
+            for _ in range(self.num_episodes):
+                episode_experience, rewards_sum_per_trajectory = self.train_goal()
                 # successes.append(succeeded)
                 # add to the replay buffer; use specified HER policy
                 self.update_replay_buffer(
