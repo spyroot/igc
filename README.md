@@ -26,6 +26,9 @@ CC=cc CXX=CC pip install mpi4py -U
 ``cuda12
 ``
 
+```
+accelerate launch --config_file /home/spyroot/.cache/huggingface/accelerate/default_config.yaml trainer.py
+```
 
 MODEL_NAME=gpt2-xl
 PER_DEVICE_TRAIN_BATCH_SIZE=1

@@ -84,7 +84,7 @@ class LlmBaseModule:
         checkpoint_path_dir = checkpoint_path_dir.resolve()
 
         if not checkpoint_path_dir.is_dir():
-            raise ValueError("Indicate path to checkpoint dir.")
+            raise ValueError(f"Indicate path to checkpoint dir {checkpoint_path_dir}.")
 
         self.checkpoint_dir = str(checkpoint_path_dir)
         self.rank = int(os.environ.get('LOCAL_RANK', -1))
