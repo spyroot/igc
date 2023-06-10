@@ -110,7 +110,6 @@ class IgcAgentTrainer:
         """
 
         print("train goal")
-
         print("Training goal:", self.current_goal["state"].shape)
 
         _state, info = self.env.reset(
