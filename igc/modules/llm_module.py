@@ -30,7 +30,9 @@ class IgcLllModule:
         directory_path = os.path.expanduser(args.raw_data_dir)
 
         self.logger = logging.getLogger(__name__)
-        logging.basicConfig(filename='igc_llm_module.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
+        logging.basicConfig(
+            filename='igc_llm_module.log',
+            level=logging.DEBUG, format='%(asctime)s %(message)s')
 
         self.dataset = JSONDataset(
             directory_path, verbose=True, tokenizer=self.tokenizer)
@@ -49,7 +51,6 @@ class IgcLllModule:
         :return:
         """
         self.llm_embeddings.train_observation()
-
         # self.goal_extractor.train_goal_and_parameter_extractor()
         # self.goal_extractor.train_goal_representation()
 

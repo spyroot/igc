@@ -173,7 +173,7 @@ def add_trainer_group(parser):
 
     parser.add_argument(
         "--overfit",
-        type=bool, default=True,
+        type=bool, default=False,
         help="By default do just overfit pass. This is mainly for debug."
     )
     return parser

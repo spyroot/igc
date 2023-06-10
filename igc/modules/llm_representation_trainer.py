@@ -126,6 +126,8 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
 
     def validate(self, validation_dataset, accelerator: Accelerator):
         """ Perform validation on the emb llm model.
+
+        :param accelerator:
         :param validation_dataset: Dataset for validation
         :return: Accuracy on the validation dataset
         """
