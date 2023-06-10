@@ -226,7 +226,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
 
         self.model, self.optimizer, train_dataloader, eval_dataset = accelerator.prepare(
             [self.model, self.optimizer, train_dataloader, eval_dataset],
-            device_placement=[True, True, True, True])
+            device_placement=[True])
 
         total_batches = len(train_dataloader)
         dataset_size = len(train_dataset)
