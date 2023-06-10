@@ -140,6 +140,12 @@ def add_trainer_group(parser):
     )
 
     parser.add_argument(
+        "--llm",
+        type=bool, default=True,
+        help="Training llm models."
+    )
+
+    parser.add_argument(
         "--eval",
         type=bool, default=True,
         help="Run evaluation on the validation based on evaluation strategy."

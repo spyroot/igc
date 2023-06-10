@@ -12,6 +12,10 @@ def main(cmd):
     """
     :return:
     """
+    if cmd.train:
+        igc = IgcLllModule(cmd)
+        igc.train()
+
     igc_rl = IgcAgentTrainer(cmd)
     igc_rl.train()
 

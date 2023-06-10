@@ -35,6 +35,7 @@ class IgcAgentTrainer:
         package_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         print(package_dir)
         model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+
         self.dataset = JSONDataset(
             raw_json_directory_path=os.path.expanduser(args.raw_data_dir),
             dataset_dir=f"{package_dir}/datasets",

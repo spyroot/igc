@@ -30,6 +30,7 @@ from igc.modules.metric_logger import MetricLogger
 from igc.shared.shared_torch_utils import get_device
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
+from loguru import logger
 
 
 class LlmBaseModule:
@@ -82,7 +83,8 @@ class LlmBaseModule:
         self.save_strategy = args.save_strategy
         checkpoint_path_dir = Path(args.output_dir)
         checkpoint_path_dir = checkpoint_path_dir.resolve()
-        print(f"Model saving dir {checkpoint_path_dir}")
+        logger.info(f"Model saving dir {checkpoint_path_dir}")
+
         if not checkpoint_path_dir.is_dir():
             raise ValueError(f"Indicate path to checkpoint dir {checkpoint_path_dir}.")
 
