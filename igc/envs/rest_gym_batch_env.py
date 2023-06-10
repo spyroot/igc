@@ -260,9 +260,13 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         done = torch.tensor(self.dones, dtype=torch.bool)
         done_mask = torch.logical_not(done)
         terminated = torch.tensor(self.terminateds, dtype=torch.bool)
-        _observations = torch.stack(observations, dim=0)
-        rewards = torch.tensor(self.rewards, dtype=torch.float32)
 
+        if len(observations) == 0:
+            _observations = self.last_observation
+        else:
+            _observations = torch.stack(observations, dim=0)
+
+        rewards = torch.tensor(self.rewards, dtype=torch.float32)
         goal_reached = self.check_goal(_observations)
         goal_reached_mask = torch.logical_and(goal_reached, done_mask)
         rewards[goal_reached_mask] = 1.0
@@ -287,15 +291,6 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         self.rewards = [0.0] * self._num_envs
         return _observations, rewards, done, terminated, info
 
-    # self.dones = [
-    #     done_val if not (term or done_val) else self.dones[i]
-    #     for i, (done_val, term) in enumerate(zip(done.tolist(), terminated.tolist()))
-    # ]
-    # self.terminateds = [
-    #     term_val if not (done_val or term_val) else self.terminateds[i]
-    #     for i, (term_val, done_val) in enumerate(zip(terminated.tolist(), done.tolist()))
-    # ]
-    #
     def simulate_goal_reached(self, batch_id: int):
         """Simulate that particular trajectory in batch reached a goal state.
 
@@ -400,7 +395,6 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         # stack and pass so we compare with self.goal.
         reached_goal_states = torch.stack(reached_goal_states, dim=0)
         check_goal = self.check_goal(reached_goal_states)
-        print("CHECK GOAL RETURN", check_goal)
 
     def sample_same_goal(self, do_sanity_check=False):
         """Method sample the same goal for all the environments, batch size

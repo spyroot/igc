@@ -670,7 +670,7 @@ class EnvChecker:
         rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0)
         rewards_sum_per_trajectory = rewards_sum_per_trajectory.sum(dim=0, keepdim=True)
         expected_sum = torch.tensor([[-0.1000, 1.2000, -1.2000, -0.1000]])
-        print("Rewards {rewards_sum_per_trajectory}")
+        print(f"Rewards {rewards_sum_per_trajectory}")
         # assert torch.allclose(rewards_sum_per_trajectory,
         #                       expected_sum), "Sum of rewards does not match the expected value."
 
@@ -717,8 +717,11 @@ class EnvChecker:
             rewards_per_trajectory.append(rewards)
             i += 1
 
-        rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
-        print(rewards_sum_per_trajectory)
+        rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0)
+        rewards_sum_per_trajectory = rewards_sum_per_trajectory.sum(dim=0, keepdim=True)
+        expected_sum = torch.tensor([[1.2000, 1.2000, 1.2000, 1.2000]])
+        assert torch.allclose(rewards_sum_per_trajectory,
+                              expected_sum), "Sum of rewards does not match the expected value."
 
     def goal_two_trajectory_reward_two_terminated(self, cmd, max_episode: int = 10):
         """
@@ -816,9 +819,9 @@ def main(cmd):
 
     # env_checker.goal_reward_state_goal_set_no_reward(cmd)
     # env_checker.goal_reward_state_goal_set_get_reward(cmd)
-    env_checker.goal_reward_state_goal_single_trajectory(cmd)
-    env_checker.goal_two_trajectory_reward_state_goal_single_trajectory(cmd)
-    # env_checker.goal_all_4_trajectory_reward_state_goal_single_trajectory(cmd)
+    # env_checker.goal_reward_state_goal_single_trajectory(cmd)
+    # env_checker.goal_two_trajectory_reward_state_goal_single_trajectory(cmd)
+    env_checker.goal_all_4_trajectory_reward_state_goal_single_trajectory(cmd)
     # env_checker.goal_two_trajectory_reward_two_terminated(cmd)
     # env_checker.goal_for_registered_callback(cmd)
 

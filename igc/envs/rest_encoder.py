@@ -1,3 +1,5 @@
+import time
+
 import torch
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
@@ -49,6 +51,8 @@ class RestBaseEncoder:
         if observation in self.cache:
             return self.cache[observation]
 
+        start_time = time.time()
+
         tokens = self.tokenizer.encode(
             observation, truncation=True,
             add_special_tokens=True,
@@ -66,6 +70,9 @@ class RestBaseEncoder:
                 chunk_embeddings = self.encoder_model(input_tensor).last_hidden_state
                 # print(f"FIRST {chunk_embeddings.shape}")
             embeddings.append(chunk_embeddings)
+
+        elapsed_time = time.time() - start_time
+        print(f"Encoder elapsed time: {elapsed_time} seconds")
 
         # concat
         embeddings = torch.cat(embeddings, dim=1).squeeze(0)
