@@ -234,7 +234,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
 
         self.model, self.optimizer, train_dataloader, eval_dataset = accelerator.prepare(
             self.model, self.optimizer, train_dataloader, eval_dataset,
-            device_placement=[True])
+            device_placement=[True, True, True, True])
 
         overfit = False
         if overfit:
