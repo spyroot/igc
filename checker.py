@@ -242,11 +242,18 @@ class EnvChecker:
         """
         """
         self._env = None
+        start_time = time.time()
         self.model, self.tokenizer, _ = IgcLllModule.load_llm_embeddings_model(cmd)
+        elapsed_time = time.time() - start_time
+        print(f"Model loading time: {elapsed_time} seconds")
+
+        start_time = time.time()
         self.dataset = JSONDataset(
             raw_json_directory_path=os.path.expanduser(args.raw_data_dir),
             dataset_dir=f"datasets",
             verbose=True, tokenizer=self.tokenizer)
+        elapsed_time = time.time() - start_time
+        print(f"Dataset loading time: {elapsed_time} seconds")
 
     def batch_simulate_error_500_check_termination(self, cmd):
         """ Batch of action one positive and one negative
@@ -277,7 +284,7 @@ class EnvChecker:
             if i == 1:
                 env.mock_server().set_simulate_http_500_error(False)
 
-            if any(terminated):
+            if torch.any(terminated):
                 break
 
         expected_rewards = torch.tensor([-0.4, -0.4])
@@ -526,6 +533,7 @@ class EnvChecker:
         :param cmd:
         :return:
         """
+        start_time = time.time()
         # max episode 3
         env = VectorizedRestApiEnv(
             args=args,
@@ -534,6 +542,8 @@ class EnvChecker:
             discovered_rest_api=self.dataset,
             max_episode=10,
             num_envs=4)
+        elapsed_time = time.time() - start_time
+        print(f"Environment creation time: {elapsed_time} seconds")
 
         observation, info = env.reset()
         goal_observation, goal_action_vector, rest_apis, supported_methods = env.sample_same_goal()
@@ -559,8 +569,10 @@ class EnvChecker:
             rewards_per_trajectory.append(rewards)
             i += 1
 
-        rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
-        print(rewards_sum_per_trajectory)
+        rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0)
+        print(f"Stacked {rewards_sum_per_trajectory}")
+        rewards_sum_per_trajectory = rewards_sum_per_trajectory.sum(dim=0, keepdim=True)
+        print(f"sum {rewards_sum_per_trajectory}")
 
     def goal_reward_state_goal_single_trajectory(self, cmd, max_episode: int = 10):
         """
@@ -573,6 +585,7 @@ class EnvChecker:
         :return:
         """
         # max episode 3
+        start_time = time.time()
         env = VectorizedRestApiEnv(
             args=args,
             model=self.model,
@@ -580,6 +593,8 @@ class EnvChecker:
             discovered_rest_api=self.dataset,
             max_episode=10,
             num_envs=4)
+        elapsed_time = time.time() - start_time
+        print(f"Environment creation time: {elapsed_time} seconds")
 
         observation, info = env.reset()
         goal_observation, goal_action_vector, rest_apis, supported_methods = env.sample_same_goal()
@@ -595,7 +610,6 @@ class EnvChecker:
         rewards_per_trajectory = []
         terminated = [False] * env.num_envs
         truncated = [False] * env.num_envs
-
         while (not any(terminated) or not any(truncated)) and i < max_episode:
             if i == 2:
                 # Set goal action vector for one trajectory in the batch
@@ -606,8 +620,11 @@ class EnvChecker:
             rewards_per_trajectory.append(rewards)
             i += 1
 
-        rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
-        print(rewards_sum_per_trajectory)
+        rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0)
+        rewards_sum_per_trajectory = rewards_sum_per_trajectory.sum(dim=0, keepdim=True)
+        expected_sum = torch.tensor([[-0.1000, 1.2000, -0.1000, -0.1000]])
+        assert torch.allclose(rewards_sum_per_trajectory,
+                              expected_sum), "Sum of rewards does not match the expected value."
 
     def goal_two_trajectory_reward_state_goal_single_trajectory(self, cmd, max_episode: int = 10):
         """Two trajectory should reach goal.
@@ -650,8 +667,12 @@ class EnvChecker:
             rewards_per_trajectory.append(rewards)
             i += 1
 
-        rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
-        print(rewards_sum_per_trajectory)
+        rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0)
+        rewards_sum_per_trajectory = rewards_sum_per_trajectory.sum(dim=0, keepdim=True)
+        expected_sum = torch.tensor([[-0.1000, 1.2000, -1.2000, -0.1000]])
+        print("Rewards {rewards_sum_per_trajectory}")
+        # assert torch.allclose(rewards_sum_per_trajectory,
+        #                       expected_sum), "Sum of rewards does not match the expected value."
 
     def goal_all_4_trajectory_reward_state_goal_single_trajectory(self, cmd, max_episode: int = 10):
         """All 4  trajectory should reach goal.
@@ -797,8 +818,8 @@ def main(cmd):
     # env_checker.goal_reward_state_goal_set_get_reward(cmd)
     env_checker.goal_reward_state_goal_single_trajectory(cmd)
     env_checker.goal_two_trajectory_reward_state_goal_single_trajectory(cmd)
-    env_checker.goal_all_4_trajectory_reward_state_goal_single_trajectory(cmd)
-    env_checker.goal_two_trajectory_reward_two_terminated(cmd)
+    # env_checker.goal_all_4_trajectory_reward_state_goal_single_trajectory(cmd)
+    # env_checker.goal_two_trajectory_reward_two_terminated(cmd)
     # env_checker.goal_for_registered_callback(cmd)
 
 

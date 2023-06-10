@@ -9,9 +9,8 @@ class RestBaseEncoder:
         :param tokenizer: (PreTrainedTokenizer): The pre-trained tokenizer.
         """
         self.model = model
-
-        self.encoder_model = model.transformer
         self.tokenizer = tokenizer
+        self.encoder_model = model.transformer
         self.model.config.is_decoder = False
         self.model.resize_token_embeddings(len(tokenizer))
 
@@ -47,14 +46,17 @@ class RestBaseEncoder:
         :param max_chunk_length: The maximum length of each output chunk.
         :return: torch.Tensor: The encoded embeddings with shape torch.Size([batch_size, seq_len, 768])
         """
-
         if observation in self.cache:
             return self.cache[observation]
 
         tokens = self.tokenizer.encode(
-            observation, truncation=True, add_special_tokens=True, padding="max_length", max_length=max_chunk_length)
-        embeddings = []
+            observation, truncation=True,
+            add_special_tokens=True,
+            padding="max_length",
+            max_length=max_chunk_length
+        )
 
+        embeddings = []
         # Process input in chunks
         for i in range(0, len(tokens), max_chunk_length):
             chunk_tokens = tokens[i:i + max_chunk_length]
