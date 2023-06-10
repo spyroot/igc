@@ -82,7 +82,7 @@ class LlmBaseModule:
         self.save_strategy = args.save_strategy
         checkpoint_path_dir = Path(args.output_dir)
         checkpoint_path_dir = checkpoint_path_dir.resolve()
-
+        print(f"Model saving dir {checkpoint_path_dir}")
         if not checkpoint_path_dir.is_dir():
             raise ValueError(f"Indicate path to checkpoint dir {checkpoint_path_dir}.")
 
