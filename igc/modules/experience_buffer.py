@@ -2,6 +2,8 @@ import numpy as np
 import random
 import collections
 
+import torch
+
 
 class Buffer:
     """Deque object to store the most recent experiences."""
@@ -20,18 +22,37 @@ class Buffer:
     def add(self, state, action, reward, next_state):
         """
         Add an experience tuple to the buffer.
-        :param state: state (ndarray): a numpy array corresponding to the env state
-        :param action: action (ndarray): a numpy array corresponding to the action:
-        :param reward: reward (ndarray): reward obtained from the env:
-        :param next_state: next_state (ndarray): numpy array corresponding to the next state:
+        :param state: state (tensor): a tensor array corresponding to the env state
+        :param action: action (tensor): a tensor array corresponding to the action:
+        :param reward: reward (tensor): tensor obtained from the env:
+        :param next_state: next_state (tensor): tensor array corresponding to the next state:
         :return:
         """
         self._buffer.append((state, action, reward, next_state))
 
-    def sample(self):
+    def sample_batch(self):
+        """This method sample from the buffer, where buffer store batch for of experiences,
+        and return a batch of experiences.
+        :return:
         """
-        Randomly sample experiences from the replay buffer.
+        samples = self._buffer
+        if len(self._buffer) >= self._sample_size:
+            samples = random.sample(self._buffer, self._sample_size)
 
+        state_batch = torch.stack([sample[0] for sample in samples], dim=0)
+        action_batch = torch.stack([sample[1] for sample in samples], dim=0)
+        reward_batch = torch.stack([sample[2] for sample in samples], dim=0)
+        next_state_batch = torch.stack([sample[3] for sample in samples], dim=0)
+
+        state_batch = torch.reshape(state_batch, (-1, state_batch.size(-1)))
+        action_batch = torch.reshape(action_batch, (-1, action_batch.size(-1)))
+        reward_batch = torch.reshape(reward_batch, (-1,))
+        next_state_batch = torch.reshape(next_state_batch, (-1, next_state_batch.size(-1)))
+
+        return state_batch, action_batch, reward_batch, next_state_batch
+
+    def sample(self):
+        """Randomly sample experiences from the replay buffer.
         Returns:
           (tuple): batch of experience (state, action, reward, next_state)
         """
@@ -39,11 +60,10 @@ class Buffer:
         if len(self._buffer) >= self._sample_size:
             samples = random.sample(self._buffer, self._sample_size)
 
-        state = np.reshape(
-            np.array([arr[0] for arr in samples]), [len(samples), -1])
-        action = np.array([arr[1] for arr in samples])
-        reward = np.array([arr[2] for arr in samples])
-        next_state = np.array(
-            [arr[3] for arr in samples]).reshape(len(samples), -1)
+        state_batch = torch.stack([sample[0] for sample in samples], dim=0)
+        action_batch = torch.stack([sample[1] for sample in samples], dim=0)
+        reward_batch = torch.stack([sample[2] for sample in samples], dim=0)
+        next_state_batch = torch.stack([sample[3] for sample in samples], dim=0)
 
-        return state, action, reward, next_state
+        print("Sampled State batch shape state: ", state_batch.shape)
+        return state_batch, action_batch, reward_batch, next_state_batch

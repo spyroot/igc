@@ -37,6 +37,7 @@ class IgcLllModule:
 
         self.goal_extractor = GoalExtractor(
             args, self.dataset, self.metric_logger, self.model, self.tokenizer)
+
         self.llm_embeddings = LlmEmbeddingsTrainer(
             args, self.dataset, self.metric_logger, self.model, self.tokenizer)
 

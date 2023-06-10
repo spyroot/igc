@@ -1,6 +1,5 @@
 import json
 import os
-
 import torch
 
 from igc.ds.redfish_dataset import JSONDataset
@@ -28,25 +27,28 @@ def enable_secure_boot_callback(json_data, handler_state) -> MockResponse:
     current_data = handler_state.get("json_data")
     if current_data:
         if isinstance(current_data, str):
+            print("Loading from string")
             current_data = json.loads(current_data)
+        print("updateding current_data")
         current_data.update(new_data)
 
-    if "SecureBootCurrentBoot" in current_data:
-        return MockResponse({"message": "Invalid SecureBootCurrentBoot value"}, 400)
+    # if "SecureBootCurrentBoot" in current_data:
+    #     return MockResponse({"message": "Invalid SecureBootCurrentBoot value"}, 400)
+    #
+    # print("CAlled2")
+    #
+    # if "SecureBootEnable" in current_data:
+    #     return MockResponse({"message": "Invalid SecureBootEnable value"}, 400)
+    #
+    # print("CAlled3")
+    # if "SecureBootMode" in current_data:
+    #     return MockResponse({"message": "Invalid SecureBootMode value"}, 400)
 
-    if "SecureBootEnable" in current_data:
-        return MockResponse({"message": "Invalid SecureBootEnable value"}, 400)
-
-    if "SecureBootMode" in current_data:
-        return MockResponse({"message": "Invalid SecureBootMode value"}, 400)
-
-    print(f"NEW DATA1")
-
+    print("current data datype", type(current_data))
     resp = MockResponse(
         {"message": "Secure boot is enabled"},
-        200, error=False, new_state=new_data)
+        200, error=False, new_state=current_data)
 
-    print(f"NEW DATA2")
     return resp
 
 
@@ -546,8 +548,11 @@ class EnvChecker:
         i = 0
         rewards_per_trajectory = []
         terminated = [False] * env.num_envs
-        while not any(terminated) and i < max_episode:
+        truncated = [False] * env.num_envs
+
+        while (not any(terminated) or not any(truncated)) and i < max_episode:
             if i == 2:
+                print(f"goal action vector {action_vector.dtype}")
                 next_states, rewards, terminated, truncated, infos = env.step(goal_action_vector)
             else:
                 next_states, rewards, terminated, truncated, infos = env.step(action_vector)
@@ -572,15 +577,15 @@ class EnvChecker:
             model=self.model,
             tokenizer=self.tokenizer,
             discovered_rest_api=self.dataset,
-            max_episode=10,
+            max_episode=self.max_episode_len,
             num_envs=4)
 
         env.mock_server().register_callback(
             "/redfish/v1/Systems/System.Embedded.1/SecureBoot", "PATCH", enable_secure_boot_callback)
 
         json_data = '{"SecureBootCurrentBoot": "Enabled"}'
-        response = env.mock_server().request("/redfish/v1/Systems/System.Embedded.1/SecureBoot",
-                                             "PATCH", json_data)
+        response = env.mock_server().request(
+            "/redfish/v1/Systems/System.Embedded.1/SecureBoot", "PATCH", json_data)
 
         response = env.mock_server().request("/redfish/v1/Systems/System.Embedded.1/SecureBoot", "GET")
         print(response.json_data)
@@ -604,8 +609,8 @@ def main(cmd):
     # env_checker.batch_vectorized_4_envs(cmd)
 
     # env_checker.goal_reward_state_goal_set_no_reward(cmd)
-    # env_checker.goal_reward_state_goal_set_get_reward(cmd)
-    env_checker.goal_for_registered_callback(cmd)
+    env_checker.goal_reward_state_goal_set_get_reward(cmd)
+    # env_checker.goal_for_registered_callback(cmd)
 
 
 if __name__ == '__main__':

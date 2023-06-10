@@ -334,6 +334,9 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
             goal_reached[self._simulate_goal_reward_idx] = True
 
         if self.goal is not None:
+            print(type(self.goal))
+            print(type(observations))
+
             goal_reached = torch.allclose(
                 observations, self.goal, rtol=1e-3, atol=1e-3, equal_nan=True)
 
@@ -394,6 +397,7 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         """Method sample the same goal for all the environments, batch size
         :return:
         """
+
         # sample goal
         rest_apis, supported_methods, one_hot_vectors = self._discovered_rest_api.sample_batch(self._num_envs)
         http_methods_one_hot = RestApiBaseEnv.encode_batched_rest_api_method("GET", self._num_envs)

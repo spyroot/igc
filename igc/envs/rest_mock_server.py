@@ -1,10 +1,16 @@
+"""
+
+"""
 import json
 import os
 import argparse
+from typing import Callable, Any, Dict, Optional
 from igc.interfaces.rest_mapping_interface import RestMappingInterface
 
 
 class MockResponse:
+    """
+    """
     def __init__(self, json_data, status_code, error=False, new_state=None):
         """
         :param json_data:
@@ -29,10 +35,71 @@ class MockResponse:
         return self.new_state
 
 
+class MockErrors:
+    """
+
+    """
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        """
+
+        :param args:
+        :param kwargs:
+        """
+        if not cls._instance:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        self._error_response = None
+
+    def generate_error_response(self):
+        """
+        :return:
+        """
+        if self._error_response is None:
+            error_response = {
+                "error": {
+                    "@Message.ExtendedInfo": [
+                        {
+                            "Message": "Unable to complete the operation because the JSON data format entered is invalid.",
+                            "MessageArgs": [],
+                            "MessageArgs@odata.count": 0,
+                            "MessageId": "IDRAC.1.6.SYS405",
+                            "RelatedProperties": [],
+                            "RelatedProperties@odata.count": 0,
+                            "Resolution": "Do the following and the retry the operation: "
+                                          "1) Enter the correct JSON data format and retry the operation.",
+                            "Severity": "Critical"
+                        },
+                        {
+                            "Message": "The request body submitted was malformed JSON "
+                                       "and could not be parsed by the receiving service.",
+                            "MessageArgs": [],
+                            "MessageArgs@odata.count": 0,
+                            "MessageId": "Base.1.2.MalformedJSON",
+                            "RelatedProperties": [],
+                            "RelatedProperties@odata.count": 0,
+                            "Resolution": "Ensure that the request body is valid JSON and resubmit the request.",
+                            "Severity": "Critical"
+                        }
+                    ],
+                    "code": "Base.1.2.GeneralError",
+                    "message": "A general error has occurred. See ExtendedInfo for more information"
+                }
+            }
+            self._error_response = json.dumps(error_response)
+
+        return self._error_response
+
 
 class MockServer:
     """
     """
+    mock_errors = MockErrors()
+    error_response = MockResponse(mock_errors.generate_error_response(), 400, error=True)
+
     def __init__(self, args: argparse.Namespace, rest_mapping: RestMappingInterface = None):
         """Initialize the MockServer object.
         :param args:
@@ -52,7 +119,7 @@ class MockServer:
         self.responses = {}
         self.dir_mock_resp = os.path.expanduser(args.raw_data_dir)
         # Read JSON files and populate the responses dictionary
-        self.mock_callbacks = {}
+        self._mock_callbacks = {}
 
         # this what we expect it might change for different system
         self._default_rest_prefix = "/redfish/v1"
@@ -62,54 +129,22 @@ class MockServer:
         self._construct_json_mocks()
         self._error_respond = None
 
+    @staticmethod
+    def generate_error_response():
+        return MockServer.mock_errors.generate_error_response()
+
     def register_callback(self, url: str, method: str, callback):
         """Register a callback for a specific endpoint and method.
           It might positive or something we expect or not.
+
         :param url: The URL of the endpoint.
         :param method: The HTTP method.
         :param callback: The callback function.
         """
-        self.mock_callbacks[(url, method)] = callback
-
-    @staticmethod
-    def generate_error_response():
-        """
-        :return:
-        """
-        error_response = {
-            "error": {
-                "@Message.ExtendedInfo": [
-                    {
-                        "Message": "Unable to complete the operation because the JSON data format entered is invalid.",
-                        "MessageArgs": [],
-                        "MessageArgs@odata.count": 0,
-                        "MessageId": "IDRAC.1.6.SYS405",
-                        "RelatedProperties": [],
-                        "RelatedProperties@odata.count": 0,
-                        "Resolution": "Do the following and the retry the operation: "
-                                      "1) Enter the correct JSON data format and retry the operation.",
-                        "Severity": "Critical"
-                    },
-                    {
-                        "Message": "The request body submitted was malformed JSON "
-                                   "and could not be parsed by the receiving service.",
-                        "MessageArgs": [],
-                        "MessageArgs@odata.count": 0,
-                        "MessageId": "Base.1.2.MalformedJSON",
-                        "RelatedProperties": [],
-                        "RelatedProperties@odata.count": 0,
-                        "Resolution": "Ensure that the request body is valid JSON and resubmit the request.",
-                        "Severity": "Critical"
-                    }
-                ],
-                "code": "Base.1.2.GeneralError",
-                "message": "A general error has occurred. See ExtendedInfo for more information"
-            }
-        }
-        return json.dumps(error_response)
+        self._mock_callbacks[(url, method)] = callback
 
     def generic_error_response(self):
-        """
+        """Return a generic error response.
         :return:
         """
         if self._error_respond is None:
@@ -118,10 +153,10 @@ class MockServer:
         return self._error_respond
 
     def _load_responses(self, file_path, file_name):
-        """Load json file from a file and convert file back to rest api
+        """
+        Load json file from a file and convert file back to rest api
         this method we essentially take _redfish_v1_UpdateService_FirmwareInventory.json
         and convert back /redfish/v1/UpdateService/FirmwareInventory
-
         The preferred way we use RestMappingInterface
 
         :param file_name:
@@ -146,7 +181,6 @@ class MockServer:
         Load json file from a file and convert file back to rest api.
         This method essentially takes _redfish_v1_UpdateService_FirmwareInventory.json
         and converts it back to /redfish/v1/UpdateService/FirmwareInventory.
-
         The preferred way is to use RestMappingInterface.
 
         :param rest_api_uri: The REST API URI.
@@ -165,7 +199,6 @@ class MockServer:
         if file_path.endswith('.json'):
             with open(file_path, 'r') as f:
                 json_data = f.read()
-
             # We read and add the API response.
             self.add_response(rest_api_uri, 'GET', json_data, self._default_success_code)
 
@@ -205,6 +238,7 @@ class MockServer:
         :param status_code:
         :return:
         """
+
         self.responses[(url, method)] = {
             "json_data": json_data,
             "status_code": status_code
@@ -212,35 +246,64 @@ class MockServer:
 
         # by default, we return 404
         if method != 'GET':
-            self.responses[(url, method)] = {"json_data": None, "status_code": 404}
+            self.responses[(url, method)] = {
+                "json_data": None,
+                "status_code": 404
+            }
+
+    def callback_dispatcher(
+            self,
+            callback: Callable[[Any, Dict[str, Any]], MockResponse],
+            url: str,
+            json_data: Optional[str]
+    ) -> MockResponse:
+        """
+         Dispatches the callback function and handles the response.
+
+        :param callback: The callback function to be executed.
+        :param url: The URL of the request.
+        :param json_data: The JSON data received in the request.
+        :return: The mock response returned by the callback.
+        """
+        respond = None
+        try:
+            handler_view = self.responses.get((url, "GET"))
+            respond = callback(json_data, handler_view)
+            if respond.state() is not None:
+                handler_view["json_data"] = json.dumps(respond.state(), indent=4)
+        except Exception as e:
+            print(e)
+
+        return respond
 
     def request(self, url, method='GET', json_data=None, accept_header=None):
-        """Main interface to mock server
+        """
+         Main interface to mock server
+
         :param url:
         :param method:
         :param json_data:
         :param accept_header:
         :return:
         """
-
         if method not in self._valid_methods:
-            return MockResponse(MockServer.generate_error_response(), 400, error=True)
+            return MockServer.error_response
 
         if json_data is not None:
             try:
                 json.loads(json_data)
             except json.JSONDecodeError:
-                return MockResponse(MockServer.generate_error_response(), 400, error=True)
+                return MockServer.error_response
 
         # generate critical errors if flag set
         if self._is_error_500:
-            return MockResponse(MockServer.generate_error_response(), 500, error=True)
+            return MockResponse(
+                MockServer.generate_error_response(), 500, error=True)
 
         # dispatch
-        callback = self.mock_callbacks.get((url, method))
+        callback = self._mock_callbacks.get((url, method))
         if callback:
-            # handler_view = self.responses.get((url, "GET"))
-            return callback(json_data, self.responses.get((url, "GET")))
+            return self.callback_dispatcher(callback, url, json_data)
 
         # get handler
         response_data = self.responses.get((url, method))
