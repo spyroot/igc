@@ -30,6 +30,7 @@ class IgcAgentTrainer:
         self.buffer_size = 1e6
         self.num_episodes = 16
         self.steps_per_episode = 10
+        self.num_epochs = 10
 
         package_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         print(package_dir)
@@ -212,7 +213,6 @@ class IgcAgentTrainer:
 
     def train(
         self,
-        num_epochs,
         env_reward_function=None,
         num_relabeled=4,
         steps_per_episode=50,
@@ -228,7 +228,7 @@ class IgcAgentTrainer:
         self.update_target(self.agent_model, self.target_model)
 
         # Run for a fixed number of epochs
-        for epoch_idx in range(num_epochs):
+        for epoch_idx in range(self.num_epochs):
             # total reward for the epoch
             total_reward = 0.0
             # record success rate for each episode of the epoch
@@ -273,16 +273,14 @@ class IgcAgentTrainer:
 
             # update target model by copying Q-policy to Q-target
             self.update_target(self.agent_model, self.target_model)
-
-            f"Epoch: {epoch_idx} Cumulative reward: "
-            f"{total_reward} Success rate: {np.mean(successes)} Mean loss: {np.mean(losses)}"
+            f"Epoch: {epoch_idx} Cumulative reward: {total_reward} Mean loss: {np.mean(losses)}"
 
             # if epoch_idx % log_interval == 0:
             #     print(
             #         f"Epoch: {epoch_idx} Cumulative reward: "
             #         f"{total_reward} Success rate: {np.mean(successes)} Mean loss: {np.mean(losses)}"
             #         # pylint: disable=line-too-long
-                )
+
                 # writer.add_scalar(
                 #     "eval_metrics/total_reward", total_reward, epoch_idx)
                 # writer.add_scalar(

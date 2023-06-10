@@ -13,7 +13,7 @@ def main(cmd):
     :return:
     """
     igc_rl = IgcAgentTrainer(cmd)
-    igc_rl.train(num_epochs=1)
+    igc_rl.train()
 
 
 if __name__ == '__main__':

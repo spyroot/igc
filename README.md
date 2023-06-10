@@ -10,13 +10,21 @@ pip install deepspeed
 pip install fairscale
 pip install asv
 pip install pynvml
-
+pip install 'gym[all]'
+pip install loguru
+pip install tensorboard
+pip install tabulate
+pip install pynvml
+pip install deepspeed
 ```
 
 ```bash
 CFLAGS=-noswitcherror pip install mpi4py
 CC=cc CXX=CC pip install mpi4py -U          
 ```
+
+``cuda12
+``
 
 
 MODEL_NAME=gpt2-xl

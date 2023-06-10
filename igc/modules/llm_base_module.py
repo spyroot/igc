@@ -219,6 +219,7 @@ class LlmBaseModule:
 
         if checkpoint_files:
             checkpoint_file = checkpoint_files[0]
+            print(f"Found candidate file {checkpoint_file}")
             checkpoint = torch.load(checkpoint_file, map_location=device)
             model.load_state_dict(checkpoint['model_state_dict'])
             epoch = checkpoint['epoch']
