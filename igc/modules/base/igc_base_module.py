@@ -81,11 +81,8 @@ class IgcBaseModule:
 
         self.model = llm_model
         self.tokenizer = llm_tokenizer
+        self.update_tokenizer_settings(self.tokenizer)
         self.module_name = module_name
-
-        self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-        self.model.config.pad_token_id = self.tokenizer.pad_token_id
 
         self.num_epochs = spec.num_train_epochs
         self.batch_size = spec.per_device_train_batch_size
@@ -95,12 +92,6 @@ class IgcBaseModule:
 
         self.device = get_device()
         self.metric_logger = metric_logger
-        self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-        self.model.config.pad_token_id = self.tokenizer.pad_token_id
-
-        self.pad_token = self.tokenizer.pad_token
-        self.pad_token_id = self.tokenizer.pad_token_id
 
         self._trainer_args = spec
         self._batch_log = 10
@@ -110,7 +101,7 @@ class IgcBaseModule:
         self.optimizer = None
 
         # model saving
-        self.save_strategy = spec.save_strateg
+        self.save_strategy = spec.save_strategy
         self.checkpoint_dir = self._prepare_checkpoint_dir()
         self.rank = int(os.environ.get('LOCAL_RANK', -1))
 
@@ -119,10 +110,26 @@ class IgcBaseModule:
 
         # configure logger
         self._configure_logger(module_name)
-
-        #
         self.logger.info(f"Model {self.module_name} saving dir {self.checkpoint_dir}")
         self._debug_info()
+
+    def set_tokenizer(self, tokenizers):
+        """Update tokenizer
+        :param tokenizers:
+        :return:
+        """
+        self.tokenizer = tokenizers
+        self.update_tokenizer_settings(self.tokenizer)
+
+    def update_tokenizer_settings(self, llm_tokenizer):
+        """Update tokenizer settings
+        :return:
+        """
+        self.tokenizer.pad_token = llm_tokenizer.eos_token
+        self.tokenizer.pad_token_id = llm_tokenizer.eos_token_id
+        self.model.config.pad_token_id = llm_tokenizer.pad_token_id
+        self.pad_token = llm_tokenizer.pad_token
+        self.pad_token_id = llm_tokenizer.pad_token_id
 
     def _debug_info(self):
         """
@@ -147,7 +154,7 @@ class IgcBaseModule:
 
         :return:
         """
-        checkpoint_path_dir = Path(self._trainer_args.log_dir.output_dir)
+        checkpoint_path_dir = Path(self._trainer_args.output_dir)
         checkpoint_path_dir = checkpoint_path_dir.resolve()
         if not checkpoint_path_dir.is_dir():
             raise ValueError(f"Indicate path to checkpoint dir {checkpoint_path_dir}.")
@@ -357,12 +364,16 @@ class IgcBaseModule:
             checkpoint_file = checkpoint_files[0]
             checkpoint = torch.load(checkpoint_file, map_location={'cuda:1': 'cuda:0'})
 
-            # Check if all required keys are present in the checkpoint
-            required_keys = ['model_state_dict', 'optimizer_state_dict', 'epoch', 'is_trained']
+            required_keys = ['model_state_dict', 'optimizer_state_dict', 'epoch']
             missing_keys = [key for key in required_keys if key not in checkpoint]
             if missing_keys:
                 raise KeyError(f"Checkpoint file {self.module_name} {checkpoint_file} "
                                f"is missing the following keys: {missing_keys}")
+
+            optional_keys = ['is_trained']
+            missing_keys = [key for key in optional_keys if key not in checkpoint]
+            if missing_keys:
+                warnings.warn("Optional key is missing from the checkpoint file. ")
 
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -424,24 +435,31 @@ class IgcBaseModule:
                 print(f"No checkpoint files found in dir {checkpoint_dir}")
                 return 0, False
 
-        print(f"Found model file {checkpoint_file}")
+        print(f"Found model file {checkpoint_file} loading to device {device}")
 
         checkpoint = torch.load(checkpoint_file, map_location=device)
-        required_keys = ['model_state_dict', 'epoch', 'is_trained']
-        if optimizer is not None:
-            required_keys.append("optimizer_state_dict")
-        if scheduler is not None:
-            required_keys.append("scheduler_state_dict")
-
+        required_keys = ['model_state_dict', 'epoch']
         missing_keys = [key for key in required_keys if key not in checkpoint]
         if missing_keys:
             print(f"Checkpoint file {checkpoint_file} "
                   f"is missing the following keys: {missing_keys}")
             return 0, False
 
+        optional_keys = ['is_trained']
+        missing_keys = [key for key in optional_keys if key not in checkpoint]
+        if missing_keys:
+            warnings.warn("Optional key is missing from the checkpoint file. ")
+            is_trained = True
+        else:
+            is_trained = checkpoint['is_trained']
+
+        if optimizer is not None:
+            required_keys.append("optimizer_state_dict")
+        if scheduler is not None:
+            required_keys.append("scheduler_state_dict")
+
         model.load_state_dict(checkpoint['model_state_dict'])
         epoch = checkpoint['epoch']
-        is_trained = checkpoint['is_trained']
 
         print(f"Loading checkpoint loaded from {checkpoint_file}, epoch: {epoch}")
 

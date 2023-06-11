@@ -12,6 +12,7 @@ def shared_main(
     device_list_visibility: str = None
 ):
     """Share main function for all trainers.
+
     :return:
     """
     args = shared_arg_parser()

@@ -29,7 +29,6 @@ class DatasetConsistencyError(Exception):
     """Base class for other exceptions"""
     pass
 
-
 class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderInterface):
 
     def __init__(self,
@@ -43,7 +42,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                  tokenizer: Optional[Any] = None,
                  transform=None,
                  target_transform=None,
-                 is_force_download=False):
+                 is_force_download=False,
+                 do_consistency_check=True):
         """
         :param raw_json_directory_path:
         :param default_tokenize:
@@ -175,7 +175,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         # load or build dataset
         self._load_dataset()
         # check consistency
-        self._check_consistency()
+        if do_consistency_check:
+            self._check_consistency()
         # state
         self._entry_rest_api_result = None
 

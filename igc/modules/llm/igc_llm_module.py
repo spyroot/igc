@@ -2,29 +2,13 @@ import argparse
 from typing import Optional, Dict, Union, List
 
 import torch
-from transformers import (GPT2LMHeadModel,
-                          GPT2Tokenizer)
-
-from igc.modules.base.igc_llm_base_module import LlmBaseModule
-from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.ds.redfish_dataset import JSONDataset
 from igc.modules.igc_train_auto_state_encoder import AutoencoderTrainer
 from igc.modules.llm_train_goal_extract import GoalExtractorTrainer
 from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
-
-
-def from_pretrained_default(args, only_tokenizer=False):
-    """
-    :param args:
-    :param only_tokenizer:
-    :return:
-    """
-    model = None
-    if not only_tokenizer:
-        model = GPT2LMHeadModel.from_pretrained(args.model_type)
-
-    tokenizer = GPT2Tokenizer.from_pretrained(args.model_type)
-    return model, tokenizer
+from igc.modules.shared.llm_shared import from_pretrained_default
+from igc.modules.base.igc_llm_base_module import LlmBaseModule
+from igc.modules.base.igc_metric_logger import MetricLogger
 
 
 class IgcLanguageModule:
@@ -158,12 +142,14 @@ class IgcLanguageModule:
         modules = {}
         if module_name is not None:
             if module_name not in IgcLanguageModule.modules:
-                raise ValueError(f"Invalid module_name: {module_name}. Must be one of {IgcLanguageModule.modules}")
+                raise ValueError(f"Invalid module_name: {module_name}. "
+                                 f"Must be one of {IgcLanguageModule.modules}")
 
             module = IgcLanguageModule.make_model(spec, module_name, base_model, base_tokenizer)
             module.load(module_name, module.model, spec,
                         device=device, is_inference=True, optimizer=None, scheduler=None)
             modules[module_name] = module
+            modules[module_name].set_tokenizer(base_tokenizer)
 
         else:
             for model_name in IgcLanguageModule.modules:
@@ -171,5 +157,6 @@ class IgcLanguageModule:
                 module.load(model_name, module.model, spec,
                             device=device, is_inference=True, optimizer=None, scheduler=None)
                 modules[model_name] = module
+                modules[model_name].set_tokenizer(base_tokenizer)
 
         return modules

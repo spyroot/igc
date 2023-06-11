@@ -459,6 +459,11 @@ def add_dataset_dataloader(parser):
         help="A directory where all discovered rest API json files. "
              "This mainly need a node that build dataset")
 
+    group.add_argument(
+        "--do_consistency_check",
+        type=bool, default=True,
+        help="Whether we perform dataset consistency check.")
+
     return parser
 
 
