@@ -10,6 +10,7 @@ from igc.shared.shared_torch_builder import TorchBuilder
 from .base.igc_base_module import IgcBaseModule
 from .base.igc_metric_logger import MetricLogger
 from igc.modules.llm.igc_autoencoder import AutoStateEncoder
+import torch.nn.functional as F
 
 
 class AutoencoderTrainer(IgcBaseModule):
@@ -87,15 +88,23 @@ class AutoencoderTrainer(IgcBaseModule):
         loss = loss.sum(dim=[1, 2, 3]).mean(dim=[0])
         return loss
 
+    def _get_reconstruction_loss(self, batch):
+        """Given a batch of images, this function returns the reconstruction loss (MSE in our case)"""
+        x, _ = batch  # We do not need the labels
+        x_hat = self.forward(x)
+        loss = F.mse_loss(x, x_hat, reduction="none")
+        loss = loss.sum(dim=[1, 2, 3]).mean(dim=[0])
+        return loss
+
+
     def encode(self):
         """
         :return:
         """
-        input_dim = self.llm_model.config.hidden_size
+        input_dim = self._llm_model.config.hidden_size
         latent_dim = 128
 
-        # here create instances of the GPT model and the Autoencoder
-        gpt_encoder = self.llm_model.get_input_embeddings()
+        gpt_encoder = self._llm_model.get_input_embeddings()
         autoencoder = AutoStateEncoder(input_dim, latent_dim)
 
         # attach the autoencoder to the GPT model
@@ -115,6 +124,8 @@ class AutoencoderTrainer(IgcBaseModule):
         """
         :return:
         """
+        self.model_autoencoder.train()
+
         num_epochs = 10
         self.logger.info(f"Starting training")
         train_dataloader = DataLoader(self.dataset,
@@ -130,13 +141,15 @@ class AutoencoderTrainer(IgcBaseModule):
             for batch in train_dataloader:
                 with torch.no_grad():
                     output = self._encoder_model(**batch)
-                    print("Output keys", output.keys())
 
                 hidden_state = output.last_hidden_state
-                print(f"Dim hidden space {hidden_state.shape}")
-                latent_repr = self._encoder_model.encoder(hidden_state)
+                flat_input = hidden_state.view(hidden_state.shape[0], -1)
+                latent_repr = self.model_autoencoder.encoder(flat_input)
                 reconstructed = self.model_autoencoder.decoder(latent_repr)
-                loss = self.loss_fn(output, hidden_state)
+
+                loss = F.mse_loss(flat_input, reconstructed, reduction="none")
+                loss = loss.mean()
+
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
