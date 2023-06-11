@@ -11,10 +11,12 @@ from .base.igc_metric_logger import MetricLogger
 from igc.modules.llm.igc_autoencoder import AutoStateEncoder
 from igc.shared.shared_torch_builder import TorchBuilder
 import torch.nn.functional as F
+from accelerate import Accelerator
 
 
 class AutoencoderTrainer(IgcBaseModule):
     """
+
     Autoencoder trainer used to train the autoencoder to reduce
     state dimension of latent space llm outputs.
 
@@ -112,12 +114,24 @@ class AutoencoderTrainer(IgcBaseModule):
         """
         :return:
         """
+        accelerator = Accelerator(device_placement=True)
+        self.device = accelerator.device
+
+        self.logger.info(
+            f"Rank {self.rank} starting train, device {self.device}")
+
+        torch.cuda.empty_cache()
+
         self._encoder_model.to(self.device)
         self._encoder_model.eval()
 
         self.model_autoencoder.to(self.device)
         self.model_autoencoder.train()
 
+        if self.checkpoint_dir is not None:
+            last_epoch = self.load_checkpoint(self.checkpoint_dir)
+        else:
+            last_epoch = 0
 
         num_epochs = 10
         self.logger.info(f"Starting training")
@@ -129,8 +143,12 @@ class AutoencoderTrainer(IgcBaseModule):
             shuffle=True,
             collate_fn=AutoencoderTrainer.custom_collate_fn)
 
+        self.model, self.optimizer, train_dataloader, eval_dataset = accelerator.prepare(
+            [self.model, self.optimizer, train_dataloader],
+            device_placement=[True])
+
         # training loop
-        for epoch in range(num_epochs):
+        for epoch in range(last_epoch, self.num_epochs):
             total_loss = 0.0
             for batch in train_dataloader:
                 with torch.no_grad():
