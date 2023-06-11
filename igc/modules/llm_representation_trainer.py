@@ -38,40 +38,38 @@ BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 class LlmEmbeddingsTrainer(LlmBaseModule):
     """
     """
-
     def __init__(self,
                  name: str,
-                 args: argparse.Namespace,
+                 spec: argparse.Namespace,
                  ds: JSONDataset,
                  metric_logger: MetricLogger,
                  llm_model,
                  llm_tokenizer):
         """
         
-        :param args: 
+        :param spec:
         :param ds: 
         :param metric_logger: 
         :param llm_model: 
         :param llm_tokenizer: 
         """
-        # Define the GPT model and tokenizer
-        super().__init__(name, args, ds, metric_logger, llm_model, llm_tokenizer)
+        super().__init__(name, spec, ds, metric_logger, llm_model, llm_tokenizer)
 
         self.is_quantize = False
-        self.num_epochs = args.num_train_epochs
-        self.batch_size = args.per_device_train_batch_size
+        self.num_epochs = spec.num_train_epochs
+        self.batch_size = spec.per_device_train_batch_size
 
         self.batch_log = 10
         self.shuffle = True
-        self.num_workers = args.num_workers
+        self.num_workers = spec.num_workers
         self._default_mask_token = "@odata.id"
 
         self.optimizer = TorchBuilder.create_optimizer(
-            args.llm_optimizer,
+            spec.llm_optimizer,
             self.model,
-            args.llm_learning_rate,
-            args.llm_weight_decay,
-            **vars(args)
+            spec.llm_learning_rate,
+            spec.llm_weight_decay,
+            **vars(spec)
         )
 
         print(f"Rank {self.rank} creating "
@@ -179,7 +177,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         """
         return self.rank == -1 or self.rank == 0
 
-    def train_observation(self, overfit: Optional[bool] = True):
+    def train(self, overfit: Optional[bool] = True):
         """Train LLM model to map high level goal to redfish actions.
 
         For example
@@ -321,5 +319,11 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             self.model = convert(self.model)
 
         self.save_model(self.checkpoint_dir)
+
+        del train_dataloader
+        del eval_dataloader
+        del self.optimizer
+        del accelerator
+
         print("Embedding extractor training complete.")
 

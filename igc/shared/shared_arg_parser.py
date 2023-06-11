@@ -22,7 +22,9 @@ def set_logger(spec):
 
 
 def add_optimizer_group(parser):
-    """Add optimizer parameters.
+    """
+    Optimizer parameters.
+
     :param parser:
     :return:
     """
@@ -60,7 +62,9 @@ def add_optimizer_group(parser):
 
 
 def add_model_type_group(parser):
-    """LLM Model parameters.
+    """
+    LLM Model parameters.
+
     :param parser:
     :return:
     """
@@ -75,7 +79,9 @@ def add_model_type_group(parser):
 
 
 def add_scheduler_group(parser):
-    """Scheduler parameters.
+    """
+    Scheduler parameters.
+
     :param parser:
     :return:
     """
@@ -95,13 +101,94 @@ def add_scheduler_group(parser):
     return parser
 
 
-def add_trainer_group(parser):
+def add_rl_trainer_group(parser):
     """
+    This all RL agent trainer parameters.
+
     :param parser:
     :return:
     """
-    trainer_group = parser.add_argument_group('Trainer')
 
+    trainer_group = parser.add_argument_group('RL Trainer')
+
+    trainer_group.add_argument(
+        "--per_device_train_batch_size",
+        type=int, default=4,
+        help="The batch size per GPU/TPU core/CPU for training.")
+
+    trainer_group.add_argument(
+        "--per_device_eval_batch_size",
+        type=int, default=8,
+        help="Batch size (per device) "
+             "for the evaluation dataloader.")
+
+    trainer_group.add_argument(
+        "--num_train_epochs",
+        type=int, default=1000,
+        help="Total number of training epochs to perform.")
+
+    trainer_group.add_argument(
+        "--max_train_steps",
+        type=int, default=None,
+        help="Total number of training steps to perform."
+             " If provided, overrides num_train_epochs.")
+
+    trainer_group.add_argument(
+        "--max_trajectory_length",
+        type=int, default=None,
+        help="Maximum length of a trajectory.")
+
+    trainer_group.add_argument(
+        "--rl_buffer_size",
+        type=float, default=1e6,
+        help="Experience buffer size.")
+
+    trainer_group.add_argument(
+        "--rl_batch_size",
+        type=float, default=8,
+        help="Batch size we use for rl agent. "
+             "Note number environments will be the same since it vectorized.")
+
+    trainer_group.add_argument(
+        "--rl_num_episodes",
+        type=float, default=16,
+        help="Batch size we use for rl agent. "
+             "Note number environments will be the same since it vectorized.")
+
+    trainer_group.add_argument(
+        "--rl_steps_per_episode",
+        type=int, default=16,
+        help="Batch size we use for rl agent. "
+             "Note number environments will be the same since it vectorized.")
+
+    trainer_group.add_argument(
+        "--rl_steps_per_episode",
+        type=int, default=16,
+        help="Batch size we use for rl agent. "
+             "Note number environments will be the same since it vectorized.")
+
+    trainer_group.add_argument(
+        "--rl_gamma_value",
+        type=float, default=0.98,
+        help="Gamma value for the rl agent.")
+
+    trainer_group.add_argument(
+        "--rl_num_optimization_steps",
+        type=int, default=40,
+        help="Number of optimization steps.")
+
+    return parser
+
+
+def add_trainer_group(parser):
+    """
+    This all trainer parameters.
+
+    :param parser:
+    :return:
+    """
+
+    trainer_group = parser.add_argument_group('Trainer')
     trainer_group.add_argument(
         "--per_device_train_batch_size",
         type=int, default=4,
@@ -147,21 +234,31 @@ def add_trainer_group(parser):
         help="Random seed to be used with data samplers."
     )
 
+    # indicate that we train
     parser.add_argument(
         "--train",
         type=bool, default=True,
         help="Training model."
     )
 
+    # setting what llm model we train
     parser.add_argument(
         "--llm",
-        choices=['latent', 'goal', 'parameter', 'encoder'],
-        type=str, default="latent",
+        choices=["all", "latent", "goal", "parameter", "encoder", "none"],
+        type=str, default="none",
         help="Training llm require to choose which model "
              "(A model we use for state encoder, goal encoder, "
              "goal and parameter encoder.)"
     )
 
+    parser.add_argument(
+        "--rl",
+        choices=["all", "none"],
+        type=str, default="none",
+        help="Training rl agent"
+    )
+
+    # do we want to run evaluation for each model during a training
     parser.add_argument(
         "--eval",
         type=bool, default=True,
@@ -169,12 +266,7 @@ def add_trainer_group(parser):
              " the validation set for a particular model and strategy."
     )
 
-    parser.add_argument(
-        "--predict",
-        type=bool, default=False,
-        help="Random seed to be used with data samplers."
-    )
-
+    # do we use gradient norm or not.
     parser.add_argument(
         "--max_grad_norm",
         type=float,
@@ -182,6 +274,7 @@ def add_trainer_group(parser):
         help="Maximum gradient norm (for gradient clipping)."
     )
 
+    # bound to a total number of steps.
     parser.add_argument(
         "--max_steps",
         type=int,
@@ -189,16 +282,19 @@ def add_trainer_group(parser):
         help="If set to a positive number, the total number of training steps to perform."
     )
 
+    # this mainly for debug model to overfit on a batch.
     parser.add_argument(
         "--overfit",
         type=bool, default=False,
         help="By default do just overfit pass. This is mainly for debug."
     )
+
     return parser
 
 
 def add_logging_group(parser):
-    """Add logging argument parameters.
+    """
+    Logging argument parameters.
 
     :param parser:
     :return:
@@ -232,7 +328,9 @@ def add_logging_group(parser):
 
 
 def add_data_types_group(parser):
-    """Data types parameters.
+    """
+    Tensor data types parameters.
+
     :param parser:
     :return:
     """
@@ -288,6 +386,8 @@ def add_data_types_group(parser):
 
 def add_checkpoint_group(parser):
     """
+    Saving checkpoint strategies, and other checkpoint related parameters.
+
     :param parser:
     :return:
     """
@@ -314,7 +414,9 @@ def add_checkpoint_group(parser):
 
 
 def add_distribute_backends(parser):
-    """Distribute backend settings.
+    """
+    Distribute backend settings, by default we use accelerate.
+
     :param parser:
     :return:
     """
@@ -341,7 +443,9 @@ def add_distribute_backends(parser):
 
 
 def add_dataset_dataloader(parser):
-    """Distribute backend settings.
+    """
+    Dataloader settings.
+
     :param parser:
     :return:
     """
@@ -349,17 +453,18 @@ def add_dataset_dataloader(parser):
     group.add_argument(
         "--dataloader_pin_memory",
         type=bool, default=False,
-        help="Whether you want to pin memory in data loaders or not.")
+        help="Whether pin dataset to memory in torch data loaders or not.")
 
     group.add_argument(
         "--num_workers",
         type=int, default=1,
-        help="Number of subprocesses to use for data loading.")
+        help="Number of workers to use for data loading.")
 
     group.add_argument(
         "--raw_data_dir",
         type=str, default="~/.json_responses",
-        help="A directory where all discovered rest API json files.")
+        help="A directory where all discovered rest API json files. "
+             "This mainly need a node that build dataset")
 
     return parser
 
@@ -375,7 +480,7 @@ def add_reporting_group(parser):
         choices=['comet_ml', 'mlflow',
                  'neptune', 'tensorboard',
                  'wandb', 'clearml'],
-    help="Where we want report metrics.")
+        help="Where we want report metrics.")
     return parser
 
 
@@ -444,5 +549,4 @@ def shared_arg_parser(
 
     # Set up the logger based on the log level in the arguments
     set_logger(args)
-
     return args

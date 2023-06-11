@@ -11,56 +11,95 @@ from transformers import (GPT2LMHeadModel,
                           PreTrainedTokenizer)
 
 from .igc_auto_state_encoder import AutoencoderTrainer
-from ..ds.redfish_dataset import JSONDataset
 from .base.igc_metric_logger import MetricLogger
 from .llm_goal_extract_trainer import GoalExtractorTrainer
 from .llm_representation_trainer import LlmEmbeddingsTrainer
+from ..ds.redfish_dataset import JSONDataset
+
+
+def from_pretrained_default(args):
+    """
+    :param args:
+    :return:
+    """
+    model = GPT2LMHeadModel.from_pretrained(args.model_type)
+    tokenizer = GPT2Tokenizer.from_pretrained(args.model_type)
+    return model, tokenizer
 
 
 class IgcLanguageModule:
-    def __init__(self, args: argparse.Namespace):
+    """
+    """
+    def __init__(self,
+                 spec: argparse.Namespace,
+                 metric_logger: MetricLogger,
+                 ds: JSONDataset,
+                 from_pretrained=from_pretrained_default):
         """
-        :param args:
+        :param spec:
         """
-        self.metric_logger = MetricLogger(args.metric_report, **vars(args))
-        self.model = GPT2LMHeadModel.from_pretrained(args.model_type)
-        self.tokenizer = GPT2Tokenizer.from_pretrained(args.model_type)
 
-        directory_path = os.path.expanduser(args.raw_data_dir)
-        self.cmd = args
+        if spec is None:
+            raise ValueError("Specs cannot be None")
+
+        self._from_pretrained_fn = from_pretrained
+        self.metric_logger = metric_logger
+        self.spec = spec
 
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(
             filename='igc_llm_module.log',
             level=logging.DEBUG, format='%(asctime)s %(message)s')
 
-        self.dataset = JSONDataset(
-            directory_path, verbose=True, tokenizer=self.tokenizer)
-
-        self.llm_embeddings = LlmEmbeddingsTrainer(
-            "state_encoder",
-            args, self.dataset, self.metric_logger, self.model, self.tokenizer)
-
-        self.goal_extractor = GoalExtractorTrainer(
-            "goal_extractor",
-            args, self.dataset, self.metric_logger, self.model, self.tokenizer)
-
-        self.autoencoder = AutoencoderTrainer(
-            "state_autoencoder", args, self.dataset, self.metric_logger, self.model, self.tokenizer)
+        self.ds = ds
 
     def train(self):
         """Main call to train all language models.
         :return:
         """
-        if self.cmd is None and self.cmd:
-            if self.cmd == "latent":
-                self.llm_embeddings.train_observation()
-            if self.cmd == "goal":
-                self.goal_extractor.train_goal_representation()
-            if self.cmd == "parameter":
-                self.goal_extractor.train_goal_and_parameter_extractor()
-            if self.cmd == "encoder":
-                self.autoencoder.train()
+
+        model, tokenizer = self._from_pretrained_fn(self.spec.model_type)
+
+        # we train State Encoder the goal here take rest api response
+        # and re-present as state.
+        if self.spec == "latent" or self.spec == "all":
+            llm_embeddings = LlmEmbeddingsTrainer(
+                "state_encoder",
+                self.spec, self.ds, self.metric_logger, model, tokenizer)
+            llm_embeddings.train()
+            model = llm_embeddings.model
+        # we train goal extractor the goal here extract
+        # goal from high level sentence
+        if self.spec == "goal" or self.spec == "all":
+            # note we first fine tune LLM then we tune all other models.
+            goal_extractor = GoalExtractorTrainer(
+                "goal_extractor",
+                self.spec,
+                self.ds,
+                self.metric_logger,
+                model,
+                tokenizer)
+            goal_extractor.train_goal_representation()
+        # we train goal and parameter extractor, the goal here to extract
+        # high level goal and parameters for that goal.
+        if self.spec == "parameter" or self.spec == "all":
+            parameter_extractor = GoalExtractorTrainer(
+                "parameter_extractor",
+                self.spec,
+                self.ds,
+                self.metric_logger,
+                model,
+                tokenizer)
+            parameter_extractor.train_goal_and_parameter_extractor()
+        # we train auto encoder the aim here to reduce state re-presentation
+        if self.spec == "encoder" or self.spec == "all":
+            autoencoder = AutoencoderTrainer(
+                "state_autoencoder",
+                self.spec, self.ds,
+                self.metric_logger,
+                model,
+                tokenizer)
+            autoencoder.train()
 
         # self.llm_autoencoder.train_autoencoder()
         # self.goal_extractor.train_goal_and_parameter_extractor()

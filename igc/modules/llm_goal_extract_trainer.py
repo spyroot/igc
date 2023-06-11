@@ -60,6 +60,8 @@ class GoalExtractorTrainer(LlmBaseModule):
         self.high_level_actions = ['Create', 'Update', 'Delete', 'Query']
         self.batch_log = 10
 
+        self.model.load()
+
         self.optimizer = TorchBuilder.create_optimizer(
             args.llm_optimizer, self.model,
             args.llm_learning_rate,

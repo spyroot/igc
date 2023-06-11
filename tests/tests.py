@@ -1,7 +1,7 @@
 import unittest
 import torch
 
-from llm_trainer import LLmTrainer
+from backups.llm_trainer import LLmTrainer
 
 
 class LLmTrainerCollateTest(unittest.TestCase):

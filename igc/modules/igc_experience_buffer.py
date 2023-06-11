@@ -1,20 +1,18 @@
-import numpy as np
 import random
 import collections
-
 import torch
 
 
 class Buffer:
-    """Deque object to store the most recent experiences."""
-
+    """
+    Buffer for the most recent experiences used in RL
+    """
     def __init__(self, size, sample_size):
         """
 
         :param size: maximum size of the buffer.
         :param sample_size: size of the randomly sampled batch of experiences.
         """
-
         self._size = int(size)
         self._sample_size = sample_size
         self._buffer = collections.deque(maxlen=self._size)
@@ -22,6 +20,7 @@ class Buffer:
     def add(self, state, action, reward, next_state):
         """
         Add an experience tuple to the buffer.
+
         :param state: state (tensor): a tensor array corresponding to the env state
         :param action: action (tensor): a tensor array corresponding to the action:
         :param reward: reward (tensor): tensor obtained from the env:

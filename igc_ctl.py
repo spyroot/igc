@@ -9,7 +9,6 @@ import requests
 import urllib3
 
 from idrac_ctl import IDracManager, CustomArgumentDefaultsHelpFormatter, ApiRequestType
-from idrac_ctl.build.lib.idrac_ctl.idrac_main import create_cmd_tree
 from idrac_ctl.idrac_ctl.cmd_exceptions import AuthenticationFailed
 from idrac_ctl.idrac_ctl.idrac_main import console_error_printer
 

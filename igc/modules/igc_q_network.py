@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 
 
-class QNetwork(nn.Module):
+class Igc_QNetwork(nn.Module):
     def __init__(self, input_dim, num_actions, hidden_dim=128):
         super().__init__()
         print(f"QNetwork input_dim {input_dim} output_dim {num_actions}")

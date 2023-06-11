@@ -6,49 +6,44 @@ import torch
 from torch import optim, nn
 
 from igc.ds.redfish_dataset import JSONDataset
-from igc.envs.rest_gym_batch_env import VectorizedRestApiEnv
 from igc.envs.rest_gym_env import RestApiEnv, GoalTypeState
-from igc.modules import experience_buffer, q_network
-from igc.modules.llm_module import IgcLllModule
-from igc.shared.shared_main import shared_main
+from igc.modules.base.igc_metric_logger import MetricLogger
+from igc.modules.base.igc_rl_base_module import RlBaseModule
+from igc.modules.igc_experience_buffer import Buffer
+from igc.modules.igc_q_network import Igc_QNetwork
 
 
-class IgcAgentTrainer:
+class IgcAgentTrainer(RlBaseModule):
     """
     """
-
-    def __init__(self, args: argparse.Namespace):
+    def __init__(self,
+                 module_name: str,
+                 spec: argparse.Namespace,
+                 ds: JSONDataset,
+                 metric_logger: MetricLogger,
+                 llm_model, llm_tokenizer):
         """
 
         :param args:
         """
-        self.args = args
-        self.env = None
-        self.batch_size = 4
-        self.max_episode_len = 10
+        super().__init__(module_name, spec, ds, metric_logger, llm_model, llm_tokenizer)
 
-        self.buffer_size = 1e6
-        self.num_episodes = 16
-        self.steps_per_episode = 10
-        self.num_epochs = 10
+        self._args = spec
+        self.env = None
+
+        self.batch_size = spec.rl_batch_size
+        self.buffer_size = spec.rl_buffer_size
+        self.max_episode_len = spec.max_trajectory_length
+
+        self.buffer_size = spec.rl_buffer_size
+        self.num_episodes = spec.rl_num_episodes
+        self.num_epochs = spec.rl_num_epochs
+        self.gamma = spec.rl_gamma_value
+        self.num_optimization_steps = spec.rl_num_optimization_steps
+        self.steps_per_episode = spec.rl_steps_per_episode
 
         package_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         print(package_dir)
-        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
-
-        self.dataset = JSONDataset(
-            raw_json_directory_path=os.path.expanduser(args.raw_data_dir),
-            dataset_dir=f"{package_dir}/datasets",
-            verbose=True, tokenizer=tokenizer)
-
-        self.env = VectorizedRestApiEnv(
-            args=args,
-            model=model,
-            tokenizer=tokenizer,
-            discovered_rest_api=self.dataset,
-            max_episode=self.max_episode_len,
-            num_envs=self.batch_size
-        )
 
         self.current_goal_action = None
         self.steps_per_episode = 10
@@ -56,18 +51,18 @@ class IgcAgentTrainer:
         self.action_dim = self.env.action_space.shape[-1]
         self.observation_space = (self.env.observation_space.shape[1] * self.env.observation_space.shape[2]) * 2
 
-        self.agent_model = q_network.QNetwork(
+        self.agent_model = Igc_QNetwork(
             self.observation_space,
             self.action_dim,
             hidden_dim=self.env.observation_space.shape[-1])
 
-        self.target_model = q_network.QNetwork(
+        self.target_model = Igc_QNetwork(
             self.observation_space,
             self.action_dim,
             hidden_dim=self.env.observation_space.shape[-1]
         )
 
-        self.optimizer = optim.Adam(model.parameters(), lr=1e-3)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-3)
         self.current_goal = None
 
     @staticmethod
@@ -117,7 +112,7 @@ class IgcAgentTrainer:
             raise ValueError("State and goal have different dimensions.")
 
         if not isinstance(_state, torch.Tensor) or not isinstance(
-            self.current_goal["state"], torch.Tensor):
+                self.current_goal["state"], torch.Tensor):
             raise TypeError("State and goal must be tensors.")
 
         episode_experience = []
@@ -213,17 +208,13 @@ class IgcAgentTrainer:
             #                   np.append(next_state.copy(), relabeled_goal.copy()))
 
     def train(
-        self,
-        env_reward_function=None,
-        num_relabeled=4,
-        steps_per_episode=50,
-        gamma=0.98,
-        opt_steps=40,
-        log_interval=5,
+            self,
+            env_reward_function=None,
+            num_relabeled=4
     ):
 
         self.current_goal = self.create_goal()
-        replay_buffer = experience_buffer.Buffer(self.buffer_size, self.batch_size)
+        replay_buffer = Buffer(self.buffer_size, self.batch_size)
 
         # start by making Q-target and Q-policy the same
         self.update_target(self.agent_model, self.target_model)
@@ -249,7 +240,7 @@ class IgcAgentTrainer:
                 )
 
             # optimize the Q-policy network
-            for _ in range(opt_steps):
+            for _ in range(self.num_optimization_steps):
                 # sample from the replay buffer, each (batch_size, )
                 state, action_one_hot, reward, next_state = replay_buffer.sample_batch()
                 self.optimizer.zero_grad()
@@ -260,7 +251,7 @@ class IgcAgentTrainer:
 
                 # calculate target reward
                 q_loss_target = torch.clip(
-                    reward + gamma * torch.max(target_q_vals, dim=-1).values, -1.0 / (1 - gamma), 0)
+                    reward + self.gamma * torch.max(target_q_vals, dim=-1).values, -1.0 / (1 - self.gamma), 0)
 
                 model_predict = self.agent_model(state)
                 q_val = torch.sum(model_predict * action_one_hot, dim=1)
@@ -282,9 +273,9 @@ class IgcAgentTrainer:
             #         f"{total_reward} Success rate: {np.mean(successes)} Mean loss: {np.mean(losses)}"
             #         # pylint: disable=line-too-long
 
-                # writer.add_scalar(
-                #     "eval_metrics/total_reward", total_reward, epoch_idx)
-                # writer.add_scalar(
-                #     "eval_metrics/success_rate", np.mean(successes), epoch_idx)
-                # writer.add_scalar(
-                #     "train_metrics/td_loss", np.mean(losses), epoch_idx)
+            # writer.add_scalar(
+            #     "eval_metrics/total_reward", total_reward, epoch_idx)
+            # writer.add_scalar(
+            #     "eval_metrics/success_rate", np.mean(successes), epoch_idx)
+            # writer.add_scalar(
+            #     "train_metrics/td_loss", np.mean(losses), epoch_idx)

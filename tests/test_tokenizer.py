@@ -2,7 +2,7 @@ import os
 import unittest
 from transformers import GPT2Tokenizer
 
-from llm_trainer import JSONDataset
+from backups.llm_trainer import JSONDataset
 
 
 class TestTokenizer(unittest.TestCase):

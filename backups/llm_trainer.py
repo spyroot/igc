@@ -30,7 +30,7 @@ from transformers import (
 )
 from igc.ds.redfish_dataset import JSONDataset
 from igc.shared.huggingface_utils import LossMonitorCallback
-from llm_base_trainer import LLmBaseTrainer
+from backups.llm_base_trainer import LLmBaseTrainer
 from igc.shared.shared_main import shared_main
 
 from igc.shared.shared_torch_utils import cuda_memory
