@@ -27,7 +27,6 @@ def make_default_data_type_spec(cmd):
     :return:
     """
     default_args = {
-
         "fp16": torch.cuda.is_available() and cmd.fp16 or False,
         "fp16_opt_level": torch.cuda.is_available() and cmd.fp16_opt_level or False,
         "half_precision_backend": torch.cuda.is_available() and cmd.half_precision_backend or False,

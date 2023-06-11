@@ -10,11 +10,11 @@ from transformers import (GPT2LMHeadModel,
                           PreTrainedModel,
                           PreTrainedTokenizer)
 
-from .autoencoder import AutoSateEncoder
-from igc.modules.base.metric_logger import MetricLogger
-from .llm_goal_extract_trainer import GoalExtractor
-from .llm_representation_trainer import LlmEmbeddingsTrainer
+from .igc_auto_state_encoder import AutoencoderTrainer
 from ..ds.redfish_dataset import JSONDataset
+from .base.igc_metric_logger import MetricLogger
+from .llm_goal_extract_trainer import GoalExtractorTrainer
+from .llm_representation_trainer import LlmEmbeddingsTrainer
 
 
 class IgcLanguageModule:
@@ -25,6 +25,7 @@ class IgcLanguageModule:
         self.metric_logger = MetricLogger(args.metric_report, **vars(args))
         self.model = GPT2LMHeadModel.from_pretrained(args.model_type)
         self.tokenizer = GPT2Tokenizer.from_pretrained(args.model_type)
+
         directory_path = os.path.expanduser(args.raw_data_dir)
         self.cmd = args
 
@@ -37,19 +38,20 @@ class IgcLanguageModule:
             directory_path, verbose=True, tokenizer=self.tokenizer)
 
         self.llm_embeddings = LlmEmbeddingsTrainer(
+            "state_encoder",
             args, self.dataset, self.metric_logger, self.model, self.tokenizer)
 
-        self.goal_extractor = GoalExtractor(
+        self.goal_extractor = GoalExtractorTrainer(
+            "goal_extractor",
             args, self.dataset, self.metric_logger, self.model, self.tokenizer)
 
-        self.autoencoder = AutoSateEncoder()
+        self.autoencoder = AutoencoderTrainer(
+            "state_autoencoder", args, self.dataset, self.metric_logger, self.model, self.tokenizer)
 
     def train(self):
-        """
+        """Main call to train all language models.
         :return:
         """
-        choices=['latent', 'goal', 'parameter', 'encoder'],
-
         if self.cmd is None and self.cmd:
             if self.cmd == "latent":
                 self.llm_embeddings.train_observation()
@@ -60,16 +62,15 @@ class IgcLanguageModule:
             if self.cmd == "encoder":
                 self.autoencoder.train()
 
-        #self.llm_autoencoder.train_autoencoder()
-
+        # self.llm_autoencoder.train_autoencoder()
         # self.goal_extractor.train_goal_and_parameter_extractor()
         # self.goal_extractor.train_goal_representation()
 
     @staticmethod
     def load_llm_embeddings_model(
-        args: argparse.Namespace,
-        only_tokenizer: Optional[bool] = False,
-        device: torch.device = "cpu"
+            args: argparse.Namespace,
+            only_tokenizer: Optional[bool] = False,
+            device: torch.device = "cpu"
     ) -> Tuple[PreTrainedModel, PreTrainedTokenizer, Optional[int]]:
         """
         Load the LLM embedding model for inference.

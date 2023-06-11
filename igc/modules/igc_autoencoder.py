@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 
-class AutoSateEncoder(nn.Module):
+class AutoStateEncoder(nn.Module):
     """
     """
     def __init__(self, seq_len=1023, hidden_dim=768, latent_dim=256):
@@ -10,9 +10,9 @@ class AutoSateEncoder(nn.Module):
         :param hidden_dim:
         :param latent_dim:
         """
-        super(AutoSateEncoder, self).__init__()
+        super(AutoStateEncoder, self).__init__()
         self.encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim[0]),
+            nn.Linear(seq_len, hidden_dim[0]),
             nn.ReLU(),
             nn.Linear(hidden_dim[0], hidden_dim[1]),
             nn.ReLU(),
@@ -24,7 +24,7 @@ class AutoSateEncoder(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim[1], hidden_dim[0]),
             nn.ReLU(),
-            nn.Linear(hidden_dim[0], input_dim),
+            nn.Linear(hidden_dim[0], latent_dim),
         )
 
     def forward(self, x):

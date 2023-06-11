@@ -7,8 +7,8 @@ Author:Mus mbayramo@stanford.edu
 """
 import argparse
 import os
-from collections import namedtuple
 from pathlib import Path
+from collections import namedtuple
 from typing import Optional, Any
 
 import loguru
@@ -16,17 +16,19 @@ import torch
 from torch.utils.data import random_split, Subset
 
 from igc.ds.redfish_dataset import JSONDataset
-from igc.modules.base.metric_logger import MetricLogger
 from igc.shared.shared_torch_utils import get_device
 
-BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
+from .igc_metric_logger import MetricLogger
+from .igc_specs import make_default_spec
 from loguru import logger
+
+BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
 
 class IgcBaseModule:
     """
+    This Base igc module, it encapsulates shared logic for all trainers.
     """
-
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
@@ -121,8 +123,8 @@ class IgcBaseModule:
         self.metric_logger.set_logger(loguru.logger)
         self.metric_logger.set_log_level(log_level)
 
-
-
+        # set defaults
+        self._trainer_specs = make_default_spec(self._trainer_args)
 
     def split_dataset(self, ratio: float = 0.8):
         """
@@ -187,18 +189,24 @@ class IgcBaseModule:
         return
 
     def save_model(self, checkpoint_dir):
-        """Save model, this call at the end for last save.
+        """Save model, after we're done training,
+        this call at the end for last save.
+
+        All modules save to separate spot, during dataset creation
+        Dataset need pull this.
+
         :param checkpoint_dir:
         :return:
         """
         if self.rank > 0:
             return
 
-        checkpoint_file = f"{checkpoint_dir}/last.pt"
+        checkpoint_file = f"{checkpoint_dir}/{self.module_name}_last.pt"
         torch.save({
             'model_state_dict': self.model.state_dict(),
         }, checkpoint_file)
-        print(f"Rank: {self.rank} checkpoint saved to {checkpoint_file}")
+        print(f"Rank: {self.rank} module name {self.module_name} "
+              f"checkpoint saved to {checkpoint_file}")
 
     def save_checkpoint(self, checkpoint_dir, epoch):
         """
@@ -317,4 +325,3 @@ class IgcBaseModule:
             _logger.info(f"rest recovered: {rest_call}")
             _logger.info(f"rest original: {data_point['rest_api']}")
             _logger.info(f"rest original: {data_point['label']}")
-

@@ -26,14 +26,13 @@ from torch import Tensor
 from torch.utils.data import DataLoader, RandomSampler
 
 from igc.ds.redfish_dataset import JSONDataset
-from igc.modules.base.llm_base_module import LlmBaseModule
-from igc.modules.base.metric_logger import MetricLogger
+from igc.modules.base.igc_llm_base_module import LlmBaseModule
+from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.shared.shared_torch_builder import TorchBuilder
-
-BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
-
 from accelerate import Accelerator
 from torch.quantization import convert
+
+BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
 
 class LlmEmbeddingsTrainer(LlmBaseModule):
@@ -41,6 +40,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
     """
 
     def __init__(self,
+                 name: str,
                  args: argparse.Namespace,
                  ds: JSONDataset,
                  metric_logger: MetricLogger,
@@ -55,7 +55,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         :param llm_tokenizer: 
         """
         # Define the GPT model and tokenizer
-        super().__init__(args, ds, metric_logger, llm_model, llm_tokenizer)
+        super().__init__(name, args, ds, metric_logger, llm_model, llm_tokenizer)
 
         self.is_quantize = False
         self.num_epochs = args.num_train_epochs
@@ -116,8 +116,8 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         """
         :return:
         """
-        if 'random_sampler_enabled' in self.trainer_args:
-            sampler = RandomSampler(self.dataset) if self.trainer_args.random_sampler_enabled else None
+        if 'random_sampler_enabled' in self._trainer_args:
+            sampler = RandomSampler(self.dataset) if self._trainer_args.random_sampler_enabled else None
             return sampler
         return None
 
@@ -159,7 +159,9 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
 
                 # compare predicted masked tokens with original tokens
                 original_tokens = batch["input_ids"][mask_indices].to(self.device)
-                correct_predictions += torch.sum(predicted_masked_tokens == original_tokens).item()
+                correct_predictions += torch.sum(
+                    torch.tensor(predicted_masked_tokens == original_tokens, dtype=torch.int)).item()
+
                 total_predictions += original_tokens.numel()
 
         accuracy = correct_predictions / total_predictions * 100.0

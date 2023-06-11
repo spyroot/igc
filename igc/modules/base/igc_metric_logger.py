@@ -5,7 +5,7 @@ Author:Mus mbayramo@stanford.edu
 from typing import Optional
 
 import loguru
-from igc.modules.metric_factory import create_logger
+from igc.modules.base.metric_factory import create_logger
 
 
 class MetricLogger:

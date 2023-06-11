@@ -23,8 +23,9 @@ from typing import List, Optional
 import re
 
 import torch
-from igc.modules.base.llm_base_module import LlmBaseModule
-from igc.modules.base.metric_logger import MetricLogger
+
+from igc.modules.base.igc_llm_base_module import LlmBaseModule
+from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.shared.shared_torch_builder import TorchBuilder
 from rest_action import RestActionSpace, ActionWithoutParam
 
@@ -34,10 +35,11 @@ from igc.ds.redfish_dataset import JSONDataset
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
 
-class GoalExtractor(LlmBaseModule):
+class GoalExtractorTrainer(LlmBaseModule):
     """
     """
     def __init__(self,
+                 name: str,
                  args: argparse.Namespace,
                  ds: JSONDataset,
                  metric_logger: MetricLogger,
@@ -51,7 +53,7 @@ class GoalExtractor(LlmBaseModule):
         :param llm_tokenizer:
         """
         # Define the GPT model and tokenizer
-        super().__init__(args, ds, metric_logger, llm_model, llm_tokenizer)
+        super().__init__(name, args, ds, metric_logger, llm_model, llm_tokenizer)
 
         self.num_epochs = args.num_train_epochs
         self.batch_size = args.per_device_train_batch_size
@@ -710,11 +712,11 @@ class GoalExtractor(LlmBaseModule):
         # model already know how to extract goal and parameter
         print("query_agent_goal generated: ", generated_prompt)
         if 'Goal' in generated_prompt:
-            goal, goals_parameter = GoalExtractor.extract_goal_and_param(generated_prompt.strip())
+            goal, goals_parameter = GoalExtractorTrainer.extract_goal_and_param(generated_prompt.strip())
             return goal, goals_parameter
 
         # model only know how to extract goal
-        extracted_goal = GoalExtractor.extract_goal(generated_prompt.strip())
+        extracted_goal = GoalExtractorTrainer.extract_goal(generated_prompt.strip())
         return extracted_goal, None
 
     def query_goal_and_parameters(self, input_prompt):
@@ -746,7 +748,7 @@ class GoalExtractor(LlmBaseModule):
             outputs[0], skip_special_tokens=True)
 
         print("extract_goal_and_parameter generated: ", generated_prompt)
-        generated_values, generated_action = GoalExtractor.extract_goal_and_param(generated_prompt)
+        generated_values, generated_action = GoalExtractorTrainer.extract_goal_and_param(generated_prompt)
         return generated_values, generated_action
 
     def sample(self):
@@ -762,7 +764,7 @@ class GoalExtractor(LlmBaseModule):
         It simulates synthetically generated input given by human or external system.
         :return:
         """
-        goal_extractor = GoalExtractor()
+        goal_extractor = GoalExtractorTrainer()
         goal_extractor.train_goal_extractor()
 
         for i in range(num_samples):
