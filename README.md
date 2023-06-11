@@ -15,6 +15,9 @@ pip install loguru
 pip install tensorboard
 pip install tabulate
 pip install pynvml
+pip install evaluate
+pip install rouge_score
+pip install scikit-learn
 pip install deepspeed
 ```
 
