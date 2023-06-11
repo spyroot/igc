@@ -23,9 +23,8 @@ from typing import List, Optional
 import re
 
 import torch
-from igc.ds.redfish_dataset import JSONDataset
-from igc.modules.llm_base_module import LlmBaseModule
-from igc.modules.metric_logger import MetricLogger
+from igc.modules.base.llm_base_module import LlmBaseModule
+from igc.modules.base.metric_logger import MetricLogger
 from igc.shared.shared_torch_builder import TorchBuilder
 from rest_action import RestActionSpace, ActionWithoutParam
 

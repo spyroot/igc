@@ -26,14 +26,14 @@ from torch import Tensor
 from torch.utils.data import DataLoader, RandomSampler
 
 from igc.ds.redfish_dataset import JSONDataset
-from igc.modules.llm_base_module import LlmBaseModule
-from igc.modules.metric_logger import MetricLogger
+from igc.modules.base.llm_base_module import LlmBaseModule
+from igc.modules.base.metric_logger import MetricLogger
 from igc.shared.shared_torch_builder import TorchBuilder
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
 from accelerate import Accelerator
-from torch.quantization import QuantStub, DeQuantStub, quantize, prepare_qat, convert
+from torch.quantization import convert
 
 
 class LlmEmbeddingsTrainer(LlmBaseModule):

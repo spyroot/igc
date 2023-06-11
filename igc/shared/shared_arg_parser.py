@@ -2,9 +2,23 @@ import argparse
 from typing import Optional
 
 import deepspeed
+import loguru
 from accelerate import Accelerator
 from .shared_torch_builder import TorchBuilder
 from .shared_torch_utils import get_device
+
+
+def set_logger(spec):
+    """
+    Set up the logger based on the log level specified in the spec.
+
+    :param spec: The argparse.Namespace object containing the program arguments.
+    """
+    log_level = spec.llm_log_level.upper()
+
+    # Configure loguru logger
+    loguru.logger.remove()  # Remove any existing handlers
+    loguru.logger.add("logfile.log", level=log_level)  # Add a handler with the specified log level
 
 
 def add_optimizer_group(parser):
@@ -427,4 +441,8 @@ def shared_arg_parser(
 
     args = parser.parse_args()
     args.device = get_device() if args.device == "auto" else args.device
+
+    # Set up the logger based on the log level in the arguments
+    set_logger(args)
+
     return args

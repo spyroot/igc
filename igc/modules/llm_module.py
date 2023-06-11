@@ -9,14 +9,12 @@ from transformers import (GPT2LMHeadModel,
                           GPT2Tokenizer,
                           PreTrainedModel,
                           PreTrainedTokenizer)
-from loguru import logger
-import inspect
 
-from .metric_logger import MetricLogger
+from .autoencoder import AutoSateEncoder
+from igc.modules.base.metric_logger import MetricLogger
 from .llm_goal_extract_trainer import GoalExtractor
 from .llm_representation_trainer import LlmEmbeddingsTrainer
 from ..ds.redfish_dataset import JSONDataset
-from ..shared.shared_torch_builder import TorchBuilder
 
 
 class IgcLanguageModule:

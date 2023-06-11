@@ -1,8 +1,11 @@
+"""
+This factory class, which is used to create where
+we serialize all metrics.
+
+Author:Mus mbayramo@stanford.edu
+"""
 from abc import abstractmethod, ABC
 from pathlib import Path
-
-from torch.utils.tensorboard import SummaryWriter
-from argparse import Namespace
 from typing import Optional
 
 
