@@ -397,7 +397,10 @@ class IgcBaseModule:
             self.logger.info(f"Found latest checkpoint, loading {checkpoint_file}.")
             checkpoint = torch.load(checkpoint_file, map_location={'cuda:1': 'cuda:0'})
 
-            required_keys = ['model_state_dict', 'optimizer_state_dict', 'epoch']
+            required_keys = ['model_state_dict', 'epoch']
+            if resuming:
+                required_keys = ['model_state_dict', 'optimizer_state_dict', 'epoch']
+
             missing_keys = [key for key in required_keys if key not in checkpoint]
             if missing_keys:
                 raise KeyError(f"Checkpoint file {self.module_name} {checkpoint_file} "
@@ -409,7 +412,9 @@ class IgcBaseModule:
                 warnings.warn("Optional key is missing from the checkpoint file. ")
 
             self.model.load_state_dict(checkpoint['model_state_dict'])
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if resuming:
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
             epoch = checkpoint['epoch']
             self.logger.info(
                 f"Rank: {self.rank} module {self.module_name} "
