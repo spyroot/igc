@@ -145,8 +145,8 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         with torch.no_grad():
             for i, batch in enumerate(validation_dataset):
                 labels = batch["input_ids"][:, 1:].clone().detach()
-                mask = (batch["input_ids"] == self.pad_token_id)
-                labels = labels.masked_fill(mask[:, 1:], -100)
+                # mask = (batch["input_ids"] == self.pad_token_id)
+                # labels = labels.masked_fill(mask[:, 1:], -100)
 
                 batch['input_ids'] = batch['input_ids'][:, :-1]
                 batch['attention_mask'] = batch['attention_mask'][:, :-1]
@@ -169,12 +169,14 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                 # compare predicted masked tokens with original tokens
                 original_tokens = batch["input_ids"][mask_indices].to(self.device)
                 accuracy_bool = predicted_masked_tokens == original_tokens
+                correct_predictions += accuracy_bool.sum().item()
+
                 print(f"Accuracy {accuracy_bool.shape} "
                       f"sum {accuracy_bool.sum()} "
+                      f" correct {correct_predictions}"
                       f"total {original_tokens.numel()}"
                       f" shape {original_tokens.shape}")
 
-                correct_predictions += accuracy_bool.sum().item()
 
                 total_predictions += original_tokens.numel()
 
