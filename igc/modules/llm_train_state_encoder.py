@@ -70,6 +70,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
 
         self.batch_log = 10
         self._eval_freq = 10
+        self._masked_freq = 10
 
         self._eval_freq = 10
         self.shuffle = True
@@ -261,6 +262,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         actual_num_epochs = max(self.num_epochs - last_epoch, 0)
         if actual_num_epochs < 10:
             self._eval_freq = 2
+            self.logger.info(f"Adjusted evaluation freq to {self._eval_freq}")
 
         for epoch in range(last_epoch, self.num_epochs):
             total_loss = 0.0
@@ -280,7 +282,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                     'attention_mask': batch['attention_mask'].to(self.device)
                 }
 
-                if epoch % 10 == 0:
+                if epoch % self._masked_freq == 0:
                     for j in range(batch_inputs['input_ids'].size(0)):
                         batch_inputs["attention_mask"] = JSONDataset.mask_json_key_and_value(
                             batch_inputs, self._default_mask_token, self.tokenizer)
