@@ -91,7 +91,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             f"dataset size {len(self.dataset)} "
             f"is overfit {self._overfit} "
         )
-        self._mask_probability = 0.15
+        self._mask_probability = 0.001
         self._best_validation_metric = float('-inf')
 
     @staticmethod
@@ -157,13 +157,12 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                     'labels': labels.to(self.device)
                 }
 
-                masked_input_ids = batch["input_ids"].clone().detach()
+                # masked_input_ids = batch["input_ids"].clone().detach()
                 mask_indices = torch.rand(batch["input_ids"].shape) < self._mask_probability
-                masked_input_ids[mask_indices] = -100
+                # masked_input_ids[mask_indices] = -100
 
                 outputs = self.model(**batch_inputs)
                 predicted_tokens = torch.argmax(outputs.logits, dim=-1)
-
                 predicted_masked_tokens = predicted_tokens[mask_indices]
                 predicted_masked_tokens = predicted_masked_tokens.to(self.device)
 
