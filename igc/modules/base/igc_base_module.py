@@ -202,7 +202,6 @@ class IgcBaseModule:
         self.logger.remove()
 
         if self._trainer_args.log_to_file:
-            logs_dir = "logs"  # Specify the desired directory for log files
             os.makedirs(logs_dir, exist_ok=True)
             log_file = os.path.join(logs_dir, f"{module_name}.log")
             self.logger.add(log_file, level=self._log_level)
