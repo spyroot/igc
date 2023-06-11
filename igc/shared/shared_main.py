@@ -1,7 +1,6 @@
 import os
 import re
 import torch
-from datetime import datetime
 from transformers import deepspeed
 from .shared_arg_parser import shared_arg_parser
 from .shared_torch_utils import get_device

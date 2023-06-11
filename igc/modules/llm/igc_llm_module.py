@@ -7,10 +7,10 @@ from transformers import (GPT2LMHeadModel,
 
 from igc.modules.base.igc_llm_base_module import LlmBaseModule
 from igc.modules.base.igc_metric_logger import MetricLogger
-from .igc_auto_state_encoder import AutoencoderTrainer
-from .llm_goal_extract_trainer import GoalExtractorTrainer
-from .llm_representation_trainer import LlmEmbeddingsTrainer
 from igc.ds.redfish_dataset import JSONDataset
+from igc.modules.igc_train_auto_state_encoder import AutoencoderTrainer
+from igc.modules.llm_train_goal_extract import GoalExtractorTrainer
+from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
 
 
 def from_pretrained_default(args, only_tokenizer=False):

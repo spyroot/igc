@@ -12,6 +12,11 @@ from igc.modules.llm.igc_autoencoder import AutoStateEncoder
 
 
 class AutoencoderTrainer(IgcBaseModule):
+    """
+    Autoencoder trainer used to train the autoencoder to reduce
+    state dimension of latent space llm outputs.
+
+    """
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
@@ -58,11 +63,13 @@ class AutoencoderTrainer(IgcBaseModule):
 
     def _get_reconstruction_loss(self, batch):
         """
+        Compute reconstruction loss
+
         :param batch:
         :return:
         """
         x, _ = batch
-        x_hat = self.forward(x)
+        x_hat = self.model.forward(x)
         loss = torch.nn.functional.mse_loss(x, x_hat, reduction="none")
         loss = loss.sum(dim=[1, 2, 3]).mean(dim=[0])
         return loss
@@ -74,16 +81,15 @@ class AutoencoderTrainer(IgcBaseModule):
         input_dim = self.llm_model.config.hidden_size
         latent_dim = 128
 
-        # Create instances of the GPT model and the Autoencoder
+        # here create instances of the GPT model and the Autoencoder
         gpt_encoder = self.llm_model.get_input_embeddings()
         autoencoder = AutoStateEncoder(input_dim, latent_dim)
 
-        # Attach the autoencoder to the GPT model
+        # attach the autoencoder to the GPT model
         gpt_encoder.weight = nn.Parameter(autoencoder.encoder.weight)
 
     def train(self):
         """
-
         :return:
         """
         # Set the training parameters
@@ -94,13 +100,12 @@ class AutoencoderTrainer(IgcBaseModule):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         loss_fn = nn.CrossEntropyLoss()
 
-        # Training loop
+        # training loop
         for epoch in range(num_epochs):
             total_loss = 0.0
-            # Iterate over the training dataset
             for input_data, target in self.train_dataloader:
-                latent_repr = self.auto_encoder.encoder(input_data)
-                output = self.gpt_model(input_data, latent_repr)
+                latent_repr = self.model.encoder(input_data)
+                output = self.llm_model(input_data, latent_repr)
 
                 loss = loss_fn(output, target)
                 optimizer.zero_grad()
@@ -116,6 +121,7 @@ class AutoencoderTrainer(IgcBaseModule):
 
             # Perform validation or evaluation steps if needed
 
-        # Save the trained model if desired
-        torch.save(self.model.state_dict(), "trained_model.pth")
+        # self.save_model()
+        # # Save the trained model if desired
+        # torch.save(self.model.state_dict(), "trained_model.pth")
 

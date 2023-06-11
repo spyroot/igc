@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Iterator, Tuple
+from typing import  Iterator, Tuple
 
 
 class RestMappingInterface(ABC):

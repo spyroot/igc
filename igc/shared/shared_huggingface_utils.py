@@ -350,7 +350,7 @@ def data_collator(features: List[Any]) -> Dict[str, Any]:
     :param features:
     :return:
     """
-    if not isinstance(features[0], collections.abc.Mapping):
+    if not isinstance(features[0], collections.Mapping):
         features = [vars(f) for f in features]
 
     first = features[0]
