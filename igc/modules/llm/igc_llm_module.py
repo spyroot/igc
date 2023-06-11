@@ -111,6 +111,7 @@ class IgcLanguageModule:
                 is_inference=False
             )
             parameter_extractor.train_goal_and_parameter_extractor()
+
         # we train auto encoder the aim here to reduce state re-presentation
         if self.spec.llm == "encoder" or self.spec.llm == "all":
             self.logger.info("Starting training state auto encoder.")
