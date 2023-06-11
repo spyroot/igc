@@ -508,7 +508,10 @@ class IgcBaseModule:
             required_keys.append("scheduler_state_dict")
 
         model.load_state_dict(checkpoint['model_state_dict'])
-        epoch = checkpoint['epoch']
+        if 'epoch' in checkpoint:
+            epoch = checkpoint['epoch']
+        else:
+            epoch = 0
 
         print(f"Loading checkpoint loaded from {checkpoint_file}, epoch: {epoch}")
 
