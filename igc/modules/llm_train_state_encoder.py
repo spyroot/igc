@@ -259,11 +259,6 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                   f"train dataset size: {dataset_size} "
                   f"batch stats freq: {batch_log_frequency}.")
 
-        actual_num_epochs = max(self.num_epochs - last_epoch, 0)
-        if actual_num_epochs < 10:
-            self._eval_freq = 2
-            self.logger.info(f"Adjusted evaluation freq to {self._eval_freq}")
-
         for epoch in range(last_epoch, self.num_epochs):
             total_loss = 0.0
             num_batches = 0
@@ -317,8 +312,8 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
 
                 num_batches += 1
 
-            # validation
-            if (epoch + 1) % self._eval_freq == 0:
+            # validation on epoch or freq
+            if self.on_epoch_eval or ((epoch + 1) % self._eval_freq == 0):
                 validation_accuracy = self.validate(eval_dataloader, accelerator)
                 if self.is_rank_zero():
                     self.metric_logger.log_metric("llm_emb_accuracy", validation_accuracy, epoch)

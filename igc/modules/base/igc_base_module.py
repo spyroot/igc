@@ -111,6 +111,7 @@ class IgcBaseModule:
 
         self.num_epochs = spec.num_train_epochs
         self.batch_size = spec.per_device_train_batch_size
+        self.on_epoch_eval = spec.eval_mode == "on_epoch"
 
         if not is_inference:
             self.dataset = ds

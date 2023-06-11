@@ -267,6 +267,13 @@ def add_trainer_group(parser):
         help="By default do just overfit pass. This is mainly for debug."
     )
 
+    parser.add_argument(
+        "--eval_mode",
+        type=str,
+        choices=["on_epoch", "freq"], default="on_epoch",
+        help="By default uses freq otherwise at the end of each epoch."
+    )
+
     return parser
 
 
