@@ -206,8 +206,8 @@ class IgcBaseModule:
             os.makedirs(logs_dir, exist_ok=True)
             log_file = os.path.join(logs_dir, f"{module_name}.log")
             self.logger.add(log_file, level=self._log_level)
-
-        self.logger.add(sys.stdout, level=self._log_level)
+        else:
+            self.logger.add(sys.stdout, level=self._log_level)
 
         if self.metric_logger is not None:
             self.metric_logger.set_logger(self.logger)
