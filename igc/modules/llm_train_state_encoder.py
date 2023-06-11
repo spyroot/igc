@@ -81,13 +81,12 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             **vars(spec)
         )
 
-        print(f"Rank {self.rank} creating "
-              f"LlmEmbeddingsTrainer num epochs {self.num_epochs} "
-              f"batch_size {self.batch_size} "
-              f"dataset size {len(self.dataset)} "
-              f"is overfit {self._overfit} "
-              )
-
+        self.logger.info(
+            f"Rank {self.rank} creating llm trainer, num epochs {self.num_epochs} "
+            f"batch_size {self.batch_size} "
+            f"dataset size {len(self.dataset)} "
+            f"is overfit {self._overfit} "
+        )
         self._mask_probability = 0.15
         self._best_validation_metric = float('-inf')
 
@@ -202,6 +201,10 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         # accelerator.wait_for_everyone()
 
         self.device = accelerator.device
+
+        self.logger.info(
+            f"Rank {self.rank} starting train, device {self.device}")
+
         validation_accuracy = float('-inf')
         self.model.to(self.device)
 

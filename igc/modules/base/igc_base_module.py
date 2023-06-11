@@ -368,7 +368,7 @@ class IgcBaseModule:
         }, checkpoint_file)
         print(f"Rank: {self.rank} {self.module_name} checkpoint saved to {checkpoint_file}.")
 
-    def load_checkpoint(self, checkpoint_dir) -> int:
+    def load_checkpoint(self, checkpoint_dir: str) -> int:
         """
         Load model checkpoint for resuming training.
 
@@ -378,15 +378,16 @@ class IgcBaseModule:
 
         model_file = self._model_file(checkpoint_dir)
         if not os.path.exists(model_file):
-            print(f"Checkpoint file {model_file} not found.")
-            return False
+            self.logger.info(f"Model file {model_file} not found.")
 
+        self.logger.info(f"Searching for latest checkpoint.")
         checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pt')]
         checkpoint_files = [os.path.join(checkpoint_dir, f) for f in checkpoint_files]
         checkpoint_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
 
         if checkpoint_files:
             checkpoint_file = checkpoint_files[0]
+            self.logger.info(f"Found latest checkpoint, loading {checkpoint_file}.")
             checkpoint = torch.load(checkpoint_file, map_location={'cuda:1': 'cuda:0'})
 
             required_keys = ['model_state_dict', 'optimizer_state_dict', 'epoch']
@@ -403,12 +404,13 @@ class IgcBaseModule:
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             epoch = checkpoint['epoch']
-            print(f"Rank: {self.rank} module {self.module_name} "
-                  f"loading checkpoint loaded from "
-                  f"{checkpoint_file}, epoch: {epoch}")
+            self.logger.info(
+                f"Rank: {self.rank} module {self.module_name} "
+                f"loading checkpoint loaded from "
+                f"{checkpoint_file}, epoch: {epoch}")
             return epoch
         else:
-            print(f"No checkpoint files found in dir {checkpoint_dir}")
+            self.logger.info(f"No checkpoint files found in dir {checkpoint_dir}")
             return 0
 
     @staticmethod
