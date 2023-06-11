@@ -150,7 +150,6 @@ class IgcBaseModule:
         """Update tokenizer settings
         :return:
         """
-        print(llm_tokenizer)
         self.tokenizer.pad_token = llm_tokenizer.eos_token
         self.tokenizer.pad_token_id = llm_tokenizer.eos_token_id
         self.model.config.pad_token_id = llm_tokenizer.pad_token_id
@@ -337,7 +336,7 @@ class IgcBaseModule:
 
         model_file = self._model_file(checkpoint_dir)
         if not os.path.exists(model_file):
-            print(f"Checkpoint file {model_file} not found.")
+            self.logger.warning(f"Checkpoint file {model_file} not found.")
             return False
 
         checkpoint = torch.load(model_file, map_location=map_location)
@@ -345,7 +344,8 @@ class IgcBaseModule:
         missing_keys = [key for key in required_keys if key not in checkpoint]
 
         if missing_keys:
-            print(f"Checkpoint file {model_file} is missing the following keys: {missing_keys}")
+            self.logger.warning(f"Checkpoint file {model_file} "
+                                f"is missing the following keys: {missing_keys}")
             return False
 
         self.model.load_state_dict(checkpoint['model_state_dict'])
@@ -371,7 +371,7 @@ class IgcBaseModule:
             'epoch': epoch,
             'is_trained': True,
         }, checkpoint_file)
-        print(f"Rank: {self.rank} {self.module_name} checkpoint saved to {checkpoint_file}.")
+        self.logger.info(f"Rank: {self.rank} {self.module_name} checkpoint saved to {checkpoint_file}.")
 
     def load_checkpoint(self, checkpoint_dir: str) -> int:
         """
