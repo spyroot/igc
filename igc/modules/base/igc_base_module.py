@@ -7,6 +7,7 @@ Author:Mus mbayramo@stanford.edu
 """
 import argparse
 import os
+import sys
 import warnings
 from pathlib import Path
 from collections import namedtuple
@@ -197,13 +198,19 @@ class IgcBaseModule:
 
         self._log_file = os.path.join(logs_dir, f"{module_name}.log")
         self._log_level = self._trainer_args.log_level.upper()
-
         self.logger = loguru.logger.bind(module_name=module_name)
-        loguru.logger.remove()
-        loguru.logger.add(self._log_file, level=self._log_level)
+        self.logger.remove()
+
+        if self._trainer_args.log_to_file:
+            logs_dir = "logs"  # Specify the desired directory for log files
+            os.makedirs(logs_dir, exist_ok=True)
+            log_file = os.path.join(logs_dir, f"{module_name}.log")
+            self.logger.add(log_file, level=self._log_level)
+
+        self.logger.add(sys.stdout, level=self._log_level)
 
         if self.metric_logger is not None:
-            self.metric_logger.set_logger(loguru.logger)
+            self.metric_logger.set_logger(self.logger)
             self.metric_logger.set_log_level(self._log_level)
 
     def get_model(self):

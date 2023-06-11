@@ -298,6 +298,10 @@ def add_logging_group(parser):
                        choices=['info', 'warning', 'error', 'critical'],
                        help="rl agent log level.")
 
+    parser.add_argument('--log-to-file',
+                        action='store_true',
+                        help='By detail logger output to console, this will switch logs to a file')
+
     group.add_argument("--dataset_builder",
                        type=str, default='warning',
                        choices=['info', 'warning', 'error', 'critical'],
