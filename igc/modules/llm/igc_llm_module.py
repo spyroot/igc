@@ -1,5 +1,6 @@
 import sys
 import argparse
+import warnings
 from typing import Optional, Dict, Union, List
 
 import loguru
@@ -69,42 +70,41 @@ class IgcLanguageModule:
             llm_embeddings.train()
             model = llm_embeddings.model
             _is_llm_pre_trained = True
+
+        if not _is_llm_pre_trained:
+            self.logger.info("Loading state encoder state.")
+            modules = self.load(self.spec, module_name="state_encoder", device=self.spec.device)
+            module = modules["state_encoder"]
+            _model = module.model
+
+        _model = None
+        if _model is None:
+            warnings.warn("Please train state encoder first.")
+            return
+
         # we train goal extractor the goal here extract
         # goal from high level sentence
         if self.spec.llm == "goal" or self.spec.llm == "all":
             self.logger.info("Starting training goal extractor.")
 
-            # note we first fine tune LLM then we tune all other models.
-            if not _is_llm_pre_trained:
-                self.logger.info("Loading state encoder state.")
-                modules = self.load(self.spec, module_name="state_encoder")
-                module = modules["state_encoder"]
-                model = module.model
-
             goal_extractor = GoalExtractorTrainer(
                 "goal_extractor",
                 self.spec,
-                model,
+                _model,
                 tokenizer,
                 ds=self.ds,
                 metric_logger=self.metric_logger)
+
             goal_extractor.train_goal_representation()
 
         # we train goal and parameter extractor, the goal here to extract
         # high level goal and parameters for that goal.
         if self.spec.llm == "parameter" or self.spec.llm == "all":
-
-            if not _is_llm_pre_trained:
-                self.logger.info("Loading state encoder state.")
-                modules = self.load(self.spec, module_name="state_encoder")
-                module = modules["state_encoder"]
-                model = module.model
-
             self.logger.info("Starting training goal parameter extractor.")
             parameter_extractor = GoalExtractorTrainer(
                 "parameter_extractor",
                 self.spec,
-                model,
+                _model,
                 tokenizer,
                 ds=self.ds,
                 metric_logger=self.metric_logger,
@@ -116,16 +116,10 @@ class IgcLanguageModule:
         if self.spec.llm == "encoder" or self.spec.llm == "all":
             self.logger.info("Starting training state auto encoder.")
 
-            if not _is_llm_pre_trained:
-                self.logger.info("Loading state encoder state.")
-                modules = self.load(self.spec, module_name="state_encoder")
-                module = modules["state_encoder"]
-                model = module.model
-
             autoencoder = AutoencoderTrainer(
                 "state_autoencoder",
                 self.spec,
-                model,
+                _model,
                 tokenizer,
                 ds=self.ds,
                 metric_logger=self.metric_logger,

@@ -36,12 +36,10 @@ class IgcMain:
                 self._directory_path, verbose=True, tokenizer=tokenizer)
 
             if (self._specs.train == "llm" or self._specs.train == "all") and self._specs.llm is not None:
-                print("Starting RL training")
                 llm_module = IgcLanguageModule(self._specs, self._metric_logger, dataset)
                 llm_module.train()
 
             if (self._specs.train == "agent" or self._specs.train == "all") and self._specs.rl is not None:
-                print("Starting RL training")
                 rl_module = IgcRlModule(self._specs, self._metric_logger, dataset)
                 rl_module.train()
 
