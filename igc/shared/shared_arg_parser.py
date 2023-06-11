@@ -112,23 +112,12 @@ def add_rl_trainer_group(parser):
     trainer_group = parser.add_argument_group('RL Trainer')
 
     trainer_group.add_argument(
-        "--per_device_train_batch_size",
-        type=int, default=4,
-        help="The batch size per GPU/TPU core/CPU for training.")
-
-    trainer_group.add_argument(
-        "--per_device_eval_batch_size",
-        type=int, default=8,
-        help="Batch size (per device) "
-             "for the evaluation dataloader.")
-
-    trainer_group.add_argument(
-        "--num_train_epochs",
+        "--rl_num_train_epochs",
         type=int, default=1000,
         help="Total number of training epochs to perform.")
 
     trainer_group.add_argument(
-        "--max_train_steps",
+        "--rl_max_train_steps",
         type=int, default=None,
         help="Total number of training steps to perform."
              " If provided, overrides num_train_epochs.")
@@ -146,18 +135,6 @@ def add_rl_trainer_group(parser):
     trainer_group.add_argument(
         "--rl_batch_size",
         type=float, default=8,
-        help="Batch size we use for rl agent. "
-             "Note number environments will be the same since it vectorized.")
-
-    trainer_group.add_argument(
-        "--rl_num_episodes",
-        type=float, default=16,
-        help="Batch size we use for rl agent. "
-             "Note number environments will be the same since it vectorized.")
-
-    trainer_group.add_argument(
-        "--rl_steps_per_episode",
-        type=int, default=16,
         help="Batch size we use for rl agent. "
              "Note number environments will be the same since it vectorized.")
 
@@ -237,8 +214,9 @@ def add_trainer_group(parser):
     # indicate that we train
     parser.add_argument(
         "--train",
-        type=bool, default=True,
-        help="Training model."
+        choices=["agent", "llm", "all", "none"],
+        type=str, default="none",
+        help="Training mode, we either train all or agent or llm."
     )
 
     # setting what llm model we train
@@ -246,7 +224,7 @@ def add_trainer_group(parser):
         "--llm",
         choices=["all", "latent", "goal", "parameter", "encoder", "none"],
         type=str, default="none",
-        help="Training llm require to choose which model "
+        help="if we training llm we can train all or particular sub-model."
              "(A model we use for state encoder, goal encoder, "
              "goal and parameter encoder.)"
     )
@@ -308,7 +286,17 @@ def add_logging_group(parser):
     group.add_argument("--llm_log_level",
                        type=str, default='warning',
                        choices=['info', 'warning', 'error', 'critical'],
-                       help="log level for the Transformers.")
+                       help="llm log level..")
+
+    group.add_argument("--rl_log_level",
+                       type=str, default='warning',
+                       choices=['info', 'warning', 'error', 'critical'],
+                       help="rl agent log level.")
+
+    group.add_argument("--dataset_builder",
+                       type=str, default='warning',
+                       choices=['info', 'warning', 'error', 'critical'],
+                       help="dataset log level.")
 
     group.add_argument("--log_strategy",
                        type=str, default="epoch",
@@ -509,6 +497,7 @@ def shared_arg_parser(
     parser = add_dataset_dataloader(parser)
     parser = add_reporting_group(parser)
     parser = add_model_type_group(parser)
+    parser = add_rl_trainer_group(parser)
 
     parser.add_argument("--local-rank",
                         type=int, default=-1,

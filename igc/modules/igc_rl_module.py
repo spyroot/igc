@@ -2,7 +2,7 @@ import argparse
 import logging
 import os
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Optional
 
 import torch
 from transformers import (GPT2LMHeadModel)
@@ -37,11 +37,6 @@ class IgcRlModule:
         directory_path = os.path.expanduser(spec.raw_data_dir)
         self.cmd = spec
 
-        self.logger = logging.getLogger(__name__)
-        logging.basicConfig(
-            filename='main_module.log',
-            level=logging.DEBUG, format='%(asctime)s %(message)s')
-
         self.autoencoder = AutoencoderTrainer(
             "state_autoencoder", spec, ds, metric_logger, model, tokenizer)
 
@@ -58,14 +53,12 @@ class IgcRlModule:
     @staticmethod
     def load_rl_model(
             args: argparse.Namespace,
-            only_tokenizer: Optional[bool] = False,
             device: torch.device = "cpu"
     ):
         """
         Load RL Agent.
         i.e. agent will use this as encoder
 
-        :param only_tokenizer:  if we only need get tokenizer.
         :param args: The command-line arguments.
         :param device: The device to load the model onto, defaults to "cpu".
         :return: The loaded model, tokenizer, and the last epoch from the checkpoint.
@@ -88,7 +81,7 @@ class IgcRlModule:
                 f"in the checkpoint directory {checkpoint_files}.")
 
         model = GPT2LMHeadModel.from_pretrained(args.model_type)
-        last_epoch = LlmEmbeddingsTrainer.load_model_inference(
+        last_epoch = IgcLanguageModule.load_llm_embeddings_model(
             model, args, device=device)
 
         return model, last_epoch

@@ -17,7 +17,7 @@ Parameters just passed to agent. i.e. we don't train on parameters.
 Author:Mus mbayramo@stanford.edu
 """
 import argparse
-from typing import List
+from typing import List, Optional
 from collections import namedtuple
 
 import evaluate
@@ -36,22 +36,34 @@ BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 class LlmBaseModule(IgcBaseModule):
     """
     """
-
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
-                 ds: JSONDataset,
-                 metric_logger:
-                 MetricLogger, llm_model,
-                 llm_tokenizer):
+                 llm_model,
+                 llm_tokenizer,
+                 ds: Optional[JSONDataset] = None,
+                 metric_logger: Optional[MetricLogger] = None,
+                 is_inference: Optional[bool] = "False"):
         """
-        :param spec: 
-        :param ds:
-        :param metric_logger:
+        Base LLM module
+
+        :param spec:  specs for the particular module
+        :param ds: dataset
+        :param metric_logger: metric logger used for training
         :param llm_model:
         :param llm_tokenizer:
         """
-        super().__init__(module_name, spec, ds, metric_logger, llm_model, llm_tokenizer)
+        super().__init__(module_name,
+                         spec,
+                         llm_model,
+                         llm_tokenizer,
+                         ds=ds,
+                         metric_logger=metric_logger,
+                         is_inference=is_inference)
+
+        self.logger.info("Starting llm module")
+        self._log_level = spec.llm_log_level.upper()
+        self.metric_logger.set_log_level(self._log_level)
 
     @staticmethod
     def compute_rouge_metric(

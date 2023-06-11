@@ -34,10 +34,11 @@ class IgcBaseModule:
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
-                 ds: JSONDataset,
-                 metric_logger: MetricLogger,
                  llm_model,
-                 llm_tokenizer):
+                 llm_tokenizer,
+                 ds: Optional[JSONDataset] = None,
+                 metric_logger: Optional[MetricLogger] = None,
+                 is_inference: Optional[bool] = "False"):
         """
 
         Note module name is important for saving
@@ -50,6 +51,7 @@ class IgcBaseModule:
         :param llm_model: pre-trained language model
         :param llm_tokenizer: pre-trained tokenizer
         """
+        self._is_inference = is_inference
 
         # validate arguments
         if spec.num_train_epochs <= 0:
@@ -71,10 +73,25 @@ class IgcBaseModule:
         if llm_tokenizer is None:
             raise ValueError("llm_tokenizer cannot be None.")
 
-        if ds is None:
+        if not is_inference and ds is None:
             raise ValueError("ds (dataset) cannot be None.")
 
+        # global logging
+        self._log_level = spec.rl_log_level.upper()
+        if spec.log_dir is None:
+            log_dir = "logs"
+        else:
+            log_dir = spec.log_dir
+
+        self.log_file = os.path.join(log_dir, f"{module_name}.log")
+
+        # configure loguru logger
+        loguru.logger.remove()
+        loguru.logger.add(self.log_file , level=self._log_level)
+        self.logger = loguru.logger
+
         self._is_trained = False
+
         self.model = llm_model
         self.tokenizer = llm_tokenizer
         self.module_name = module_name
@@ -86,7 +103,9 @@ class IgcBaseModule:
         self.num_epochs = spec.num_train_epochs
         self.batch_size = spec.per_device_train_batch_size
 
-        self.dataset = ds
+        if not is_inference:
+            self.dataset = ds
+
         self.device = get_device()
         self.metric_logger = metric_logger
 
@@ -108,7 +127,7 @@ class IgcBaseModule:
         self.save_strategy = spec.save_strategy
         checkpoint_path_dir = Path(spec.output_dir)
         checkpoint_path_dir = checkpoint_path_dir.resolve()
-        logger.info(f"Model {self.module_name} saving dir {checkpoint_path_dir}")
+        self.logger.info(f"Model {self.module_name} saving dir {checkpoint_path_dir}")
 
         if not checkpoint_path_dir.is_dir():
             raise ValueError(f"Indicate path to checkpoint dir {checkpoint_path_dir}.")
@@ -116,16 +135,8 @@ class IgcBaseModule:
         self.checkpoint_dir = str(checkpoint_path_dir)
         self.rank = int(os.environ.get('LOCAL_RANK', -1))
 
-        # logging
-        log_level = spec.llm_log_level.upper()
-        log_file = os.path.join(spec.log_dir, f"{module_name}.log")
-
-        # configure loguru logger
-        loguru.logger.remove()
-        loguru.logger.add(log_file, level=log_level)
-
         self.metric_logger.set_logger(loguru.logger)
-        self.metric_logger.set_log_level(log_level)
+        self.metric_logger.set_log_level(self._log_level)
 
         # set defaults
         self._trainer_specs = make_default_spec(self._trainer_args)
@@ -336,7 +347,7 @@ class IgcBaseModule:
     def load(
             module_name: str,
             model: torch.nn.Module,
-            args: argparse.Namespace,
+            specs: argparse.Namespace,
             device: torch.device = "cpu",
             is_inference: bool = True,
             optimizer: Optional[torch.optim.Optimizer] = None,
@@ -351,8 +362,8 @@ class IgcBaseModule:
         :param module_name:  module name.
         :param model: The model to load the checkpoint into.
         :type model: torch.nn.Module
-        :param args: The command-line arguments.
-        :type args: argparse.Namespace
+        :param specs: The command-line arguments.
+        :type specs: argparse.Namespace
         :param device: The device to load the model onto, defaults to "cpu".
         :param is_inference: by default load and set to inference.
         :type device: str, optional
@@ -360,7 +371,7 @@ class IgcBaseModule:
         :rtype: Optional[int] bool
         """
 
-        checkpoint_path_dir = Path(args.output_dir)
+        checkpoint_path_dir = Path(specs.output_dir)
         checkpoint_path_dir = checkpoint_path_dir.resolve()
         if not checkpoint_path_dir.is_dir():
             raise ValueError("Indicate path to checkpoint dir.")

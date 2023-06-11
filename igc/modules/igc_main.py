@@ -19,9 +19,14 @@ def from_pretrained_default(args):
 
 
 class IgcMain:
+    """
+    IGC main class
+
+    """
+
     def __init__(self, specs: argparse.Namespace, from_pretrained=from_pretrained_default):
         """
-        :param args:
+        :param specs:
         """
         self._from_pretrained_fn = from_pretrained
         self._metric_logger = MetricLogger(specs.metric_report, **vars(specs))
@@ -29,25 +34,27 @@ class IgcMain:
         self._specs = specs
 
     def train(self):
-        """Main call to train all language models.
+        """
+        Main igc trainer.
+
         :return:
         """
-        if self._specs.train and self._specs.llm is not None:
+        print("Starting training.")
 
+        if self._specs.train:
             model, tokenizer = self._from_pretrained_fn(self._specs)
             dataset = JSONDataset(
                 self._directory_path, verbose=True, tokenizer=tokenizer)
 
-            llm_module = IgcLanguageModule(self._specs, self._metric_logger, dataset)
-            llm_module.train()
+            if (self._specs.train == "llm" or self._specs.train == "all") and self._specs.llm is not None:
+                print("Starting RL training")
+                llm_module = IgcLanguageModule(self._specs, self._metric_logger, dataset)
+                llm_module.train()
 
-        if self._specs.train and self._specs.rl is not None:
-            tokenizer = IgcLanguageModule.load_llm_embeddings_model(self._specs, only_tokenizer=True)
-            dataset = JSONDataset(
-                self._directory_path, verbose=True, tokenizer=tokenizer)
-
-            rl_module = IgcRlModule(self._specs, self._metric_logger, dataset)
-            rl_module.train()
+            if (self._specs.train == "agent" or self._specs.train == "all") and self._specs.rl is not None:
+                print("Starting RL training")
+                rl_module = IgcRlModule(self._specs, self._metric_logger, dataset)
+                rl_module.train()
 
     def load(self):
         pass
@@ -64,4 +71,4 @@ class IgcMain:
         # gpt_encoder.weight = nn.Parameter(model_autoencoder.encoder.weight)
 
     def run(self):
-        pass
+        self.train()

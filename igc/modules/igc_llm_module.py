@@ -1,28 +1,28 @@
 import argparse
-import logging
-import os
-from pathlib import Path
-from typing import Tuple, Optional
+from typing import Optional, Dict
 
 import torch
 from transformers import (GPT2LMHeadModel,
-                          GPT2Tokenizer,
-                          PreTrainedModel,
-                          PreTrainedTokenizer)
+                          GPT2Tokenizer)
 
-from .igc_auto_state_encoder import AutoencoderTrainer
+from .base.igc_llm_base_module import LlmBaseModule
 from .base.igc_metric_logger import MetricLogger
+from .igc_auto_state_encoder import AutoencoderTrainer
 from .llm_goal_extract_trainer import GoalExtractorTrainer
 from .llm_representation_trainer import LlmEmbeddingsTrainer
 from ..ds.redfish_dataset import JSONDataset
 
 
-def from_pretrained_default(args):
+def from_pretrained_default(args, only_tokenizer=False):
     """
     :param args:
+    :param only_tokenizer:
     :return:
     """
-    model = GPT2LMHeadModel.from_pretrained(args.model_type)
+    model = None
+    if not only_tokenizer:
+        model = GPT2LMHeadModel.from_pretrained(args.model_type)
+
     tokenizer = GPT2Tokenizer.from_pretrained(args.model_type)
     return model, tokenizer
 
@@ -30,6 +30,8 @@ def from_pretrained_default(args):
 class IgcLanguageModule:
     """
     """
+    modules = ["goal_extractor", "parameter_extractor", "state_encoder", "state_autoencoder"]
+
     def __init__(self,
                  spec: argparse.Namespace,
                  metric_logger: MetricLogger,
@@ -42,15 +44,11 @@ class IgcLanguageModule:
         if spec is None:
             raise ValueError("Specs cannot be None")
 
+        self.modules = ["goal_extractor", "parameter_extractor", "state_encoder", "state_autoencoder"]
+
         self._from_pretrained_fn = from_pretrained
         self.metric_logger = metric_logger
         self.spec = spec
-
-        self.logger = logging.getLogger(__name__)
-        logging.basicConfig(
-            filename='igc_llm_module.log',
-            level=logging.DEBUG, format='%(asctime)s %(message)s')
-
         self.ds = ds
 
     def train(self):
@@ -106,43 +104,72 @@ class IgcLanguageModule:
         # self.goal_extractor.train_goal_representation()
 
     @staticmethod
-    def load_llm_embeddings_model(
-            args: argparse.Namespace,
-            only_tokenizer: Optional[bool] = False,
-            device: torch.device = "cpu"
-    ) -> Tuple[PreTrainedModel, PreTrainedTokenizer, Optional[int]]:
+    def make_base_model(spec: argparse.Namespace):
+        return from_pretrained_default(spec)
+
+    @staticmethod
+    def make_model(
+            spec: argparse.Namespace,
+            module_name: str,
+            base_model: None,
+            base_tokenizer) -> Optional[LlmBaseModule]:
+
         """
-        Load the LLM embedding model for inference.
+        Create an igc module based on the module name.
+
+        :param spec: specs for each module
+        :param module_name: igc module name
+        :param base_model: base llm model
+        :param base_tokenizer:  base llm tokenizer
+        :return:
+        """
+        return LlmBaseModule(module_name, spec, base_model, base_tokenizer, is_inference=True)
+
+    @staticmethod
+    def load_tokenizer(spec: argparse.Namespace):
+        """
+        Return tokenizer used for the llm models.
+
+        :param spec:
+        :return:
+        """
+        _, tokenizer = from_pretrained_default(spec.model_type, only_tokenizer=True)
+        return tokenizer
+
+    @staticmethod
+    def load(
+            spec: argparse.Namespace,
+            device: torch.device = "cpu",
+            module_name: str = None,
+    ) -> Dict[str, LlmBaseModule]:
+        """
+
+        Load the all llm models embedding model for inference.
         i.e. agent will use this as encoder
 
-        :param only_tokenizer:  if we only need get tokenizer.
-        :param args: The command-line arguments.
+        :param module_name:
+        :param spec:
         :param device: The device to load the model onto, defaults to "cpu".
         :return: The loaded model, tokenizer, and the last epoch from the checkpoint.
         """
-        tokenizer = GPT2Tokenizer.from_pretrained(args.model_type)
-        if only_tokenizer:
-            return tokenizer
 
-        checkpoint_path_dir = Path(args.output_dir)
-        checkpoint_path_dir = checkpoint_path_dir.resolve()
-        checkpoint_path_dir = checkpoint_path_dir.absolute()
+        base_model, base_tokenizer = IgcLanguageModule.make_base_model(spec)
 
-        logging.info(F"absolute {str(args.output_dir)}")
-        if not checkpoint_path_dir.is_dir():
-            raise ValueError("Invalid checkpoint directory.")
+        modules = {}
+        if module_name is not None:
+            if module_name not in IgcLanguageModule.modules:
+                raise ValueError(f"Invalid module_name: {module_name}. Must be one of {IgcLanguageModule.modules}")
 
-        checkpoint_files = [f for f in os.listdir(checkpoint_path_dir) if f.endswith('.pt')]
-        checkpoint_files = [os.path.join(checkpoint_path_dir, f) for f in checkpoint_files]
-        checkpoint_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+            module = IgcLanguageModule.make_model(spec, module_name, base_model, base_tokenizer)
+            module.load(module_name, module.model, spec,
+                        device=device, is_inference=True, optimizer=None, scheduler=None)
+            modules[module_name] = module
 
-        if not checkpoint_files:
-            raise ValueError(
-                f"No checkpoint files found "
-                f"in the checkpoint directory {checkpoint_files}.")
+        else:
+            for model_name in IgcLanguageModule.modules:
+                module = IgcLanguageModule.make_model(spec, model_name, base_model, base_tokenizer)
+                module.load(model_name, module.model, spec,
+                            device=device, is_inference=True, optimizer=None, scheduler=None)
+                modules[model_name] = module
 
-        model = GPT2LMHeadModel.from_pretrained(args.model_type)
-        last_epoch = LlmEmbeddingsTrainer.load_model_inference(
-            model, args, device=device)
-
-        return model, tokenizer, last_epoch
+        return modules

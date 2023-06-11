@@ -21,7 +21,7 @@ class IgcAgentTrainer(RlBaseModule):
                  spec: argparse.Namespace,
                  ds: JSONDataset,
                  metric_logger: MetricLogger,
-                 llm_model, llm_tokenizer):
+                 llm_model, llm_tokenizer, env):
         """
 
         :param args:
