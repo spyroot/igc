@@ -38,22 +38,31 @@ BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 class LlmEmbeddingsTrainer(LlmBaseModule):
     """
     """
+
     def __init__(self,
-                 name: str,
+                 module_name: str,
                  spec: argparse.Namespace,
-                 ds: JSONDataset,
-                 metric_logger: MetricLogger,
                  llm_model,
-                 llm_tokenizer):
+                 llm_tokenizer,
+                 ds: Optional[JSONDataset] = None,
+                 metric_logger: Optional[MetricLogger] = None,
+                 is_inference=False):
         """
-        
+
         :param spec:
         :param ds: 
         :param metric_logger: 
         :param llm_model: 
         :param llm_tokenizer: 
         """
-        super().__init__(name, spec, ds, metric_logger, llm_model, llm_tokenizer)
+        super().__init__(
+            module_name,
+            spec,
+            llm_model,
+            llm_tokenizer,
+            ds=ds,
+            metric_logger=metric_logger,
+            is_inference=is_inference)
 
         self.is_quantize = False
         self.num_epochs = spec.num_train_epochs
@@ -326,4 +335,3 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         del accelerator
 
         print("Embedding extractor training complete.")
-

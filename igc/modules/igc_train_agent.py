@@ -56,7 +56,6 @@ class IgcAgentTrainer(RlBaseModule):
                  metric_logger: Optional[MetricLogger] = None,
                  is_inference: Optional[bool] = "False"):
         """
-
         :param module_name:
         :param spec:
         :param llm_model:

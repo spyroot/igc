@@ -39,12 +39,13 @@ class GoalExtractorTrainer(LlmBaseModule):
     """
     """
     def __init__(self,
-                 name: str,
+                 module_name: str,
                  args: argparse.Namespace,
-                 ds: JSONDataset,
-                 metric_logger: MetricLogger,
                  llm_model,
-                 llm_tokenizer):
+                 llm_tokenizer,
+                 ds: Optional[JSONDataset] = None,
+                 metric_logger: Optional[MetricLogger] = None,
+                 is_inference: Optional[bool] = False):
         """
 
         :param args:
@@ -53,7 +54,12 @@ class GoalExtractorTrainer(LlmBaseModule):
         :param llm_tokenizer:
         """
         # Define the GPT model and tokenizer
-        super().__init__(name, args, ds, metric_logger, llm_model, llm_tokenizer)
+        super().__init__(module_name,
+                         args,
+                         llm_model,
+                         llm_tokenizer,
+                         ds=ds, metric_logger=metric_logger,
+                         is_inference=is_inference)
 
         self.num_epochs = args.num_train_epochs
         self.batch_size = args.per_device_train_batch_size

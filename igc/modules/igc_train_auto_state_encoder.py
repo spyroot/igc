@@ -35,9 +35,11 @@ class AutoencoderTrainer(IgcBaseModule):
         :param llm_tokenizer:
         """
         super().__init__(
-            module_name, spec, ds,
+            module_name,
+            spec,
             llm_model,
             llm_tokenizer,
+            ds=ds,
             metric_logger=metric_logger,
             is_inference=is_inference)
 

@@ -15,6 +15,7 @@ from typing import Optional, Any
 import loguru
 import torch
 from torch.utils.data import random_split, Subset
+from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from igc.ds.redfish_dataset import JSONDataset
 from igc.shared.shared_torch_utils import get_device
@@ -50,6 +51,29 @@ class IgcBaseModule:
         :param llm_model: pre-trained language model
         :param llm_tokenizer: pre-trained tokenizer
         """
+        if not isinstance(module_name, str):
+            raise TypeError(f"module_name should be a string, received {type(module_name).__name__}.")
+
+        if not isinstance(spec, argparse.Namespace):
+            raise TypeError(f"spec should be an instance of argparse.Namespace, received {type(spec).__name__}.")
+
+        if not isinstance(llm_model, PreTrainedModel):
+            raise TypeError(f"llm_model should be an instance of PreTrainedModel, received {type(llm_model).__name__}.")
+
+        if not isinstance(llm_tokenizer, PreTrainedTokenizer):
+            raise TypeError(
+                f"llm_tokenizer should be an instance of PreTrainedTokenizer, received {type(llm_tokenizer).__name__}.")
+
+        if ds is not None and not isinstance(ds, JSONDataset):
+            raise TypeError(f"ds should be an instance of JSONDataset or None, received {type(ds).__name__}.")
+
+        if metric_logger is not None and not isinstance(metric_logger, MetricLogger):
+            raise TypeError(
+                f"metric_logger should be an instance of MetricLogger or None, received {type(metric_logger).__name__}.")
+
+        if not isinstance(is_inference, bool):
+            raise TypeError(f"is_inference should be a boolean, received {type(is_inference).__name__}.")
+
         self._is_inference = is_inference
 
         # validate arguments
@@ -125,6 +149,7 @@ class IgcBaseModule:
         """Update tokenizer settings
         :return:
         """
+        print(llm_tokenizer)
         self.tokenizer.pad_token = llm_tokenizer.eos_token
         self.tokenizer.pad_token_id = llm_tokenizer.eos_token_id
         self.model.config.pad_token_id = llm_tokenizer.pad_token_id

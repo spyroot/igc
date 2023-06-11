@@ -1,6 +1,8 @@
+import sys
 import argparse
 from typing import Optional, Dict, Union, List
 
+import loguru
 import torch
 from igc.ds.redfish_dataset import JSONDataset
 from igc.modules.igc_train_auto_state_encoder import AutoencoderTrainer
@@ -34,37 +36,52 @@ class IgcLanguageModule:
         self.metric_logger = metric_logger
         self.spec = spec
         self.ds = ds
+        self._configure_logger()
+
+    def _configure_logger(self):
+        """
+        Configures the logger for the module.
+        """
+        module_name = self.__class__.__name__
+        self._log_level = self.spec.log_level.upper()
+        self.logger = loguru.logger.bind(module_name=module_name)
+        self.logger.remove()
+        self.logger.add(sys.stdout, level=self._log_level)
 
     def train(self):
         """Main call to train all language models.
         :return:
         """
 
-        model, tokenizer = self._from_pretrained_fn(self.spec.model_type)
+        model, tokenizer = self._from_pretrained_fn(self.spec)
+        self.logger.info("Starting training.")
 
         # we train State Encoder the goal here take rest api response
         # and re-present as state.
-        if self.spec == "latent" or self.spec == "all":
+        if self.spec.llm == "latent" or self.spec.llm == "all":
+            self.logger.info("Starting training state encoder.")
             llm_embeddings = LlmEmbeddingsTrainer(
                 "state_encoder",
-                self.spec, self.ds, self.metric_logger, model, tokenizer)
+                self.spec, model, tokenizer,
+                ds=self.ds, metric_logger=self.metric_logger)
             llm_embeddings.train()
             model = llm_embeddings.model
         # we train goal extractor the goal here extract
         # goal from high level sentence
-        if self.spec == "goal" or self.spec == "all":
+        if self.spec.llm == "goal" or self.spec.llm == "all":
+            self.logger.info("Starting training goal extractor.")
             # note we first fine tune LLM then we tune all other models.
             goal_extractor = GoalExtractorTrainer(
                 "goal_extractor",
                 self.spec,
-                self.ds,
-                self.metric_logger,
-                model,
-                tokenizer)
+                model, tokenizer,
+                ds=self.ds,
+                metric_logger=self.metric_logger)
             goal_extractor.train_goal_representation()
         # we train goal and parameter extractor, the goal here to extract
         # high level goal and parameters for that goal.
-        if self.spec == "parameter" or self.spec == "all":
+        if self.spec.llm == "parameter" or self.spec.llm == "all":
+            self.logger.info("Starting training goal parameter extractor.")
             parameter_extractor = GoalExtractorTrainer(
                 "parameter_extractor",
                 self.spec,
@@ -74,7 +91,8 @@ class IgcLanguageModule:
                 tokenizer)
             parameter_extractor.train_goal_and_parameter_extractor()
         # we train auto encoder the aim here to reduce state re-presentation
-        if self.spec == "encoder" or self.spec == "all":
+        if self.spec.llm == "encoder" or self.spec.llm == "all":
+            self.logger.info("Starting training state auto encoder.")
             autoencoder = AutoencoderTrainer(
                 "state_autoencoder",
                 self.spec, self.ds,
