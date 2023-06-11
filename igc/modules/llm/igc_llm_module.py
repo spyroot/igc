@@ -56,6 +56,7 @@ class IgcLanguageModule:
         model, tokenizer = self._from_pretrained_fn(self.spec)
         self.logger.info("Starting training.")
 
+        _is_llm_pre_trained = False
         # we train State Encoder the goal here take rest api response
         # and re-present as state.
         if self.spec.llm == "latent" or self.spec.llm == "all":
@@ -66,6 +67,7 @@ class IgcLanguageModule:
                 ds=self.ds, metric_logger=self.metric_logger)
             llm_embeddings.train()
             model = llm_embeddings.model
+            _is_llm_pre_trained = True
         # we train goal extractor the goal here extract
         # goal from high level sentence
         if self.spec.llm == "goal" or self.spec.llm == "all":
@@ -90,19 +92,28 @@ class IgcLanguageModule:
                 tokenizer,
                 ds=self.ds,
                 metric_logger=self.metric_logger,
-                )
+                is_inference=False
+            )
             parameter_extractor.train_goal_and_parameter_extractor()
         # we train auto encoder the aim here to reduce state re-presentation
         if self.spec.llm == "encoder" or self.spec.llm == "all":
             self.logger.info("Starting training state auto encoder.")
+
+            if not _is_llm_pre_trained:
+                print("Loading state encoder")
+                modules = self.load(self.spec, module_name="state_encoder")
+                module = modules["state_encoder"]
+                model = module.model
+
             autoencoder = AutoencoderTrainer(
                 "state_autoencoder",
                 self.spec,
                 model,
                 tokenizer,
                 ds=self.ds,
-                metric_logger=self.metric_logger
-                )
+                metric_logger=self.metric_logger,
+                is_inference=False)
+
             autoencoder.train()
 
         # self.llm_autoencoder.train_autoencoder()

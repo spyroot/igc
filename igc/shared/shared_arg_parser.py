@@ -101,6 +101,44 @@ def add_scheduler_group(parser):
     return parser
 
 
+def add_auto_encoder_group(parser):
+    """
+    This all RL agent trainer parameters.
+
+    :param parser:
+    :return:
+    """
+
+    trainer_group = parser.add_argument_group('Autoencoder Trainer')
+
+    trainer_group.add_argument(
+        "--auto_encoder_lr",
+        type=float,
+        default=0.001,
+        help="Auto encoder learning rate.")
+
+    trainer_group.add_argument(
+        "--auto_encoder_train_steps",
+        type=int, default=None,
+        help="Total number of training steps to perform."
+             " If provided, overrides num_train_epochs.")
+
+    trainer_group.add_argument(
+        "--auto_encoder_optimizer",
+        type=str,
+        default="Adam",
+        choices=TorchBuilder.get_supported_optimizers(),
+        help="Autoencoder optimizer to use."
+    )
+
+    trainer_group.add_argument(
+        "--auto_encoder_weight_decay",
+        type=float, default=0.0,
+        help="Weight decay to use.")
+
+    return parser
+
+
 def add_rl_trainer_group(parser):
     """
     This all RL agent trainer parameters.
@@ -520,6 +558,7 @@ def shared_arg_parser(
     parser = add_reporting_group(parser)
     parser = add_model_type_group(parser)
     parser = add_rl_trainer_group(parser)
+    parser = add_auto_encoder_group(parser)
 
     parser.add_argument("--local-rank",
                         type=int, default=-1,

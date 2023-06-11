@@ -12,19 +12,19 @@ class AutoStateEncoder(nn.Module):
         """
         super(AutoStateEncoder, self).__init__()
         self.encoder = nn.Sequential(
-            nn.Linear(seq_len, hidden_dim[0]),
+            nn.Linear(seq_len, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim[0], hidden_dim[1]),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim[1], latent_dim),
+            nn.Linear(hidden_dim, latent_dim),
         )
 
         self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim[1]),
+            nn.Linear(latent_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim[1], hidden_dim[0]),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim[0], latent_dim),
+            nn.Linear(hidden_dim, latent_dim),
         )
 
     def forward(self, x):

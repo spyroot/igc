@@ -91,13 +91,14 @@ class TorchBuilder:
         :return: Instance of the optimizer
         """
 
+        optimizer_name = optimizer
         optimizer = optimizer.lower()
 
         if optimizer == 'AdamW2'.lower():
             # this a special case for AdamW2 in transformer pacakge.
             optimizer_class = getattr(transformers, "AdamW", None)
         else:
-            optimizer_class = getattr(torch.optim, optimizer, None)
+            optimizer_class = getattr(torch.optim, optimizer_name, None)
 
         if optimizer_class is None:
             raise ValueError(f"Optimizer '{optimizer}' not recognized")

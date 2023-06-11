@@ -3,6 +3,7 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
 
 from igc.ds.redfish_dataset import JSONDataset
 from igc.shared.shared_torch_builder import TorchBuilder
@@ -43,21 +44,31 @@ class AutoencoderTrainer(IgcBaseModule):
             metric_logger=metric_logger,
             is_inference=is_inference)
 
-        self.llm_model = llm_model
-        self.train_dataloader = None
+        self._llm_model = llm_model
+        self._input_dim = llm_model.config.hidden_size
+        self._latent_dim = llm_model.config.hidden_size
+        self._learning_rate = spec.auto_encoder_lr
 
-        self.input_dim = spec.llm_model.config.hidden_size
-        self.latent_dim = spec.auto_encoder_latent_dim
-        self.model_autoencoder = AutoStateEncoder(self.input_dim, self.latent_dim)
+        self.logger.info(f"Creating auto-encoder input dim"
+                         f" {self._input_dim} {self._latent_dim} batch_size: {self.batch_size}")
+
+        self._encoder_model = llm_model.transformer
+        llm_model.transformer.config.is_decoder = False
+        # self._llm_model.resize_token_embeddings(len(llm_tokenizer))
+        input_shape = self._encoder_model.wpe.weight.shape
+        self.emb_shape = (input_shape[0] - 1, input_shape[1])
+        self.model_autoencoder = AutoStateEncoder()
 
         # 0.001
-        self.num_epochs = spec.spec.num_epoch_train
-        self.learning_rate = spec.auto_encoder_lr
+        self.logger.info(f"Creating optimizer {spec.auto_encoder_optimizer} "
+                         f"lr: {spec.auto_encoder_lr} "
+                         f"weight decay: {spec.auto_encoder_weight_decay}")
 
+        self._learning_rate = spec.auto_encoder_lr
         self.optimizer = TorchBuilder.create_optimizer(
-            spec.llm_optimizer,
-            self.model,
-            spec.auto_encoder_learning_rate,
+            spec.auto_encoder_optimizer,
+            self.model_autoencoder,
+            spec.auto_encoder_lr,
             spec.auto_encoder_weight_decay,
             **vars(spec)
         )
@@ -90,35 +101,51 @@ class AutoencoderTrainer(IgcBaseModule):
         # attach the autoencoder to the GPT model
         gpt_encoder.weight = nn.Parameter(autoencoder.encoder.weight)
 
+    @staticmethod
+    def custom_collate_fn(samples):
+        """Collate data before we pass to the model.
+        :param samples:
+        :return:
+        """
+        included_keys = ['input_ids', 'attention_mask']
+        batch = {key: torch.stack([s[key] for s in samples]) for key in included_keys}
+        return batch
+
     def train(self):
         """
         :return:
         """
-        # Set the training parameters
         num_epochs = 10
-        learning_rate = 0.001
-
-        # Define your optimizer and loss function
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
-        loss_fn = nn.CrossEntropyLoss()
+        self.logger.info(f"Starting training")
+        train_dataloader = DataLoader(self.dataset,
+                                      batch_size=self.batch_size,
+                                      sampler=None,
+                                      num_workers=self.num_workers,
+                                      shuffle=True,
+                                      collate_fn=AutoencoderTrainer.custom_collate_fn)
 
         # training loop
         for epoch in range(num_epochs):
             total_loss = 0.0
-            for input_data, target in self.train_dataloader:
-                latent_repr = self.model.encoder(input_data)
-                output = self.llm_model(input_data, latent_repr)
+            for batch in train_dataloader:
+                with torch.no_grad():
+                    output = self._encoder_model(**batch)
+                    print("Output keys", output.keys())
 
-                loss = loss_fn(output, target)
-                optimizer.zero_grad()
+                hidden_state = output.last_hidden_state
+                print(f"Dim hidden space {hidden_state.shape}")
+                latent_repr = self._encoder_model.encoder(hidden_state)
+                reconstructed = self.model_autoencoder.decoder(latent_repr)
+                loss = self.loss_fn(output, hidden_state)
+                self.optimizer.zero_grad()
                 loss.backward()
-                optimizer.step()
+                self.optimizer.step()
 
                 # Update the total loss
                 total_loss += loss.item()
 
             # Print the average loss for the epoch
-            average_loss = total_loss / len(self.train_dataloader)
+            average_loss = total_loss / len(train_dataloader)
             print(f"Epoch [{epoch + 1}/{num_epochs}], Average Loss: {average_loss}")
 
             # Perform validation or evaluation steps if needed
