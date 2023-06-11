@@ -270,7 +270,8 @@ def add_trainer_group(parser):
     parser.add_argument(
         "--eval_mode",
         type=str,
-        choices=["on_epoch", "freq"], default="on_epoch",
+        choices=["on_epoch", "freq"],
+        default="on_epoch",
         help="By default uses freq otherwise at the end of each epoch."
     )
 
