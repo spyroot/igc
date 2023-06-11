@@ -152,7 +152,7 @@ class AutoencoderTrainer(IgcBaseModule):
             average_loss = total_loss / len(train_dataloader)
             print(f"Epoch [{epoch + 1}/{num_epochs}], Average Loss: {average_loss}")
 
-            # Perform validation or evaluation steps if needed
+        # Perform validation or evaluation steps if needed
         # self.save_model()
         # # Save the trained model if desired
         # torch.save(self.model.state_dict(), "trained_model.pth")

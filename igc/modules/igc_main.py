@@ -2,7 +2,6 @@ import argparse
 import os
 
 import torch
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from .base.igc_metric_logger import MetricLogger
 from igc.modules.llm.igc_llm_module import IgcLanguageModule
 from .igc_rl_module import IgcRlModule
@@ -31,10 +30,8 @@ class IgcMain:
 
         :return:
         """
-        print("Starting training.")
-
         if self._specs.train:
-            model, tokenizer = self._from_pretrained_fn(self._specs)
+            _, tokenizer = self._from_pretrained_fn(self._specs, only_tokenizer=True)
             dataset = JSONDataset(
                 self._directory_path, verbose=True, tokenizer=tokenizer)
 
@@ -48,8 +45,9 @@ class IgcMain:
                 rl_module = IgcRlModule(self._specs, self._metric_logger, dataset)
                 rl_module.train()
 
-    def load(self, specs: argparse.Namespace, module_name: str,  device: torch.device = "cpu",):
-        """
+    def load(self, specs: argparse.Namespace, module_name: str,  device: torch.device = "cpu"):
+        """Load a module.
+
         :param device:
         :param specs:
         :param module_name:
