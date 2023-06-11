@@ -72,9 +72,6 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         self._eval_freq = 10
 
         self._eval_freq = 10
-        if self.num_epochs < 10:
-            self._eval_freq = 2
-
         self.shuffle = True
         self.num_workers = spec.num_workers
         self._default_mask_token = "@odata.id"
@@ -259,6 +256,10 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             print(f"Staring training total_batches: {total_batches} "
                   f"train dataset size: {dataset_size} "
                   f"batch stats freq: {batch_log_frequency}.")
+
+        actual_num_epochs = max(self.num_epochs - last_epoch, 0)
+        if actual_num_epochs < 10:
+            self._eval_freq = 2
 
         for epoch in range(last_epoch, self.num_epochs):
             total_loss = 0.0
