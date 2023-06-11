@@ -129,7 +129,7 @@ class IgcBaseModule:
         # model saving
         self.save_strategy = spec.save_strategy
         self.checkpoint_dir = self._prepare_checkpoint_dir()
-        self.module_checkpoint_dir = f"{spec.checkpoint_dir}/{module_name}"
+        self.module_checkpoint_dir = f"{self.checkpoint_dir }/{module_name}"
         os.makedirs(self.module_checkpoint_dir, exist_ok=True)
 
         self.rank = int(os.environ.get('LOCAL_RANK', -1))
@@ -139,7 +139,7 @@ class IgcBaseModule:
 
         # configure logger
         self._configure_logger(module_name)
-        self.logger.info(f"Model {self.module_name} saving dir {self.checkpoint_dir}")
+        self.logger.info(f"Model {self.module_name} saving dir {self.module_checkpoint_dir}")
         self._debug_info()
 
     def set_tokenizer(self, tokenizers):
@@ -174,7 +174,7 @@ class IgcBaseModule:
         self.logger.debug(f"  - pad_token_id: {self.pad_token_id}")
         self.logger.debug(f"  - num_epochs: {self.num_epochs}")
         self.logger.debug(f"  - batch_size: {self.batch_size}")
-        self.logger.debug(f"  - checkpoint_dir: {self.checkpoint_dir}")
+        self.logger.debug(f"  - checkpoint_dir: {self.module_checkpoint_dir}")
         self.logger.debug(f"  - rank: {self.rank}")
 
     def _prepare_checkpoint_dir(self):
