@@ -71,13 +71,14 @@ class IgcLanguageModule:
             model = llm_embeddings.model
             _is_llm_pre_trained = True
 
+        _model = None
+
         if not _is_llm_pre_trained:
             self.logger.info("Loading state encoder state.")
             modules = self.load(self.spec, module_name="state_encoder", device=self.spec.device)
             module = modules["state_encoder"]
             _model = module.model
 
-        _model = None
         if _model is None:
             warnings.warn("Please train state encoder first.")
             return
