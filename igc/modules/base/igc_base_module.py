@@ -21,7 +21,6 @@ from igc.shared.shared_torch_utils import get_device
 
 from .igc_metric_logger import MetricLogger
 from .igc_specs import make_default_spec
-from loguru import logger
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
@@ -38,7 +37,7 @@ class IgcBaseModule:
                  llm_tokenizer,
                  ds: Optional[JSONDataset] = None,
                  metric_logger: Optional[MetricLogger] = None,
-                 is_inference: Optional[bool] = "False"):
+                 is_inference: Optional[bool] = False):
         """
 
         Note module name is important for saving
@@ -76,20 +75,8 @@ class IgcBaseModule:
         if not is_inference and ds is None:
             raise ValueError("ds (dataset) cannot be None.")
 
-        # global logging
-        self._log_level = spec.rl_log_level.upper()
-        if spec.log_dir is None:
-            log_dir = "logs"
-        else:
-            log_dir = spec.log_dir
-
-        self.log_file = os.path.join(log_dir, f"{module_name}.log")
-
-        # configure loguru logger
-        loguru.logger.remove()
-        loguru.logger.add(self.log_file , level=self._log_level)
+        self._log_file = None
         self.logger = loguru.logger
-
         self._is_trained = False
 
         self.model = llm_model
@@ -108,7 +95,6 @@ class IgcBaseModule:
 
         self.device = get_device()
         self.metric_logger = metric_logger
-
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.model.config.pad_token_id = self.tokenizer.pad_token_id
@@ -124,26 +110,72 @@ class IgcBaseModule:
         self.optimizer = None
 
         # model saving
-        self.save_strategy = spec.save_strategy
-        checkpoint_path_dir = Path(spec.output_dir)
-        checkpoint_path_dir = checkpoint_path_dir.resolve()
-        self.logger.info(f"Model {self.module_name} saving dir {checkpoint_path_dir}")
+        self.save_strategy = spec.save_strateg
+        self.checkpoint_dir = self._prepare_checkpoint_dir()
+        self.rank = int(os.environ.get('LOCAL_RANK', -1))
 
+        # update specs and add all defaults
+        self._trainer_specs = make_default_spec(self._trainer_args)
+
+        # configure logger
+        self._configure_logger(module_name)
+
+        #
+        self.logger.info(f"Model {self.module_name} saving dir {self.checkpoint_dir}")
+        self._debug_info()
+
+    def _debug_info(self):
+        """
+        :return:
+        """
+        # Debug logging for initialized parameters
+        self.logger.debug(f"IgcBaseModule.__init__ - module_name: {self.module_name}")
+        self.logger.debug(f"IgcBaseModule.__init__ - is_inference: {self._is_inference}")
+
+        self.logger.debug("Internal variables:")
+        self.logger.debug(f"  - device: {self.device}")
+        self.logger.debug(f"  - pad_token: {self.pad_token}")
+        self.logger.debug(f"  - pad_token_id: {self.pad_token_id}")
+        self.logger.debug(f"  - num_epochs: {self.num_epochs}")
+        self.logger.debug(f"  - batch_size: {self.batch_size}")
+        self.logger.debug(f"  - checkpoint_dir: {self.checkpoint_dir}")
+        self.logger.debug(f"  - rank: {self.rank}")
+
+    def _prepare_checkpoint_dir(self):
+        """
+        Prepares the checkpoint directory.
+
+        :return:
+        """
+        checkpoint_path_dir = Path(self._trainer_args.log_dir.output_dir)
+        checkpoint_path_dir = checkpoint_path_dir.resolve()
         if not checkpoint_path_dir.is_dir():
             raise ValueError(f"Indicate path to checkpoint dir {checkpoint_path_dir}.")
 
-        self.checkpoint_dir = str(checkpoint_path_dir)
-        self.rank = int(os.environ.get('LOCAL_RANK', -1))
+        return str(checkpoint_path_dir)
 
-        self.metric_logger.set_logger(loguru.logger)
-        self.metric_logger.set_log_level(self._log_level)
+    def _configure_logger(self, module_name: str):
+        """
+        Configures the logger for the module.
 
-        # set defaults
-        self._trainer_specs = make_default_spec(self._trainer_args)
+        :param module_name: The name of the module.
+        """
+        logs_dir = self._trainer_args.log_dir or "logs"
+        os.makedirs(logs_dir, exist_ok=True)
+
+        self._log_file = os.path.join(logs_dir, f"{module_name}.log")
+        self._log_level = self._trainer_args.log_level.upper()
+
+        self.logger = loguru.logger.bind(module_name=module_name)
+        loguru.logger.remove()
+        loguru.logger.add(self._log_file, level=self._log_level)
+
+        if self.metric_logger is not None:
+            self.metric_logger.set_logger(loguru.logger)
+            self.metric_logger.set_log_level(self._log_level)
 
     def get_model(self):
-        """
-
+        """Return module model.
         :return:
         """
         return self.model
@@ -428,30 +460,30 @@ class IgcBaseModule:
 
     def is_trained(self) -> bool:
         """
-
-        Check if the model has been trained.
+        Check if the model has been trained,
+        this flag post model train procedure.
 
         :return: True if the model has been trained, False otherwise.
         """
         return self._is_trained
 
     @staticmethod
-    def dataset_checker(dataset, _logger):
+    def dataset_checker(dataset, global_logger):
         """
         Dataset checker,  checks if the dataset is valid and
         has all data that we need.
 
         :param dataset: The dataset to check.
-        :param _logger: The logger object to use for logging.
+        :param global_logger: The logger object to use for logging.
         """
         required_keys = ["label", "rest_api"]
 
         for data_point in dataset:
             for key in required_keys:
                 if key not in data_point:
-                    _logger.error(f"Key '{key}' not found in the dataset.")
+                    global_logger.error(f"Key '{key}' not found in the dataset.")
 
             rest_call = dataset.action(data_point["label"])
-            _logger.info(f"rest recovered: {rest_call}")
-            _logger.info(f"rest original: {data_point['rest_api']}")
-            _logger.info(f"rest original: {data_point['label']}")
+            global_logger.info(f"rest recovered: {rest_call}")
+            global_logger.info(f"rest original: {data_point['rest_api']}")
+            global_logger.info(f"rest original: {data_point['label']}")

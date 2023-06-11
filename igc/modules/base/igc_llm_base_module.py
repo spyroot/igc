@@ -17,7 +17,7 @@ Parameters just passed to agent. i.e. we don't train on parameters.
 Author:Mus mbayramo@stanford.edu
 """
 import argparse
-from typing import List, Optional
+from typing import List, Optional, Union, Callable
 from collections import namedtuple
 
 import evaluate
@@ -29,6 +29,9 @@ from igc.ds.redfish_dataset import JSONDataset
 from .igc_base_module import IgcBaseModule
 from .igc_llm_metrics_type import MetricType
 from .igc_metric_logger import MetricLogger
+from sklearn.metrics import f1_score
+
+from .prompt_types import PromptType
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
@@ -43,15 +46,18 @@ class LlmBaseModule(IgcBaseModule):
                  llm_tokenizer,
                  ds: Optional[JSONDataset] = None,
                  metric_logger: Optional[MetricLogger] = None,
-                 is_inference: Optional[bool] = "False"):
+                 is_inference: Optional[bool] = False):
         """
         Base LLM module
 
-        :param spec:  specs for the particular module
-        :param ds: dataset
-        :param metric_logger: metric logger used for training
-        :param llm_model:
-        :param llm_tokenizer:
+        :param module_name: name of the module
+        :param spec: store all specs.
+        :param llm_model: pre-trained language model
+        :param llm_tokenizer: pre-trained tokenizer
+        :param ds: dataset used to train IGC
+        :param metric_logger: a metric logger to store metrics
+        :param is_inference: flag indicating if the module is for inference
+
         """
         super().__init__(module_name,
                          spec,
@@ -61,14 +67,16 @@ class LlmBaseModule(IgcBaseModule):
                          metric_logger=metric_logger,
                          is_inference=is_inference)
 
-        self.logger.info("Starting llm module")
         self._log_level = spec.llm_log_level.upper()
-        self.metric_logger.set_log_level(self._log_level)
+        if self.metric_logger is not None:
+            self.metric_logger.set_log_level(self._log_level)
+
+        self.logger.info("Starting llm module")
 
     @staticmethod
     def compute_rouge_metric(
-            predictions:
-            List[str], targets: List[str],
+            predictions: List[str],
+            targets: List[str],
             default_rouge: str = 'rouge1') -> float:
         """
         Compute_rouge_metric
@@ -79,13 +87,14 @@ class LlmBaseModule(IgcBaseModule):
         :return: 
         """
         scorer = rouge_scorer.RougeScorer([default_rouge], use_stemmer=True)
+
         scores = [scorer.score(p, t)[default_rouge].fmeasure
                   for p, t in zip(predictions, targets)]
+
         return sum(scores) / len(scores)
 
     @staticmethod
-    def compute_exact_match(
-            predictions: List[str], targets: List[str]) -> float:
+    def compute_exact_match(predictions: List[Union[str, int]], targets: List[Union[str, int]]) -> float:
         """
         Compute exact match score.
 
@@ -95,52 +104,157 @@ class LlmBaseModule(IgcBaseModule):
         """
         if isinstance(targets[0], str):
             return sum(
-                [p.strip() == t.strip()
-                 for p, t in zip(predictions, targets)]) / len(predictions)
+                [p.strip() == t.strip() for p, t in zip(predictions, targets)]) / len(predictions)
+        else:
+            return sum(
+                [p == t for p, t in zip(predictions, targets)]) / len(predictions)
 
     @staticmethod
-    def compute_f1_score(predictions, targets) -> float:
-        pass
+    def compute_f1_score(predictions: List[str], targets: List[str]) -> float:
+        """
+        Compute the F1 score.
+
+        :param predictions: List of predicted values.
+        :param targets: List of target values.
+        :return: F1 score.
+        """
+        f1 = f1_score(targets, predictions)
+        return f1
 
     @staticmethod
-    def performance_metric(predictions: List[str], targets: List[str], metric: str) -> float:
+    def _normalize(prediction: str, substring: str) -> str:
         """
-        :param predictions:
-        :param targets:
-        :param metric:
-        :return:
+        Normalize the prediction by removing a specified substring.
+
+        :param prediction: Prediction string.
+        :param substring: Substring to remove from the prediction.
+        :return: Normalized prediction string.
         """
-        if metric == 'rouge':
-            return LlmBaseModule.compute_rouge_metric(predictions, targets)
-        elif metric == 'f1':
-            return LlmBaseModule.compute_f1_score(predictions, targets)
-        elif metric == 'exact match':
-            if isinstance(targets[0], str):
-                return sum([p.strip() == t.strip() for p, t in zip(predictions, targets)]) / len(predictions)
+        if prediction.startswith(substring):
+            prediction = prediction[len(substring):]
+        elif prediction.endswith(substring):
+            prediction = prediction[:-len(substring)]
+        elif substring.lower() in prediction.lower():
+            prediction = prediction.replace(substring.lower(), "").replace(substring.upper(), "").strip()
+
+        return prediction.strip()
+
+    @staticmethod
+    def _contains(key: str, candidates: Union[str, List[str]]) -> bool:
+        """
+        Check if the key string is contained in any of the candidate strings.
+
+        :param key: Key string to search for.
+        :param candidates: List of candidate strings.
+        :return: True if key is contained in any candidate, False otherwise.
+        """
+        if isinstance(candidates, str):
+            return key.lower() in candidates.lower()
+        else:
+            for c in candidates:
+                if key.lower() in c.lower():
+                    return True
+            return False
+
+    @staticmethod
+    def sentiment_accuracy_metric(predictions: List[str], targets: List[str]) -> float:
+        return LlmBaseModule.accuracy_metric(predictions, targets)
+
+    @staticmethod
+    def intent_accuracy_metric(predictions: List[str], targets: List[str]) -> float:
+        return LlmBaseModule.accuracy_metric(predictions, targets)
+
+    @staticmethod
+    def accuracy_metric(predictions: List[str], targets: List[str]) -> float:
+        """
+        Compute the accuracy metric between predictions and targets.
+
+        :param predictions: List of predicted values.
+        :param targets: List of target values.
+        :return: Accuracy metric score.
+        """
+        total_count = len(predictions)
+        correct_count = sum(1 for prediction, target in zip(predictions, targets) if prediction == target)
+        accuracy = correct_count / total_count
+        return accuracy
+
+    @staticmethod
+    def performance_metric(
+            predictions: List[str],
+            targets: List[str],
+            metric: Union[str, MetricType],
+            prompt_type: Optional[PromptType] = None,
+            callback: Optional[Callable] = None,
+            prefix_to_remove=None) -> float:
+        """
+        Compute the performance metric between predictions and targets.
+
+        :param prefix_to_remove:
+        :param predictions: List of predicted values from the language model.
+        :param targets: List of target values.
+        :param metric: Metric type as a string or an enumeration value.
+        :param prompt_type: Type of the prompt.
+        :param callback: Callback function to invoke for custom prompt types.
+        :return: Performance metric score.
+        """
+        if isinstance(metric, str):
+            metric = MetricType(metric)
+
+        if prompt_type == PromptType.SENTIMENT:
+            if metric == MetricType.F1_SCORE:
+                return LlmBaseModule.compute_f1_score(predictions, targets)
+            elif metric == MetricType.ROUGE:
+                return LlmBaseModule.compute_rouge_metric(predictions, targets)
             else:
-                def _normalize(prediction):
-                    if prediction.endswith('Q'):
-                        prediction = prediction[:-1]
-                    elif 'Q:' in prediction:
-                        prediction = prediction[:prediction.index('Q:')]
-                    return prediction.strip('. ').lower()
+                return LlmBaseModule.sentiment_accuracy_metric(predictions, targets)
 
-                normalized = [_normalize(p) for p in predictions]
+        if prompt_type == PromptType.INTENT:
+            if metric == MetricType.F1_SCORE:
+                return LlmBaseModule.compute_f1_score(predictions, targets)
+            elif metric == MetricType.ROUGE:
+                return LlmBaseModule.compute_rouge_metric(predictions, targets)
+            else:
+                return LlmBaseModule.intent_accuracy_metric(predictions, targets)
 
-                def contains(key, candidates):
-                    for c in candidates:
-                        if key in c:
-                            return True
-                    return False
-
-                return sum([contains(n, t)
-                            for n, t in zip(normalized, targets)]) / len(normalized)
+        if metric == MetricType.ROUGE:
+            return LlmBaseModule.compute_rouge_metric(predictions, targets)
+        elif metric == MetricType.F1_SCORE:
+            return LlmBaseModule.compute_f1_score(predictions, targets)
+        elif metric == MetricType.EXACT_MATCH:
+            exact = LlmBaseModule.compute_exact_match(predictions, targets)
+            # in all case if we have exact match we return it
+            if exact == 1.0:
+                return exact
+            # if we have exact match skip this step
+            if prompt_type == PromptType.EXACT_MATCH:
+                return exact
+            if prompt_type == PromptType.SUMMARY:
+                return LlmBaseModule.compute_exact_match(predictions, targets)
+            elif prompt_type == PromptType.QUESTION:
+                default_prefix = "Q:"
+                if prefix_to_remove is None:
+                    prefix_to_remove = default_prefix
+                normalized = [LlmBaseModule._normalize(p, prefix_to_remove) for p in predictions]
+                return sum([LlmBaseModule._contains(n, t) for n, t in zip(normalized, targets)]) / len(normalized)
+            elif prompt_type == PromptType.TLDR:
+                default_prefix = "TLDR"
+                if prefix_to_remove is None:
+                    prefix_to_remove = default_prefix
+                normalized = [LlmBaseModule._normalize(p, prefix_to_remove) for p in predictions]
+                s = sum([LlmBaseModule._contains(n, t) for n, t in zip(normalized, targets)]) / len(normalized)
+                print("S", s)
+                return sum([LlmBaseModule._contains(n, t) for n, t in zip(normalized, targets)]) / len(normalized)
+            elif prompt_type == PromptType.CUSTOM:
+                if callback is not None:
+                    return callback(predictions, targets)
+                else:
+                    raise ValueError("Callback function must be provided for CUSTOM prompt type.")
         else:
             raise NotImplementedError()
 
     @staticmethod
     def metric_for_dataset():
-        """
+        """Returns metric types
         :return:
         """
         return {
@@ -282,7 +396,7 @@ class LlmBaseModule(IgcBaseModule):
 
         # shifting
         labels = input_ids[:, 1:].clone()
-        labels[:, -1] = ignore_index  # ignore index
+        labels[:, -1] = ignore_index
         mask = torch.tensor(input_ids == pad_token_id)
         labels = labels.masked_fill(mask, ignore_index)
 

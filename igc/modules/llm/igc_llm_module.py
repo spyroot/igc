@@ -1,16 +1,16 @@
 import argparse
-from typing import Optional, Dict
+from typing import Optional, Dict, Union, List
 
 import torch
 from transformers import (GPT2LMHeadModel,
                           GPT2Tokenizer)
 
-from .base.igc_llm_base_module import LlmBaseModule
-from .base.igc_metric_logger import MetricLogger
+from igc.modules.base.igc_llm_base_module import LlmBaseModule
+from igc.modules.base.igc_metric_logger import MetricLogger
 from .igc_auto_state_encoder import AutoencoderTrainer
 from .llm_goal_extract_trainer import GoalExtractorTrainer
 from .llm_representation_trainer import LlmEmbeddingsTrainer
-from ..ds.redfish_dataset import JSONDataset
+from igc.ds.redfish_dataset import JSONDataset
 
 
 def from_pretrained_default(args, only_tokenizer=False):
@@ -140,15 +140,15 @@ class IgcLanguageModule:
     def load(
             spec: argparse.Namespace,
             device: torch.device = "cpu",
-            module_name: str = None,
+            module_name: Union[str, List[str]] = None,
     ) -> Dict[str, LlmBaseModule]:
         """
 
         Load the all llm models embedding model for inference.
         i.e. agent will use this as encoder
 
-        :param module_name:
-        :param spec:
+        :param spec: specs for modules
+        :param module_name: The name or list of names of the specific modules to load, or None to load all modules.
         :param device: The device to load the model onto, defaults to "cpu".
         :return: The loaded model, tokenizer, and the last epoch from the checkpoint.
         """

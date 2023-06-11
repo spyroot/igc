@@ -1,24 +1,25 @@
 import argparse
+from typing import Optional
 
 import torch
 import torch.nn as nn
-from transformers import GPT2Model
 
 from igc.ds.redfish_dataset import JSONDataset
 from igc.shared.shared_torch_builder import TorchBuilder
 from .base.igc_base_module import IgcBaseModule
 from .base.igc_metric_logger import MetricLogger
-from .igc_autoencoder import AutoStateEncoder
+from igc.modules.llm.igc_autoencoder import AutoStateEncoder
 
 
 class AutoencoderTrainer(IgcBaseModule):
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
-                 ds: JSONDataset,
-                 metric_logger: MetricLogger,
                  llm_model,
-                 llm_tokenizer):
+                 llm_tokenizer,
+                 ds: Optional[JSONDataset] = None,
+                 metric_logger: Optional[MetricLogger] = None,
+                 is_inference: Optional[bool] = "False"):
         """
 
         :param module_name:
@@ -28,7 +29,12 @@ class AutoencoderTrainer(IgcBaseModule):
         :param llm_model:
         :param llm_tokenizer:
         """
-        super().__init__(module_name, spec, ds, metric_logger, llm_model, llm_tokenizer)
+        super().__init__(
+            module_name, spec, ds,
+            llm_model,
+            llm_tokenizer,
+            metric_logger=metric_logger,
+            is_inference=is_inference)
 
         self.llm_model = llm_model
         self.train_dataloader = None

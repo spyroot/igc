@@ -3,7 +3,7 @@ import os
 
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from .base.igc_metric_logger import MetricLogger
-from .igc_llm_module import IgcLanguageModule
+from igc.modules.llm.igc_llm_module import IgcLanguageModule
 from .igc_rl_module import IgcRlModule
 from ..ds.redfish_dataset import JSONDataset
 

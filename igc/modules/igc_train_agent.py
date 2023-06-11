@@ -1,11 +1,22 @@
+"""
+
+This class is used to train a RL agent.
+It consists two trainer, auto encoder used to
+reduce state encoder dimensionality , and RL trainer.
+
+Author:Mus mbayramo@stanford.edu
+"""
 import argparse
 import os
+from typing import Optional
 
 import numpy as np
 import torch
 from torch import optim, nn
+from transformers import PreTrainedTokenizer
 
 from igc.ds.redfish_dataset import JSONDataset
+from igc.envs.rest_gym_batch_env import VectorizedRestApiEnv
 from igc.envs.rest_gym_env import RestApiEnv, GoalTypeState
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.modules.base.igc_rl_base_module import RlBaseModule
@@ -15,21 +26,79 @@ from igc.modules.igc_q_network import Igc_QNetwork
 
 class IgcAgentTrainer(RlBaseModule):
     """
+    A class representing the IGC Agent Trainer.
+
+    :param module_name: The name of the module.
+    :type module_name: str
+    :param spec: The specifications for the trainer.
+    :type spec: argparse.Namespace
+    :param llm_model: The LLM model for training.
+    :type llm_model: torch.nn.Module
+    :param llm_tokenizer: The LLM tokenizer for training.
+    :type llm_tokenizer: PreTrainedTokenizer
+    :param env: The vectorized REST API environment.
+    :type env: VectorizedRestApiEnv
+    :param ds: The JSONDataset for training, if available.
+    :type ds: Optional[JSONDataset]
+    :param metric_logger: The metric logger for tracking training metrics, if available.
+    :type metric_logger: Optional[MetricLogger]
+    :param is_inference: Flag indicating whether the trainer is for inference.
+    :type is_inference: Optional[bool]
     """
+
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
-                 ds: JSONDataset,
-                 metric_logger: MetricLogger,
-                 llm_model, llm_tokenizer, env):
+                 llm_model,
+                 llm_tokenizer,
+                 env: VectorizedRestApiEnv,
+                 ds: Optional[JSONDataset] = None,
+                 metric_logger: Optional[MetricLogger] = None,
+                 is_inference: Optional[bool] = "False"):
         """
 
-        :param args:
+        :param module_name:
+        :param spec:
+        :param llm_model:
+        :param llm_tokenizer:
+        :param ds:
+        :param metric_logger:
+        :param is_inference:
         """
-        super().__init__(module_name, spec, ds, metric_logger, llm_model, llm_tokenizer)
+        super().__init__(
+            module_name,
+            spec,
+            llm_model,
+            llm_tokenizer,
+            ds=ds,
+            metric_logger=metric_logger,
+            is_inference=is_inference
+        )
+
+        # Validate inputs
+        if not isinstance(module_name, str):
+            raise TypeError("module_name must be a string.")
+
+        if not isinstance(spec, argparse.Namespace):
+            raise TypeError("spec must be an instance of argparse.Namespace.")
+
+        if not isinstance(llm_model, torch.nn.Module):
+            raise TypeError("llm_model must be an instance of torch.nn.Module.")
+
+        if not isinstance(llm_tokenizer, PreTrainedTokenizer):
+            raise TypeError("llm_tokenizer must be an instance of PreTrainedTokenizer.")
+
+        if ds is not None and not isinstance(ds, JSONDataset):
+            raise TypeError("ds must be an instance of JSONDataset.")
+
+        if metric_logger is not None and not isinstance(metric_logger, MetricLogger):
+            raise TypeError("metric_logger must be an instance of MetricLogger.")
+
+        if not isinstance(is_inference, bool):
+            raise TypeError("is_inference must be a boolean value.")
 
         self._args = spec
-        self.env = None
+        self.env = env
 
         self.batch_size = spec.rl_batch_size
         self.buffer_size = spec.rl_buffer_size
@@ -68,22 +137,31 @@ class IgcAgentTrainer(RlBaseModule):
     @staticmethod
     def update_target(model: nn.Module, target_model: nn.Module):
         """
-        :param model:
-        :param target_model:
-        :return:
+        Update the target model by copying the weights from the source model.
+
+        :param model: The source model.
+        :type model: nn.Module
+        :param target_model: The target model.
+        :type target_model: nn.Module
         """
         target_model.load_state_dict(model.state_dict())
 
-    def create_action(self):
+    def _create_action(self):
         """
+        Create rest api action, that consists of one hot vector for rest api
+        and one hot vector for http method.
         :return:
         """
-        rest_api, supported_method, one_hot_action = self.dataset.sample_rest_api()
-        http_method_one_hot = RestApiEnv.encode_rest_api_method("GET")
-        action = RestApiEnv.concat_rest_api_method(one_hot_action, http_method_one_hot)
+        rest_api, http_supported_method, one_hot_action = self.dataset.sample_rest_api()
+        action = RestApiEnv.concat_rest_api_method(
+            one_hot_action, RestApiEnv.encode_rest_api_method("GET")
+        )
+        return action, rest_api, http_supported_method
 
-    def create_goal(self, http_method="GET") -> dict:
-        """Sample a goal from the dataset.
+    def _create_goal(self, http_method: Optional[str] = "GET") -> dict:
+        """
+        Sample a goal from the dataset.
+
         :return:
         """
         goal_state, action_vector, rest_apis, supported_methods = self.env.sample_same_goal()
@@ -94,7 +172,6 @@ class IgcAgentTrainer(RlBaseModule):
             "http_method": http_method,
             "parameters": None,
         }
-
         return goal
 
     def train_goal(self):
@@ -163,11 +240,12 @@ class IgcAgentTrainer(RlBaseModule):
         rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
         return episode_experience, torch.sum(rewards_sum_per_trajectory, dim=0)
 
-    def update_replay_buffer(self,
-                             replay_buffer,
-                             episode_experience,
-                             env_reward_function=None,
-                             num_relabeled=4, ):
+    def update_replay_buffer(
+            self,
+            replay_buffer,
+            episode_experience,
+            env_reward_function=None,
+            num_relabeled=4, ):
         """Adds experience to the replay buffer. Training is done with
         episodes from the replay buffer. When HER is used, relabeled
         experiences are also added to the replay buffer.

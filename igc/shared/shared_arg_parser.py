@@ -283,6 +283,11 @@ def add_logging_group(parser):
                        type=str, default="logs",
                        help="Log.")
 
+    group.add_argument("--log_level",
+                       type=str, default='warning',
+                       choices=['info', 'warning', 'error', 'critical'],
+                       help="llm log level..")
+
     group.add_argument("--llm_log_level",
                        type=str, default='warning',
                        choices=['info', 'warning', 'error', 'critical'],

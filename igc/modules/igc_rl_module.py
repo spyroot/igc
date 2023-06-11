@@ -2,17 +2,15 @@ import argparse
 import logging
 import os
 from pathlib import Path
-from typing import Optional
 
 import torch
 from transformers import (GPT2LMHeadModel)
 
 from .base.igc_metric_logger import MetricLogger
-from .igc_agent_trainer import IgcAgentTrainer
-from .igc_auto_state_encoder import AutoencoderTrainer
-from .igc_llm_module import IgcLanguageModule
-from .llm_representation_trainer import LlmEmbeddingsTrainer
+from .igc_train_agent import IgcAgentTrainer
 from ..ds.redfish_dataset import JSONDataset
+from .llm.igc_llm_module import IgcLanguageModule
+from .igc_train_auto_state_encoder import AutoencoderTrainer
 from ..envs.rest_gym_batch_env import VectorizedRestApiEnv
 
 
@@ -23,9 +21,10 @@ class IgcRlModule:
         """
         :param spec:
         """
-        model, tokenizer, last_epoch = IgcLanguageModule.load_llm_embeddings_model(spec, only_tokenizer=False)
+        model, tokenizer, last_epoch = IgcLanguageModule.load(spec, module_name="state_encoder")
+
         # create env
-        self.env = VectorizedRestApiEnv(
+        env = VectorizedRestApiEnv(
             args=spec,
             model=model,
             tokenizer=tokenizer,
@@ -35,14 +34,13 @@ class IgcRlModule:
         )
 
         directory_path = os.path.expanduser(spec.raw_data_dir)
-        self.cmd = spec
 
+        self.spec = spec
         self.autoencoder = AutoencoderTrainer(
-            "state_autoencoder", spec, ds, metric_logger, model, tokenizer)
+            "state_autoencoder", spec, ds, model, tokenizer, metric_logger=metric_logger)
 
         self.rl_gent = IgcAgentTrainer(
-            "rl_agent", spec, ds, metric_logger, model, tokenizer
-        )
+            "rl_agent", spec, ds, env, model, tokenizer, metric_logger=metric_logger)
 
     def train(self):
         """Main call to train all language models.
