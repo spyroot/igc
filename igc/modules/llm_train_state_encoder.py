@@ -169,7 +169,10 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                 # compare predicted masked tokens with original tokens
                 original_tokens = batch["input_ids"][mask_indices].to(self.device)
                 accuracy_bool = predicted_masked_tokens == original_tokens
-                print(f"Accuracy {accuracy_bool.shape} sum {accuracy_bool.sum()} total {original_tokens.numel()} shape {original_tokens.shape})
+                print(f"Accuracy {accuracy_bool.shape} "
+                      f"sum {accuracy_bool.sum()} "
+                      f"total {original_tokens.numel()}"
+                      f" shape {original_tokens.shape}")
 
                 correct_predictions += accuracy_bool.sum().item()
 
