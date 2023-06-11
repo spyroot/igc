@@ -125,6 +125,8 @@ class AutoencoderTrainer(IgcBaseModule):
         :return:
         """
         self.model_autoencoder.to(self.device)
+        self._encoder_model.to(self.device)
+        self._encoder_model.eval()
         self.model_autoencoder.train()
 
         num_epochs = 10
