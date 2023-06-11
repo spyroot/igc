@@ -91,7 +91,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             f"dataset size {len(self.dataset)} "
             f"is overfit {self._overfit} "
         )
-        self._mask_probability = 0.001
+        self._mask_probability = 1.0
         self._best_validation_metric = float('-inf')
 
     @staticmethod
