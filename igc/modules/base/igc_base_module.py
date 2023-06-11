@@ -388,7 +388,8 @@ class IgcBaseModule:
                 self.logger.info(f"Model file {model_file} not found.")
 
         self.logger.info(f"Searching for latest checkpoint.")
-        checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pt')]
+        checkpoint_files = [f for f in os.listdir(checkpoint_dir) if
+                            f.endswith('.pt') and f != self._model_file(checkpoint_dir)]
         checkpoint_files = [os.path.join(checkpoint_dir, f) for f in checkpoint_files]
         checkpoint_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
 
