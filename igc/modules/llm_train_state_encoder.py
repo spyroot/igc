@@ -209,8 +209,8 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         validation_accuracy = float('-inf')
         self.model.to(self.device)
 
-        if self.checkpoint_dir is not None:
-            last_epoch = self.load_checkpoint(self.checkpoint_dir)
+        if self.module_checkpoint_dir is not None:
+            last_epoch = self.load_checkpoint(self.module_checkpoint_dir)
         else:
             last_epoch = 0
 
@@ -325,13 +325,13 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             # save best checkpoint
             if validation_accuracy > self._best_validation_metric and self.is_rank_zero():
                 self._best_validation_metric = validation_accuracy
-                if self.checkpoint_dir is not None:
-                    self.save_checkpoint(self.checkpoint_dir, epoch + 1)
+                if self.module_checkpoint_dir is not None:
+                    self.save_checkpoint(self.module_checkpoint_dir, epoch + 1)
 
         if self.is_quantize:
             self.model = convert(self.model)
 
-        self.save_model(self.checkpoint_dir)
+        self.save_model(self.module_checkpoint_dir)
 
         del train_dataloader
         del eval_dataloader

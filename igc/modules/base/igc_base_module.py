@@ -106,8 +106,10 @@ class IgcBaseModule:
 
         self.model = llm_model
         self.tokenizer = llm_tokenizer
-        self.update_tokenizer_settings(self.tokenizer)
         self.module_name = module_name
+        self.update_tokenizer_settings(self.tokenizer)
+        self.module_checkpoint_dir = f"{spec.checkpoint_dir}/{module_name}"
+        os.makedirs(self.module_checkpoint_dir, exist_ok=True)
 
         self.num_epochs = spec.num_train_epochs
         self.batch_size = spec.per_device_train_batch_size
@@ -458,27 +460,28 @@ class IgcBaseModule:
         :rtype: Optional[int] bool
         """
 
-        checkpoint_path_dir = Path(specs.output_dir)
-        checkpoint_path_dir = checkpoint_path_dir.resolve()
-        if not checkpoint_path_dir.is_dir():
+        _checkpoint_path_dir = Path(specs.output_dir)
+        _checkpoint_path_dir = _checkpoint_path_dir.resolve()
+        if not _checkpoint_path_dir.is_dir():
             raise ValueError("Indicate path to checkpoint dir.")
 
-        checkpoint_dir = str(checkpoint_path_dir)
+        _checkpoint_dir = str(_checkpoint_path_dir)
+        module_checkpoint_dir = f"{_checkpoint_dir}/{module_name}"
 
-        model_file = False
-        model_file = IgcBaseModule.model_file(module_name, checkpoint_dir)
+        _model_file = True
+        model_file = IgcBaseModule.model_file(module_name, module_checkpoint_dir)
         if os.path.exists(model_file):
             checkpoint_file = model_file
-            model_file = True
+            _model_file = True
         else:
-            checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pt')]
-            checkpoint_files = [os.path.join(checkpoint_dir, f) for f in checkpoint_files]
+            checkpoint_files = [f for f in os.listdir(module_checkpoint_dir) if f.endswith('.pt')]
+            checkpoint_files = [os.path.join(module_checkpoint_dir, f) for f in checkpoint_files]
             checkpoint_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
 
             if checkpoint_files:
                 checkpoint_file = checkpoint_files[0]
             else:
-                print(f"No checkpoint files found in dir {checkpoint_dir}")
+                print(f"No checkpoint files found in dir {module_checkpoint_dir}")
                 return 0, False
 
         print(f"Found model file {checkpoint_file} loading to device {device}")

@@ -128,8 +128,8 @@ class AutoencoderTrainer(IgcBaseModule):
         self.model_autoencoder.to(self.device)
         self.model_autoencoder.train()
 
-        if self.checkpoint_dir is not None:
-            last_epoch = self.load_checkpoint(self.checkpoint_dir)
+        if self.module_checkpoint_dir is not None:
+            last_epoch = self.load_checkpoint(self.module_checkpoint_dir)
         else:
             last_epoch = 0
 
