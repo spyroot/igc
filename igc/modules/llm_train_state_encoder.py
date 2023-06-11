@@ -168,8 +168,9 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
 
                 # compare predicted masked tokens with original tokens
                 original_tokens = batch["input_ids"][mask_indices].to(self.device)
-                correct_predictions += torch.sum(
-                    torch.tensor(predicted_masked_tokens == original_tokens, dtype=torch.int).detach()).item()
+                accuracy_bool = predicted_masked_tokens == original_tokens
+                correct_predictions += torch.sum(accuracy_bool.int()).item()
+                    # torch.tensor(predicted_masked_tokens == original_tokens, dtype=torch.int)).item()
 
                 total_predictions += original_tokens.numel()
 
