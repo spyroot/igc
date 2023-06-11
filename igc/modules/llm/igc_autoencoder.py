@@ -32,13 +32,6 @@ class AutoStateEncoder(nn.Module):
         :param x:
         :return:
         """
-        # flatten
-        # print("X shape", x.shape)
-        # batch_size = x.size(0)
-        # print("X shape", x.shape)
-        #
-        # x = x.view(batch_size, -1)
-        #
         latent = self.encoder(x)
         reconstructed = self.decoder(latent)
         return reconstructed

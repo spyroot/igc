@@ -19,6 +19,7 @@ class AutoencoderTrainer(IgcBaseModule):
     state dimension of latent space llm outputs.
 
     """
+
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
@@ -96,7 +97,6 @@ class AutoencoderTrainer(IgcBaseModule):
         loss = loss.sum(dim=[1, 2, 3]).mean(dim=[0])
         return loss
 
-
     def encode(self):
         """
         :return:
@@ -128,12 +128,13 @@ class AutoencoderTrainer(IgcBaseModule):
 
         num_epochs = 10
         self.logger.info(f"Starting training")
-        train_dataloader = DataLoader(self.dataset,
-                                      batch_size=self.batch_size,
-                                      sampler=None,
-                                      num_workers=self.num_workers,
-                                      shuffle=True,
-                                      collate_fn=AutoencoderTrainer.custom_collate_fn)
+        train_dataloader = DataLoader(
+            self.dataset,
+            batch_size=self.batch_size,
+            sampler=None,
+            num_workers=self.num_workers,
+            shuffle=True,
+            collate_fn=AutoencoderTrainer.custom_collate_fn)
 
         # training loop
         for epoch in range(num_epochs):
@@ -143,10 +144,9 @@ class AutoencoderTrainer(IgcBaseModule):
                     output = self._encoder_model(**batch)
 
                 hidden_state = output.last_hidden_state
-                flat_input = hidden_state.view(hidden_state.shape[0], -1)
+                flat_input = hidden_state.view(hidden_state.shape[0], -1).to(self.device)
                 latent_repr = self.model_autoencoder.encoder(flat_input)
                 reconstructed = self.model_autoencoder.decoder(latent_repr)
-
                 loss = F.mse_loss(flat_input, reconstructed, reduction="none")
                 loss = loss.mean()
 
@@ -166,4 +166,3 @@ class AutoencoderTrainer(IgcBaseModule):
         # self.save_model()
         # # Save the trained model if desired
         # torch.save(self.model.state_dict(), "trained_model.pth")
-
