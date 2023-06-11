@@ -141,14 +141,18 @@ def add_trainer_group(parser):
 
     parser.add_argument(
         "--llm",
-        type=bool, default=True,
-        help="Training llm models."
+        choices=['latent', 'goal', 'parameter', 'encoder'],
+        type=str, default="latent",
+        help="Training llm require to choose which model "
+             "(A model we use for state encoder, goal encoder, "
+             "goal and parameter encoder.)"
     )
 
     parser.add_argument(
         "--eval",
         type=bool, default=True,
-        help="Run evaluation on the validation based on evaluation strategy."
+        help="Run evaluation for each model we train, based"
+             " the validation set for a particular model and strategy."
     )
 
     parser.add_argument(
@@ -181,6 +185,7 @@ def add_trainer_group(parser):
 
 def add_logging_group(parser):
     """Add logging argument parameters.
+
     :param parser:
     :return:
     """
@@ -229,24 +234,28 @@ def add_data_types_group(parser):
     data_types_group.add_argument(
         "--fp16", action='store_true',
         default=True,
-        help="Whether to use fp16 16-bit (mixed) precision training instead of 32-bit training.")
+        help="Whether to use fp16 16-bit (mixed) precision "
+             "training instead of 32-bit training.")
 
     data_types_group.add_argument(
         "--fp16_opt_level", type=str, default='O1',
         choices=['O0', 'O1', 'O2', 'O3'],
-        help="For fp16 training, Apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3'].")
+        help="For fp16 training, Apex AMP optimization level selected in "
+             "['O0', 'O1', 'O2', and 'O3'].")
 
     data_types_group.add_argument(
         "--half_precision_backend",
         type=str, default="auto",
         choices=["auto", "cuda_amp", "apex", "cpu_amp"],
-        help="The backend to use for mixed precision training. Must be one of 'auto', 'cuda_amp', 'apex', 'cpu_amp'.")
+        help="The backend to use for mixed precision training. "
+             "Must be one of 'auto', 'cuda_amp', 'apex', 'cpu_amp'.")
 
     data_types_group.add_argument(
         "--bf16_full_eval",
         action='store_true',
-        help="Whether to use full bfloat16 evaluation instead of 32-bit. This will be faster and save memory "
-             "but can harm metric values. This is an experimental API and it may change.")
+        help="Whether to use full bfloat16  instead of 32-bit. "
+             "This will be faster and save memory but can harm metric values."
+             "This is an experimental API and it may change.")
 
     data_types_group.add_argument(
         "--fp16_full_eval",

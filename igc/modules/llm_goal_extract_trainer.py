@@ -18,22 +18,16 @@ Author:Mus mbayramo@stanford.edu
 """
 import argparse
 import itertools
-import os
 import random
 from typing import List, Optional
 import re
 
 import torch
-from torch.utils.tensorboard import SummaryWriter
-from transformers import GPT2LMHeadModel, GPT2Tokenizer, AdamW
-
 from igc.ds.redfish_dataset import JSONDataset
 from igc.modules.llm_base_module import LlmBaseModule
 from igc.modules.metric_logger import MetricLogger
 from igc.shared.shared_torch_builder import TorchBuilder
 from rest_action import RestActionSpace, ActionWithoutParam
-from igc.shared.shared_torch_utils import get_device
-from torch.utils.data import Dataset
 
 from collections import namedtuple
 from igc.ds.redfish_dataset import JSONDataset
@@ -63,11 +57,13 @@ class GoalExtractor(LlmBaseModule):
         self.num_epochs = args.num_train_epochs
         self.batch_size = args.per_device_train_batch_size
         self.high_level_actions = ['Create', 'Update', 'Delete', 'Query']
-
         self.batch_log = 10
 
         self.optimizer = TorchBuilder.create_optimizer(
-            args.llm_optimizer, self.model, args.llm_learning_rate, args.llm_weight_decay, **vars(args))
+            args.llm_optimizer, self.model,
+            args.llm_learning_rate,
+            args.llm_weight_decay,
+            **vars(args))
 
         print(self.optimizer)
 
@@ -80,7 +76,9 @@ class GoalExtractor(LlmBaseModule):
 
     @staticmethod
     def generate_prompts_permutation(action: str, goal: str, allowable_parameters: List[str]):
-        """Generate permutation of prompt. Where goal is goal for RL agent.
+        """
+
+        Generate permutation of prompt. Where goal is goal for RL agent.
         and allowable_parameters are parameters that agent must use.
         During we train on synthetically generated prompts, during inference
         we human or external system generate prompts based on simular structure or
@@ -110,7 +108,8 @@ class GoalExtractor(LlmBaseModule):
     @staticmethod
     def generate_goal_permutation(
             action: str, goal: str, allowable_parameters: List[str], num_permutations: int):
-        """Generate permutations of prompts based on the given parameters.
+        """
+        Generate permutations of prompts based on the given parameters.
 
         :param action: Action word such as 'Create', 'Update'
         :param goal: Goal for RL agent.
@@ -133,7 +132,7 @@ class GoalExtractor(LlmBaseModule):
         return prompts, input_seq
 
     def generate_prompts(self):
-        """
+        """Generate prompts for training.
         :return:
         """
         flatten_high_level_action = RestActionSpace.high_level_actions()
@@ -147,7 +146,8 @@ class GoalExtractor(LlmBaseModule):
 
             # input seq used for validation
             for high_level_action in flatten_high_level_action:
-                prompts, input_seq = self.generate_goal_permutation(high_level_action, goal, goal_modified.split(), 32)
+                prompts, input_seq = self.generate_goal_permutation(
+                    high_level_action, goal, goal_modified.split(), 32)
                 for prompt in prompts:
                     batch.append(prompt)
                     goals.append(goal)
@@ -161,6 +161,8 @@ class GoalExtractor(LlmBaseModule):
     @staticmethod
     def compute_exact_match_accuracy(generated_prompts: List[str], target_goals: List[str]) -> float:
         """
+        Compute exact match accuracy for prediction for particular prompt.
+
         :param generated_prompts:
         :param target_goals:
         :return:
@@ -173,10 +175,12 @@ class GoalExtractor(LlmBaseModule):
         accuracy = num_correct / total
         return accuracy
 
-    def val_goal_representation(self, input_seqs: List[List[str]], goals: List[str]):
-        """Validate LLM model for goal extraction.
-        :param input_seqs:
-        :param goals:
+    def _val_goal_representation(self, input_seqs: List[List[str]], goals: List[str]):
+        """
+        Validate LLM model for goal extraction,
+
+        :param input_seqs: input sequences
+        :param goals: a goals
         :return:
         """
         self.model.eval()
@@ -188,11 +192,12 @@ class GoalExtractor(LlmBaseModule):
         correct_predictions = 0.0
         for i, seq in enumerate(input_seqs):
             eval_encoded_inputs = self.tokenizer(
-                seq, padding=True, truncation=True, return_tensors='pt')
+                seq, padding=True, truncation=True,
+                return_tensors='pt'
+            )
 
             eval_input_ids = eval_encoded_inputs['input_ids'].to(self.device)
             eval_attr_mask = eval_encoded_inputs['attention_mask'].to(self.device)
-
             with torch.no_grad():
                 outputs = self.model.generate(
                     input_ids=eval_input_ids,
@@ -208,30 +213,33 @@ class GoalExtractor(LlmBaseModule):
         return accuracy
 
     def val_goal_representation_epoch(self, overfit: Optional[bool] = True):
-        """Validate LLM model for goal extraction at the end epoch.
-        :param overfit:
-        :return:
+        """
+        Validate LLM model for goal extraction at the end epoch.
+
+        :param overfit: will overfit and will not use entire dataset.
+        :return: accuracy
         """
         if overfit:
             batch_generator = iter([next(self.generate_prompts())])
         else:
             batch_generator = self.generate_prompts()
-        epoch_accuracy = 0.0
+
         num_batches = 0
+        epoch_accuracy = 0.0
         for i, (batch, input_seqs, goals) in enumerate(batch_generator):
-            # evaluate entire batch
             num_batches += 1
-            epoch_accuracy += self.val_goal_representation(input_seqs, goals)
+            epoch_accuracy += self._val_goal_representation(input_seqs, goals)
 
         return epoch_accuracy / num_batches
 
     def train_goal_representation(self, overfit: Optional[bool] = True):
-        """Train LLM model to map high level goal to redfish actions.
-
+        """
+        Train LLM model to map high level goal to rest api  actions.
         For example
                 "target": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
         :return:
         """
+
         self.model.to(self.device)
         self.model.train()
 
@@ -244,11 +252,10 @@ class GoalExtractor(LlmBaseModule):
             else:
                 batch_generator = self.generate_prompts()
 
-            for i, (batch, input_seqs, goals) in enumerate(batch_generator):
+            for _, (batch, input_seqs, goals) in enumerate(batch_generator):
                 encoded_inputs = self.tokenizer(batch, padding=True, truncation=True, return_tensors='pt')
                 num_batches += 1
                 for i in range(0, len(encoded_inputs['input_ids']), self.batch_size):
-                    # print(f"batch_inputs feeding : {input_ids.shape}.")
                     batch_inputs = {
                         'input_ids': encoded_inputs['input_ids'][i:i + self.batch_size],
                         'attention_mask': encoded_inputs['attention_mask'][i:i + self.batch_size]
@@ -263,14 +270,15 @@ class GoalExtractor(LlmBaseModule):
                     outputs = self.model(**batch_inputs, labels=batch_inputs['input_ids'])
                     loss = outputs.loss
 
-                    # Backward pass
+                    # backward pass
                     self.optimizer.zero_grad()
                     loss.backward()
                     self.optimizer.step()
                     total_loss += loss.item()
+
                     # Accumulate loss
                     total_loss += loss.item()
-                    self.writer.add_scalar("Goal extractor batch Loss", loss.item(), epoch * num_batches + i)
+                    self.metric_logger.log_metric("Goal extractor batch Loss", loss.item(), epoch * num_batches + i)
                     if (i + 1) % self.batch_log == 0:
                         formatted_loss = "{:.4f}".format(loss.item())
                         print(f"Goal extractor batch Loss [{i + 1}/{num_batches}]: {formatted_loss}")
@@ -278,25 +286,27 @@ class GoalExtractor(LlmBaseModule):
                     # report batch loss it percentage, from total epochs
                     if (epoch + 1) % (self.num_epochs // 10) == 0 or epoch == self.num_epochs - 1:
                         accuracy = self.val_goal_representation(input_seqs, goals)
-                        self.writer.add_scalar("Goal extractor accuracy", accuracy, epoch)
+                        self.metric_logger.log_metric("Goal extractor accuracy", accuracy, epoch)
                         print(f"Accuracy at epoch {epoch + 1}: {accuracy}%")
 
             average_loss = total_loss / num_batches
-            self.writer.add_scalar("Goal extractor epoch Loss", average_loss, epoch)
+            self.metric_logger.log_metric("Goal extractor epoch Loss", average_loss, epoch)
             print(f"Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
             # percentage, from total epochs
             if (epoch + 1) % (self.num_epochs // 2) == 0 or epoch == self.num_epochs - 1:
                 epoch_accuracy = self.val_goal_representation_epoch(overfit=overfit)
-                self.writer.add_scalar("Goal extractor epoch accuracy", epoch_accuracy, epoch)
+                self.metric_logger.log_metric("Goal extractor epoch accuracy", epoch_accuracy, epoch)
                 print(f"Accuracy at Epoch {epoch + 1}: {epoch_accuracy}%")
 
         print("Goal extractor training complete.")
 
     def generator_goal_parameter(self):
-        """Generator yields batch of prompts that represent
-         goal, action and action parameters.
+        """
+        Generator yields batch of prompts that represent
+        goal, action and action parameters.
 
          Example ExportThermalHistory action has different parameters:
+
          We train on combination of the parameters.
          ExportThermalHistory with FileType: CSV, ShareType: CIFS, ProxySupport: DefaultProxy
          ExportThermalHistory with FileType: CSV, ShareType: CIFS, ProxySupport: ParametersProxy
@@ -452,7 +462,6 @@ class GoalExtractor(LlmBaseModule):
         :return:
         """
         # Tokenize the prompts
-        optimizer = AdamW(self.model.parameters(), lr=1e-5)
         self.model.to(self.device)
         self.model.train()
 
@@ -481,9 +490,9 @@ class GoalExtractor(LlmBaseModule):
                     outputs = self.model(**batch_inputs, labels=batch_inputs['input_ids'])
                     loss = outputs.loss
                     # Backward pass
-                    optimizer.zero_grad()
+                    self.optimizer.zero_grad()
                     loss.backward()
-                    optimizer.step()
+                    self.optimizer.step()
                     total_loss += loss.item()
                     # Accumulate loss
                     total_loss += loss.item()
@@ -804,24 +813,3 @@ class GoalExtractor(LlmBaseModule):
             goal, parameters = self.query_goal_and_parameters(goal_with_parameters_query)
             print(f"Agent goal: {goal} parameters {parameters}")
 
-#
-# def main():
-#     """
-#     :return:
-#     """
-#     goal_extractor = GoalExtractor()
-#     # goal_extractor.train_goal_representation()
-#     goal_extractor.train_goal_and_parameter_extractor()
-#     # goal_extractor.agent_interaction()
-#     # Close SummaryWriter
-#     goal_extractor.writer.close()
-
-#
-# if __name__ == '__main__':
-#     """
-#     """
-#     directory_path = os.path.expanduser("~/.json_responses")
-#     dataset = JSONDataset(
-#         directory_path, verbose=False)
-#
-#     main()

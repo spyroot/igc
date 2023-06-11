@@ -1,13 +1,37 @@
-from typing import List, Any, Optional
+"""
+This class is used to essentially render torch Optimizer,
+Activation etc.
 
+LLM, RL agent, classes all use this class to get torch
+object.
+
+Author:Mus mbayramo@stanford.edu
+"""
+from typing import List, Any, Optional, Callable, Union
 import torch
 import transformers
+from torch import nn
 from torch.nn import Module
 from torch.optim import Optimizer
 import inspect
 
 
 class TorchBuilder:
+    """
+
+    """
+    Activation = Union[str, nn.Module]
+
+    _str_to_activation = {
+        'relu': nn.ReLU(),
+        'tanh': nn.Tanh(),
+        'leaky_relu': nn.LeakyReLU(),
+        'sigmoid': nn.Sigmoid(),
+        'selu': nn.SELU(),
+        'softplus': nn.Softplus(),
+        'identity': nn.Identity(),
+    }
+
     @staticmethod
     def get_supported_optimizers() -> List[str]:
         """Get a list of supported optimizers.
@@ -37,13 +61,28 @@ class TorchBuilder:
         return relevant_args
 
     @staticmethod
+    def get_activation_function(activation_name: str) -> Callable:
+        """
+        Take name of activation function and return the
+        corresponding function from torch.
+
+        :param activation_name: Name of the activation function.
+        :return: The activation function.
+        """
+        activation_func = getattr(torch, activation_name, None)
+        if activation_func is None or not callable(activation_func):
+            raise ValueError("Invalid activation function name: " + activation_name)
+        return activation_func
+
+    @staticmethod
     def create_optimizer(
-        optimizer: str, model: Module,
-        lr: Optional[float] = 0.001,
-        weight_decay: Optional[float] = 0.0,
-        **kwargs: Any
+            optimizer: str, model: Module,
+            lr: Optional[float] = 0.001,
+            weight_decay: Optional[float] = 0.0,
+            **kwargs: Any
     ) -> Optimizer:
         """Create optimizer.
+
         :param optimizer: Optimizer to use
         :param model: Model for which the optimizer is created
         :param lr: learning rate
@@ -134,3 +173,78 @@ class TorchBuilder:
             return torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, **kwargs)
         else:
             raise ValueError(f"Scheduler '{scheduler}' not recognized")
+
+    @staticmethod
+    def build_bottleneck_mlp(
+            input_size: int,
+            output_size: int,
+            hidden_dims: List[int],
+            activation: Activation = 'tanh',
+            output_activation: Activation = 'identity',
+            dtype: Optional[torch.dtype] = torch.float32
+    ) -> nn.Module:
+        """
+        Build a multi-layer bottleneck perceptron (MLP)
+        with customizable hidden layer dimensions.
+
+        :param input_size: Size of the input layer.
+        :param output_size: Size of the output layer.
+        :param hidden_dims: List of hidden layer dimensions in decreasing order.
+        :param activation: Activation function to use for hidden layers.
+        :param output_activation: Activation function to use for the output layer.
+        :param dtype: Data type of the model parameters.
+
+        :return: MLP (nn.Module).
+        """
+        layers = []
+        prev_dim = input_size
+        for dim in hidden_dims:
+            layers.append(nn.Linear(prev_dim, dim))
+            layers.append(TorchBuilder.get_activation_function(activation))
+            prev_dim = dim
+
+        layers.append(nn.Linear(prev_dim, output_size))
+        layers.append(TorchBuilder.get_activation_function(output_activation))
+
+        model = nn.Sequential(*layers)
+        model.to(dtype=dtype)
+
+        return model
+
+    @staticmethod
+    def build_mlp(
+            input_size: int,
+            output_size: int,
+            n_layers: int,
+            size: int,
+            activation: Activation = 'tanh',
+            output_activation: Activation = 'identity',
+            dtype: Optional[torch.dtype] = torch.float32) -> nn.Module:
+        """
+       Build a multi-layer perceptron (MLP) with the specified architecture.
+
+       :param input_size: The size of the input layer.
+       :param output_size: The size of the output layer.
+       :param n_layers: The number of hidden layers in the MLP.
+       :param size: The number of hidden units in each hidden layer.
+       :param activation: The activation function to use in the hidden layers.
+       :param output_activation: The activation function to use in the output layer.
+       :param dtype: The data type of the MLP parameters.
+       :return: The MLP as an nn.Module.
+       """
+        if isinstance(activation, str):
+            activation = TorchBuilder._str_to_activation[activation]
+        if isinstance(output_activation, str):
+            output_activation = TorchBuilder._str_to_activation[output_activation]
+
+        layers = nn.ModuleList()
+        for i in range(n_layers):
+            intput_sz = input_size if i == 0 else size
+            layers.append(nn.Linear(intput_sz, size, bias=True, dtype=dtype))
+            if i == n_layers - 1:
+                layers.append(output_activation)
+            else:
+                layers.append(activation)
+
+        layers.append(nn.Linear(size, output_size, bias=True, dtype=dtype))
+        return nn.Sequential(*layers)

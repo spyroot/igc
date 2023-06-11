@@ -1,39 +1,57 @@
+import argparse
+
 import torch
 import torch.nn as nn
 from transformers import GPT2Model
 
+from igc.ds.redfish_dataset import JSONDataset
+from igc.modules.metric_logger import MetricLogger
+from igc.shared.shared_torch_builder import TorchBuilder
 
-class Autoencoder(nn.Module):
+
+class AutoSateEncoder(nn.Module):
     """
     """
-    def __init__(self, input_dim, latent_dim):
+    def __init__(self, seq_len=1023, hidden_dim=768, latent_dim=256):
         """
-
-        :param input_dim:
+        :param seq_len:
+        :param hidden_dim:
         :param latent_dim:
         """
-        super(Autoencoder, self).__init__()
-        self.encoder = nn.Linear(input_dim, latent_dim)
-        self.decoder = nn.Linear(latent_dim, input_dim)
-        num_epochs = 10
-        learning_rate = 0.001
+        super(AutoSateEncoder, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim[0]),
+            nn.ReLU(),
+            nn.Linear(hidden_dim[0], hidden_dim[1]),
+            nn.ReLU(),
+            nn.Linear(hidden_dim[1], latent_dim),
+        )
 
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
-        loss_fn = nn.CrossEntropyLoss()
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim[1]),
+            nn.ReLU(),
+            nn.Linear(hidden_dim[1], hidden_dim[0]),
+            nn.ReLU(),
+            nn.Linear(hidden_dim[0], input_dim),
+        )
 
     def forward(self, x):
         """
-
         :param x:
         :return:
         """
+        # flatten
+        batch_size = x.size(0)
+        x = x.view(batch_size, -1)
         latent = self.encoder(x)
         reconstructed = self.decoder(latent)
         return reconstructed
 
 
 class AutoencoderTrainer:
-    def __init__(self, input_dim, latent_dim):
+    def __init__(self,  args: argparse.Namespace,
+                 ds: JSONDataset,
+                 metric_logger: MetricLogger, input_dim, latent_dim):
         """
 
         :param input_dim:
@@ -42,6 +60,25 @@ class AutoencoderTrainer:
         self.llm_model = None
         self.auto_encoder = None
         self.train_dataloader = None
+
+        num_epochs = 10
+        learning_rate = 0.001
+
+        self.optimizer = TorchBuilder.create_optimizer(
+            args.llm_optimizer,
+            self.model,
+            args.auto_encoder_learning_rate,
+            args.auto_encoder_weight_decay,
+            **vars(args)
+        )
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+        loss_fn = nn.CrossEntropyLoss()
+
+        logging.basicConfig(
+            filename='igc_llm_module.log',
+            level=logging.DEBUG, format='%(asctime)s %(message)s')
+
+
 
     def _get_reconstruction_loss(self, batch):
         """

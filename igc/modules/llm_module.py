@@ -19,7 +19,7 @@ from ..ds.redfish_dataset import JSONDataset
 from ..shared.shared_torch_builder import TorchBuilder
 
 
-class IgcLllModule:
+class IgcLanguageModule:
     def __init__(self, args: argparse.Namespace):
         """
         :param args:
@@ -28,6 +28,7 @@ class IgcLllModule:
         self.model = GPT2LMHeadModel.from_pretrained(args.model_type)
         self.tokenizer = GPT2Tokenizer.from_pretrained(args.model_type)
         directory_path = os.path.expanduser(args.raw_data_dir)
+        self.cmd = args
 
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(
@@ -37,21 +38,31 @@ class IgcLllModule:
         self.dataset = JSONDataset(
             directory_path, verbose=True, tokenizer=self.tokenizer)
 
-        self.goal_extractor = GoalExtractor(
-            args, self.dataset, self.metric_logger, self.model, self.tokenizer)
-
         self.llm_embeddings = LlmEmbeddingsTrainer(
             args, self.dataset, self.metric_logger, self.model, self.tokenizer)
 
-        # goal_extractor.train_goal_representation()
-        # self.goal_extractor.train_goal_and_parameter_extractor()
+        self.goal_extractor = GoalExtractor(
+            args, self.dataset, self.metric_logger, self.model, self.tokenizer)
+
+        self.autoencoder = AutoSateEncoder()
 
     def train(self):
         """
         :return:
         """
-        self.llm_embeddings.train_observation()
-        self.llm_autoencoder.train_autoencoder()
+        choices=['latent', 'goal', 'parameter', 'encoder'],
+
+        if self.cmd is None and self.cmd:
+            if self.cmd == "latent":
+                self.llm_embeddings.train_observation()
+            if self.cmd == "goal":
+                self.goal_extractor.train_goal_representation()
+            if self.cmd == "parameter":
+                self.goal_extractor.train_goal_and_parameter_extractor()
+            if self.cmd == "encoder":
+                self.autoencoder.train()
+
+        #self.llm_autoencoder.train_autoencoder()
 
         # self.goal_extractor.train_goal_and_parameter_extractor()
         # self.goal_extractor.train_goal_representation()

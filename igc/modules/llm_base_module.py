@@ -143,6 +143,20 @@ class LlmBaseModule:
     def save_strategy(self):
         return
 
+    def save_model(self, checkpoint_dir):
+        """Save model, this call at the end for last save.
+        :param checkpoint_dir:
+        :return:
+        """
+        if self.rank > 0:
+            return
+
+        checkpoint_file = f"{checkpoint_dir}/last.pt"
+        torch.save({
+            'model_state_dict': self.model.state_dict(),
+        }, checkpoint_file)
+        print(f"Rank: {self.rank} checkpoint saved to {checkpoint_file}")
+
     def save_checkpoint(self, checkpoint_dir, epoch):
         """
         :param checkpoint_dir:

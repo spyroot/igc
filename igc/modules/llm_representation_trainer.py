@@ -33,6 +33,7 @@ from igc.shared.shared_torch_builder import TorchBuilder
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
 from accelerate import Accelerator
+from torch.quantization import QuantStub, DeQuantStub, quantize, prepare_qat, convert
 
 
 class LlmEmbeddingsTrainer(LlmBaseModule):
@@ -42,8 +43,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
     def __init__(self,
                  args: argparse.Namespace,
                  ds: JSONDataset,
-                 metric_logger:
-                 MetricLogger,
+                 metric_logger: MetricLogger,
                  llm_model,
                  llm_tokenizer):
         """
@@ -57,11 +57,12 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         # Define the GPT model and tokenizer
         super().__init__(args, ds, metric_logger, llm_model, llm_tokenizer)
 
+        self.is_quantize = False
         self.num_epochs = args.num_train_epochs
         self.batch_size = args.per_device_train_batch_size
 
         self.batch_log = 10
-        self.shuffle = False
+        self.shuffle = True
         self.num_workers = args.num_workers
         self._default_mask_token = "@odata.id"
 
@@ -210,7 +211,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                                       batch_size=self.batch_size,
                                       sampler=sampler,
                                       num_workers=self.num_workers,
-                                      shuffle=True,
+                                      shuffle=self.shuffle,
                                       collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)
 
         eval_dataloader = DataLoader(eval_dataset,
@@ -227,6 +228,9 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         self.model, self.optimizer, train_dataloader, eval_dataset = accelerator.prepare(
             [self.model, self.optimizer, train_dataloader, eval_dataset],
             device_placement=[True])
+
+        if self.is_quantize:
+            self.model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
 
         total_batches = len(train_dataloader)
         dataset_size = len(train_dataset)
@@ -277,6 +281,10 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                 batch_losses[num_batches] = loss.item()
                 total_loss += loss.item()
 
+                if self.is_quantize:
+                    self.model.apply(torch.quantization.propagate_qconfig_)
+                    self.model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+
                 # calculate the progress percentage
                 progress_percentage = int(round((num_batches + 1) / total_batches * 100))
                 if (num_batches % batch_log_frequency == 0) or (num_batches == total_batches - 1):
@@ -307,5 +315,9 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                 if self.checkpoint_dir is not None:
                     self.save_checkpoint(self.checkpoint_dir, epoch + 1)
 
+        if self.is_quantize:
+            self.model = convert(self.model)
+
+        self.save_model(self.checkpoint_dir)
         print("Embedding extractor training complete.")
 

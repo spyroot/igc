@@ -781,7 +781,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
         :param tokenizer:
         :param encoding:
-        :param target_key:
+        :param target_key:  a json key that we use to mask the value of that key
         :param debug:
         :return:
         """
