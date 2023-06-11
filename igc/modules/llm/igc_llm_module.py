@@ -74,7 +74,8 @@ class IgcLanguageModule:
             goal_extractor = GoalExtractorTrainer(
                 "goal_extractor",
                 self.spec,
-                model, tokenizer,
+                model,
+                tokenizer,
                 ds=self.ds,
                 metric_logger=self.metric_logger)
             goal_extractor.train_goal_representation()
@@ -85,20 +86,23 @@ class IgcLanguageModule:
             parameter_extractor = GoalExtractorTrainer(
                 "parameter_extractor",
                 self.spec,
-                self.ds,
-                self.metric_logger,
                 model,
-                tokenizer)
+                tokenizer,
+                ds=self.ds,
+                metric_logger=self.metric_logger,
+                )
             parameter_extractor.train_goal_and_parameter_extractor()
         # we train auto encoder the aim here to reduce state re-presentation
         if self.spec.llm == "encoder" or self.spec.llm == "all":
             self.logger.info("Starting training state auto encoder.")
             autoencoder = AutoencoderTrainer(
                 "state_autoencoder",
-                self.spec, self.ds,
-                self.metric_logger,
+                self.spec,
                 model,
-                tokenizer)
+                tokenizer,
+                ds=self.ds,
+                metric_logger=self.metric_logger
+                )
             autoencoder.train()
 
         # self.llm_autoencoder.train_autoencoder()
