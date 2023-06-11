@@ -382,14 +382,16 @@ class IgcBaseModule:
         :return: Last saved epoch from the checkpoint.
         """
         # during re-resume we don't load model, we load from checkpoint
+        model_file = self._model_file(checkpoint_dir)
+        base_model_name = os.path.basename(self._model_file(checkpoint_dir))
+
         if not resuming:
-            model_file = self._model_file(checkpoint_dir)
             if not os.path.exists(model_file):
                 self.logger.info(f"Model file {model_file} not found.")
 
         self.logger.info(f"Searching for latest checkpoint.")
         checkpoint_files = [f for f in os.listdir(checkpoint_dir) if
-                            f.endswith('.pt') and f != self._model_file(checkpoint_dir)]
+                            f.endswith('.pt') and f != base_model_name]
         checkpoint_files = [os.path.join(checkpoint_dir, f) for f in checkpoint_files]
         checkpoint_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
 
