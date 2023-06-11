@@ -1,5 +1,6 @@
 """
-This hugging face shared utility method, used in different places in the code.
+This hugging face shared utility method,
+used in different places in the code.
 
 """
 import collections

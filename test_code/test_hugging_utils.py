@@ -1,5 +1,5 @@
 import transformers
-from huggingface_utils import hugging_face_info, model_and_tokenizer
+from igc.shared.huggingface_utils import hugging_face_info, model_and_tokenizer
 
 # this will download all models
 if __name__ == '__main__':

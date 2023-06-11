@@ -29,7 +29,7 @@ from transformers import (
     Trainer, GPT2Tokenizer
 )
 from igc.ds.redfish_dataset import JSONDataset
-from huggingface_utils import LossMonitorCallback
+from igc.shared.huggingface_utils import LossMonitorCallback
 from llm_base_trainer import LLmBaseTrainer
 from igc.shared.shared_main import shared_main
 

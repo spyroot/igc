@@ -1,8 +1,7 @@
 import unittest
 import transformers
-from typing import Any, Type
 
-from huggingface_utils import model_hf_name, model_and_tokenizer
+from igc.shared.huggingface_utils import model_hf_name, model_and_tokenizer
 
 
 class TestModelAndTokenizer(unittest.TestCase):
