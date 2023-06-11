@@ -373,17 +373,19 @@ class IgcBaseModule:
         }, checkpoint_file)
         self.logger.info(f"Rank: {self.rank} {self.module_name} checkpoint saved to {checkpoint_file}.")
 
-    def load_checkpoint(self, checkpoint_dir: str) -> int:
+    def load_checkpoint(self, checkpoint_dir: str, resuming="True") -> int:
         """
         Load model checkpoint for resuming training.
 
+        :param resuming:
         :param checkpoint_dir: Directory location of the checkpoints.
         :return: Last saved epoch from the checkpoint.
         """
-
-        model_file = self._model_file(checkpoint_dir)
-        if not os.path.exists(model_file):
-            self.logger.info(f"Model file {model_file} not found.")
+        # during re-resume we don't load model, we load from checkpoint
+        if resuming:
+            model_file = self._model_file(checkpoint_dir)
+            if not os.path.exists(model_file):
+                self.logger.info(f"Model file {model_file} not found.")
 
         self.logger.info(f"Searching for latest checkpoint.")
         checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pt')]
