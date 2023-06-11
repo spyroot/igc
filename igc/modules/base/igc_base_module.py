@@ -108,9 +108,6 @@ class IgcBaseModule:
         self.tokenizer = llm_tokenizer
         self.module_name = module_name
         self.update_tokenizer_settings(self.tokenizer)
-        self.module_checkpoint_dir = f"{spec.checkpoint_dir}/{module_name}"
-        os.makedirs(self.module_checkpoint_dir, exist_ok=True)
-
         self.num_epochs = spec.num_train_epochs
         self.batch_size = spec.per_device_train_batch_size
         self.on_epoch_eval = spec.eval_mode == "on_epoch"
@@ -132,6 +129,9 @@ class IgcBaseModule:
         # model saving
         self.save_strategy = spec.save_strategy
         self.checkpoint_dir = self._prepare_checkpoint_dir()
+        self.module_checkpoint_dir = f"{spec.checkpoint_dir}/{module_name}"
+        os.makedirs(self.module_checkpoint_dir, exist_ok=True)
+
         self.rank = int(os.environ.get('LOCAL_RANK', -1))
 
         # update specs and add all defaults
