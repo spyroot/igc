@@ -69,6 +69,12 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         self.batch_size = spec.per_device_train_batch_size
 
         self.batch_log = 10
+        self._eval_freq = 10
+
+        self._eval_freq = 10
+        if self.num_epochs < 10:
+            self._eval_freq = 2
+
         self.shuffle = True
         self.num_workers = spec.num_workers
         self._default_mask_token = "@odata.id"
@@ -308,16 +314,16 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                 num_batches += 1
 
             # validation
-            if (epoch + 1) % 10 == 0:
+            if (epoch + 1) % self._eval_freq == 0:
                 validation_accuracy = self.validate(eval_dataloader, accelerator)
-                if self.rank == 0 or self.rank == -1:
+                if self.is_rank_zero():
                     self.metric_logger.log_metric("llm_emb_accuracy", validation_accuracy, epoch)
                 print(f"Rank {self.rank} Epoch {epoch + 1} - Validation Accuracy: "
                       f"{validation_accuracy} Best: {self._best_validation_metric}")
 
             if num_batches > 0:
                 average_loss = total_loss / num_batches
-                if self.rank == 0 or self.rank == -1:
+                if self.is_rank_zero():
                     self.metric_logger.log_metric("llm_emb_epoch_loss", average_loss, epoch)
                 print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
 
