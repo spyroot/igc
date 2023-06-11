@@ -465,9 +465,11 @@ class IgcBaseModule:
 
         checkpoint_dir = str(checkpoint_path_dir)
 
+        model_file = False
         model_file = IgcBaseModule.model_file(module_name, checkpoint_dir)
         if os.path.exists(model_file):
             checkpoint_file = model_file
+            model_file = True
         else:
             checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pt')]
             checkpoint_files = [os.path.join(checkpoint_dir, f) for f in checkpoint_files]
@@ -483,6 +485,9 @@ class IgcBaseModule:
 
         checkpoint = torch.load(checkpoint_file, map_location=device)
         required_keys = ['model_state_dict', 'epoch']
+        if model_file:
+            required_keys = ['model_state_dict']
+
         missing_keys = [key for key in required_keys if key not in checkpoint]
         if missing_keys:
             print(f"Checkpoint file {checkpoint_file} "
