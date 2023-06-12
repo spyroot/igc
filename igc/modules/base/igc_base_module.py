@@ -23,26 +23,26 @@ from igc.shared.shared_torch_utils import get_device
 
 from .igc_metric_logger import MetricLogger
 from .igc_specs import make_default_spec
+from .igc_state import IgcBaseState
 from .igc_tokenize_state import GenericTokenizeState
 from ...shared.shared_accelerator import build_accelerator
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
 
-class IgcBaseModule:
+class IgcBaseModule(IgcBaseState):
     """
     This Base igc module, it encapsulates shared logic for all trainers.
     """
 
-    def __init__(self,
-                 module_name: str,
-                 spec: argparse.Namespace,
-                 llm_model,
-                 llm_tokenizer,
-                 ds: Optional[JSONDataset] = None,
-                 metric_logger: Optional[MetricLogger] = None,
-                 is_inference: Optional[bool] = False,
-                 device=None):
+    def __init__(
+            self, module_name: str,
+            spec: argparse.Namespace,
+            llm_model, llm_tokenizer,
+            ds: Optional[JSONDataset] = None,
+            metric_logger: Optional[MetricLogger] = None,
+            is_inference: Optional[bool] = False,
+            device=None):
         """
 
         Note module name is important for saving
@@ -55,6 +55,8 @@ class IgcBaseModule:
         :param llm_model: pre-trained language model
         :param llm_tokenizer: pre-trained tokenizer
         """
+        super().__init__(module_name, spec, device)
+
         if not isinstance(module_name, str):
             raise TypeError(f"module_name should be a string, received "
                             f"{type(module_name).__name__}.")
@@ -110,22 +112,7 @@ class IgcBaseModule:
         if not is_inference and ds is None:
             raise ValueError("ds (dataset) cannot be None.")
 
-        self.is_accelerator = False
-        if "use_accelerator" in spec and spec.use_accelerator:
-            self.accelerator = build_accelerator(spec)
-            self.is_accelerator = True
-            # let accelerator choose device.
-            self.device = self.accelerator.device
-        elif hasattr(spec, "device"):
-            self.device = spec.device
-        else:
-            # if we are not using accelerator, we need to set device
-            self.device = get_device() if device is None else device
-
-        self._log_file = None
         self._is_trained = False
-
-        self.logger = loguru.logger
 
         # model param
         self.model = llm_model
@@ -156,12 +143,6 @@ class IgcBaseModule:
         self.checkpoint_dir = self._prepare_checkpoint_dir()
         self.module_checkpoint_dir = f"{self.checkpoint_dir}/{module_name}"
         os.makedirs(self.module_checkpoint_dir, exist_ok=True)
-
-        self.rank = int(os.environ.get('LOCAL_RANK', -1))
-        if self.rank == 0:
-            self.device = torch.device("cuda:0")
-        if self.rank == 1:
-            self.device = torch.device("cuda:1")
 
         # update specs and add all defaults
         self._trainer_specs = make_default_spec(self._trainer_args)

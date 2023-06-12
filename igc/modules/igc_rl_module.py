@@ -7,6 +7,7 @@ import torch
 from transformers import (GPT2LMHeadModel)
 
 from .base.igc_metric_logger import MetricLogger
+from .base.igc_state import IgcBaseState
 from .igc_train_agent import IgcAgentTrainer
 from ..ds.redfish_dataset import JSONDataset
 from .llm.igc_llm_module import IgcLanguageModule
@@ -14,13 +15,14 @@ from .igc_train_auto_state_encoder import AutoencoderTrainer
 from ..envs.rest_gym_batch_env import VectorizedRestApiEnv
 
 
-class IgcRlModule:
+class IgcRlModule(IgcBaseState):
     """
     """
-    def __init__(self, spec: argparse.Namespace, metric_logger: MetricLogger, ds: JSONDataset):
+    def __init__(self, spec: argparse.Namespace, metric_logger: MetricLogger, ds: JSONDataset, module_name: str):
         """
         :param spec:
         """
+        super().__init__(module_name, spec)
         model, tokenizer, last_epoch = IgcLanguageModule.load(spec, module_name="state_encoder")
 
         # create env
