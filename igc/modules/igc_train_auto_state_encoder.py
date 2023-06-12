@@ -163,11 +163,11 @@ class AutoencoderTrainer(IgcBaseModule):
                 # with torch.no_grad():
                 #     output = self._encoder_model(**batch)
 
-                hidden_state = self.sample(batch).to(self.device)
+                hidden_state = self.sample(batch)
                 hidden_state = hidden_state.to(self.device)
                 self.accelerator.print(hidden_state.shape)
 
-                flat_input = hidden_state.view(hidden_state.shape[0], -1)
+                flat_input = hidden_state.view(hidden_state.shape[0], -1).to(self.device)
                 latent_repr = self.model_autoencoder.encoder(flat_input)
                 reconstructed = self.model_autoencoder.decoder(latent_repr)
                 loss = F.mse_loss(flat_input, reconstructed, reduction="none")
