@@ -27,7 +27,7 @@ def main(cmd):
 
     igc_autoencoder = AutoencoderTrainer(
         "autoencoder", cmd, model, tokenizers, ds=dataset, metric_logger=None, is_inference=False)
-
+    igc_autoencoder.device = accelerator.device
     igc_autoencoder.accelerator = accelerator
     igc_autoencoder.train()
 

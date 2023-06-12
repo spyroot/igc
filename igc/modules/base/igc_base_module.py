@@ -107,6 +107,7 @@ class IgcBaseModule:
         self.model = llm_model
         self.tokenizer = llm_tokenizer
         self.module_name = module_name
+
         self.update_tokenizer_settings(self.tokenizer)
         self.num_epochs = spec.num_train_epochs
         self.batch_size = spec.per_device_train_batch_size
