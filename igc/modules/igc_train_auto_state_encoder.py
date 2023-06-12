@@ -122,7 +122,8 @@ class AutoencoderTrainer(IgcBaseModule):
         accelerator = Accelerator(device_placement=True)
         # self.device = accelerator.device
 
-        self.device = "'cuda:1'"
+        self.device = torch.device("cuda:1")
+
         self.logger.info(
             f"Rank {self.rank} starting train, device {self.device}")
 
