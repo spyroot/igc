@@ -120,9 +120,7 @@ class AutoencoderTrainer(IgcBaseModule):
         :return:
         """
         accelerator = Accelerator(device_placement=True, split_batches=True)
-        # self.device = accelerator.device
-
-        self.device = torch.device("cuda:1")
+        self.device = accelerator.device
 
         self.logger.info(
             f"Rank {self.rank} starting train, device {self.device}")
@@ -157,7 +155,7 @@ class AutoencoderTrainer(IgcBaseModule):
 
         self.model, self.optimizer, train_dataloader = accelerator.prepare(
             [self.model_autoencoder, self.optimizer, train_dataloader],
-            device_placement=[False])
+            device_placement=[True])
 
         # batch = {key: value.to(self.device) for key, value in batch.items()}
         # training loop
