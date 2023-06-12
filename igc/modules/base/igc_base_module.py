@@ -39,7 +39,8 @@ class IgcBaseModule:
                  llm_tokenizer,
                  ds: Optional[JSONDataset] = None,
                  metric_logger: Optional[MetricLogger] = None,
-                 is_inference: Optional[bool] = False):
+                 is_inference: Optional[bool] = False,
+                 device=None):
         """
 
         Note module name is important for saving
@@ -116,7 +117,11 @@ class IgcBaseModule:
         if not is_inference:
             self.dataset = ds
 
-        self.device = get_device()
+        if device is None:
+            self.device = get_device()
+        else:
+            self.device = device
+
         self.metric_logger = metric_logger
 
         self._trainer_args = spec

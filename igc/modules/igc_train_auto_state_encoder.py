@@ -27,7 +27,8 @@ class AutoencoderTrainer(IgcBaseModule):
                  llm_tokenizer,
                  ds: Optional[JSONDataset] = None,
                  metric_logger: Optional[MetricLogger] = None,
-                 is_inference: Optional[bool] = "False"):
+                 is_inference: Optional[bool] = "False",
+                 device: Optional[torch.device] = None):
         """
 
         :param module_name:
@@ -44,7 +45,8 @@ class AutoencoderTrainer(IgcBaseModule):
             llm_tokenizer,
             ds=ds,
             metric_logger=metric_logger,
-            is_inference=is_inference)
+            is_inference=is_inference,
+            device=device)
 
         self._input_dim = self.model.config.hidden_size
         self._latent_dim = self.model.config.hidden_size
