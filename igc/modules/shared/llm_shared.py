@@ -1,7 +1,7 @@
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 
-def from_pretrained_default(args, only_tokenizer=False):
+def from_pretrained_default(args, only_tokenizer=Falsee):
     """
     :param args: Argument parser namespace or string specifying the model_type.
     :param only_tokenizer: Whether to return only the tokenizer.
@@ -10,9 +10,9 @@ def from_pretrained_default(args, only_tokenizer=False):
     model = None
     if not only_tokenizer:
         if isinstance(args, str):
-            model = GPT2LMHeadModel.from_pretrained(args)
+            model = GPT2LMHeadModel.from_pretrained(args, device_map="auto")
         else:
-            model = GPT2LMHeadModel.from_pretrained(args.model_type)
+            model = GPT2LMHeadModel.from_pretrained(args.model_type, device_map="auto")
 
     if isinstance(args, str):
         tokenizer = GPT2Tokenizer.from_pretrained(args)
