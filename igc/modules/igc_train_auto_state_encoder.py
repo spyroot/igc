@@ -128,6 +128,7 @@ class AutoencoderTrainer(IgcBaseModule):
             f"Rank {self.rank} starting train, device {self.device}")
 
         torch.cuda.empty_cache()
+        self.accelerator.free_memory()
 
         # self._encoder_model.to(self.device)
         self._encoder_model.eval()
