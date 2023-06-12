@@ -7,6 +7,7 @@ object.
 
 Author:Mus mbayramo@stanford.edu
 """
+import os
 from typing import List, Any, Optional, Callable, Union
 import torch
 import transformers
@@ -174,6 +175,40 @@ class TorchBuilder:
             return torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, **kwargs)
         else:
             raise ValueError(f"Scheduler '{scheduler}' not recognized")
+
+    @staticmethod
+    def allocate_gpu(gpu_list: List[str]) -> torch.device:
+        """
+        Allocate a GPU device based on
+        the rank and the provided list of GPU devices.
+
+        :param gpu_list: A list of GPU devices.
+        :return: The allocated GPU device.
+        """
+        rank = int(os.environ.get('LOCAL_RANK', -1))
+        if rank >= len(gpu_list):
+            raise ValueError("Invalid rank provided")
+
+        device = torch.device(gpu_list[rank])
+        return device
+
+    @staticmethod
+    def get_available_gpus() -> List[torch.device]:
+        """
+        Get a list of available GPU devices as torch.device objects.
+
+        :return: A list of available GPU devices.
+        """
+        return [torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())]
+
+    @staticmethod
+    def available_gpus_string() -> List[str]:
+        """
+        Get a list of available GPU devices as str objects.
+
+        :return: A list of available GPU devices.
+        """
+        return [f"cuda:{i}" for i in range(torch.cuda.device_count())]
 
     @staticmethod
     def build_bottleneck_mlp(

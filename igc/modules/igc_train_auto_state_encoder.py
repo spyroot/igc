@@ -160,9 +160,9 @@ class AutoencoderTrainer(IgcBaseModule):
         self.model_autoencoder.train()
         # self.model_autoencoder.train()
         # self.model_autoencoder.to(self.device)
-
         # batch = {key: value.to(self.device) for key, value in batch.items()}
         # training loop
+
         for epoch in range(last_epoch, self.num_epochs):
             total_loss = 0.0
             for batch in train_dataloader:

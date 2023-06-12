@@ -21,6 +21,56 @@ def set_logger(spec):
     loguru.logger.add("logfile.log", level=log_level)  # Add a handler with the specified log level
 
 
+def add_accelerator_parser_group(parser) -> argparse.ArgumentParser:
+    """
+    Build the argument parser for command line arguments
+
+    :return: ArgumentParser object
+    """
+    accelerate_group = parser.add_argument_group(description="Accelerator Argument Parser")
+    accelerate_group.add_argument(
+        "--use_accelerator",
+        type=bool, default=True, help="Enable accelerator. By default IGC will use it.")
+    accelerate_group.add_argument(
+        "--device_placement",
+        type=bool, default=True, help="Device placement flag")
+    accelerate_group.add_argument(
+        "--split_batches", type=bool, default=False, help="Split batches flag")
+    accelerate_group.add_argument(
+        "--mixed_precision", type=str, default=None, help="Mixed precision setting")
+    accelerate_group.add_argument(
+        "--cpu", type=bool, default=False, help="CPU flag")
+    accelerate_group.add_argument(
+        "--deepspeed_plugin", type=str, default=None, help="DeepSpeed plugin")
+    accelerate_group.add_argument(
+        "--fsdp_plugin", type=str, default=None, help="FullyShardedDataParallel plugin")
+    accelerate_group.add_argument(
+        "--megatron_lm_plugin", type=str, default=None, help="MegatronLM plugin")
+    accelerate_group.add_argument(
+        "--rng_types", nargs="+", default=None, help="RNG types")
+    accelerate_group.add_argument(
+        "--log_with", nargs="+", default=None, help="Log with")
+    accelerate_group.add_argument(
+        "--project_dir", type=str, default=None, help="Project directory")
+    accelerate_group.add_argument(
+        "--project_config", type=str, default=None, help="Project configuration")
+    accelerate_group.add_argument(
+        "--gradient_accumulation_plugin", type=str, default=None,
+        help="Gradient accumulation plugin")
+    accelerate_group.add_argument(
+        "--dispatch_batches", type=bool, default=None, help="Dispatch batches flag")
+    accelerate_group.add_argument(
+        "--even_batches", type=bool, default=True, help="Even batches flag")
+    accelerate_group.add_argument(
+        "--step_scheduler_with_optimizer", type=bool, default=True,
+        help="Step scheduler with optimizer flag")
+    accelerate_group.add_argument(
+        "--kwargs_handlers", nargs="+", default=None, help="Kwargs handlers")
+    accelerate_group.add_argument(
+        "--dynamo_backend", type=str, default=None, help="Dynamo backend")
+    return parser
+
+
 def add_optimizer_group(parser):
     """
     Optimizer parameters.
@@ -559,10 +609,12 @@ def shared_arg_parser(
     parser = add_model_type_group(parser)
     parser = add_rl_trainer_group(parser)
     parser = add_auto_encoder_group(parser)
+    parser = add_accelerator_parser_group(parser)
 
-    parser.add_argument("--local-rank",
-                        type=int, default=-1,
-                        help="local_rank for distributed training on GPUs")
+    parser.add_argument(
+        "--local-rank",
+        type=int, default=-1,
+        help="local_rank for distributed training on GPUs")
 
     if is_accelerate_arg_parser:
         try:
@@ -585,11 +637,14 @@ def shared_arg_parser(
     if is_deepspeed_arg_parser:
         parser = deepspeed.add_config_arguments(parser)
 
+    available_gpus = TorchBuilder.available_gpus_string()
+    device_choices = ['cuda', 'cpu', 'mps', 'auto'] + available_gpus
+
     parser.add_argument(
         "--device",
         type=str,
         default="auto",
-        choices=['cuda', 'cpu', 'mps', 'auto'],
+        choices=device_choices,
         help="Device to use (overrides the default device)."
              " Options: 'cuda', 'cpu', or 'auto'. 'auto' selects 'cuda' if available."
     )

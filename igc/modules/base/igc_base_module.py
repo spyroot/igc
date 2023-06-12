@@ -23,6 +23,8 @@ from igc.shared.shared_torch_utils import get_device
 
 from .igc_metric_logger import MetricLogger
 from .igc_specs import make_default_spec
+from .igc_tokenize_state import GenericTokenizeState
+from ...shared.shared_accelerator import build_accelerator
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
@@ -54,27 +56,34 @@ class IgcBaseModule:
         :param llm_tokenizer: pre-trained tokenizer
         """
         if not isinstance(module_name, str):
-            raise TypeError(f"module_name should be a string, received {type(module_name).__name__}.")
+            raise TypeError(f"module_name should be a string, received "
+                            f"{type(module_name).__name__}.")
 
         if not isinstance(spec, argparse.Namespace):
-            raise TypeError(f"spec should be an instance of argparse.Namespace, received {type(spec).__name__}.")
+            raise TypeError(f"spec should be an instance of argparse.Namespace, "
+                            f"received {type(spec).__name__}.")
 
         if not isinstance(llm_model, PreTrainedModel):
-            raise TypeError(f"llm_model should be an instance of PreTrainedModel, received {type(llm_model).__name__}.")
+            raise TypeError(f"llm_model should be an instance of PreTrainedModel, "
+                            f"received {type(llm_model).__name__}.")
 
         if not isinstance(llm_tokenizer, PreTrainedTokenizer):
             raise TypeError(
-                f"llm_tokenizer should be an instance of PreTrainedTokenizer, received {type(llm_tokenizer).__name__}.")
+                f"llm_tokenizer should be an instance of PreTrainedTokenizer, "
+                f"received {type(llm_tokenizer).__name__}.")
 
         if ds is not None and not isinstance(ds, JSONDataset):
-            raise TypeError(f"ds should be an instance of JSONDataset or None, received {type(ds).__name__}.")
+            raise TypeError(f"ds should be an instance of JSONDataset or None, "
+                            f"received {type(ds).__name__}.")
 
         if metric_logger is not None and not isinstance(metric_logger, MetricLogger):
             raise TypeError(
-                f"metric_logger should be an instance of MetricLogger or None, received {type(metric_logger).__name__}.")
+                f"metric_logger should be an instance of MetricLogger or None, "
+                f"received {type(metric_logger).__name__}.")
 
         if not isinstance(is_inference, bool):
-            raise TypeError(f"is_inference should be a boolean, received {type(is_inference).__name__}.")
+            raise TypeError(f"is_inference should be a boolean, "
+                            f"received {type(is_inference).__name__}.")
 
         self._is_inference = is_inference
 
@@ -101,14 +110,29 @@ class IgcBaseModule:
         if not is_inference and ds is None:
             raise ValueError("ds (dataset) cannot be None.")
 
+        self.is_accelerator = False
+        if "use_accelerator" in spec and spec.use_accelerator:
+            self.accelerator = build_accelerator(spec)
+            self.is_accelerator = True
+            # let accelerator choose device.
+            self.device = self.accelerator.device
+        elif hasattr(spec, "device"):
+            self.device = spec.device
+        else:
+            # if we are not using accelerator, we need to set device
+            self.device = get_device() if device is None else device
+
         self._log_file = None
-        self.logger = loguru.logger
         self._is_trained = False
 
+        self.logger = loguru.logger
+
+        # model param
         self.model = llm_model
         self.tokenizer = llm_tokenizer
         self.module_name = module_name
 
+        self._tokenize_state = None
         self.update_tokenizer_settings(self.tokenizer)
         self.num_epochs = spec.num_train_epochs
         self.batch_size = spec.per_device_train_batch_size
@@ -116,11 +140,6 @@ class IgcBaseModule:
 
         if not is_inference:
             self.dataset = ds
-
-        if device is None:
-            self.device = get_device()
-        else:
-            self.device = device
 
         self.metric_logger = metric_logger
 
@@ -135,7 +154,7 @@ class IgcBaseModule:
         # model saving
         self.save_strategy = spec.save_strategy
         self.checkpoint_dir = self._prepare_checkpoint_dir()
-        self.module_checkpoint_dir = f"{self.checkpoint_dir }/{module_name}"
+        self.module_checkpoint_dir = f"{self.checkpoint_dir}/{module_name}"
         os.makedirs(self.module_checkpoint_dir, exist_ok=True)
 
         self.rank = int(os.environ.get('LOCAL_RANK', -1))
@@ -152,23 +171,30 @@ class IgcBaseModule:
         self.logger.info(f"Model {self.module_name} saving dir {self.module_checkpoint_dir}")
         self._debug_info()
 
-    def set_tokenizer(self, tokenizers):
+    def set_tokenizer(self, tokenizer: PreTrainedTokenizer):
         """Update tokenizer
-        :param tokenizers:
+        :param tokenizer:
         :return:
         """
-        self.tokenizer = tokenizers
+        if not isinstance(tokenizer, PreTrainedTokenizer):
+            raise ValueError("Invalid Hugging Face tokenizer provided.")
+
+        self.tokenizer = tokenizer
         self.update_tokenizer_settings(self.tokenizer)
 
-    def update_tokenizer_settings(self, llm_tokenizer):
-        """Update tokenizer settings
+    def update_tokenizer_settings(self, llm_tokenizer: PreTrainedTokenizer):
+        """Update tokenize state
+        :param llm_tokenizer:
         :return:
         """
-        self.tokenizer.pad_token = llm_tokenizer.eos_token
-        self.tokenizer.pad_token_id = llm_tokenizer.eos_token_id
-        self.model.config.pad_token_id = llm_tokenizer.pad_token_id
-        self.pad_token = llm_tokenizer.pad_token
-        self.pad_token_id = llm_tokenizer.pad_token_id
+        self._tokenize_state = GenericTokenizeState(
+            pad_token=llm_tokenizer.pad_token,
+            pad_token_id=llm_tokenizer.pad_token_id,
+            eos_token=llm_tokenizer.eos_token,
+            eos_token_id=llm_tokenizer.eos_token_id,
+            model_pad_token_id=llm_tokenizer.model.config.pad_token_id,
+            model_eos_token_id=llm_tokenizer.model.config.eos_token_id
+        )
 
     def _debug_info(self):
         """
@@ -180,8 +206,7 @@ class IgcBaseModule:
 
         self.logger.debug("Internal variables:")
         self.logger.debug(f"  - device: {self.device}")
-        self.logger.debug(f"  - pad_token: {self.pad_token}")
-        self.logger.debug(f"  - pad_token_id: {self.pad_token_id}")
+        self.logger.debug(f"  - pad_token: {self._tokenize_state}")
         self.logger.debug(f"  - num_epochs: {self.num_epochs}")
         self.logger.debug(f"  - batch_size: {self.batch_size}")
         self.logger.debug(f"  - checkpoint_dir: {self.module_checkpoint_dir}")
