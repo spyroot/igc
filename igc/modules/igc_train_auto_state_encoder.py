@@ -214,14 +214,15 @@ class AutoencoderTrainer(IgcBaseModule):
         with torch.no_grad():
             for batch in train_dataloader:
                 hidden_state = self._encoder_model(**batch).last_hidden_state
-                # flat_input = hidden_state.view(hidden_state.shape[0], -1)
                 tensors.append(hidden_state.detach().cpu())
 
         return tensors
 
     def measure_reconstruction(self, test_data):
         """
-        Measure the reconstruction performance of the autoencoder on the test data.
+        Measure the reconstruction performance
+        of the autoencoder on the test data.
+
         :param test_data: Test dataset
         :return: Average reconstruction loss
         """
@@ -243,14 +244,14 @@ class AutoencoderTrainer(IgcBaseModule):
         """
         :return:
         """
-        tensors = self.sample_all()
-        self.logger.info(
-            f"Rank {self.rank} starting train, device {self.device}")
-
-        del self._encoder_model
-        del self.model
-
-        print(self.model_autoencoder)
+        # tensors = self.sample_all()
+        # self.logger.info(
+        #     f"Rank {self.rank} starting train, device {self.device}")
+        #
+        # del self._encoder_model
+        # del self.model
+        #
+        # print(self.model_autoencoder)
 
         # torch.cuda.empty_cache()
         # # self._encoder_model.to(self.device)
@@ -283,6 +284,21 @@ class AutoencoderTrainer(IgcBaseModule):
         #
         # self.model_autoencoder.train()
         #
+
+
+        train_dataset, _ = self.split_slice_dataset()
+        train_dataloader = DataLoader(
+            train_dataset,
+            batch_size=self.batch_size,
+            sampler=None,
+            num_workers=self.num_workers,
+            pin_memory=False,
+            shuffle=True,
+            drop_last=True,
+            collate_fn=AutoencoderTrainer.custom_collate_fn)
+
+        self.model_autoencoder.eval()
+
         self.model_autoencoder.train()
         self.model_autoencoder.to(self.device)
         # # batch = {key: value.to(self.device) for key, value in batch.items()}
@@ -293,9 +309,12 @@ class AutoencoderTrainer(IgcBaseModule):
 
         for epoch in range(0, self.num_epochs):
             total_loss = 0.0
-            for batch in tensors:
-                batch = batch.to(self.device)
-                reconstructed = self.model_autoencoder(batch)
+            for batch in train_dataset:
+                with torch.no_grad():
+                    output = self._encoder_model(**batch)
+                    output.last_hidden_state.to(self.device)
+                hidden_state = batch.to(self.device)
+                reconstructed = self.model_autoencoder(hidden_state)
                 batch = batch.view(batch.shape[0], -1)
                 loss = F.mse_loss(batch, reconstructed, reduction="none")
                 loss = loss.mean()
@@ -307,7 +326,7 @@ class AutoencoderTrainer(IgcBaseModule):
                 total_loss += loss.item()
         #
         #     # Print the average loss for the epoch
-            average_loss = total_loss / len(tensors)
+            average_loss = total_loss / len(train_dataloader)
             print(f"Epoch [{epoch + 1}/{self.num_epochs}], Average Loss: {average_loss}")
         #
         # # self.save_model()
