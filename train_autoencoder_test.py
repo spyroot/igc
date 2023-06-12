@@ -1,5 +1,6 @@
 import os
 
+import torch
 from accelerate import Accelerator
 
 from igc.ds.redfish_dataset import JSONDataset
@@ -16,7 +17,13 @@ def main(cmd):
         print(f"CUDA_VISIBLE_DEVICES: {os.environ['CUDA_VISIBLE_DEVICES']}")
 
     accelerator = Accelerator(device_placement=True, split_batches=True, mixed_precision="fp16")
-    cmd.device = accelerator.device
+    rank = int(os.environ.get('LOCAL_RANK', -1))
+    if rank == 0:
+        device = torch.device("cuda:0")
+    if rank == 1:
+        device = torch.device("cuda:1")
+
+    cmd.device = device
 
     model, tokenizers = from_pretrained_default(cmd)
     dataset = JSONDataset(
@@ -27,7 +34,7 @@ def main(cmd):
 
     igc_autoencoder = AutoencoderTrainer(
         "autoencoder", cmd, model, tokenizers, ds=dataset, metric_logger=None,
-        is_inference=False, device=accelerator.device)
+        is_inference=False, device=device)
     igc_autoencoder.device = accelerator.device
     igc_autoencoder.accelerator = accelerator
     igc_autoencoder.train()

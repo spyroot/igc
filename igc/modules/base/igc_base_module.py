@@ -141,7 +141,7 @@ class IgcBaseModule:
         self.rank = int(os.environ.get('LOCAL_RANK', -1))
         if self.rank == 0:
             self.device = torch.device("cuda:0")
-        if self.rank == 0:
+        if self.rank == 1:
             self.device = torch.device("cuda:1")
 
         # update specs and add all defaults
