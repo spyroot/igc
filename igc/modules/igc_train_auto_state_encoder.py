@@ -4,7 +4,6 @@ from typing import Optional
 import numpy as np
 import torch
 import torch.nn as nn
-from torch import autocast
 
 from torch.utils.data import DataLoader
 from igc.ds.redfish_dataset import JSONDataset
@@ -224,14 +223,14 @@ class AutoencoderTrainer(IgcBaseModule):
                     print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Batch "
                           f"{num_batches + 1}/{total_batches} "
                           f"- Progress: {progress_percentage:.2f}% - Batch Loss mean: {batch_losses.mean():.4f}")
-                    self.metric_logger.log_metric("state_auto_encoder", batch_losses.mean(), epoch)
+                    self.metric_logger.log_metric("state_auto_encoder_batch", batch_losses.mean(), epoch)
 
                 num_batches += 1
 
             if num_batches > 0:
                 average_loss = total_loss / num_batches
                 if self.is_rank_zero():
-                    self.metric_logger.log_metric("llm_emb_epoch_loss", average_loss, epoch)
+                    self.metric_logger.log_metric("state_auto_encoder_epoch", average_loss, epoch)
                 print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
 
             # save best checkpoint
