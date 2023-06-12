@@ -210,7 +210,7 @@ class AutoencoderTrainer(IgcBaseModule):
         tensors = []
         with torch.no_grad():
             for batch in train_dataloader:
-                hidden_state = self._encoder_model(**batch)
+                hidden_state = self._encoder_model(**batch).hidden_state
                 flat_input = hidden_state.view(hidden_state.shape[0], -1)
                 tensors.append(flat_input.detach().cpu())
 
