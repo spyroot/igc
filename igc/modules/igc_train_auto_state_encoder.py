@@ -235,7 +235,7 @@ class AutoencoderTrainer(IgcBaseModule):
                 print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
 
             # save best checkpoint
-            if self.is_rank_zero() and epoch % 100 == 0:
+            if self.is_rank_zero() and epoch % 20 == 0:
                 self.save_checkpoint(self.module_checkpoint_dir, epoch + 1)
 
         self.save_model(self.module_checkpoint_dir)
