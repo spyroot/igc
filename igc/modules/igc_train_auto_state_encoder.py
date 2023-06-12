@@ -132,6 +132,8 @@ class AutoencoderTrainer(IgcBaseModule):
         else:
             last_epoch = 0
 
+        self.log_memory_usage()
+
         num_epochs = 10
         self.logger.info(f"Starting training")
         train_dataloader = DataLoader(

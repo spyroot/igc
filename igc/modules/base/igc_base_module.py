@@ -560,3 +560,17 @@ class IgcBaseModule:
             global_logger.info(f"rest recovered: {rest_call}")
             global_logger.info(f"rest original: {data_point['rest_api']}")
             global_logger.info(f"rest original: {data_point['label']}")
+
+    def log_memory_usage(self):
+        """
+        Log memory usage.
+        :return:
+        """
+        if torch.cuda.is_available():
+            mem_get_info = torch.cuda.memory_stats()
+            self.logger.info("Memory allocated:", mem_get_info["allocated_bytes.all.current"] / 1024 ** 3, "GB")
+            # additional CUDA statistics if available
+            if hasattr(torch.cuda, 'utilization'):
+                self.logger.info(f"CUDA utilization:", torch.cuda.utilization())
+            if hasattr(torch.cuda, 'memory_summary'):
+                self.logger.info(f"CUDA memory summary: {torch.cuda.memory_summary()}")

@@ -141,7 +141,7 @@ def cuda_memory(is_verbose=False):
         torch.cuda.memory_summary()
         print_dict_as_table(torch.cuda.memory_stats())
 
-    torch.cuda.mem_get_info()
+    return torch.cuda.mem_get_info()
 
 
 def torch_runtime_details():

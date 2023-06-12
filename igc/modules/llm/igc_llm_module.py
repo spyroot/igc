@@ -5,6 +5,8 @@ from typing import Optional, Dict, Union, List
 
 import loguru
 import torch
+from accelerate import Accelerator
+
 from igc.ds.redfish_dataset import JSONDataset
 from igc.modules.igc_train_auto_state_encoder import AutoencoderTrainer
 from igc.modules.llm_train_goal_extract import GoalExtractorTrainer
