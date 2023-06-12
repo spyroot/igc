@@ -573,4 +573,4 @@ class IgcBaseModule:
             if hasattr(torch.cuda, 'utilization'):
                 self.logger.info(f"CUDA utilization:", torch.cuda.utilization())
             if hasattr(torch.cuda, 'memory_summary'):
-                self.logger.info(f"CUDA memory summary: {torch.cuda.memory_summary()}")
+                torch.cuda.memory_summary()
