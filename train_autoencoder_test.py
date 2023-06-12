@@ -29,8 +29,7 @@ def main(cmd):
     print(gpus)
     print("cmd.use_accelerator", igc_autoencoder.is_accelerator)
     print("igc_autoencoder.device", igc_autoencoder.device)
-
-    # igc_autoencoder.train()
+    igc_autoencoder.train()
 
 
 if __name__ == '__main__':
