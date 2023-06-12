@@ -27,8 +27,7 @@ def main(cmd):
         is_inference=False)
 
     print(gpus)
-    print("cmd.use_accelerator", igc_autoencoder.is_accelerator)
-    print("igc_autoencoder.device", igc_autoencoder.device)
+    igc_autoencoder.show_accelerator_info()
     igc_autoencoder.train()
 
 

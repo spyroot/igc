@@ -105,3 +105,24 @@ class IgcBaseState:
                 self.logger.info(f"CUDA utilization:", torch.cuda.utilization())
             if hasattr(torch.cuda, 'memory_summary'):
                 torch.cuda.memory_summary()
+
+    def show_accelerator_info(self):
+        """
+        Show information about the accelerator used.
+        """
+        if self.is_accelerator:
+            self.logger.info("Accelerator Configuration:")
+            self.logger.info(f"is main process: {self.accelerator.is_main_process}")
+            self.logger.info(f"Distributed Training: {self.accelerator.distributed_type}")
+            self.logger.info(f"Device Placement: {self.accelerator.device_placement}")
+            self.logger.info(f"Split Batches: {self.accelerator.split_batches}")
+            self.logger.info(f"Mixed Precision: {self.accelerator.mixed_precision}")
+            self.logger.info(f"Project Directory: {self.accelerator.project_dir}")
+            self.logger.info(f"Dispatch Batches: {self.accelerator.dispatch_batches}")
+            self.logger.info(f"Even Batches: {self.accelerator.even_batches}")
+            self.logger.info(f"RNG Types: {self.accelerator.rng_types}")
+            self.logger.info(f"Log With: {self.accelerator.log_with}")
+            self.logger.info(f"Step Scheduler with Optimizer: {self.accelerator.step_scheduler_with_optimizer}")
+
+
+
