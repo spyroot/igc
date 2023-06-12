@@ -131,7 +131,6 @@ class AutoencoderTrainer(IgcBaseModule):
 
         # self._encoder_model.to(self.device)
         self._encoder_model.eval()
-        self.model_autoencoder.to(self.device)
         self.model_autoencoder.train()
 
         if self.module_checkpoint_dir is not None:
