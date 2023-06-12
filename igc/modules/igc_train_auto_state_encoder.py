@@ -121,7 +121,7 @@ class AutoencoderTrainer(IgcBaseModule):
 
         torch.cuda.empty_cache()
 
-        self._encoder_model.to(self.device)
+        # self._encoder_model.to(self.device)
         self._encoder_model.eval()
 
         self.model_autoencoder.to(self.device)
@@ -154,7 +154,7 @@ class AutoencoderTrainer(IgcBaseModule):
             total_loss = 0.0
             for batch in train_dataloader:
                 with torch.no_grad():
-                    batch = {key: value.to(self.device) for key, value in batch.items()}
+                    # batch = {key: value.to(self.device) for key, value in batch.items()}
                     output = self._encoder_model(**batch)
 
                 hidden_state = output.last_hidden_state
