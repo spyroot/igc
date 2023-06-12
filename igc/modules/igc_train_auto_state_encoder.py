@@ -11,7 +11,6 @@ from .base.igc_metric_logger import MetricLogger
 from igc.modules.llm.igc_autoencoder import AutoStateEncoder
 from igc.shared.shared_torch_builder import TorchBuilder
 import torch.nn.functional as F
-from accelerate import Accelerator
 
 
 class AutoencoderTrainer(IgcBaseModule):
