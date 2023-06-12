@@ -150,12 +150,11 @@ class AutoencoderTrainer(IgcBaseModule):
             shuffle=True,
             collate_fn=AutoencoderTrainer.custom_collate_fn)
 
-        print("self.optimizer")
         # train_dataloader, self.model_autoencoder, self.optimizer,  = self.accelerator.prepare(
         #     train_dataloader, self.model_autoencoder, self.optimizer)
 
-        self.model_autoencoder = self.accelerator.prepare(self.model_autoencoder)
-        self.optimizer = self.accelerator.prepare(self.optimizer)
+        self.model_autoencoder, self.optimizer = self.accelerator.prepare(
+            self.model_autoencoder, self.optimizer)
 
         self.model_autoencoder.train()
         # self.model_autoencoder.to(self.device)
