@@ -152,7 +152,7 @@ class AutoencoderTrainer(IgcBaseModule):
             collate_fn=AutoencoderTrainer.custom_collate_fn)
 
         self.model, self.optimizer, train_dataloader = self.accelerator.prepare(
-            [self.model_autoencoder, self.optimizer, train_dataloader],
+            [self.model_autoencoder, self.optimizer],
             device_placement=[True])
 
         # batch = {key: value.to(self.device) for key, value in batch.items()}
@@ -162,9 +162,9 @@ class AutoencoderTrainer(IgcBaseModule):
             for batch in train_dataloader:
                 # with torch.no_grad():
                 #     output = self._encoder_model(**batch)
+
                 hidden_state = self.sample(batch)
                 hidden_state = hidden_state.to(self.device)
-                print("req grad", hidden_state.requires_grad)  # Check if requires_grad is False
 
                 flat_input = hidden_state.view(hidden_state.shape[0], -1)
                 latent_repr = self.model_autoencoder.encoder(flat_input)
