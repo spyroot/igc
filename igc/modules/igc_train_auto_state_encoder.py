@@ -191,3 +191,97 @@ class AutoencoderTrainer(IgcBaseModule):
         # self.save_model()
         # # Save the trained model if desired
         # torch.save(self.model.state_dict(), "trained_model.pth")
+
+    @torch.no_grad()
+    def sample_all(self):
+        """
+
+        :return:
+        """
+        train_dataset, _ = self.split_slice_dataset()
+        train_dataloader = DataLoader(
+            train_dataset,
+            batch_size=self.batch_size,
+            sampler=None,
+            num_workers=self.num_workers,
+            pin_memory=False,
+            shuffle=True,
+            collate_fn=AutoencoderTrainer.custom_collate_fn)
+
+        tensors = []
+        for batch in train_dataloader:
+            hidden_state = self.sample(batch)
+            flat_input = hidden_state.view(hidden_state.shape[0], -1).to(self.device)
+            tensors.append(flat_input)
+        return tensors
+
+    def train_offline(self):
+        """
+        :return:
+        """
+        tensors = self.sample_all()
+
+        self.logger.info(
+            f"Rank {self.rank} starting train, device {self.device}")
+
+        # torch.cuda.empty_cache()
+        # # self._encoder_model.to(self.device)
+        # self._encoder_model.eval()
+        #
+        # if self.module_checkpoint_dir is not None:
+        #     last_epoch = self.load_checkpoint(self.module_checkpoint_dir)
+        # else:
+        #     last_epoch = 0
+        #
+        # num_epochs = 10
+        # self.logger.info(f"Starting training")
+        #
+        # train_dataset, _ = self.split_slice_dataset()
+        # train_dataloader = DataLoader(
+        #     train_dataset,
+        #     batch_size=self.batch_size,
+        #     sampler=None,
+        #     num_workers=self.num_workers,
+        #     pin_memory=False,
+        #     shuffle=True,
+        #     collate_fn=AutoencoderTrainer.custom_collate_fn)
+        #
+        # # train_dataloader, self.model_autoencoder, self.optimizer,  = self.accelerator.prepare(
+        # #     train_dataloader, self.model_autoencoder, self.optimizer)
+        #
+        # train_dataloader, self.model_autoencoder, self.optimizer = self.accelerator.prepare(
+        #     [train_dataloader, self.model_autoencoder, self.optimizer],
+        #     device_placement=[True])
+        #
+        # self.model_autoencoder.train()
+        #
+        # # self.model_autoencoder.train()
+        # self.model_autoencoder.to(self.device)
+        # # batch = {key: value.to(self.device) for key, value in batch.items()}
+        # # training loop
+        #
+        for epoch in range(0, self.num_epochs):
+            total_loss = 0.0
+            for batch in tensors:
+                latent_repr = self.model_autoencoder.encoder(batch).to(self.device)
+                latent_repr = latent_repr.to(self.device).to(self.device)
+                reconstructed = self.model_autoencoder.decoder(latent_repr).to(self.device)
+                loss = F.mse_loss(batch, reconstructed, reduction="none")
+                loss = loss.mean()
+
+                self.optimizer.zero_grad()
+                self.accelerator.backward(loss)
+                # loss.backward()
+                self.optimizer.step()
+                print(f"Loss {loss}")
+
+                # Update the total loss
+                total_loss += loss.item()
+
+            # Print the average loss for the epoch
+            average_loss = total_loss / len(tensors)
+            print(f"Epoch [{epoch + 1}/{self.num_epochs}], Average Loss: {average_loss}")
+
+        self.save_model()
+        # Save the trained model if desired
+        torch.save(self.model.state_dict(), "trained_model.pth")

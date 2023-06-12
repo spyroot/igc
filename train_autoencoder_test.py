@@ -21,9 +21,9 @@ def main(cmd):
         "autoencoder", cmd, model, tokenizers, ds=dataset, metric_logger=None,
         is_inference=False)
 
-    print(gpus)
-    igc_autoencoder.show_accelerator_info()
-    igc_autoencoder.train()
+    # print(gpus)
+    # igc_autoencoder.show_accelerator_info()
+    igc_autoencoder.train_offline()
 
 
 if __name__ == '__main__':
