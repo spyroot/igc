@@ -124,6 +124,7 @@ class AutoencoderTrainer(IgcBaseModule):
         # self._encoder_model.to(self.device)
         self._encoder_model.eval()
         print(f"_encoder_model device: {next(self._encoder_model.parameters()).device}")
+        print(f"_encoder_model device: {next(self.model.device)}")
 
         self.model_autoencoder.to(self.device)
         self.model_autoencoder.train()
