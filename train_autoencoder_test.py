@@ -14,14 +14,7 @@ def main(cmd):
     """
     :return:
     """
-    if "CUDA_VISIBLE_DEVICES" in os.environ:
-        print(f"CUDA_VISIBLE_DEVICES: {os.environ['CUDA_VISIBLE_DEVICES']}")
-
-    accelerator = build_accelerator(cmd)
-    rank = int(os.environ.get('LOCAL_RANK', -1))
     gpus = TorchBuilder.get_available_gpus()
-    print(gpus)
-
     model, tokenizers = from_pretrained_default(cmd)
     dataset = JSONDataset(
         "datasets",
@@ -33,7 +26,11 @@ def main(cmd):
         "autoencoder", cmd, model, tokenizers, ds=dataset, metric_logger=None,
         is_inference=False)
 
-    igc_autoencoder.train()
+    print(gpus)
+    print("cmd.use_accelerator", igc_autoencoder.is_accelerator)
+    print("igc_autoencoder.device", igc_autoencoder.device)
+
+    # igc_autoencoder.train()
 
 
 if __name__ == '__main__':

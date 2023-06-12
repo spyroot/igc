@@ -7,25 +7,21 @@ Author:Mus mbayramo@stanford.edu
 """
 import argparse
 import os
-import sys
 import warnings
 from pathlib import Path
 from collections import namedtuple
 from typing import Optional, Any
 
-import loguru
 import torch
 from torch.utils.data import random_split, Subset
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from igc.ds.redfish_dataset import JSONDataset
-from igc.shared.shared_torch_utils import get_device
 
 from .igc_metric_logger import MetricLogger
 from .igc_specs import make_default_spec
 from .igc_state import IgcBaseState
 from .igc_tokenize_state import GenericTokenizeState
-from ...shared.shared_accelerator import build_accelerator
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
@@ -148,7 +144,7 @@ class IgcBaseModule(IgcBaseState):
         self._trainer_specs = make_default_spec(self._trainer_args)
 
         # configure logger
-        self._configure_logger(module_name)
+        self._configure_metric_logger(module_name)
         self.logger.info(f"Model {self.module_name} saving dir {self.module_checkpoint_dir}")
         self._debug_info()
 
@@ -206,26 +202,12 @@ class IgcBaseModule(IgcBaseState):
 
         return str(checkpoint_path_dir)
 
-    def _configure_logger(self, module_name: str):
+    def _configure_metric_logger(self, module_name: str):
         """
         Configures the logger for the module.
 
         :param module_name: The name of the module.
         """
-        logs_dir = self._trainer_args.log_dir or "logs"
-        os.makedirs(logs_dir, exist_ok=True)
-
-        self._log_file = os.path.join(logs_dir, f"{module_name}.log")
-        self._log_level = self._trainer_args.log_level.upper()
-        self.logger = loguru.logger.bind(module_name=module_name)
-        self.logger.remove()
-
-        if self._trainer_args.log_to_file:
-            log_file = os.path.join(logs_dir, f"{module_name}.log")
-            self.logger.add(log_file, level=self._log_level)
-        else:
-            self.logger.add(sys.stdout, level=self._log_level)
-
         if self.metric_logger is not None:
             self.metric_logger.set_logger(self.logger)
             self.metric_logger.set_log_level(self._log_level)
