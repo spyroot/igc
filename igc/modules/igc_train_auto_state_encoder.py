@@ -163,7 +163,7 @@ class AutoencoderTrainer(IgcBaseModule):
                 # with torch.no_grad():
                 #     output = self._encoder_model(**batch)
 
-                hidden_state = self.sample(batch)
+                hidden_state = self.sample(batch).to(self.device)
                 hidden_state = hidden_state.to(self.device)
                 self.accelerator.print(hidden_state.shape)
 
