@@ -132,13 +132,10 @@ class AutoencoderTrainer(IgcBaseModule):
         else:
             last_epoch = 0
 
-        self.log_memory_usage()
-
         num_epochs = 10
         self.logger.info(f"Starting training")
 
         train_dataset, _ = self.split_slice_dataset()
-
         train_dataloader = DataLoader(
             train_dataset,
             batch_size=self.batch_size,
@@ -149,7 +146,7 @@ class AutoencoderTrainer(IgcBaseModule):
             collate_fn=AutoencoderTrainer.custom_collate_fn)
 
         self.model, self.optimizer, train_dataloader = accelerator.prepare(
-            [self.model, self.optimizer, train_dataloader],
+            [self.model_autoencoder, self.optimizer, train_dataloader],
             device_placement=[True])
 
         # training loop
@@ -157,7 +154,7 @@ class AutoencoderTrainer(IgcBaseModule):
             total_loss = 0.0
             for batch in train_dataloader:
                 with torch.no_grad():
-                    batch = {key: value.to(self.device) for key, value in batch.items()}
+                    # batch = {key: value.to(self.device) for key, value in batch.items()}
                     output = self._encoder_model(**batch)
 
                 hidden_state = output.last_hidden_state
@@ -170,6 +167,7 @@ class AutoencoderTrainer(IgcBaseModule):
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+                print(f"Loss {loss}")
 
                 # Update the total loss
                 total_loss += loss.item()
