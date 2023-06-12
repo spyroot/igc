@@ -15,7 +15,7 @@ def main(cmd):
     if "CUDA_VISIBLE_DEVICES" in os.environ:
         print(f"CUDA_VISIBLE_DEVICES: {os.environ['CUDA_VISIBLE_DEVICES']}")
 
-    accelerator = Accelerator(device_placement=True, split_batches=True)
+    accelerator = Accelerator(device_placement=True, split_batches=True, mixed_precision="fp16")
     cmd.device = accelerator.device
 
     model, tokenizers = from_pretrained_default(cmd)
@@ -26,7 +26,8 @@ def main(cmd):
         do_consistency_check=True)
 
     igc_autoencoder = AutoencoderTrainer(
-        "autoencoder", cmd, model, tokenizers, ds=dataset, metric_logger=None, is_inference=False, device=accelerator.device)
+        "autoencoder", cmd, model, tokenizers, ds=dataset, metric_logger=None,
+        is_inference=False, device=accelerator.device)
     igc_autoencoder.device = accelerator.device
     igc_autoencoder.accelerator = accelerator
     igc_autoencoder.train()
