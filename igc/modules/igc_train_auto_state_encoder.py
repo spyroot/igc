@@ -172,6 +172,7 @@ class AutoencoderTrainer(IgcBaseModule):
 
                 # Update the total loss
                 total_loss += loss.item()
+                break
 
             # Print the average loss for the epoch
             average_loss = total_loss / len(train_dataloader)
