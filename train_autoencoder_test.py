@@ -20,10 +20,11 @@ def main(cmd):
         tokenizer=tokenizers,
         do_consistency_check=True)
 
-    igc = AutoencoderTrainer("autoencoder", cmd, model, tokenizers, ds=dataset, metric_logger=None, is_inference=False)
+    igc_autoencoder = AutoencoderTrainer("autoencoder", cmd, model, tokenizers, ds=dataset, metric_logger=None,
+                                         is_inference=False)
+    igc_autoencoder.train()
 
 
 if __name__ == '__main__':
     args = shared_main()
     main(args)
-
