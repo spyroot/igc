@@ -32,6 +32,7 @@ class IgcMain:
         """
         if self._specs.train:
             _, tokenizer = self._from_pretrained_fn(self._specs, only_tokenizer=True)
+
             dataset = JSONDataset(
                 self._directory_path, verbose=True, tokenizer=tokenizer)
 
