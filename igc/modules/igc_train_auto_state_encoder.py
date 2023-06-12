@@ -123,7 +123,7 @@ class AutoencoderTrainer(IgcBaseModule):
         self.device = accelerator.device
 
         self.logger.info(
-            f"Rank {self.rank} starting train, device {self.device}")
+            f"Rank {self.rank} starting train, device {self.device} {accelerator.device}")
 
         torch.cuda.empty_cache()
 
