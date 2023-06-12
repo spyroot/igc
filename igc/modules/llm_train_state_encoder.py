@@ -238,8 +238,8 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         #     [self.model, self.optimizer, train_dataloader, eval_dataset],
         #     device_placement=[True])
 
-        self.model, self.optimizer, train_dataloader, eval_dataset = accelerator.prepare(
-            [self.model, self.optimizer, train_dataloader, eval_dataset],
+        self.model, self.optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
+            [self.model, self.optimizer, train_dataloader, eval_dataloader],
             device_placement=[True])
 
         if self.is_quantize:
