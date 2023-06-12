@@ -3,6 +3,7 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
+from torch import autocast
 
 from torch.utils.data import DataLoader
 from igc.ds.redfish_dataset import JSONDataset
@@ -60,7 +61,8 @@ class AutoencoderTrainer(IgcBaseModule):
         # self._llm_model.resize_token_embeddings(len(llm_tokenizer))
         input_shape = self._encoder_model.wpe.weight.shape
         self.emb_shape = (input_shape[0] - 1, input_shape[1])
-        self.model_autoencoder = AutoStateEncoder()
+
+        self.model_autoencoder = AutoStateEncoder(input_shape=input_shape)
 
         self.logger.info(f"Creating optimizer {spec.auto_encoder_optimizer} "
                          f"lr: {spec.auto_encoder_lr} "
@@ -205,16 +207,37 @@ class AutoencoderTrainer(IgcBaseModule):
             num_workers=self.num_workers,
             pin_memory=False,
             shuffle=True,
+            drop_last=True,
             collate_fn=AutoencoderTrainer.custom_collate_fn)
 
         tensors = []
         with torch.no_grad():
             for batch in train_dataloader:
-                hidden_state = self._encoder_model(**batch).hidden_state
-                flat_input = hidden_state.view(hidden_state.shape[0], -1)
-                tensors.append(flat_input.detach().cpu())
+                hidden_state = self._encoder_model(**batch).last_hidden_state
+                # flat_input = hidden_state.view(hidden_state.shape[0], -1)
+                tensors.append(hidden_state.detach().cpu())
 
         return tensors
+
+    def measure_reconstruction(self, test_data):
+        """
+        Measure the reconstruction performance of the autoencoder on the test data.
+        :param test_data: Test dataset
+        :return: Average reconstruction loss
+        """
+        self.model_autoencoder.eval()
+        total_loss = 0.0
+
+        with torch.no_grad():
+            for batch in test_data:
+                batch = batch.to(self.device)
+                reconstructed = self.model_autoencoder(batch)
+                batch = batch.view(batch.shape[0], -1)
+                loss = F.mse_loss(batch, reconstructed, reduction="mean")
+                total_loss += loss.item()
+
+        average_loss = total_loss / len(test_data)
+        return average_loss
 
     def train_offline(self):
         """
@@ -223,6 +246,11 @@ class AutoencoderTrainer(IgcBaseModule):
         tensors = self.sample_all()
         self.logger.info(
             f"Rank {self.rank} starting train, device {self.device}")
+
+        del self._encoder_model
+        del self.model
+
+        print(self.model_autoencoder)
 
         # torch.cuda.empty_cache()
         # # self._encoder_model.to(self.device)
@@ -255,33 +283,33 @@ class AutoencoderTrainer(IgcBaseModule):
         #
         # self.model_autoencoder.train()
         #
-        # # self.model_autoencoder.train()
-        # self.model_autoencoder.to(self.device)
+        self.model_autoencoder.train()
+        self.model_autoencoder.to(self.device)
         # # batch = {key: value.to(self.device) for key, value in batch.items()}
         # # training loop
-        #
+
+        # batch = tensors[0]
+        # batch = batch.to(self.device)
+
         for epoch in range(0, self.num_epochs):
             total_loss = 0.0
             for batch in tensors:
-                latent_repr = self.model_autoencoder.encoder(batch).to(self.device)
-                latent_repr = latent_repr.to(self.device).to(self.device)
-                reconstructed = self.model_autoencoder.decoder(latent_repr).to(self.device)
+                batch = batch.to(self.device)
+                reconstructed = self.model_autoencoder(batch)
+                batch = batch.view(batch.shape[0], -1)
                 loss = F.mse_loss(batch, reconstructed, reduction="none")
                 loss = loss.mean()
-
+                #
                 self.optimizer.zero_grad()
-                self.accelerator.backward(loss)
-                # loss.backward()
+                # self.accelerator.backward(loss)
+                loss.backward()
                 self.optimizer.step()
-                print(f"Loss {loss}")
-
-                # Update the total loss
                 total_loss += loss.item()
-
-            # Print the average loss for the epoch
+        #
+        #     # Print the average loss for the epoch
             average_loss = total_loss / len(tensors)
             print(f"Epoch [{epoch + 1}/{self.num_epochs}], Average Loss: {average_loss}")
-
-        self.save_model()
-        # Save the trained model if desired
-        torch.save(self.model.state_dict(), "trained_model.pth")
+        #
+        # # self.save_model()
+        # # # Save the trained model if desired
+        # # torch.save(self.model.state_dict(), "trained_model.pth")
