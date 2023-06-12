@@ -139,6 +139,7 @@ class AutoencoderTrainer(IgcBaseModule):
             batch_size=self.batch_size,
             sampler=None,
             num_workers=self.num_workers,
+            pin_memory=False,
             shuffle=True,
             collate_fn=AutoencoderTrainer.custom_collate_fn)
 
