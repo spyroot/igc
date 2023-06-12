@@ -120,9 +120,6 @@ class AutoencoderTrainer(IgcBaseModule):
         """
         :return:
         """
-        # accelerator = Accelerator(device_placement=True, split_batches=True)
-        # self.device = accelerator.device
-
         self.logger.info(
             f"Rank {self.rank} starting train, device {self.device}")
 
@@ -157,6 +154,7 @@ class AutoencoderTrainer(IgcBaseModule):
             device_placement=[True])
 
         self.model_autoencoder.train()
+
         # self.model_autoencoder.train()
         # self.model_autoencoder.to(self.device)
         # batch = {key: value.to(self.device) for key, value in batch.items()}
@@ -170,9 +168,9 @@ class AutoencoderTrainer(IgcBaseModule):
 
                 hidden_state = self.sample(batch)
                 flat_input = hidden_state.view(hidden_state.shape[0], -1).to(self.device)
-                latent_repr = self.model_autoencoder.encoder(flat_input)
-                latent_repr = latent_repr.to(self.device)
-                reconstructed = self.model_autoencoder.decoder(latent_repr)
+                latent_repr = self.model_autoencoder.encoder(flat_input).to(self.device)
+                latent_repr = latent_repr.to(self.device).to(self.device)
+                reconstructed = self.model_autoencoder.decoder(latent_repr).to(self.device)
                 loss = F.mse_loss(flat_input, reconstructed, reduction="none")
                 loss = loss.mean()
 

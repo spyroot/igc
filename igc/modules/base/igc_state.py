@@ -55,7 +55,6 @@ class IgcBaseState:
 
         self.logger = loguru.logger
         self._configure_logger(module_name)
-
         self.rank = int(os.environ.get('LOCAL_RANK', -1))
 
     def _prepare_checkpoint_dir(self):
