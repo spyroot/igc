@@ -152,10 +152,10 @@ class AutoencoderTrainer(IgcBaseModule):
 
         print("self.optimizer")
         train_dataloader, self.model_autoencoder, self.optimizer,  = self.accelerator.prepare(
-            [train_dataloader, self.model_autoencoder, self.optimizer])
+            train_dataloader, self.model_autoencoder, self.optimizer)
 
         self.model_autoencoder.train()
-        self.model_autoencoder.to(self.device)
+        # self.model_autoencoder.to(self.device)
 
         # batch = {key: value.to(self.device) for key, value in batch.items()}
         # training loop
