@@ -156,7 +156,7 @@ class AutoencoderTrainer(IgcBaseModule):
         self.model_autoencoder.train()
         self.model_autoencoder, self.optimizer = self.accelerator.prepare(
             train_dataloader, self.model_autoencoder, self.optimizer,
-            device_placement=[False, True, True])
+            device_placement=[True, True, True])
 
         # self.model_autoencoder.train()
         # self.model_autoencoder.to(self.device)
