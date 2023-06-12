@@ -165,6 +165,7 @@ class AutoencoderTrainer(IgcBaseModule):
 
                 hidden_state = self.sample(batch)
                 hidden_state = hidden_state.to(self.device)
+                self.accelerator.print(hidden_state.shape)
 
                 flat_input = hidden_state.view(hidden_state.shape[0], -1)
                 latent_repr = self.model_autoencoder.encoder(flat_input)
