@@ -128,7 +128,6 @@ class AutoencoderTrainer(IgcBaseModule):
             f"Rank {self.rank} starting train, device {self.device}")
 
         torch.cuda.empty_cache()
-        self.accelerator.free_memory()
 
         # self._encoder_model.to(self.device)
         self._encoder_model.eval()
@@ -153,7 +152,7 @@ class AutoencoderTrainer(IgcBaseModule):
             collate_fn=AutoencoderTrainer.custom_collate_fn)
 
         self.model, self.optimizer, train_dataloader = self.accelerator.prepare(
-            [train_dataset, self.model_autoencoder, self.optimizer],
+            [train_dataloader, self.model_autoencoder, self.optimizer],
             device_placement=[True])
 
         # batch = {key: value.to(self.device) for key, value in batch.items()}
