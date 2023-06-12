@@ -174,7 +174,8 @@ class AutoencoderTrainer(IgcBaseModule):
                 loss = loss.mean()
 
                 self.optimizer.zero_grad()
-                loss.backward()
+                self.accelerator.backward(loss)
+                # loss.backward()
                 self.optimizer.step()
                 print(f"Loss {loss}")
 
