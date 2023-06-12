@@ -91,6 +91,18 @@ class IgcBaseState:
         else:
             self.logger.add(sys.stdout, level=self._log_level)
 
+    def is_distributed(self):
+        """
+        :return:
+        """
+        return self.rank != -1
+
+    def is_rank_zero(self):
+        """
+        :return:
+        """
+        return self.rank == -1 or self.rank == 0
+
     def log_memory_usage(self):
         """
         Log memory usage.

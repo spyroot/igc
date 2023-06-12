@@ -1,6 +1,7 @@
 import argparse
 from typing import Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch import autocast
@@ -118,82 +119,6 @@ class AutoencoderTrainer(IgcBaseModule):
             output = self._encoder_model(**batch)
         return output.last_hidden_state.to(self.device)
 
-    def train(self):
-        """
-        :return:
-        """
-        self.logger.info(
-            f"Rank {self.rank} starting train, device {self.device}")
-
-        torch.cuda.empty_cache()
-
-        # self._encoder_model.to(self.device)
-        self._encoder_model.eval()
-
-        if self.module_checkpoint_dir is not None:
-            last_epoch = self.load_checkpoint(self.module_checkpoint_dir)
-        else:
-            last_epoch = 0
-
-        num_epochs = 10
-        self.logger.info(f"Starting training")
-
-        train_dataset, _ = self.split_slice_dataset()
-        train_dataloader = DataLoader(
-            train_dataset,
-            batch_size=self.batch_size,
-            sampler=None,
-            num_workers=self.num_workers,
-            pin_memory=False,
-            shuffle=True,
-            collate_fn=AutoencoderTrainer.custom_collate_fn)
-
-        # train_dataloader, self.model_autoencoder, self.optimizer,  = self.accelerator.prepare(
-        #     train_dataloader, self.model_autoencoder, self.optimizer)
-
-        train_dataloader, self.model_autoencoder, self.optimizer = self.accelerator.prepare(
-            [train_dataloader, self.model_autoencoder, self.optimizer],
-            device_placement=[True])
-
-        self.model_autoencoder.train()
-
-        # self.model_autoencoder.train()
-        self.model_autoencoder.to(self.device)
-        # batch = {key: value.to(self.device) for key, value in batch.items()}
-        # training loop
-
-        for epoch in range(last_epoch, self.num_epochs):
-            total_loss = 0.0
-            for batch in train_dataloader:
-                # with torch.no_grad():
-                #     output = self._encoder_model(**batch)
-
-                hidden_state = self.sample(batch)
-                flat_input = hidden_state.view(hidden_state.shape[0], -1).to(self.device)
-                latent_repr = self.model_autoencoder.encoder(flat_input).to(self.device)
-                latent_repr = latent_repr.to(self.device).to(self.device)
-                reconstructed = self.model_autoencoder.decoder(latent_repr).to(self.device)
-                loss = F.mse_loss(flat_input, reconstructed, reduction="none")
-                loss = loss.mean()
-
-                self.optimizer.zero_grad()
-                self.accelerator.backward(loss)
-                # loss.backward()
-                self.optimizer.step()
-                print(f"Loss {loss}")
-
-                # Update the total loss
-                total_loss += loss.item()
-
-            # Print the average loss for the epoch
-            average_loss = total_loss / len(train_dataloader)
-            print(f"Epoch [{epoch + 1}/{num_epochs}], Average Loss: {average_loss}")
-
-        # Perform validation or evaluation steps if needed
-        # self.save_model()
-        # # Save the trained model if desired
-        # torch.save(self.model.state_dict(), "trained_model.pth")
-
     @torch.no_grad()
     def sample_all(self):
         """
@@ -240,54 +165,23 @@ class AutoencoderTrainer(IgcBaseModule):
         average_loss = total_loss / len(test_data)
         return average_loss
 
-    def train_offline(self):
+    def train(self):
         """
         :return:
         """
-        # tensors = self.sample_all()
-        # self.logger.info(
-        #     f"Rank {self.rank} starting train, device {self.device}")
-        #
-        # del self._encoder_model
-        # del self.model
-        #
-        # print(self.model_autoencoder)
+        self.logger.info(
+            f"Rank {self.rank} starting train, device {self.device}")
+
+        if self.module_checkpoint_dir is not None:
+            last_epoch = self.load_checkpoint(self.module_checkpoint_dir)
+        else:
+            last_epoch = 0
 
         # torch.cuda.empty_cache()
-        # # self._encoder_model.to(self.device)
-        # self._encoder_model.eval()
-        #
-        # if self.module_checkpoint_dir is not None:
-        #     last_epoch = self.load_checkpoint(self.module_checkpoint_dir)
-        # else:
-        #     last_epoch = 0
-        #
-        # num_epochs = 10
-        # self.logger.info(f"Starting training")
-        #
-        # train_dataset, _ = self.split_slice_dataset()
-        # train_dataloader = DataLoader(
-        #     train_dataset,
-        #     batch_size=self.batch_size,
-        #     sampler=None,
-        #     num_workers=self.num_workers,
-        #     pin_memory=False,
-        #     shuffle=True,
-        #     collate_fn=AutoencoderTrainer.custom_collate_fn)
-        #
-        # # train_dataloader, self.model_autoencoder, self.optimizer,  = self.accelerator.prepare(
-        # #     train_dataloader, self.model_autoencoder, self.optimizer)
-        #
-        # train_dataloader, self.model_autoencoder, self.optimizer = self.accelerator.prepare(
-        #     [train_dataloader, self.model_autoencoder, self.optimizer],
-        #     device_placement=[True])
-        #
-        # self.model_autoencoder.train()
-        #
 
-        train_dataset, _ = self.split_slice_dataset()
+        self.logger.info(f"Starting training")
         train_dataloader = DataLoader(
-            train_dataset,
+            self.dataset,
             batch_size=self.batch_size,
             sampler=None,
             num_workers=self.num_workers,
@@ -297,17 +191,17 @@ class AutoencoderTrainer(IgcBaseModule):
             collate_fn=AutoencoderTrainer.custom_collate_fn)
 
         self.model_autoencoder.eval()
-
         self.model_autoencoder.train()
         self.model_autoencoder.to(self.device)
-        # # batch = {key: value.to(self.device) for key, value in batch.items()}
-        # # training loop
 
-        # batch = tensors[0]
-        # batch = batch.to(self.device)
+        total_batches = len(train_dataloader)
+        batch_log_frequency = round(32 * 0.2)
 
-        for epoch in range(0, self.num_epochs):
+        for epoch in range(last_epoch, self.num_epochs):
             total_loss = 0.0
+            num_batches = 0
+
+            batch_losses = np.zeros(total_batches)
             for batch in train_dataloader:
                 with torch.no_grad():
                     output = self._encoder_model(**batch).last_hidden_state.to(self.device)
@@ -320,12 +214,28 @@ class AutoencoderTrainer(IgcBaseModule):
                 # self.accelerator.backward(loss)
                 loss.backward()
                 self.optimizer.step()
+
+                batch_losses[num_batches] = loss.item()
                 total_loss += loss.item()
 
-        #     # Print the average loss for the epoch
-            average_loss = total_loss / len(train_dataloader)
-            print(f"Epoch [{epoch + 1}/{self.num_epochs}], Average Loss: {average_loss}")
-        #
-        # # self.save_model()
-        # # # Save the trained model if desired
-        # # torch.save(self.model.state_dict(), "trained_model.pth")
+                # calculate the progress percentage
+                progress_percentage = int(round((num_batches + 1) / total_batches * 100))
+                if (num_batches % batch_log_frequency == 0) or (num_batches == total_batches - 1):
+                    print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Batch "
+                          f"{num_batches + 1}/{total_batches} "
+                          f"- Progress: {progress_percentage:.2f}% - Batch Loss mean: {batch_losses.mean():.4f}")
+                    self.metric_logger.log_metric("state_auto_encoder", batch_losses.mean(), epoch)
+
+                num_batches += 1
+
+            if num_batches > 0:
+                average_loss = total_loss / num_batches
+                if self.is_rank_zero():
+                    self.metric_logger.log_metric("llm_emb_epoch_loss", average_loss, epoch)
+                print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
+
+            # save best checkpoint
+            if self.is_rank_zero() and epoch % 100 == 0:
+                self.save_checkpoint(self.module_checkpoint_dir, epoch + 1)
+
+        self.save_model(self.module_checkpoint_dir)
