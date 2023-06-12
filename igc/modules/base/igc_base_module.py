@@ -139,6 +139,10 @@ class IgcBaseModule:
         os.makedirs(self.module_checkpoint_dir, exist_ok=True)
 
         self.rank = int(os.environ.get('LOCAL_RANK', -1))
+        if self.rank == 0:
+            self.device = torch.device("cuda:0")
+        if self.rank == 0:
+            self.device = torch.device("cuda:1")
 
         # update specs and add all defaults
         self._trainer_specs = make_default_spec(self._trainer_args)
