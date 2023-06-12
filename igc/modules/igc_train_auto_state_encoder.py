@@ -73,7 +73,6 @@ class AutoencoderTrainer(IgcBaseModule):
             spec.auto_encoder_weight_decay,
             **vars(spec)
         )
-        self.loss_fn = nn.CrossEntropyLoss()
 
     def _get_reconstruction_loss(self, batch):
         """

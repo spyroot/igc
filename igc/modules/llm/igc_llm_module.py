@@ -49,29 +49,34 @@ class IgcLanguageModule:
         self.logger.remove()
         self.logger.add(sys.stdout, level=self._log_level)
 
-    def train(self):
+    def train(self, use_pretrained_only: bool = True):
         """Main call to train all language models.
         :return:
         """
 
-        _, tokenizer = self._from_pretrained_fn(self.spec, only_tokenizer=True)
-        self.logger.info("Starting training.")
+        _model = None
 
         _is_llm_pre_trained = False
+        if use_pretrained_only:
+            _model, tokenizer = self._from_pretrained_fn(self.spec, only_tokenizer=False)
+            _is_llm_pre_trained = True
+        else:
+            _, tokenizer = self._from_pretrained_fn(self.spec, only_tokenizer=True)
+
+        self.logger.info("Starting training.")
+
         # we train State Encoder the goal here take rest api response
         # and re-present as state.
-        if self.spec.llm == "latent" or self.spec.llm == "all":
-            model, tokenizer = self._from_pretrained_fn(self.spec, only_tokenizer=True)
-            self.logger.info("Starting training state encoder.")
-            llm_embeddings = LlmEmbeddingsTrainer(
-                "state_encoder",
-                self.spec, model, tokenizer,
-                ds=self.ds, metric_logger=self.metric_logger)
-            llm_embeddings.train()
-            model = llm_embeddings.model
-            _is_llm_pre_trained = True
-
-        _model = None
+        if not use_pretrained_only:
+            if self.spec.llm == "latent" or self.spec.llm == "all":
+                model, tokenizer = self._from_pretrained_fn(self.spec, only_tokenizer=True)
+                self.logger.info("Starting training state encoder.")
+                llm_embeddings = LlmEmbeddingsTrainer(
+                    "state_encoder",
+                    self.spec, model, tokenizer,
+                    ds=self.ds, metric_logger=self.metric_logger)
+                llm_embeddings.train()
+                _is_llm_pre_trained = True
 
         if not _is_llm_pre_trained:
             self.logger.info("Loading state encoder state.")
