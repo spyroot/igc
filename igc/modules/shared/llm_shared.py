@@ -1,7 +1,7 @@
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 
-def from_pretrained_default(args, only_tokenizer=Falsee):
+def from_pretrained_default(args, only_tokenizer=False):
     """
     :param args: Argument parser namespace or string specifying the model_type.
     :param only_tokenizer: Whether to return only the tokenizer.
