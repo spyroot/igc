@@ -257,7 +257,7 @@ class IgcBaseModule:
                 "Invalid train_ratio. The train_ratio "
                 "value should be between 0 and 1 (exclusive).")
 
-        if sample_ratio <= 0 or sample_ratio >= 1:
+        if sample_ratio <= 0. or sample_ratio >= 1.:
             raise ValueError(
                 "Invalid sample_ratio. The sample_ratio value "
                 "should be between 0 and 1 (exclusive).")

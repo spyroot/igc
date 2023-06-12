@@ -136,8 +136,11 @@ class AutoencoderTrainer(IgcBaseModule):
 
         num_epochs = 10
         self.logger.info(f"Starting training")
+
+        train_dataset, _ = self.split_slice_dataset()
+
         train_dataloader = DataLoader(
-            self.dataset,
+            train_dataset,
             batch_size=self.batch_size,
             sampler=None,
             num_workers=self.num_workers,
