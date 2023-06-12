@@ -192,8 +192,8 @@ class IgcBaseModule:
             pad_token_id=llm_tokenizer.pad_token_id,
             eos_token=llm_tokenizer.eos_token,
             eos_token_id=llm_tokenizer.eos_token_id,
-            model_pad_token_id=llm_tokenizer.model.config.pad_token_id,
-            model_eos_token_id=llm_tokenizer.model.config.eos_token_id
+            model_pad_token_id=self.model.config.pad_token_id,
+            model_eos_token_id=self.model.config.eos_token_id
         )
 
     def _debug_info(self):
@@ -315,13 +315,28 @@ class IgcBaseModule:
             self.dataset, [train_size, eval_size])
 
     def save_strategy(self):
+        """
+
+        :return:
+        """
         return
 
     def _model_file(self, checkpoint_dir):
+        """
+
+        :param checkpoint_dir:
+        :return:
+        """
         return f"{checkpoint_dir}/{self.module_name}_last.pt"
 
     @staticmethod
     def model_file(model_dir: str, name: str):
+        """
+
+        :param model_dir:
+        :param name:
+        :return:
+        """
         return f"{model_dir}/{name}_last.pt"
 
     @staticmethod
