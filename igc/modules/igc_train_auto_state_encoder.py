@@ -50,6 +50,7 @@ class AutoencoderTrainer(IgcBaseModule):
         self._input_dim = self.model.config.hidden_size
         self._latent_dim = self.model.config.hidden_size
         self._learning_rate = spec.auto_encoder_lr
+        self.accelerator = None
 
         self.logger.info(f"Creating auto-encoder input dim"
                          f" {self._input_dim} {self._latent_dim} batch_size: {self.batch_size}")
@@ -119,8 +120,8 @@ class AutoencoderTrainer(IgcBaseModule):
         """
         :return:
         """
-        accelerator = Accelerator(device_placement=True, split_batches=True)
-        self.device = accelerator.device
+        # accelerator = Accelerator(device_placement=True, split_batches=True)
+        # self.device = accelerator.device
 
         self.logger.info(
             f"Rank {self.rank} starting train, device {self.device}")
