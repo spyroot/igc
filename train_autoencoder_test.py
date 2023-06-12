@@ -23,7 +23,7 @@ def main(cmd):
 
     # print(gpus)
     # igc_autoencoder.show_accelerator_info()
-    igc_autoencoder.train_offline()
+    igc_autoencoder.train()
 
 
 if __name__ == '__main__':
