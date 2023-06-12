@@ -285,7 +285,6 @@ class AutoencoderTrainer(IgcBaseModule):
         # self.model_autoencoder.train()
         #
 
-
         train_dataset, _ = self.split_slice_dataset()
         train_dataloader = DataLoader(
             train_dataset,
@@ -309,22 +308,20 @@ class AutoencoderTrainer(IgcBaseModule):
 
         for epoch in range(0, self.num_epochs):
             total_loss = 0.0
-            for batch in train_dataset:
+            for batch in train_dataloader:
                 with torch.no_grad():
-                    output = self._encoder_model(**batch)
-                    output.last_hidden_state.to(self.device)
-                hidden_state = batch.to(self.device)
-                reconstructed = self.model_autoencoder(hidden_state)
-                batch = batch.view(batch.shape[0], -1)
-                loss = F.mse_loss(batch, reconstructed, reduction="none")
+                    output = self._encoder_model(**batch).last_hidden_state.to(self.device)
+                reconstructed = self.model_autoencoder(output)
+                output = output.view(output.shape[0], -1)
+                loss = F.mse_loss(output, reconstructed, reduction="none")
                 loss = loss.mean()
-                #
+
                 self.optimizer.zero_grad()
                 # self.accelerator.backward(loss)
                 loss.backward()
                 self.optimizer.step()
                 total_loss += loss.item()
-        #
+
         #     # Print the average loss for the epoch
             average_loss = total_loss / len(train_dataloader)
             print(f"Epoch [{epoch + 1}/{self.num_epochs}], Average Loss: {average_loss}")
