@@ -195,7 +195,6 @@ class AutoencoderTrainer(IgcBaseModule):
     @torch.no_grad()
     def sample_all(self):
         """
-
         :return:
         """
         train_dataset, _ = self.split_slice_dataset()
@@ -209,10 +208,12 @@ class AutoencoderTrainer(IgcBaseModule):
             collate_fn=AutoencoderTrainer.custom_collate_fn)
 
         tensors = []
-        for batch in train_dataloader:
-            hidden_state = self.sample(batch)
-            flat_input = hidden_state.view(hidden_state.shape[0], -1).to(self.device)
-            tensors.append(flat_input)
+        with torch.no_grad():
+            for batch in train_dataloader:
+                hidden_state = self._encoder_model(**batch)
+                flat_input = hidden_state.view(hidden_state.shape[0], -1)
+                tensors.append(flat_input.detach().cpu())
+
         return tensors
 
     def train_offline(self):
@@ -220,7 +221,6 @@ class AutoencoderTrainer(IgcBaseModule):
         :return:
         """
         tensors = self.sample_all()
-
         self.logger.info(
             f"Rank {self.rank} starting train, device {self.device}")
 
