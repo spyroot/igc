@@ -168,6 +168,8 @@ class AutoencoderTrainer(IgcBaseModule):
                 #     output = self._encoder_model(**batch)
                 hidden_state = self.sample(batch)
                 hidden_state = hidden_state.to(self.device)
+                print("req grad", hidden_state.requires_grad)  # Check if requires_grad is False
+
                 flat_input = hidden_state.view(hidden_state.shape[0], -1)
                 latent_repr = self.model_autoencoder.encoder(flat_input)
                 reconstructed = self.model_autoencoder.decoder(latent_repr)
