@@ -154,7 +154,7 @@ class AutoencoderTrainer(IgcBaseModule):
             total_loss = 0.0
             for batch in train_dataloader:
                 with torch.no_grad():
-                    # batch = {key: value.to(self.device) for key, value in batch.items()}
+                    batch = {key: value.to(self.device) for key, value in batch.items()}
                     output = self._encoder_model(**batch)
 
                 hidden_state = output.last_hidden_state
