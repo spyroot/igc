@@ -119,7 +119,7 @@ class AutoencoderTrainer(IgcBaseModule):
         """
         :return:
         """
-        accelerator = Accelerator(device_placement=True)
+        accelerator = Accelerator(device_placement=True, split_batches=True)
         # self.device = accelerator.device
 
         self.device = torch.device("cuda:1")
