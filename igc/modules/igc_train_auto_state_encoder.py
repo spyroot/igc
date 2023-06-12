@@ -109,6 +109,12 @@ class AutoencoderTrainer(IgcBaseModule):
         batch = {key: torch.stack([s[key] for s in samples]) for key in included_keys}
         return batch
 
+    @torch.no_grad()
+    def sample(self, batch):
+        with torch.no_grad():
+            output = self._encoder_model(**batch)
+        return output.last_hidden_state
+
     def train(self):
         """
         :return:
@@ -156,10 +162,10 @@ class AutoencoderTrainer(IgcBaseModule):
         for epoch in range(last_epoch, self.num_epochs):
             total_loss = 0.0
             for batch in train_dataloader:
-                with torch.no_grad():
-                    output = self._encoder_model(**batch)
-
-                hidden_state = output.last_hidden_state.detach().to(self.device)
+                # with torch.no_grad():
+                #     output = self._encoder_model(**batch)
+                hidden_state = self.sample(batch)
+                hidden_state = hidden_state.to(self.device)
                 flat_input = hidden_state.view(hidden_state.shape[0], -1)
                 latent_repr = self.model_autoencoder.encoder(flat_input)
                 reconstructed = self.model_autoencoder.decoder(latent_repr)
@@ -173,7 +179,6 @@ class AutoencoderTrainer(IgcBaseModule):
 
                 # Update the total loss
                 total_loss += loss.item()
-                break
 
             # Print the average loss for the epoch
             average_loss = total_loss / len(train_dataloader)
