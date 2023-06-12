@@ -165,10 +165,10 @@ class AutoencoderTrainer(IgcBaseModule):
 
                 hidden_state = self.sample(batch)
                 hidden_state = hidden_state.to(self.device)
-                self.accelerator.print(hidden_state.shape)
 
                 flat_input = hidden_state.view(hidden_state.shape[0], -1).to(self.device)
                 latent_repr = self.model_autoencoder.encoder(flat_input)
+                latent_repr = latent_repr.to(self.device)
                 reconstructed = self.model_autoencoder.decoder(latent_repr)
                 loss = F.mse_loss(flat_input, reconstructed, reduction="none")
                 loss = loss.mean()
