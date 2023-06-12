@@ -150,12 +150,12 @@ class AutoencoderTrainer(IgcBaseModule):
             [self.model_autoencoder, self.optimizer, train_dataloader],
             device_placement=[True])
 
+        # batch = {key: value.to(self.device) for key, value in batch.items()}
         # training loop
         for epoch in range(last_epoch, self.num_epochs):
             total_loss = 0.0
             for batch in train_dataloader:
                 with torch.no_grad():
-                    # batch = {key: value.to(self.device) for key, value in batch.items()}
                     output = self._encoder_model(**batch)
 
                 hidden_state = output.last_hidden_state.to(self.device)
