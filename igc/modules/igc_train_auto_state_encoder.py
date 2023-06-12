@@ -152,7 +152,7 @@ class AutoencoderTrainer(IgcBaseModule):
             collate_fn=AutoencoderTrainer.custom_collate_fn)
 
         print("self.optimizer")
-        train_dataloader, self.model, self.optimizer,  = self.accelerator.prepare(
+        train_dataloader, self.model_autoencoder, self.optimizer,  = self.accelerator.prepare(
             [train_dataloader, self.model_autoencoder, self.optimizer])
 
         # batch = {key: value.to(self.device) for key, value in batch.items()}
