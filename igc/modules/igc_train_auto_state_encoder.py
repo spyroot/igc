@@ -131,7 +131,6 @@ class AutoencoderTrainer(IgcBaseModule):
 
         # self._encoder_model.to(self.device)
         self._encoder_model.eval()
-        self.model_autoencoder.train()
 
         if self.module_checkpoint_dir is not None:
             last_epoch = self.load_checkpoint(self.module_checkpoint_dir)
@@ -154,6 +153,8 @@ class AutoencoderTrainer(IgcBaseModule):
         print("self.optimizer")
         train_dataloader, self.model_autoencoder, self.optimizer,  = self.accelerator.prepare(
             [train_dataloader, self.model_autoencoder, self.optimizer])
+
+        self.model_autoencoder.train()
 
         # batch = {key: value.to(self.device) for key, value in batch.items()}
         # training loop
