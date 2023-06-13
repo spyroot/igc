@@ -136,21 +136,28 @@ def main(cmd):
     file_path1 = "datasets/orig/10.252.252.209/_redfish_v1_AccountService.json"
     file_path2 = "datasets/orig/10.252.252.209/_redfish_v1_AccountService_Accounts.json"
     file_path3 = "datasets/orig/10.252.252.209/_redfish_v1_Systems_System.Embedded.1_SecureBoot.json"
-    #
-    # masking_from_json_file_test(cmd, file_path1, "@odata.id")
-    # masking_from_json_file_test(cmd, file_path2, "@odata.id")
-    #
-    # # masking actions
-    # masking_from_json_file_test(cmd, file_path3, "Actions", end_tok=["Name"])
-    #
-    # # targets
-    # masking_from_json_file_test(cmd, file_path3, "target")
-    #
-    # # allowableValues
-    # masking_from_json_file_test(cmd, file_path3, "Redfish.AllowableValues", end_tok=["]"])
-    #
-    # # values
-    # masking_from_json_file_test(cmd, file_path3, ": ", end_tok=["\","])
+
+    print("### Starting checking odata masking from _redfish_v1_AccountService")
+    masking_from_json_file_test(cmd, file_path1, "@odata.id")
+    print("\n\n")
+    print("Starting checking odata masking from _redfish_v1_AccountService")
+    masking_from_json_file_test(cmd, file_path2, "@odata.id")
+    # masking actions
+    print("\n\n")
+    print("fStarting checking masking actions {file_path3}")
+    masking_from_json_file_test(cmd, file_path3, "Actions", end_tok=["Name"])
+    print("\n\n")
+    print("fStarting checking masking actions {file_path3}")
+    # targets
+    masking_from_json_file_test(cmd, file_path3, "target")
+    print("\n\n")
+    print(f"Starting checking masking AllowableValues {file_path3}")
+    # allowableValues
+    masking_from_json_file_test(cmd, file_path3, "Redfish.AllowableValues", end_tok=["]"])
+    print("\n\n")
+    print(f"Starting checking masking actions {file_path3}")
+    # values
+    masking_from_json_file_test(cmd, file_path3, ": ", end_tok=["\","])
 
     files = ["_redfish_v1_AccountService.json",
              "_redfish_v1_AccountService_Accounts.json,"
