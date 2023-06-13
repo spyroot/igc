@@ -149,12 +149,8 @@ class MaskedJSONDataset(JSONDataset, ABC):
         :param end_toks: The termination sequence to identify the end of the masked value
         :return: The computed new attention mask
         """
-        print("Original mask shape: ", attention_mask.shape)
         attention_mask = attention_mask.clone()
         attention_mask[:, :] = 0
-
-        print("Original target_key: ", target_key)
-        print("Original end_toks: ", end_toks)
 
         if isinstance(end_toks, str):
             end_toks = [end_toks]
@@ -164,11 +160,8 @@ class MaskedJSONDataset(JSONDataset, ABC):
         end_toks_lens = [len(end_toks) for end_toks in end_toks]
 
         target_len = len(target_tokens)
-
-        torch.set_printoptions(threshold=10000)  # Set the threshold value as per your requirement
-
         print(f"Start searching {target_key} tokens {target_tokens}")
-        print(f"Start in", input_ids)
+        print(f"End tokens {end_toks}")
 
         for i in range(input_ids.shape[1] - target_len + 1):
             if input_ids[0, i:i + target_len].tolist() == target_tokens:
@@ -231,22 +224,15 @@ class MaskedJSONDataset(JSONDataset, ABC):
         data = self._data["train_data"][idx]
 
         # modified_data = data.copy()
-        print("data input_ids", data['input_ids'].shape)
-        print("data attention_mask", data['input_ids'].shape)
-        print("data mask", data['attention_mask'])
 
         input_ids = data['input_ids'].unsqueeze(0)
         attention_mask = data['attention_mask'].unsqueeze(0)
-
-        print("data attention_mask", data['input_ids'].shape)
-        print("data mask un suizzed", attention_mask)
 
         for token, end_token in self.token_to_mask:
             new_mask = MaskedJSONDataset.mask_tensor_json_kv_span(
                 input_ids, attention_mask, self.tokenizer, token,  end_toks=end_token
             ).squeeze(0)
 
-            print("new mask", new_mask)
             if torch.all(new_mask == 0):
                 print("Attention mask contains all zeros")
             else:
