@@ -133,9 +133,15 @@ def main(cmd):
     :return:
     """
 
+
     file_path1 = "datasets/orig/10.252.252.209/_redfish_v1_AccountService.json"
     file_path2 = "datasets/orig/10.252.252.209/_redfish_v1_AccountService_Accounts.json"
     file_path3 = "datasets/orig/10.252.252.209/_redfish_v1_Systems_System.Embedded.1_SecureBoot.json"
+    print("\n\n")
+    print(f"Starting checking masking actions {file_path3}")
+    # masking_test_from_dataset(cmd, files)
+    masking_test_from_dataset_from_id(cmd)
+    print("\n\n")
 
     print("### Starting checking odata masking from _redfish_v1_AccountService")
     masking_from_json_file_test(cmd, file_path1, "@odata.id")
@@ -162,10 +168,6 @@ def main(cmd):
     files = ["_redfish_v1_AccountService.json",
              "_redfish_v1_AccountService_Accounts.json,"
              "_redfish_v1_Systems_System.Embedded.1_SecureBoot.json"]
-
-    # masking_test_from_dataset(cmd, files)
-    masking_test_from_dataset_from_id(cmd)
-
 
 if __name__ == '__main__':
     args = shared_main()
