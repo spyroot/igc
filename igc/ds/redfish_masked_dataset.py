@@ -10,54 +10,61 @@ from .redfish_dataset import JSONDataset
 class MaskedJSONDataset(JSONDataset, ABC):
 
     def __init__(self,
-                 raw_json_directory_path: str,
-                 default_tokenize: Optional[str] = "gpt2-xl",
+                 dataset_dir: Optional[str] = "datasets",
+                 default_tokenize: Optional[str] = "gpt2",
                  max_len: Optional[int] = 1024,
                  overlap: Optional[int] = 256,
-                 dataset_dir: Optional[str] = "datasets",
                  verbose: Optional[bool] = False,
                  recreate_dataset: Optional[bool] = False,
                  tokenizer: Optional[Any] = None,
                  transform=None,
                  target_transform=None,
                  is_force_download=False,
-                 do_consistency_check=True):
+                 do_consistency_check=True,
+                 raw_json_directory_path: Optional[str] = "~/.json_responses",
+                 ):
         """
-        :param raw_json_directory_path:
+
+        :param dataset_dir:
         :param default_tokenize:
         :param max_len:
         :param overlap:
-        :param dataset_dir:
         :param verbose:
         :param recreate_dataset:
         :param tokenizer:
+        :param transform:
+        :param target_transform:
+        :param is_force_download:
+        :param do_consistency_check:
+        :param raw_json_directory_path:
         """
+
         self.token_to_mask = [
             ("odata.id", ["\"},", "\"}"]),
         ]
         super().__init__(
-            raw_json_directory_path,
-            default_tokenize,
-            max_len,
-            overlap,
-            dataset_dir,
-            verbose,
-            recreate_dataset,
-            tokenizer,
-            transform,
-            target_transform,
-            is_force_download,
-            do_consistency_check
+            dataset_dir=dataset_dir,
+            default_tokenize=default_tokenize,
+            max_len=max_len,
+            overlap=overlap,
+            verbose=verbose,
+            recreate_dataset=recreate_dataset,
+            tokenizer=tokenizer,
+            transform=transform,
+            target_transform=target_transform,
+            is_force_download=is_force_download,
+            do_consistency_check=do_consistency_check,
+            raw_json_directory_path=raw_json_directory_path,
         )
         self._cache = [None] * len(self._data["train_data"])
 
     @staticmethod
     def mask_json_kv_span(
-            data: Dict[str, torch.Tensor],
-            tokenizer: PreTrainedTokenizer,
-            target_key: str,
-            end_toks: Union[str, List[str]] = "\"},",
-            return_original: bool = False,
+        data: Dict[str, torch.Tensor],
+        tokenizer: PreTrainedTokenizer,
+        target_key: str,
+        end_toks: Union[str, List[str]] = "\"},",
+        return_original: bool = False,
     ) -> torch.Tensor:
 
         """
@@ -84,46 +91,31 @@ class MaskedJSONDataset(JSONDataset, ABC):
         """
 
         return MaskedJSONDataset.mask_tensor_json_kv_span(
-            data['input_ids'], data['attention_mask'], tokenizer, target_key, end_toks, return_original)
+            data['input_ids'], data['attention_mask'],
+            tokenizer, target_key, end_toks, return_original
+        )
 
-        # target_tokens = tokenizer(target_key)['input_ids']
-        # end_toks = [tokenizer(end_tok)['input_ids'] for end_tok in end_toks]
-        # end_toks_lens = [len(end_toks) for end_toks in end_toks]
-        #
-        # target_len = len(target_tokens)
-        # end_toks_len = len(end_toks)
-        #
-        # for i in range(input_ids.shape[1] - target_len + 1):
-        #     if input_ids[0, i:i + target_len].tolist() == target_tokens:
-        #         attention_mask[0, i:i + target_len] = 1
-        #         print("FOUND BEING")
-        #         # corresponding end tokens after the target key
-        #         j = i + target_len
-        #         while j < input_ids.shape[1]:
-        #             current_token = input_ids[0, j:j + max(end_toks_lens)].tolist()
-        #             # current_token = input_ids[0, j:j + end_toks_len].tolist()
-        #             if any(current_token[-len(et):] == et for et in end_toks):
-        #                 attention_mask[0, j:j + max(end_toks_lens)] = 1
-        #                 print("BREAKING FOUND")
-        #                 break
-        #             attention_mask[0, j] = 1
-        #             j += 1
-        #             i += 1
-        #
-        # if return_original:
-        #     if attention_mask.sum() == 0:
-        #         attention_mask[:, :] = 1
-        #
-        # return attention_mask
+    def apply_mask_tensor_json_kv_span(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        target_key: str,
+        end_toks: Union[str, List[str]] = "\"},",
+        return_original: bool = False,
+    ) -> torch.Tensor:
+        return MaskedJSONDataset.mask_tensor_json_kv_span(
+            input_ids, attention_mask, self.tokenizer,
+            target_key, end_toks, return_original=return_original
+        )
 
     @staticmethod
     def mask_tensor_json_kv_span(
-            input_ids: torch.Tensor,
-            attention_mask: torch.Tensor,
-            tokenizer: PreTrainedTokenizer,
-            target_key: str,
-            end_toks: Union[str, List[str]] = "\"},",
-            return_original: bool = False,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        tokenizer: PreTrainedTokenizer,
+        target_key: str,
+        end_toks: Union[str, List[str]] = "\"},",
+        return_original: bool = False,
     ) -> torch.Tensor:
 
         """
@@ -160,16 +152,21 @@ class MaskedJSONDataset(JSONDataset, ABC):
         end_toks_lens = [len(end_toks) for end_toks in end_toks]
 
         target_len = len(target_tokens)
+
         print(f"Start searching {target_key} tokens {target_tokens}")
-        print(f"End tokens {end_toks}")
+        print(f"End tokens {end_toks[0]}")
+        # print(f"End tokens shape {end_toks[0].shape}")
+        print(f"end_toks {input_ids}")
 
         for i in range(input_ids.shape[1] - target_len + 1):
             if input_ids[0, i:i + target_len].tolist() == target_tokens:
+                print("Found begin")
                 attention_mask[0, i:i + target_len] = 1
                 # corresponding end tokens after the target key
                 j = i + target_len
                 while j < input_ids.shape[1]:
                     current_token = input_ids[0, j:j + max(end_toks_lens)].tolist()
+                    print("Found end")
                     # current_token = input_ids[0, j:j + end_toks_len].tolist()
                     if any(current_token[-len(et):] == et for et in end_toks):
                         attention_mask[0, j:j + max(end_toks_lens)] = 1
@@ -229,8 +226,8 @@ class MaskedJSONDataset(JSONDataset, ABC):
         attention_mask = data['attention_mask'].unsqueeze(0)
 
         for token, end_token in self.token_to_mask:
-            new_mask = MaskedJSONDataset.mask_tensor_json_kv_span(
-                input_ids, attention_mask, self.tokenizer, token,  end_toks=end_token
+            new_mask = self.apply_mask_tensor_json_kv_span(
+                input_ids, attention_mask, token, end_toks=end_token
             ).squeeze(0)
 
             if torch.all(new_mask == 0):

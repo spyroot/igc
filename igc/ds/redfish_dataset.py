@@ -33,7 +33,7 @@ class DatasetConsistencyError(Exception):
 class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderInterface):
 
     def __init__(self,
-                 dataset_dir,
+                 dataset_dir: Optional[str] = "datasets",
                  default_tokenize: Optional[str] = "gpt2",
                  max_len: Optional[int] = 1024,
                  overlap: Optional[int] = 256,
@@ -57,6 +57,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         :param raw_json_directory_path: this default location we store all raw json responses.
 
         """
+        self._special_tokens = JSONDataset.build_special_tok_table()
+
         assert isinstance(raw_json_directory_path, str), 'directory_path should be a string'
         assert isinstance(default_tokenize, str), 'default_tokenize should be a string'
         assert isinstance(max_len, int), 'max_len should be an integer'
@@ -66,7 +68,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
         self._recreate_dataset = recreate_dataset
         if dataset_dir is None:
-            dataset_dir = "datasets"
+            dataset_dir = "datasets/"
 
         # torch dataset mirror
         # dataset mirror
@@ -96,27 +98,29 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._data = {}
         self._masked_data = {}
 
-        _unprocessed = os.path.abspath(raw_json_directory_path)
+        _unprocessed = Path(raw_json_directory_path).expanduser()
         _unprocessed = Path(_unprocessed).resolve()
         self._unprocessed = str(_unprocessed)
         self._verbose = verbose
         self._max_len = max_len
         self._overlap = overlap
 
-        if tokenizer is not None:
-            self.tokenizer = tokenizer
-            tok_name = self.tokenizer.name_or_path
-        else:
-            self.tokenizer = GPT2Tokenizer.from_pretrained(default_tokenize)
-            tok_name = self.tokenizer.name_or_path
-
-        self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-
         # dataset root dir, default datasets
         dataset_path = os.path.abspath(dataset_dir)
         dataset_path = Path(dataset_path).resolve()
         self._dataset_root_dir = str(dataset_path)
+
+        if tokenizer is not None:
+            self.tokenizer = tokenizer
+            tok_name = self.tokenizer.name_or_path
+        else:
+            self._load_tokenizer()
+            if self.tokenizer:
+                self.tokenizer = GPT2Tokenizer.from_pretrained(default_tokenize)
+            tok_name = self.tokenizer.name_or_path
+
+        self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
         # default location for raw and orig files.
         self._default_raw_dir = str(dataset_path / 'raw')
@@ -181,12 +185,25 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         # create all tarballs if we have raw files, rebuilding.
         self._create_tarball()
         # load or build dataset
+        self._load_tokenizer()
+        #
         self._load_dataset()
         # check consistency
         if do_consistency_check:
             self._check_consistency()
         # state
         self._entry_rest_api_result = None
+
+    def _load_tokenizer(self):
+        """
+        :return:
+        """
+        tok_dir = f"{self._dataset_root_dir}/tokenizer"
+        if os.path.exists(tok_dir):
+            self.tokenizer = GPT2Tokenizer.from_pretrained(tok_dir)
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
     def _load_dataset_spec(self):
         """Read dataset spec and update mirror and resources.
@@ -262,7 +279,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                         self._json_files.append(file)
 
             if not self._json_files:
-                raise Exception("No JSON files found inside the directory.")
+                raise Exception(f"No JSON files found inside the directory {self._unprocessed}.")
 
             logging.debug(f"Copy all discovered data to {self._json_directory_path}")
             shutil.copytree(self._unprocessed, f"{self._json_directory_path}/")
@@ -422,7 +439,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
             self._check_consistency()
 
-            self.tokenizer.save(f"{self.dataset_dir}"/"tokenizer.json")
+            self.tokenizer.save_pretrained(f"{self._dataset_root_dir}/tokenizer")
 
             # create tarball
             self._create_tarball()
@@ -462,7 +479,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         """
         # if tar file present unpack other create new dataset.
         if os.path.exists(self._dataset_tarball_name) and not glob.glob(
-                os.path.join(self._default_raw_dir, '*')):
+            os.path.join(self._default_raw_dir, '*')):
             logging.debug(
                 f"Found tarball unpack {self._dataset_tarball_name} "
                 f"files to {self._default_raw_dir}")
@@ -470,7 +487,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
         # if tarball of all api responds present, unpack.
         if os.path.exists(self._dataset_json_tarball_name) and not glob.glob(
-                os.path.join(self._default_original_dir, '*')):
+            os.path.join(self._default_original_dir, '*')):
             logging.debug(
                 f"Found tarball unpack {self._dataset_json_tarball_name} "
                 f"files to {self._default_original_dir}")
@@ -632,9 +649,9 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return converted_name
 
     def create_chunks(
-            self,
-            input_ids: torch.Tensor,
-            attention_mask: torch.Tensor
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor
     ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
         """
 
@@ -750,10 +767,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
     @staticmethod
     def mask_specific_key(
-            json_data,
-            target_key: str,
-            tokenizer=None,
-            debug: Optional[bool] = False
+        json_data,
+        target_key: str,
+        tokenizer=None,
+        debug: Optional[bool] = False
     ) -> torch.Tensor:
         """
         Masks specific key in json structure.
@@ -794,11 +811,11 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
     @staticmethod
     def mask_json_key_and_value(
-            encoding,
-            target_key,
-            tokenizer,
-            debug=False,
-            return_original=False,
+        encoding,
+        target_key,
+        tokenizer,
+        debug=False,
+        return_original=False,
     ) -> torch.Tensor:
         """Mask specific key and value in json structure,
          technically will work in other cases.
@@ -852,10 +869,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
     @staticmethod
     def mask_specific_key_and_value(
-            json_data,
-            target_key,
-            tokenizer=None,
-            debug=False
+        json_data,
+        target_key,
+        tokenizer=None,
+        debug=False
     ):
         """
         Mask specific key and value in json structure,
@@ -909,10 +926,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return attention_mask
 
     def _process_and_mask_json_file(
-            self,
-            json_file_path: str,
-            json_file_name: str,
-            mask_target_key: str
+        self,
+        json_file_path: str,
+        json_file_name: str,
+        mask_target_key: str
     ) -> None:
         """
 
@@ -987,8 +1004,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._data["hash_to_action_idx"] = {}
         self._data["action_idx_to_hash"] = {}
         self._data["hash_to_rest_api"] = {}
+        self._data["special_tokens"] = {}
         self._data["train_data"] = []
         self._masked_data["train_data"] = []
+        self.add_special_tokens()
 
         def process_json_file(_file_path: str, json_file_name: str) -> None:
             """
@@ -1065,6 +1084,14 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                 if processed_files >= total_files:
                     break
 
+        for special_token in self._special_tokens:
+            tokenizer = self.tokenizer(
+                special_token,
+                max_length=self._max_len,
+                truncation=False,
+                return_tensors='pt')
+            self._data["special_tokens"][special_token] = tokenizer
+
     def action(self, one_hot_vec: torch.Tensor) -> str:
         """Return rest api action from a one hot
            vector representation.
@@ -1087,8 +1114,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return self._rest_api_to_method.get(action, "Unknown")
 
     def action_to_one_hot(
-            self,
-            rest_api: str
+        self,
+        rest_api: str
     ) -> Union[np.ndarray, torch.Tensor]:
 
         """Must take a string and return one hot vector either as tensor or ndarray
@@ -1107,8 +1134,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return one_hot_tensor
 
     def one_hot_vector_to_action(
-            self,
-            one_hot_vector: Union[np.ndarray, torch.Tensor]
+        self,
+        one_hot_vector: Union[np.ndarray, torch.Tensor]
     ) -> str:
         """
         Takes a one-hot vector and returns the corresponding REST API.
@@ -1247,7 +1274,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return rest_api, supported_method, self.action_to_one_hot(rest_api)
 
     def sample_batch_of_rest_api(
-            self, batch_size: int
+        self, batch_size: int
     ) -> Tuple[List[str], List[List[str]], torch.Tensor]:
         """
         Randomly sample REST API endpoints from the dataset
@@ -1453,3 +1480,64 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                 print(f"Error: Inconsistent recovery for hash value: {hash_value}")
 
         print("Consistency check completed.")
+
+    @staticmethod
+    def tokenizer_setting():
+        """Return tokenizer setting used during tokenization
+        :return:
+        """
+        return {
+            "padding": 'max_length',
+            "max_length": 1024,
+            "truncation": False,
+            "return_tensors": 'pt'
+        }
+
+    def add_special_tokens(self):
+        """
+        :return:
+        """
+        self.tokenizer.add_tokens(["@odata.id"])
+        self.tokenizer.add_tokens(["AllowableValues"])
+        self.tokenizer.add_tokens(["target"])
+
+        self._data["tokenizer_special_tokens"] = [
+            self.tokenizer.token_to_id["@odata.id"],
+            self.tokenizer.token_to_id["target"],
+            self.tokenizer.token_to_id["AllowableValues"],
+        ]
+
+        self._data["tokenizer_special_tokens"] = [
+            "@odata.id",
+            "AllowableValues",
+            "target",
+        ]
+
+    @staticmethod
+    def build_special_tok_table():
+        return ["@odata.id",
+                "\"@odata.id\""
+                "target",
+                "\"target\"",
+                "Name",
+                "\"Name\"",
+                "Redfish.AllowableValues",
+                "\"Redfish.AllowableValues\"",
+                "Members",
+                "\"Members\"",
+                "Actions",
+                "\"Actions\"",
+                "Id",
+                "\"Id\"",
+                "\"Links\"",
+                "\"#", "#",
+                "/redfish/v1/",
+                "{", "}",
+                "[", "]",
+                ",", "\"",
+                ":", " :", ": ", " : "
+                ",[",
+                "],",
+                "\"},", "\"}"
+                "."
+                ]
