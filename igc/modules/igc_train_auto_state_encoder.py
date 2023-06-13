@@ -1,3 +1,14 @@
+"""
+This class is used to train a state auto encoder.
+
+Here is idea. We take REST API and pass to GPT
+We take hidden representation and pass 1D conv layer with kernel size 2
+That essentially create a polling layer with stride 2
+We pass the two an encoder and reduce the dimension to fixed size block
+Then do standard autoencoder procedure and reconstruct.
+
+Author:Mus mbayramo@stanford.edu
+"""
 import argparse
 from typing import Optional
 
@@ -227,6 +238,7 @@ class AutoencoderTrainer(IgcBaseModule):
 
                 num_batches += 1
 
+            # epoch end
             if num_batches > 0:
                 average_loss = total_loss / num_batches
                 if self.is_rank_zero():

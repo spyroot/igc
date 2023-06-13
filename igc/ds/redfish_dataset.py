@@ -29,6 +29,7 @@ class DatasetConsistencyError(Exception):
     """Base class for other exceptions"""
     pass
 
+
 class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderInterface):
 
     def __init__(self,
@@ -301,7 +302,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         """Return rest api based on local directory structure..
         :return:
         """
-        return self._rest_api_to_respond_[rest_api], f"{self._default_original_dir}{self._rest_api_to_respond_[rest_api]}"
+        return self._rest_api_to_respond_[
+            rest_api], f"{self._default_original_dir}{self._rest_api_to_respond_[rest_api]}"
 
     def rest_api_contains(self, rest_api: str) -> bool:
         """Return the REST API and REST API response based on the local directory structure,
@@ -442,7 +444,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         """
         # if tar file present unpack other create new dataset.
         if os.path.exists(self._dataset_tarball_name) and not glob.glob(
-            os.path.join(self._default_raw_dir, '*')):
+                os.path.join(self._default_raw_dir, '*')):
             logging.debug(
                 f"Found tarball unpack {self._dataset_tarball_name} "
                 f"files to {self._default_raw_dir}")
@@ -450,7 +452,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
         # if tarball of all api responds present, unpack.
         if os.path.exists(self._dataset_json_tarball_name) and not glob.glob(
-            os.path.join(self._default_original_dir, '*')):
+                os.path.join(self._default_original_dir, '*')):
             logging.debug(
                 f"Found tarball unpack {self._dataset_json_tarball_name} "
                 f"files to {self._default_original_dir}")
@@ -612,9 +614,9 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return converted_name
 
     def create_chunks(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor
     ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
         """
 
@@ -696,18 +698,30 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         if target not in self.action_to_rest:
             self.action_to_rest[action] = target
 
-    def _construct_action_space(self):
-        """Actions is rest api and corresponding arguments
+    def _data_entry(self):
+        """
+
+        :param idx:
         :return:
         """
-        for d in self:
-            target = d["targets"]
+        for idx in range(len(self._data["train_data"])):
+            yield self._data["train_data"][idx]
+
+    def _construct_action_space(self):
+        """
+        Actions is rest api and corresponding arguments,
+        So we construct.
+
+        :return:
+        """
+        for data_entry in self._data_entry():
+            target = data_entry["targets"]
             if len(target) == 0:
                 continue
 
             t = target['api_target']
             self.goals[t] = []
-            allowable_values = d["allowable_values"]
+            allowable_values = data_entry["allowable_values"]
             if len(allowable_values) > 0:
                 for key, values in allowable_values.items():
                     parameter, _ = key.split('@')
@@ -718,10 +732,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
     @staticmethod
     def mask_specific_key(
-        json_data,
-        target_key: str,
-        tokenizer=None,
-        debug: Optional[bool] = False
+            json_data,
+            target_key: str,
+            tokenizer=None,
+            debug: Optional[bool] = False
     ) -> torch.Tensor:
         """
         Masks specific key in json structure.
@@ -762,10 +776,11 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
     @staticmethod
     def mask_json_key_and_value(
-        encoding,
-        target_key,
-        tokenizer,
-        debug=False
+            encoding,
+            target_key,
+            tokenizer,
+            debug=False,
+            return_original=False,
     ) -> torch.Tensor:
         """Mask specific key and value in json structure,
          technically will work in other cases.
@@ -780,6 +795,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             attention_mask = mask_specific_key_and_value(json_lines,
             target_key, tokenizer=tokenizer, debug=True)
 
+        :param return_original: in case we did not find require key
         :param tokenizer:
         :param encoding:
         :param target_key:  a json key that we use to mask the value of that key
@@ -807,16 +823,21 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                         unmasked_tokens.append(input_ids[0, j].item())
                     j += 1
                 if debug:
-                    print(f"Unmasking tokens at positions {i} to {j}: {tokenizer.decode(unmasked_tokens)}")
+                    print(
+                        f"Unmasking tokens at positions {i} to {j}: {tokenizer.decode(unmasked_tokens)}")
+
+        if return_original:
+            if attention_mask.sum() == 0:
+                attention_mask[:, :] = 1
 
         return attention_mask
 
     @staticmethod
     def mask_specific_key_and_value(
-        json_data,
-        target_key,
-        tokenizer=None,
-        debug=False
+            json_data,
+            target_key,
+            tokenizer=None,
+            debug=False
     ):
         """
         Mask specific key and value in json structure,
@@ -870,10 +891,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return attention_mask
 
     def process_and_mask_json_file(
-        self,
-        json_file_path: str,
-        json_file_name: str,
-        mask_target_key: str
+            self,
+            json_file_path: str,
+            json_file_name: str,
+            mask_target_key: str
     ) -> None:
         """
 
@@ -1048,8 +1069,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return self._rest_api_to_method.get(action, "Unknown")
 
     def action_to_one_hot(
-        self,
-        rest_api: str
+            self,
+            rest_api: str
     ) -> Union[np.ndarray, torch.Tensor]:
 
         """Must take a string and return one hot vector either as tensor or ndarray
@@ -1068,8 +1089,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         return one_hot_tensor
 
     def one_hot_vector_to_action(
-        self,
-        one_hot_vector: Union[np.ndarray, torch.Tensor]
+            self,
+            one_hot_vector: Union[np.ndarray, torch.Tensor]
     ) -> str:
         """
         Takes a one-hot vector and returns the corresponding REST API.

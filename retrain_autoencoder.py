@@ -12,21 +12,18 @@ def main(cmd):
     """
     gpus = TorchBuilder.get_available_gpus()
     model, tokenizers = from_pretrained_default(cmd)
-
     _metric_logger = MetricLogger(cmd.metric_report, **vars(cmd))
 
     dataset = JSONDataset(
         "datasets",
         verbose=True,
         tokenizer=tokenizers,
-        do_consistency_check=True)
+        do_consistency_check=False)
 
     igc_autoencoder = AutoencoderTrainer(
         "autoencoder", cmd, model, tokenizers, ds=dataset, metric_logger=_metric_logger,
         is_inference=False)
 
-    # print(gpus)
-    # igc_autoencoder.show_accelerator_info()
     igc_autoencoder.train()
 
 
