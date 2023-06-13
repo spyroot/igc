@@ -33,27 +33,29 @@ class DatasetConsistencyError(Exception):
 class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderInterface):
 
     def __init__(self,
-                 raw_json_directory_path: str,
-                 default_tokenize: Optional[str] = "gpt2-xl",
+                 dataset_dir,
+                 default_tokenize: Optional[str] = "gpt2",
                  max_len: Optional[int] = 1024,
                  overlap: Optional[int] = 256,
-                 dataset_dir: Optional[str] = "datasets",
                  verbose: Optional[bool] = False,
                  recreate_dataset: Optional[bool] = False,
                  tokenizer: Optional[Any] = None,
                  transform=None,
                  target_transform=None,
                  is_force_download=False,
-                 do_consistency_check=True):
+                 do_consistency_check=True,
+                 raw_json_directory_path: Optional[str] = "~/.json_responses"
+                 ):
         """
-        :param raw_json_directory_path:
+        :param dataset_dir:
         :param default_tokenize:
         :param max_len:
         :param overlap:
-        :param dataset_dir:
         :param verbose:
         :param recreate_dataset:
         :param tokenizer:
+        :param raw_json_directory_path: this default location we store all raw json responses.
+
         """
         assert isinstance(raw_json_directory_path, str), 'directory_path should be a string'
         assert isinstance(default_tokenize, str), 'default_tokenize should be a string'
@@ -63,6 +65,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         assert isinstance(verbose, bool), 'verbose should be a boolean'
 
         self._recreate_dataset = recreate_dataset
+        if dataset_dir is None:
+            dataset_dir = "datasets"
 
         # torch dataset mirror
         # dataset mirror
@@ -91,6 +95,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         # all rest api train data loaded to data, masked data container masked dataset.
         self._data = {}
         self._masked_data = {}
+
         _unprocessed = os.path.abspath(raw_json_directory_path)
         _unprocessed = Path(_unprocessed).resolve()
         self._unprocessed = str(_unprocessed)
@@ -108,10 +113,12 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
+        # dataset root dir, default datasets
         dataset_path = os.path.abspath(dataset_dir)
         dataset_path = Path(dataset_path).resolve()
-
         self._dataset_root_dir = str(dataset_path)
+
+        # default location for raw and orig files.
         self._default_raw_dir = str(dataset_path / 'raw')
         self._default_original_dir = str(dataset_path / 'orig')
         self._json_directory_path = self._default_original_dir
@@ -244,9 +251,19 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
           It will update all hash values for each tarball file.
         :return: Nothing.
         """
-
         # copy all json if not present already
         if not os.path.exists(self._json_directory_path):
+            self.logger.info(f"Copy json files from "
+                             f"{self._unprocessed} to {self._json_directory_path}/")
+            self._json_files = []
+            for root, dirs, files in os.walk(self._unprocessed):
+                for file in files:
+                    if file.endswith('.json'):
+                        self._json_files.append(file)
+
+            if not self._json_files:
+                raise Exception("No JSON files found inside the directory.")
+
             logging.debug(f"Copy all discovered data to {self._json_directory_path}")
             shutil.copytree(self._unprocessed, f"{self._json_directory_path}/")
 
@@ -366,7 +383,6 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
          The hash we use
         :return:
         """
-
         # load all rest trajectories.
         self._rest_trajectories = RestTrajectory(
             self._unprocessed, self._default_original_dir)
@@ -405,6 +421,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                   f"num masked entries: {len(self._masked_data['train_data'])} ")
 
             self._check_consistency()
+
+            self.tokenizer.save(f"{self.dataset_dir}"/"tokenizer.json")
 
             # create tarball
             self._create_tarball()
@@ -890,7 +908,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
         return attention_mask
 
-    def process_and_mask_json_file(
+    def _process_and_mask_json_file(
             self,
             json_file_path: str,
             json_file_name: str,
@@ -1041,7 +1059,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                     file_path = os.path.join(root, file_name)
                     process_json_file(file_path, file_name)
                     for jk in self._list_masked_keys:
-                        self.process_and_mask_json_file(file_path, file_name, jk)
+                        self._process_and_mask_json_file(file_path, file_name, jk)
 
                 processed_files += 1
                 if processed_files >= total_files:
