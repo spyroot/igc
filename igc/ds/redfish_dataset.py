@@ -77,12 +77,15 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             {"spec": 'http://192.168.254.78/ds/dataset.json'},
             {"train_dataset": 'http://192.168.254.78/ds/igc.tar.gz'},
             {"json_data": 'http://192.168.254.78/ds/json_data.tar.gz'},
+            {"tokenizer": 'http://192.168.254.78/ds/tokenizer.tar.gz'},
+
         ]
 
         self._resources = [
             ("dataset.json", "", "spec"),
             ("igc.tar.gz", "", "train_dataset"),
             ("json_data.tar.gz", "", "json_data"),
+            ("tokenizer.tar.gz", "", "tokenizer"),
         ]
 
         # this required for dataset download
@@ -151,6 +154,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             Path(self._dataset_root_dir) / 'igc.tar.gz')
         self._dataset_json_tarball_name = str(
             Path(self._dataset_root_dir) / 'json_data.tar.gz')
+        self._dataset_tokenizer_tarball_name = str(
+            Path(self._dataset_root_dir) / 'tokenizer.tar.gz')
         self._tarball_hash = ""
 
         logging.debug(f"Dataset root directory {self._dataset_root_dir}")
@@ -314,6 +319,21 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
                 # update hash
                 tarball_name = os.path.basename(self._dataset_tarball_name)
+                for i, resource in enumerate(self._resources):
+                    if resource[0] == tarball_name:
+                        self._resources[i] = (resource[0], _tarball_hash, resource[2])
+                        regenerate_hash = True
+
+        if not os.path.exists(self._dataset_tokenizer_tarball_name):
+            # create tarball if not present,  compress tokenizer
+            if not os.path.exists(self._dataset_tokenizer_tarball_name):
+                os.makedirs(self._dataset_root_dir, exist_ok=True)
+                logging.debug(f"Creating tarball {self._dataset_tokenizer_tarball_name} file.")
+                _, _tarball_hash = create_tar_gz(
+                    self.root_dir(), self._dataset_tokenizer_tarball_name)
+
+                # update hash
+                tarball_name = os.path.basename(self._dataset_tokenizer_tarball_name)
                 for i, resource in enumerate(self._resources):
                     if resource[0] == tarball_name:
                         self._resources[i] = (resource[0], _tarball_hash, resource[2])
@@ -495,6 +515,14 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             os.path.join(self._default_original_dir, '*')):
             logging.debug(
                 f"Found tarball unpack {self._dataset_json_tarball_name} "
+                f"files to {self._default_original_dir}")
+            unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
+
+        # if tarball of all api responds present, unpack.
+        if os.path.exists(self._dataset_tokenizer_tarball_name) and not glob.glob(
+            os.path.join(self._default_original_dir, '*')):
+            logging.debug(
+                f"Found tarball unpack {self._dataset_tokenizer_tarball_name} "
                 f"files to {self._default_original_dir}")
             unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
 

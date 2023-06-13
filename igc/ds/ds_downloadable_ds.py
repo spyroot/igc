@@ -199,7 +199,8 @@ class DownloadableDataset(Dataset):
             _resource = self.resources_tarball()
             _mirrors = self.mirrors_tarballs()
         else:
-            raise DatasetError(f"Can't download data format {self.data_format()} it unsupported.")
+            raise DatasetError(
+                f"Can't download data format {self.data_format()} it unsupported.")
 
         return _resource, _mirrors
 
