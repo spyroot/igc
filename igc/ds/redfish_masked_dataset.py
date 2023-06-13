@@ -49,19 +49,19 @@ class MaskedJSONDataset(JSONDataset, ABC):
             ("odata.id", ["\"},", "\"}"]),
         ]
 
-        _object_close = [[92], [92, 13]]
-        _object_open = [[90]]
-        _array_close = [[60], [60, 11]]
-        _array_open = [[58], [60, 11]]
+        self._object_close = [[92], [92, 13]]
+        self._object_open = [[90]]
+        self._array_close = [[60], [60, 11]]
+        self._array_open = [[58], [60, 11]]
 
         self._masking_option = {
-            MaskingOption.ODATA_ID: (50257, _array_close),
-            MaskingOption.ALLOWED_VALUE: (50258, _array_close),
-            MaskingOption.TARGET: (16793, _object_close),
+            MaskingOption.ODATA_ID: (50257, self._array_close),
+            MaskingOption.ALLOWED_VALUE: (50258, self._array_close),
+            MaskingOption.TARGET: (16793, self._object_close),
         }
 
         self._current_token_id_mask = [
-            (50257, _object_close),
+            (50257, self._object_close),
         ]
 
         super().__init__(
@@ -97,6 +97,13 @@ class MaskedJSONDataset(JSONDataset, ABC):
         :return:
         """
         self._current_token_id_mask = [self._masking_option[MaskingOption.TARGET]]
+
+    def enable_all_mask(self):
+        self._current_token_id_mask = [
+            (50257, self._array_close),
+            (50258, self._array_close),
+            (16793, self._object_close)
+        ]
 
     @staticmethod
     def mask_json_kv_span(

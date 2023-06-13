@@ -1,5 +1,6 @@
 import json
 import time
+from typing import List
 
 import torch
 
@@ -86,8 +87,9 @@ def masking_from_json_file_test(
     print("Decoded Tokens:", decoded_tokens)
 
 
-def masking_test_from_dataset_from_id(ids, masks_types, decoder=False):
+def masking_test_from_dataset_from_id(ids: List[int], masks_types, decoder=False):
     """
+    :param ids:
     :param masks_types:
     :param decoder:
     :return:
@@ -137,37 +139,45 @@ def masking_test_from_dataset_from_id(ids, masks_types, decoder=False):
             decode_masked_output(dataset, input_ids, attention_mask)
 
 
-def masking_test_from_dataset_allowed_val(cmd, ids, decoder=False):
+def mask_all_test_from_dataset_from_id(ids: List[int], masks_types, decoder=False):
     """
+    :param ids:
+    :param masks_types:
     :param decoder:
-    :param cmd:
     :return:
     """
     dataset = MaskedJSONDataset(
         "datasets",
         verbose=True,
         do_consistency_check=False)
-    dataset.mask_allowed_value()
 
     print("######## Start testing from dataset ###### ")
     print("# Data from a dataset: ")
     print("dataset size:", len(dataset))
 
+    dataset.enable_all_mask()
+
     for _id in ids:
+
         data = dataset[_id]
-        input_ids = data["input_ids"]
-        attention_mask = data["attention_mask"]
         file = data["file_path"]
         file_path = f"datasets/{file}"
-        print("input_ids shape      :", input_ids.shape)
-        print("attention mask shape :", attention_mask.shape)
+
+        input_ids = data["input_ids"]
+        attention_mask = data["attention_mask"]
 
         if decoder:
             decoded_text = dataset.tokenizer.decode(input_ids)
             print("Decoded Text:")
             print(decoded_text)
 
-        decode_masked_output(dataset, input_ids.unsqueeze_(0), attention_mask.unsqueeze_(0))
+        if input_ids.ndim == 1:
+            input_ids = input_ids.unsqueeze(0)
+
+        if attention_mask.ndim == 1:
+            attention_mask = attention_mask.unsqueeze(0)
+
+        decode_masked_output(dataset, input_ids, attention_mask)
 
 
 def masking_test_from_dataset(cmd, files):
@@ -200,31 +210,12 @@ def masking_test_from_dataset(cmd, files):
     print(f"Search took {elapsed_time:.4f} seconds")
 
 
-def main(cmd):
-    """
-    :param cmd:
-    :return:
-    """
-
+def test_read_from_file_and_mask(cmd):
     file_path1 = "datasets/orig/10.252.252.209/_redfish_v1_AccountService.json"
     file_path2 = "datasets/orig/10.252.252.209/_redfish_v1_AccountService_Accounts.json"
     file_path3 = "datasets/orig/10.252.252.209/_redfish_v1_Systems_System.Embedded.1_SecureBoot.json"
+    masking_from_json_file_test(cmd, file_path1, "@data.id", end_tok=["\"},", "}"])
 
-    files = ["_redfish_v1_AccountService.json",
-             "_redfish_v1_AccountService_Accounts.json",
-             "_redfish_v1_Systems_System.Embedded.1_SecureBoot.json"]
-
-    # masking_from_json_file_test(cmd, file_path1, "@data.id", end_tok=["\"},", "}"])
-
-    masks_type = [MaskingOption.ALLOWED_VALUE, MaskingOption.ODATA_ID, MaskingOption.TARGET]
-
-    print("\n\n")
-    print(f"Starting checking masking actions {file_path1}")
-    print("### Starting checking odata masking from _redfish_v1_AccountService")
-    masking_test_from_dataset_from_id(ids=[10021, 19380, 21040], masks_types=masks_type)
-
-    # print("\n\n")
-    # print("Starting checking odata masking from _redfish_v1_AccountService")
     # masking_from_json_file_test(cmd, file_path2, "@odata.id")
     # # masking actions
     # print("\n\n")
@@ -242,10 +233,27 @@ def main(cmd):
     # print(f"Starting checking masking actions {file_path3}")
     # # values
     # masking_from_json_file_test(cmd, file_path3, ": ", end_tok=["\","])
-    #
-    # files = ["_redfish_v1_AccountService.json",
-    #          "_redfish_v1_AccountService_Accounts.json,"
-    #          "_redfish_v1_Systems_System.Embedded.1_SecureBoot.json"]
+
+
+def main(cmd):
+    """
+    :param cmd:
+    :return:
+    """
+
+    files = ["_redfish_v1_AccountService.json",
+             "_redfish_v1_AccountService_Accounts.json",
+             "_redfish_v1_Systems_System.Embedded.1_SecureBoot.json"]
+
+    masks_type = [MaskingOption.ALLOWED_VALUE, MaskingOption.ODATA_ID, MaskingOption.TARGET]
+
+    print("\n\n")
+    print("### Starting checking odata masking masking_test_from_dataset_from_id")
+    masking_test_from_dataset_from_id(ids=[10021, 19380, 21040], masks_types=masks_type)
+
+    print("\n\n")
+    print("Starting checking odata masking from mask_all_test_from_dataset_from_id")
+    mask_all_test_from_dataset_from_id(ids=[10021, 19380, 21040], masks_types=masks_type)
 
 
 if __name__ == '__main__':

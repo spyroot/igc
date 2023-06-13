@@ -1,19 +1,18 @@
-import sys
 import argparse
+import sys
 import warnings
 from typing import Optional, Dict, Union, List
 
 import loguru
 import torch
-from accelerate import Accelerator
 
 from igc.ds.redfish_dataset import JSONDataset
+from igc.modules.base.igc_llm_base_module import LlmBaseModule
+from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.modules.igc_train_auto_state_encoder import AutoencoderTrainer
 from igc.modules.llm_train_goal_extract import GoalExtractorTrainer
 from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
 from igc.modules.shared.llm_shared import from_pretrained_default
-from igc.modules.base.igc_llm_base_module import LlmBaseModule
-from igc.modules.base.igc_metric_logger import MetricLogger
 
 
 class IgcLanguageModule:
@@ -65,10 +64,12 @@ class IgcLanguageModule:
         else:
             _, tokenizer = self._from_pretrained_fn(self.spec, only_tokenizer=True)
 
-        self.logger.info("Starting training.")
+        self._register_tokens()
+        if hasattr(_model, 'resize_token_embeddings'):
+            _model.resize_token_embeddings(len(tokenizer))
 
-        # we train State Encoder the goal here take rest api response
-        # and re-present as state.
+        self.logger.info("Starting training.")
+        # we train State Encoder the goal here take rest api response, and re-present as state.
         if not use_pretrained_only:
             if self.spec.llm == "latent" or self.spec.llm == "all":
                 model, tokenizer = self._from_pretrained_fn(self.spec, only_tokenizer=True)
@@ -77,6 +78,10 @@ class IgcLanguageModule:
                     "state_encoder",
                     self.spec, model, tokenizer,
                     ds=self.ds, metric_logger=self.metric_logger)
+
+                if hasattr(model, 'resize_token_embeddings'):
+                    model.resize_token_embeddings(len(tokenizer))
+
                 llm_embeddings.train()
                 _is_llm_pre_trained = True
 
@@ -102,6 +107,8 @@ class IgcLanguageModule:
                 tokenizer,
                 ds=self.ds,
                 metric_logger=self.metric_logger)
+            if hasattr(_model, 'resize_token_embeddings'):
+                _model.resize_token_embeddings(len(tokenizer))
 
             goal_extractor.train_goal_representation()
 
@@ -118,6 +125,8 @@ class IgcLanguageModule:
                 metric_logger=self.metric_logger,
                 is_inference=False
             )
+            if hasattr(_model, 'resize_token_embeddings'):
+                _model.resize_token_embeddings(len(tokenizer))
             parameter_extractor.train_goal_and_parameter_extractor()
 
         # we train auto encoder the aim here to reduce state re-presentation
@@ -133,11 +142,16 @@ class IgcLanguageModule:
                 metric_logger=self.metric_logger,
                 is_inference=False)
 
+            if hasattr(_model, 'resize_token_embeddings'):
+                _model.resize_token_embeddings(len(tokenizer))
             autoencoder.train()
 
         # self.llm_autoencoder.train_autoencoder()
         # self.goal_extractor.train_goal_and_parameter_extractor()
         # self.goal_extractor.train_goal_representation()
+
+    def _register_tokens(self):
+        pass
 
     @staticmethod
     def make_base_model(spec: argparse.Namespace):
@@ -170,6 +184,7 @@ class IgcLanguageModule:
         :return:
         """
         _, tokenizer = from_pretrained_default(spec.model_type, only_tokenizer=True)
+
         return tokenizer
 
     @staticmethod

@@ -17,6 +17,7 @@ Parameters just passed to agent. i.e. we don't train on parameters.
 Author:Mus mbayramo@stanford.edu
 """
 import argparse
+import os
 from collections import namedtuple
 from typing import Optional, Tuple
 
@@ -28,6 +29,7 @@ from torch.utils.data import DataLoader, RandomSampler
 from igc.ds.redfish_dataset import JSONDataset
 from igc.modules.base.igc_llm_base_module import LlmBaseModule
 from igc.modules.base.igc_metric_logger import MetricLogger
+from igc.modules.shared.llm_shared import save_pretrained_default, load_pretrained_default
 from igc.shared.shared_torch_builder import TorchBuilder
 from accelerate import Accelerator
 from torch.quantization import convert
@@ -332,6 +334,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             self.model = convert(self.model)
 
         self.save_model(self.module_checkpoint_dir)
+        self.save_finetuned()
 
         del train_dataloader
         del eval_dataloader

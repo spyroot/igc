@@ -6,7 +6,7 @@ from .base.igc_metric_logger import MetricLogger
 from igc.modules.llm.igc_llm_module import IgcLanguageModule
 from .igc_rl_module import IgcRlModule
 from ..ds.redfish_dataset import JSONDataset
-from .shared.llm_shared import from_pretrained_default
+from .shared.llm_shared import from_pretrained_default, load_pretrained_default, save_pretrained_default
 
 
 class IgcMain:
@@ -14,12 +14,26 @@ class IgcMain:
     IGC main class
 
     """
+    def __init__(
+        self, specs: argparse.Namespace,
+        from_pretrained=from_pretrained_default,
+        from_pretrained_load_fn=load_pretrained_default,
+        from_pretrained_save_fn=save_pretrained_default,
+    ):
+        """
 
-    def __init__(self, specs: argparse.Namespace, from_pretrained=from_pretrained_default):
+        :param specs: An `argparse.Namespace` object containing the specifications and arguments.
+        :param from_pretrained: A function for loading the pretrained model and tokenizer.
+        :param from_pretrained_load_fn: A function for loading a pretrained model from a directory.
+        :param from_pretrained_save_fn: A function for saving the pretrained model and tokenizer.
+        """
         """
         :param specs:
         """
         self._from_pretrained_fn = from_pretrained
+        self._from_pretrained_fn = from_pretrained_load_fn
+        self._from_pretrained_fn = from_pretrained_save_fn
+
         self._metric_logger = MetricLogger(specs.metric_report, **vars(specs))
         self._directory_path = os.path.expanduser(specs.raw_data_dir)
         self._specs = specs

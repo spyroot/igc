@@ -32,13 +32,13 @@ class IgcBaseModule(IgcBaseState):
     """
 
     def __init__(
-            self, module_name: str,
-            spec: argparse.Namespace,
-            llm_model, llm_tokenizer,
-            ds: Optional[JSONDataset] = None,
-            metric_logger: Optional[MetricLogger] = None,
-            is_inference: Optional[bool] = False,
-            device=None):
+        self, module_name: str,
+        spec: argparse.Namespace,
+        llm_model, llm_tokenizer,
+        ds: Optional[JSONDataset] = None,
+        metric_logger: Optional[MetricLogger] = None,
+        is_inference: Optional[bool] = False,
+        device=None):
         """
 
         Note module name is important for saving
@@ -112,6 +112,7 @@ class IgcBaseModule(IgcBaseState):
 
         # model param
         self.model = llm_model
+        self.model.resize_token_embeddings(len(llm_tokenizer))
         self.tokenizer = llm_tokenizer
         self.module_name = module_name
 
@@ -240,9 +241,9 @@ class IgcBaseModule(IgcBaseState):
             self.dataset, [train_size, eval_size])
 
     def split_slice_dataset(
-            self,
-            train_ratio: float = 0.8,
-            sample_ratio: float = 0.01) -> list[Subset[Any]]:
+        self,
+        train_ratio: float = 0.8,
+        sample_ratio: float = 0.01) -> list[Subset[Any]]:
         """
         Split a subset of the dataset and specify the amount of sample used.
 
@@ -328,18 +329,17 @@ class IgcBaseModule(IgcBaseState):
         :param checkpoint_dir:
         :return:
         """
-        if self.rank > 0:
-            return
+        if self.is_rank_zero():
+            # weights
+            checkpoint_file = self._model_file(checkpoint_dir)
+            torch.save({
+                'model_state_dict': self.model.state_dict(),
+                'is_trained': True,
+            }, checkpoint_file)
 
-        checkpoint_file = self._model_file(checkpoint_dir)
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'is_trained': True,
-        }, checkpoint_file)
-
-        print(f"Rank: {self.rank} "
-              f"module name {self.module_name} "
-              f"checkpoint saved to {checkpoint_file}")
+            print(f"Rank: {self.rank} "
+                  f"module name {self.module_name} "
+                  f"checkpoint saved to {checkpoint_file}")
 
     def load_model(self, checkpoint_dir, map_location=None) -> bool:
         """
@@ -368,7 +368,11 @@ class IgcBaseModule(IgcBaseState):
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self._is_trained = checkpoint['is_trained']
 
-    def save_checkpoint(self, checkpoint_dir, epoch: int, num_check_points_to_keep: Optional[int] = 3):
+    def save_checkpoint(
+        self, checkpoint_dir,
+        epoch: int,
+        num_check_points_to_keep: Optional[int] = 3
+    ):
         """
         Save model checkpoint.
 
@@ -447,13 +451,13 @@ class IgcBaseModule(IgcBaseState):
 
     @staticmethod
     def load(
-            module_name: str,
-            model: torch.nn.Module,
-            specs: argparse.Namespace,
-            device: torch.device = "cpu",
-            is_inference: bool = True,
-            optimizer: Optional[torch.optim.Optimizer] = None,
-            scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
+        module_name: str,
+        model: torch.nn.Module,
+        specs: argparse.Namespace,
+        device: torch.device = "cpu",
+        is_inference: bool = True,
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
 
     ) -> tuple[Optional[int], bool]:
         """
@@ -524,6 +528,7 @@ class IgcBaseModule(IgcBaseState):
             required_keys.append("scheduler_state_dict")
 
         model.load_state_dict(checkpoint['model_state_dict'])
+
         if 'epoch' in checkpoint:
             epoch = checkpoint['epoch']
         else:

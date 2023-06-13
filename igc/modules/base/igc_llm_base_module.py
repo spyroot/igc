@@ -17,6 +17,8 @@ Parameters just passed to agent. i.e. we don't train on parameters.
 Author:Mus mbayramo@stanford.edu
 """
 import argparse
+import os
+import warnings
 from typing import List, Optional, Union, Callable
 from collections import namedtuple
 
@@ -32,6 +34,7 @@ from .igc_metric_logger import MetricLogger
 from sklearn.metrics import f1_score
 
 from .prompt_types import PromptType
+from ..shared.llm_shared import load_pretrained_default, save_pretrained_default
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
@@ -39,6 +42,7 @@ BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 class LlmBaseModule(IgcBaseModule):
     """
     """
+
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
@@ -71,13 +75,50 @@ class LlmBaseModule(IgcBaseModule):
         if self.metric_logger is not None:
             self.metric_logger.set_log_level(self._log_level)
 
+        if not hasattr(spec, 'module_checkpoint_dir') or not spec.module_checkpoint_dir:
+            raise ValueError("module_checkpoint_dir must be provided in the spec argument.")
+
+        if hasattr(llm_model, 'resize_token_embeddings'):
+            llm_model.resize_token_embeddings(len(llm_tokenizer))
+        else:
+            warnings.warn("Model does not have the 'resize_token_embeddings' method.")
         self.logger.info("Starting llm module")
+
+    def finetuned_dir(self):
+        """
+        Get the directory path for saving/loading the fine-tuned model.
+        This huggingface format.
+        :return: The directory path.
+        """
+        return f"{self.module_checkpoint_dir}/fine_tuned"
+
+    def save_finetuned(self):
+        """
+        Save the fine-tuned model and tokenizer. This huggingface format.
+        :return: None
+        """
+        if self.is_rank_zero():
+            fine_tuned = self.finetuned_dir()
+            if not os.path.exists(fine_tuned):
+                os.makedirs(fine_tuned)
+            save_pretrained_default(fine_tuned, self.model, self.tokenizer)
+
+    def load_finetuned(self, device_map="auto"):
+        """
+        Load the fine-tuned model and tokenizer. This huggingface format.
+        :param device_map: The device map for placing the model on specific devices. Defaults to "auto".
+        :return: Tuple of the loaded model and tokenizer.
+        """
+        model, tokenizer = load_pretrained_default(
+            self._trainer_specs, self.finetuned_dir(), device_map=device_map
+        )
+        return model, tokenizer
 
     @staticmethod
     def compute_rouge_metric(
-            predictions: List[str],
-            targets: List[str],
-            default_rouge: str = 'rouge1') -> float:
+        predictions: List[str],
+        targets: List[str],
+        default_rouge: str = 'rouge1') -> float:
         """
         Compute_rouge_metric
         
@@ -180,12 +221,12 @@ class LlmBaseModule(IgcBaseModule):
 
     @staticmethod
     def performance_metric(
-            predictions: List[str],
-            targets: List[str],
-            metric: Union[str, MetricType],
-            prompt_type: Optional[PromptType] = None,
-            callback: Optional[Callable] = None,
-            prefix_to_remove=None) -> float:
+        predictions: List[str],
+        targets: List[str],
+        metric: Union[str, MetricType],
+        prompt_type: Optional[PromptType] = None,
+        callback: Optional[Callable] = None,
+        prefix_to_remove=None) -> float:
         """
         Compute the performance metric between predictions and targets.
 
