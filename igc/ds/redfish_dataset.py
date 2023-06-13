@@ -109,15 +109,18 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         dataset_path = os.path.abspath(dataset_dir)
         dataset_path = Path(dataset_path).resolve()
         self._dataset_root_dir = str(dataset_path)
+        self.tokenizer = None
 
         if tokenizer is not None:
             self.tokenizer = tokenizer
             tok_name = self.tokenizer.name_or_path
         else:
-            self._load_tokenizer()
-            if self.tokenizer:
+            self.tokenizer = self._load_tokenizer()
+            if tokenizer is None:
                 self.tokenizer = GPT2Tokenizer.from_pretrained(default_tokenize)
-            tok_name = self.tokenizer.name_or_path
+                tok_name = default_tokenize
+            else:
+                tok_name = self.tokenizer.name_or_path
 
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
@@ -202,8 +205,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         if os.path.exists(tok_dir):
             self.tokenizer = GPT2Tokenizer.from_pretrained(tok_dir)
             self.tokenizer.pad_token = self.tokenizer.eos_token
-            self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+            self.add_special_tokens()
+            return self.tokenizer
+        return None
 
     def _load_dataset_spec(self):
         """Read dataset spec and update mirror and resources.
@@ -734,9 +739,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             self.action_to_rest[action] = target
 
     def _data_entry(self):
-        """
-
-        :param idx:
+        """Return train data.
         :return:
         """
         for idx in range(len(self._data["train_data"])):
@@ -857,9 +860,6 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                     if debug:
                         unmasked_tokens.append(input_ids[0, j].item())
                     j += 1
-                if debug:
-                    print(
-                        f"Unmasking tokens at positions {i} to {j}: {tokenizer.decode(unmasked_tokens)}")
 
         if return_original:
             if attention_mask.sum() == 0:
@@ -947,16 +947,16 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
             json_lines = json_file.read()
             json_lines += json_lines + "<|endoftext|>"
-            tokenized = self.tokenizer(
+            token_out = self.tokenizer(
                 json_lines,
                 padding='max_length',
                 max_length=self._max_len,
                 truncation=False,
                 return_tensors='pt')
 
-            input_ids = tokenized['input_ids']
+            input_ids = token_out['input_ids']
             attention_mask = JSONDataset.mask_json_key_and_value(
-                tokenized, mask_target_key, tokenizer=self.tokenizer
+                token_out, mask_target_key, tokenizer=self.tokenizer
             )
 
             chunks = self.create_chunks(input_ids, attention_mask)
@@ -1039,15 +1039,15 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                     self.extract_recursive(json_data, allowable_values, targets)
 
                 json_lines += json_lines + "<|endoftext|>"
-                tokenizer = self.tokenizer(
+                tokens_out = self.tokenizer(
                     json_lines,
                     padding='max_length',
                     max_length=self._max_len,
                     truncation=False,
                     return_tensors='pt')
 
-                input_ids = tokenizer['input_ids']
-                attention_mask = tokenizer['attention_mask']
+                input_ids = tokens_out['input_ids']
+                attention_mask = tokens_out['attention_mask']
                 chunks = self.create_chunks(input_ids, attention_mask)
 
                 # for each chunk add it as a separate data point
@@ -1090,7 +1090,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                 max_length=self._max_len,
                 truncation=False,
                 return_tensors='pt')
-            self._data["special_tokens"][special_token] = tokenizer
+            self._data["special_tokens"][special_token] = tokenizer["input_ids"]
+
+    def get_special_tokens(self):
+        return self._data["special_tokens"]
 
     def action(self, one_hot_vec: torch.Tensor) -> str:
         """Return rest api action from a one hot
@@ -1497,26 +1500,24 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         """
         :return:
         """
-        self.tokenizer.add_tokens(["@odata.id"])
-        self.tokenizer.add_tokens(["AllowableValues"])
-        self.tokenizer.add_tokens(["target"])
-
-        self._data["tokenizer_special_tokens"] = [
-            self.tokenizer.token_to_id["@odata.id"],
-            self.tokenizer.token_to_id["target"],
-            self.tokenizer.token_to_id["AllowableValues"],
-        ]
+        self.tokenizer.add_tokens(["@odata.id", "target", "AllowableValues"])
+        special_tokens = ["[", "]", "{", "}"]
+        self.tokenizer.add_tokens(special_tokens, special_tokens=True)
+        special_tokens_dict = {"additional_special_tokens": special_tokens}
+        self.tokenizer.add_special_tokens(special_tokens_dict)
 
         self._data["tokenizer_special_tokens"] = [
             "@odata.id",
             "AllowableValues",
             "target",
+            "[", "]",
+            "{", "}"
         ]
 
     @staticmethod
     def build_special_tok_table():
         return ["@odata.id",
-                "\"@odata.id\""
+                "\"@odata.id\"",
                 "target",
                 "\"target\"",
                 "Name",
@@ -1536,8 +1537,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                 "[", "]",
                 ",", "\"",
                 ":", " :", ": ", " : "
-                ",[",
+                                 ",[",
                 "],",
                 "\"},", "\"}"
-                "."
+                        "."
                 ]

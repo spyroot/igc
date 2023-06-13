@@ -1,10 +1,16 @@
 from abc import ABC
+from enum import auto, Enum
 from typing import Optional, Any, Dict, Union, List
 
 import torch
 from transformers import PreTrainedTokenizer
-
 from .redfish_dataset import JSONDataset
+
+
+class MaskingOption(Enum):
+    ALLOWED_VALUE = auto()
+    ODATA_ID = auto()
+    TARGET = auto()
 
 
 class MaskedJSONDataset(JSONDataset, ABC):
@@ -42,6 +48,22 @@ class MaskedJSONDataset(JSONDataset, ABC):
         self.token_to_mask = [
             ("odata.id", ["\"},", "\"}"]),
         ]
+
+        _object_close = [[92], [92, 13]]
+        _object_open = [[90]]
+        _array_close = [[60], [60, 11]]
+        _array_open = [[58], [60, 11]]
+
+        self._masking_option = {
+            MaskingOption.ODATA_ID: (50257, _array_close),
+            MaskingOption.ALLOWED_VALUE: (50258, _array_close),
+            MaskingOption.TARGET: (16793, _object_close),
+        }
+
+        self._current_token_id_mask = [
+            (50257, _object_close),
+        ]
+
         super().__init__(
             dataset_dir=dataset_dir,
             default_tokenize=default_tokenize,
@@ -58,12 +80,30 @@ class MaskedJSONDataset(JSONDataset, ABC):
         )
         self._cache = [None] * len(self._data["train_data"])
 
+    def mask_allowed_value(self):
+        """
+        :return:
+        """
+        self._current_token_id_mask = [self._masking_option[MaskingOption.ALLOWED_VALUE]]
+
+    def mask_odata_id(self):
+        """
+        :return:
+        """
+        self._current_token_id_mask = [self._masking_option[MaskingOption.ODATA_ID]]
+
+    def mask_targets(self):
+        """
+        :return:
+        """
+        self._current_token_id_mask = [self._masking_option[MaskingOption.TARGET]]
+
     @staticmethod
     def mask_json_kv_span(
         data: Dict[str, torch.Tensor],
         tokenizer: PreTrainedTokenizer,
-        target_key: str,
-        end_toks: Union[str, List[str]] = "\"},",
+        target_key: Union[str, int],
+        end_toks: Union[str, List[Union[str, int]]] = "\"},",
         return_original: bool = False,
     ) -> torch.Tensor:
 
@@ -99,8 +139,8 @@ class MaskedJSONDataset(JSONDataset, ABC):
         self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
-        target_key: str,
-        end_toks: Union[str, List[str]] = "\"},",
+        target_key: Union[str, int],
+        end_toks: Union[str, List[Union[str, int]]] = "\"},",
         return_original: bool = False,
     ) -> torch.Tensor:
         return MaskedJSONDataset.mask_tensor_json_kv_span(
@@ -109,12 +149,77 @@ class MaskedJSONDataset(JSONDataset, ABC):
         )
 
     @staticmethod
+    def mask_tensor_ids_json_kv_span(
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        target_ids: Union[int, List[int]],
+        end_toks_ids: Union[int, List[int], List[List[int]]] = 92,
+        return_original: bool = False,
+    ) -> torch.Tensor:
+
+        """
+        It computes Masks for specific key and value in json structure
+        It mask both key and value.
+
+        Shapes attention  [1, x]
+        Shapes intput_idx [1, x]
+
+        Usage:
+            target_key = "@odata.id"
+            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+            json_lines = json.dumps(j_data)
+            attention_mask = mask_specific_key_and_value(json_lines,
+            target_key, tokenizer=tokenizer, debug=True)
+
+        :param attention_mask:
+        :param input_ids:
+        :param return_original: Boolean indicating whether to return the original attention mask
+                                if the target key is not found
+        :param target_ids: The JSON key to mask the value of
+        :param end_toks_ids: The termination sequence to identify the end of the masked value
+        :return: The computed new attention mask
+        """
+        attention_mask = attention_mask.clone()
+        attention_mask[:, :] = 0
+
+        if isinstance(end_toks_ids, int):
+            end_toks_ids = [[end_toks_ids]]
+
+        if isinstance(target_ids, int):
+            target_ids = [target_ids]
+
+        end_toks_lens = [len(end_toks) for end_toks in end_toks_ids]
+        target_len = len(target_ids)
+
+        for i in range(input_ids.shape[1] - target_len + 1):
+            if input_ids[0, i:i + target_len].tolist() == target_ids:
+                # print("Found begin")
+                attention_mask[0, i:i + target_len] = 1
+                # corresponding end tokens after the target key
+                j = i + target_len
+                while j < input_ids.shape[1]:
+                    current_token = input_ids[0, j:j + max(end_toks_lens)].tolist()
+                    # current_token = input_ids[0, j:j + end_toks_len].tolist()
+                    if any(current_token[-len(et):] == et for et in end_toks_ids):
+                        attention_mask[0, j:j + max(end_toks_lens)] = 1
+                        break
+                    attention_mask[0, j] = 1
+                    j += 1
+                    i += 1
+
+        if return_original:
+            if attention_mask.sum() == 0:
+                attention_mask[:, :] = 1
+
+        return attention_mask
+
+    @staticmethod
     def mask_tensor_json_kv_span(
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
         tokenizer: PreTrainedTokenizer,
-        target_key: str,
-        end_toks: Union[str, List[str]] = "\"},",
+        target_key: Union[str, int],
+        end_toks: Union[str, List[Union[str, int]]] = "\"},",
         return_original: bool = False,
     ) -> torch.Tensor:
 
@@ -144,29 +249,32 @@ class MaskedJSONDataset(JSONDataset, ABC):
         attention_mask = attention_mask.clone()
         attention_mask[:, :] = 0
 
-        if isinstance(end_toks, str):
+        if isinstance(end_toks, int):
             end_toks = [end_toks]
 
-        target_tokens = tokenizer(target_key)['input_ids']
-        end_toks = [tokenizer(end_tok)['input_ids'] for end_tok in end_toks]
+        target_tokens = tokenizer(target_key, add_special_tokens=True)['input_ids']
+        end_toks = [tokenizer(end_tok, add_special_tokens=True)['input_ids'] for end_tok in end_toks]
         end_toks_lens = [len(end_toks) for end_toks in end_toks]
-
         target_len = len(target_tokens)
 
         print(f"Start searching {target_key} tokens {target_tokens}")
-        print(f"End tokens {end_toks[0]}")
+        print(f"End tokens {end_toks}")
+        print("special", tokenizer.additional_special_tokens)
+        print("special", tokenizer.additional_special_tokens_ids[3])
+        print("special vob size", tokenizer.vocab_size)
+
         # print(f"End tokens shape {end_toks[0].shape}")
-        print(f"end_toks {input_ids}")
+        # print(f"end_toks {input_ids}")
 
         for i in range(input_ids.shape[1] - target_len + 1):
             if input_ids[0, i:i + target_len].tolist() == target_tokens:
-                print("Found begin")
+                # print("Found begin")
                 attention_mask[0, i:i + target_len] = 1
                 # corresponding end tokens after the target key
                 j = i + target_len
                 while j < input_ids.shape[1]:
                     current_token = input_ids[0, j:j + max(end_toks_lens)].tolist()
-                    print("Found end")
+                    # print("Found end")
                     # current_token = input_ids[0, j:j + end_toks_len].tolist()
                     if any(current_token[-len(et):] == et for et in end_toks):
                         attention_mask[0, j:j + max(end_toks_lens)] = 1
@@ -220,14 +328,19 @@ class MaskedJSONDataset(JSONDataset, ABC):
 
         data = self._data["train_data"][idx]
 
-        # modified_data = data.copy()
+        original_mask = attention_mask = data['attention_mask']
+        input_ids = data['input_ids']
+        attention_mask = data['attention_mask']
 
-        input_ids = data['input_ids'].unsqueeze(0)
-        attention_mask = data['attention_mask'].unsqueeze(0)
+        if input_ids.ndim == 1:
+            input_ids = input_ids.unsqueeze(0)
+            attention_mask = attention_mask.unsqueeze(0)
 
-        for token, end_token in self.token_to_mask:
-            new_mask = self.apply_mask_tensor_json_kv_span(
-                input_ids, attention_mask, token, end_toks=end_token
+        mask_adjusted = False
+        for token, end_token in self._current_token_id_mask:
+            mask_adjusted = True
+            new_mask = self.mask_tensor_ids_json_kv_span(
+                input_ids, attention_mask, target_ids=token, end_toks_ids=end_token
             ).squeeze(0)
 
             if torch.all(new_mask == 0):
@@ -235,6 +348,8 @@ class MaskedJSONDataset(JSONDataset, ABC):
             else:
                 print("Attention mask contains non-zero values")
             data["attention_mask"] = new_mask
+
+        print(f"return data and {mask_adjusted} original shape {original_mask.shape} new mask shape {attention_mask.shape}")
 
         data['file_idx'] = torch.tensor(idx)
         # self._cache[idx] = data

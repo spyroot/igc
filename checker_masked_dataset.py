@@ -1,9 +1,9 @@
 import json
 import time
+
 import torch
 
-from igc.ds.redfish_masked_dataset import MaskedJSONDataset
-from igc.modules.shared.llm_shared import from_pretrained_default
+from igc.ds.redfish_masked_dataset import MaskedJSONDataset, MaskingOption
 from igc.shared.shared_main import shared_main
 
 
@@ -36,7 +36,7 @@ def decode_masked_output(dataset, input_ids: torch.Tensor, attention_mask: torch
 
 
 def masking_from_json_file_test(
-    cmd, file_path, target_key, end_tok=["\"},", "\"}"]):
+    cmd, file_path, target_key, end_tok=["},", "}"]):
     """
     Grabs
      {
@@ -48,19 +48,29 @@ def masking_from_json_file_test(
     :param target_key:
     :return:
     """
-    _, tokenizer = from_pretrained_default(cmd, only_tokenizer=True)
+
+    dataset = MaskedJSONDataset(
+        dataset_dir="datasets",
+        verbose=True,
+        do_consistency_check=False)
+
+    # _, tokenizer = from_pretrained_default(cmd, only_tokenizer=True)
 
     print(f"Start token {target_key} end token {end_tok}")
     with open(file_path, 'r') as f:
         json_data = json.load(f)
 
+    tokenizer = dataset.tokenizer
     json_lines = json.dumps(json_data)
     encoding = tokenizer(json_lines, return_tensors='pt')
 
-    print("Encodings")
+    print("Encodings {encoding.keys()}")
     # Call the mask_json_key_and_value method
-    attention_mask = MaskedJSONDataset.mask_json_kv_span(
-        encoding, tokenizer, target_key, end_toks=end_tok)
+
+    attention_mask = MaskedJSONDataset.mask_tensor_ids_json_kv_span(
+        encoding["input_ids"], encoding["attention_mask"],
+        target_ids=50257,
+        end_toks_ids=[[92], [92, 13]])
 
     unmasked_tokens = []
     input_ids = encoding['input_ids']
@@ -76,49 +86,96 @@ def masking_from_json_file_test(
     print("Decoded Tokens:", decoded_tokens)
 
 
-def masking_test_from_dataset_from_id(cmd, decoder=False, end_tok=None):
+def masking_test_from_dataset_from_id(ids, masks_types, decoder=False):
     """
-    :param end_tok:
+    :param masks_types:
     :param decoder:
-    :param cmd:
     :return:
     """
-    if end_tok is None:
-        end_tok = ["\"},", "\"}"]
-
     dataset = MaskedJSONDataset(
         "datasets",
         verbose=True,
         do_consistency_check=False)
 
     print("######## Start testing from dataset ###### ")
-
     print("# Data from a dataset: ")
+    print("dataset size:", len(dataset))
 
-    data = dataset[25316]
-    input_ids = data["input_ids"]
-    attention_mask = data["attention_mask"]
-    file = data["file_path"]
-    file_path = f"datasets/{file}"
-    print("input_ids shape      :", input_ids.shape)
-    print("attention mask shape :", attention_mask.shape)
+    for _id in ids:
 
-    if decoder:
-        decoded_text = dataset.tokenizer.decode(input_ids)
-        print("Decoded Text:")
-        print(decoded_text)
+        data = dataset[_id]
+        file = data["file_path"]
+        file_path = f"datasets/{file}"
 
-    decode_masked_output(dataset, input_ids.unsqueeze_(0), attention_mask.unsqueeze_(0))
+        input_ids = data["input_ids"]
+        attention_mask = data["attention_mask"]
 
-    print("# Data from manually passing: ")
-    new_mask = MaskedJSONDataset.mask_tensor_json_kv_span(
-        input_ids, attention_mask, dataset.tokenizer, "@odata.id", end_toks=end_tok)
+        print("input_ids shape      :", input_ids.shape)
+        print("attention mask shape :", attention_mask.shape)
+        for mask_type in masks_types:
+            if mask_type == MaskingOption.TARGET:
+                print(f"- Masking target values for {file_path}")
+                dataset.mask_targets()
+            if mask_type == MaskingOption.ALLOWED_VALUE:
+                print(f"- Masking allowed  values for {file_path}")
+                dataset.mask_allowed_value()
+            if mask_type == MaskingOption.ODATA_ID:
+                print(f"- Masking odata for {file_path}")
+                dataset.mask_odata_id()
 
-    decode_masked_output(dataset, input_ids, new_mask)
+            if decoder:
+                decoded_text = dataset.tokenizer.decode(input_ids)
+                print("Decoded Text:")
+                print(decoded_text)
+
+            if input_ids.ndim == 1:
+                input_ids = input_ids.unsqueeze(0)
+
+            if attention_mask.ndim == 1:
+                attention_mask = attention_mask.unsqueeze(0)
+
+            decode_masked_output(dataset, input_ids, attention_mask)
+
+
+def masking_test_from_dataset_allowed_val(cmd, ids, decoder=False):
+    """
+    :param decoder:
+    :param cmd:
+    :return:
+    """
+    dataset = MaskedJSONDataset(
+        "datasets",
+        verbose=True,
+        do_consistency_check=False)
+    dataset.mask_allowed_value()
+
+    print("######## Start testing from dataset ###### ")
+    print("# Data from a dataset: ")
+    print("dataset size:", len(dataset))
+
+    for _id in ids:
+        data = dataset[_id]
+        input_ids = data["input_ids"]
+        attention_mask = data["attention_mask"]
+        file = data["file_path"]
+        file_path = f"datasets/{file}"
+        print("input_ids shape      :", input_ids.shape)
+        print("attention mask shape :", attention_mask.shape)
+
+        if decoder:
+            decoded_text = dataset.tokenizer.decode(input_ids)
+            print("Decoded Text:")
+            print(decoded_text)
+
+        decode_masked_output(dataset, input_ids.unsqueeze_(0), attention_mask.unsqueeze_(0))
 
 
 def masking_test_from_dataset(cmd, files):
     """
+    Dataset ids {'_redfish_v1_Systems_System.Embedded.1_SecureBoot.json': [10021, 10022],
+    '_redfish_v1_AccountService.json': [19380, 19381],
+     '_redfish_v1_AccountService_Accounts.json': [21040]}
+
     :param files:
     :param cmd:
     :return:
@@ -152,14 +209,19 @@ def main(cmd):
     file_path1 = "datasets/orig/10.252.252.209/_redfish_v1_AccountService.json"
     file_path2 = "datasets/orig/10.252.252.209/_redfish_v1_AccountService_Accounts.json"
     file_path3 = "datasets/orig/10.252.252.209/_redfish_v1_Systems_System.Embedded.1_SecureBoot.json"
-    # print("\n\n")
-    # print(f"Starting checking masking actions {file_path3}")
-    # # masking_test_from_dataset(cmd, files)
-    # masking_test_from_dataset_from_id(cmd)
-    # print("\n\n")
 
+    files = ["_redfish_v1_AccountService.json",
+             "_redfish_v1_AccountService_Accounts.json",
+             "_redfish_v1_Systems_System.Embedded.1_SecureBoot.json"]
+
+    # masking_from_json_file_test(cmd, file_path1, "@data.id", end_tok=["\"},", "}"])
+
+    masks_type = [MaskingOption.ALLOWED_VALUE, MaskingOption.ODATA_ID, MaskingOption.TARGET]
+
+    print("\n\n")
+    print(f"Starting checking masking actions {file_path1}")
     print("### Starting checking odata masking from _redfish_v1_AccountService")
-    masking_from_json_file_test(cmd, file_path1, "@data.id", end_tok=["\"},", "\"}"])
+    masking_test_from_dataset_from_id(ids=[10021, 19380, 21040], masks_types=masks_type)
 
     # print("\n\n")
     # print("Starting checking odata masking from _redfish_v1_AccountService")
