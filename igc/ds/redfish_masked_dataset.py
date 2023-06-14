@@ -495,8 +495,22 @@ class MaskedJSONDataset(JSONDataset, ABC):
         return len(self._data["train_data"])
 
     def __getitem__(self, idx):
-        """Get item from json dataset and mask what we
-        need and return it as a dict
+        """
+        Get item from json dataset and mask what we
+        need and return it as a dict.
+
+        we have 3 cases. case when we return just what we have in our dataset.
+        i.e parent class, in that case we only cache result
+
+        if any option of attention mask enabled , we pass
+        to respected method and mask what we need and return.
+
+        we have to option what we mask.  Option one we mask all token we added.
+        idea here that we train GPT in such a way it learns representation.
+
+        Option two when we train attentions. for example we train to keep
+        attention on REST API's , or parameters rest API accept. etc
+
 
         :param idx:
         :return:
@@ -532,6 +546,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
                     warnings.warn("Attention mask contains all zeros")
                     break
 
+        # we make same shape after we re masked
         if input_ids.ndim == 2:
             data["attention_mask"] = data["attention_mask"].squeeze(0)
             data["input_ids"] = data["input_ids"].squeeze(0)
