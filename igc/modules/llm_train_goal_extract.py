@@ -433,7 +433,7 @@ class GoalExtractorTrainer(LlmBaseModule):
         # shifting
         labels = input_ids[:, 1:].clone()
         labels[:, -1] = -100  # ignore index
-        mask = torch.tensor(input_ids == self.pad_token_id)
+        mask = torch.tensor(input_ids == self.dataset.pad_token_id)
         labels = labels.masked_fill(mask, -100)
 
         input_ids = input_ids[:, :-1]
@@ -505,7 +505,7 @@ class GoalExtractorTrainer(LlmBaseModule):
                     total_loss += loss.item()
                     # Accumulate loss
                     total_loss += loss.item()
-                    self.writer.add_scalar("Parameters extractor batch Loss", loss.item(), epoch * num_batches + i)
+                    self.metric_logger.add_scalar("Parameters extractor batch Loss", loss.item(), epoch * num_batches + i)
 
                     if (i + 1) % self.batch_log == 0:
                         formatted_loss = "{:.4f}".format(loss.item())
@@ -514,16 +514,16 @@ class GoalExtractorTrainer(LlmBaseModule):
                     # report batch loss it percentage, from total epochs
                     if (epoch + 1) % (self.num_epochs // 10) == 0 or epoch == self.num_epochs - 1:
                         accuracy = self.val_goal_and_parameters_batch(input_seqs, parameters)
-                        self.writer.add_scalar("Parameters extractor accuracy", accuracy, epoch)
+                        self.metric_logger.add_scalar("Parameters extractor accuracy", accuracy, epoch)
                         print(f"Parameters extractor accuracy at epoch {epoch + 1}: {accuracy}%")
 
             average_loss = total_loss / num_batches
-            self.writer.add_scalar("Parameters extractor epoch Loss", average_loss, epoch)
+            self.metric_logger.add_scalar("Parameters extractor epoch Loss", average_loss, epoch)
             # print(f"Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
             # percentage, from total epochs
             if (epoch + 1) % (self.num_epochs // 2) == 0 or epoch == self.num_epochs - 1:
                 epoch_accuracy = self.val_goal_and_parameters_epoch(overfit=overfit)
-                self.writer.add_scalar("Goal extractor epoch accuracy", epoch_accuracy, epoch)
+                self.metric_logger.add_scalar("Goal extractor epoch accuracy", epoch_accuracy, epoch)
                 print(f"Parameters extractor accuracy at Epoch {epoch + 1}: {epoch_accuracy}%")
 
         print("Goal&Parameters training complete.")
