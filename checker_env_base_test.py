@@ -13,7 +13,7 @@ def create_test_env(cmd):
     tokenizer = IgcLllModule.load_llm_embeddings_model(cmd, only_tokenizer=True)
     directory_path = os.path.expanduser(cmd.raw_data_dir)
     dataset = JSONDataset(
-        directory_path, verbose=True, tokenizer=tokenizer)
+        directory_path, verbose=True)
 
     for rest_api, path in dataset.get_rest_api_mappings():
         print(f"rest api {rest_api} path {path}")

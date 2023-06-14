@@ -1,6 +1,10 @@
 __pycache__/
 *.py[cod]
 *$py.class
+experiment*/
+logs*/
+datasets*/
+backup*/
 
 # C extensions
 *.so

@@ -3,10 +3,15 @@ from igc.modules.shared.llm_shared import from_pretrained_default
 from igc.shared.shared_main import shared_main
 
 
-def add_token_test(cmd):
+def add_token_test(cmd, tokenizer_dir):
     # """
-
-    tokens_to_add = ["@odata.id", "target", "AllowableValues"]
+    tokens_to_add = ["@odata.id",
+                     "AllowableValues",
+                     "@odata.context",
+                     "@odata.context",
+                     "@odata.count",
+                     "@odata.etag",
+                     "#JsonSchemaFile", "$ref"]
     special_tokens = ["[", "]", "{", "}"]
 
     _, tokenizer = from_pretrained_default(cmd, only_tokenizer=True)
@@ -25,6 +30,12 @@ def add_token_test(cmd):
 
     print(f"all special ids   : {tokenizer.all_special_ids}")
     print(f"all special tokens: {tokenizer.all_special_tokens}")
+
+    # Print token IDs
+    print("Token IDs:")
+    for token in tokens_to_add:
+        token_id = tokenizer.convert_tokens_to_ids(token)
+        print(f"Token: {token}, ID: {token_id}")
 
     # Print special tokens map
     special_tokens_map = tokenizer.special_tokens_map
@@ -93,16 +104,26 @@ def check_saved_tokens(cmd):
     print("Decoded tokens:", tokenizer.decode(encoded_input))
 
 
+def process_files(cmd):
+    """
+
+    :return:
+    """
+    add_token_test(cmd, "datasets/tokenizer_all")
+
+
 def main(cmd):
     """
 
     :param cmd:
     :return:
     """
-    token_test()
+    process_files(cmd)
 
-    print("Checking token addition.\n\n\n")
-    add_token_test(cmd)
+    # token_test()
+    # print("Checking token addition.\n\n\n")
+    # add_token_test(cmd)
+    #
 
 
 if __name__ == '__main__':
