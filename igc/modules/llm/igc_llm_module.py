@@ -50,42 +50,47 @@ class IgcLanguageModule:
         self.logger.remove()
         self.logger.add(sys.stdout, level=self._log_level)
 
-    def train(self, use_pretrained_only: bool = True):
+    def load_finetuned_llm(self, use_pretrained_only=False):
+        """
+        :return:
+        """
+        _is_llm_pre_trained = False
+        if use_pretrained_only:
+            _model, tokenizer = self._from_pretrained_fn(self.spec, only_tokenizer=False)
+            _model.resize_token_embeddings(len(self.ds.tokenizer))
+            return _model, tokenizer, True
+
+        self.logger.info("Starting training.")
+        # we train State Encoder the goal here take rest api response, and re-present as state.
+        if self.spec.llm == "latent" or self.spec.llm == "all":
+
+            self.logger.info("Starting training state encoder.")
+            _model, t = self._from_pretrained_fn(self.spec, only_tokenizer=False)
+            llm_embeddings = LlmEmbeddingsTrainer(
+                "state_encoder",
+                self.spec, _model, self.ds.tokenizer,
+                ds=self.ds, metric_logger=self.metric_logger)
+
+            if hasattr(_model, 'resize_token_embeddings'):
+                _model.resize_token_embeddings(len(self.ds.tokenizer))
+
+            llm_embeddings.train()
+            return llm_embeddings.model, self.ds.tokenizer, True
+
+        return None, None, False
+
+    def train(self, use_pretrained_only: bool = False):
         """Main call to train all language models.
         :return:
         """
 
         _model = None
-
-        _is_llm_pre_trained = False
-        if use_pretrained_only:
-            _model, tokenizer = self._from_pretrained_fn(self.spec, only_tokenizer=False)
-            _is_llm_pre_trained = True
-        else:
-            _, tokenizer = self._from_pretrained_fn(self.spec, only_tokenizer=True)
-
-        self._register_tokens()
-        if hasattr(_model, 'resize_token_embeddings'):
-            _model.resize_token_embeddings(len(tokenizer))
-
         self.logger.info("Starting training.")
-        # we train State Encoder the goal here take rest api response, and re-present as state.
-        if not use_pretrained_only:
-            if self.spec.llm == "latent" or self.spec.llm == "all":
-                model, tokenizer = self._from_pretrained_fn(self.spec, only_tokenizer=True)
-                self.logger.info("Starting training state encoder.")
-                llm_embeddings = LlmEmbeddingsTrainer(
-                    "state_encoder",
-                    self.spec, model, tokenizer,
-                    ds=self.ds, metric_logger=self.metric_logger)
+        _model, tokenizer, is_pre_trained_or_tuned = self.load_finetuned_llm(
+            use_pretrained_only=use_pretrained_only
+        )
 
-                if hasattr(model, 'resize_token_embeddings'):
-                    model.resize_token_embeddings(len(tokenizer))
-
-                llm_embeddings.train()
-                _is_llm_pre_trained = True
-
-        if not _is_llm_pre_trained:
+        if is_pre_trained_or_tuned:
             self.logger.info("Loading state encoder state.")
             modules = self.load(self.spec, module_name="state_encoder", device=self.spec.device)
             module = modules["state_encoder"]
@@ -159,10 +164,10 @@ class IgcLanguageModule:
 
     @staticmethod
     def make_model(
-            spec: argparse.Namespace,
-            module_name: str,
-            base_model: None,
-            base_tokenizer) -> Optional[LlmBaseModule]:
+        spec: argparse.Namespace,
+        module_name: str,
+        base_model: None,
+        base_tokenizer) -> Optional[LlmBaseModule]:
 
         """
         Create an igc module based on the module name.
@@ -189,9 +194,9 @@ class IgcLanguageModule:
 
     @staticmethod
     def load(
-            spec: argparse.Namespace,
-            device: torch.device = "cpu",
-            module_name: Union[str, List[str]] = None,
+        spec: argparse.Namespace,
+        device: torch.device = "cpu",
+        module_name: Union[str, List[str]] = None,
     ) -> Dict[str, LlmBaseModule]:
         """
 

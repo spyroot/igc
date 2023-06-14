@@ -75,13 +75,11 @@ class LlmBaseModule(IgcBaseModule):
         if self.metric_logger is not None:
             self.metric_logger.set_log_level(self._log_level)
 
-        if not hasattr(spec, 'module_checkpoint_dir') or not spec.module_checkpoint_dir:
-            raise ValueError("module_checkpoint_dir must be provided in the spec argument.")
-
         if hasattr(llm_model, 'resize_token_embeddings'):
             llm_model.resize_token_embeddings(len(llm_tokenizer))
         else:
             warnings.warn("Model does not have the 'resize_token_embeddings' method.")
+
         self.logger.info("Starting llm module")
 
     def finetuned_dir(self):

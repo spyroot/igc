@@ -22,7 +22,6 @@ def get_device(rank: Optional[int] = None) -> torch.device:
                   If None, no distribution is done.
     :return: A torch.device.
     """
-    # Get the total number of CUDA devices
     num_cuda_devices = torch.cuda.device_count() if torch.cuda.is_available() else 0
 
     if num_cuda_devices > 0:

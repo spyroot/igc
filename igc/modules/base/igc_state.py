@@ -22,6 +22,7 @@ class IgcBaseState:
     This base state shared in trainer , modules.
     Rank, Devices, Logging
     """
+
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
@@ -37,18 +38,6 @@ class IgcBaseState:
             raise TypeError(f"spec should be an instance of argparse.Namespace, "
                             f"received {type(spec).__name__}.")
 
-        self.is_accelerator = False
-        if "use_accelerator" in spec and spec.use_accelerator:
-            self.accelerator = build_accelerator(spec)
-            self.is_accelerator = True
-            # let accelerator choose device.
-            self.device = self.accelerator.device
-        elif hasattr(spec, "device"):
-            self.device = spec.device
-        else:
-            # if we are not using accelerator, we need to set device
-            self.device = get_device() if device is None else device
-
         self._log_file = None
         self._is_trained = False
         self._trainer_args = spec
@@ -56,6 +45,19 @@ class IgcBaseState:
         self.logger = loguru.logger
         self._configure_logger(module_name)
         self.rank = int(os.environ.get('LOCAL_RANK', -1))
+
+        self.is_accelerator = False
+        if "use_accelerator" in spec and spec.use_accelerator:
+            self.accelerator = build_accelerator(spec)
+            self.is_accelerator = True
+            # let accelerator choose device.
+            self.device = self.accelerator.device
+            self.logger.info(f"Running accelerator device {device}")
+        elif hasattr(spec, "device"):
+            self.device = spec.device
+        else:
+            # if we are not using accelerator, we need to set device
+            self.device = get_device(self.rank) if device is None else device
 
     def _prepare_checkpoint_dir(self):
         """
@@ -134,6 +136,3 @@ class IgcBaseState:
             self.logger.info(f"RNG Types: {self.accelerator.rng_types}")
             self.logger.info(f"Log With: {self.accelerator.log_with}")
             self.logger.info(f"Step Scheduler with Optimizer: {self.accelerator.step_scheduler_with_optimizer}")
-
-
-

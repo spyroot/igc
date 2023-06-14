@@ -237,8 +237,7 @@ class IgcBaseModule(IgcBaseState):
             raise ValueError(
                 "Invalid dataset sizes. Adjust the ratio value to ensure non-zero splits.")
 
-        return random_split(
-            self.dataset, [train_size, eval_size])
+        return random_split(self.dataset, [train_size, eval_size])
 
     def split_slice_dataset(
         self,
@@ -263,9 +262,8 @@ class IgcBaseModule(IgcBaseState):
 
         sample_size = int(len(self.dataset) * sample_ratio)
 
-        # randomly select a subset of the dataset
         indices = torch.randperm(len(self.dataset))
-        self.dataset = torch.utils.data.Subset(self.dataset, indices[:sample_size])
+        data = torch.utils.data.Subset(self.dataset, indices[:sample_size])
 
         train_size = int(len(self.dataset) * train_ratio)
         eval_size = len(self.dataset) - train_size
@@ -276,7 +274,7 @@ class IgcBaseModule(IgcBaseState):
                 "value to ensure non-zero splits.")
 
         return random_split(
-            self.dataset, [train_size, eval_size])
+            data, [train_size, eval_size])
 
     def save_strategy(self):
         """

@@ -23,6 +23,7 @@ from .ds_utils import (
     create_tar_gz,
     unpack_tar_gz, md5_checksum, delete_directory_with_confirmation
 )
+from .igc_json_pipeline import JsonPipeline
 
 
 class DatasetConsistencyError(Exception):
@@ -203,14 +204,18 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self._entry_rest_api_result = None
 
     def _load_tokenizer(self):
-        """
+        """ Load tokenizer.
         :return:
         """
         tok_dir = f"{self._dataset_root_dir}/tokenizer"
+        print(f"Loading tokenizer from {tok_dir}")
         if os.path.exists(tok_dir):
             self.tokenizer = GPT2Tokenizer.from_pretrained(tok_dir)
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+            print(f"Loading tokenizer, from {tok_dir}. number of "
+                  f"tokens in the loaded tokenizer: {len(self.tokenizer)}")
+
             self.add_special_tokens()
             return self.tokenizer
         return None
@@ -438,6 +443,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         if not self._check_dataset_files():
             logging.debug(f"Re-building dataset {self._dataset_file_name}")
 
+            # first we add all tokens
+            self._build_tokenizer()
             self._load_json_files()
             self._load_dicts_from_data()
             self._construct_action_space()
@@ -1524,16 +1531,34 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             "return_tensors": 'pt'
         }
 
+    def _build_tokenizer(self):
+        """
+
+        :return:
+        """
+        json_pipeline = JsonPipeline(self._json_directory_path)
+        json_pipeline.load_json_files()
+        json_pipeline.build_tokens(self.tokenizer)
+        print("Finished new vocab size", self.tokenizer.vocab_size)
+
     def add_special_tokens(self):
         """
         :return:
         """
-        self.tokenizer.add_tokens(["@odata.id", "target", "AllowableValues"])
+        self.tokenizer.add_tokens(["@odata.id",
+                                   "AllowableValues",
+                                   "@odata.context",
+                                   "@odata.context",
+                                   "@odata.count",
+                                   "@odata.etag",
+                                   "#JsonSchemaFile",
+                                   "$ref"])
         special_tokens = ["[", "]", "{", "}"]
         self.tokenizer.add_tokens(special_tokens, special_tokens=True)
         special_tokens_dict = {"additional_special_tokens": special_tokens}
         self.tokenizer.add_special_tokens(special_tokens_dict)
 
+        # this ill need re-think a bit.
         self._data["tokenizer_special_tokens"] = [
             "@odata.id",
             "AllowableValues",

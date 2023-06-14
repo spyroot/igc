@@ -16,9 +16,8 @@ def set_logger(spec):
     """
     log_level = spec.llm_log_level.upper()
 
-    # Configure loguru logger
-    loguru.logger.remove()  # Remove any existing handlers
-    loguru.logger.add("logfile.log", level=log_level)  # Add a handler with the specified log level
+    loguru.logger.remove()
+    loguru.logger.add("logfile.log", level=log_level)
 
 
 def add_accelerator_parser_group(parser) -> argparse.ArgumentParser:
@@ -30,7 +29,7 @@ def add_accelerator_parser_group(parser) -> argparse.ArgumentParser:
     accelerate_group = parser.add_argument_group(description="Accelerator Argument Parser")
     accelerate_group.add_argument(
         "--use_accelerator",
-        type=bool, default=True, help="Enable accelerator. By default IGC will use it.")
+        action='store_true', default=False, help="Enable accelerator. By default, IGC will use it.")
     accelerate_group.add_argument(
         "--device_placement",
         type=bool, default=True, help="Device placement flag")
@@ -616,13 +615,6 @@ def shared_arg_parser(
         type=int, default=-1,
         help="local_rank for distributed training on GPUs")
 
-    if is_accelerate_arg_parser:
-        try:
-            accelerator = Accelerator()
-            parser = accelerator.inject_arguments(parser)
-        except ImportError:
-            pass
-
     if is_fairscale_arg_parser:
         optimizer_group = parser.add_argument_group('Optimizer')
         optimizer_group.add_argument("--optimizer",
@@ -651,6 +643,14 @@ def shared_arg_parser(
 
     args = parser.parse_args()
     args.device = get_device() if args.device == "auto" else args.device
+
+    if is_accelerate_arg_parser:
+        try:
+            if args.use_accelerator:
+                accelerator = Accelerator()
+                parser = accelerator.inject_arguments(parser)
+        except ImportError:
+            pass
 
     # Set up the logger based on the log level in the arguments
     set_logger(args)

@@ -6,7 +6,12 @@ from .base.igc_metric_logger import MetricLogger
 from igc.modules.llm.igc_llm_module import IgcLanguageModule
 from .igc_rl_module import IgcRlModule
 from ..ds.redfish_dataset import JSONDataset
-from .shared.llm_shared import from_pretrained_default, load_pretrained_default, save_pretrained_default
+from .shared.llm_shared import (
+    from_pretrained_default,
+    load_pretrained_default,
+    save_pretrained_default
+)
+from ..ds.redfish_masked_dataset import MaskedJSONDataset
 
 
 class IgcMain:
@@ -31,8 +36,8 @@ class IgcMain:
         :param specs:
         """
         self._from_pretrained_fn = from_pretrained
-        self._from_pretrained_fn = from_pretrained_load_fn
-        self._from_pretrained_fn = from_pretrained_save_fn
+        self._from_pretrained_load_fn = from_pretrained_load_fn
+        self._from_pretrained_save_fn = from_pretrained_save_fn
 
         self._metric_logger = MetricLogger(specs.metric_report, **vars(specs))
         self._directory_path = os.path.expanduser(specs.raw_data_dir)
@@ -45,11 +50,10 @@ class IgcMain:
         :return:
         """
         if self._specs.train:
-            _, tokenizer = self._from_pretrained_fn(self._specs, only_tokenizer=True)
-
-            dataset = JSONDataset(
-                self._directory_path, verbose=True, tokenizer=tokenizer)
-
+            dataset = MaskedJSONDataset(
+                "datasets",
+                do_consistency_check=False
+            )
             if (self._specs.train == "llm" or self._specs.train == "all") and self._specs.llm is not None:
                 llm_module = IgcLanguageModule(self._specs, self._metric_logger, dataset)
                 llm_module.train()
@@ -72,7 +76,6 @@ class IgcMain:
         dataset = JSONDataset(
             self._directory_path,
             verbose=True,
-            tokenizer=tokenizer,
             do_consistency_check=specs.do_consistency_check)
 
         llm_module = IgcLanguageModule(self._specs, self._metric_logger, dataset)

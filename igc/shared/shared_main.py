@@ -17,7 +17,8 @@ def shared_main(
     """
     args = shared_arg_parser()
     if args.local_rank == -1:
-        args.device = get_device()
+        if args.device is None:
+            args.device = get_device()
     else:
         torch.cuda.set_device(args.local_rank)
         args.device = torch.device("cuda", args.local_rank)
