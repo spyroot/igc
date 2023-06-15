@@ -91,6 +91,8 @@ class IgcAgentTrainer(RlBaseModule):
         )
 
         # Validate inputs
+        self.epsilon_decay_factor = 0.99
+
         if not isinstance(module_name, str):
             raise TypeError("module_name must be a string.")
 
@@ -150,7 +152,6 @@ class IgcAgentTrainer(RlBaseModule):
         self.target_model.to(self.device)
 
         self.current_goal = None
-
         self.replay_buffer = Buffer(self.buffer_size, self.batch_size)
 
         loguru.logger.level("INFO")
@@ -205,7 +206,8 @@ class IgcAgentTrainer(RlBaseModule):
         }
         return goal
 
-    def train_goal(self):
+
+    def train_goal(self, epsilon=0.0):
         """
         :return:
         """
@@ -213,6 +215,8 @@ class IgcAgentTrainer(RlBaseModule):
             goal=self.current_goal["state"],
             goal_type=GoalTypeState.State
         )
+
+        self.env.add_goal_state(self.current_goal["state"])
 
         if not torch.is_same_size(_state, self.current_goal["state"]):
             raise ValueError("State and goal have different dimensions.")
@@ -229,16 +233,24 @@ class IgcAgentTrainer(RlBaseModule):
         truncated = [False] * self.env.num_envs
 
         while (not any(terminated) or not any(truncated)) and i < self.max_episode_len:
+
             goal_state = self.current_goal["state"]
             state_flat = _state.view(_state.size(0), -1)
             goal_state_flat = goal_state.view(goal_state.size(0), -1)
             input_state = torch.cat([state_flat, goal_state_flat], dim=1)
 
             out = self.agent_model.forward(input_state.to(self.device))
-            rest_tensor_slice, method_tensor_slice = self.env.extract_action_method(out)
-
-            rest_api_indices = torch.argmax(rest_tensor_slice, dim=1)
-            rest_api_method_indices = torch.argmax(method_tensor_slice, dim=1)
+            if np.random.uniform(0, 1) < epsilon:
+                # random action
+                random_action = torch.randint(0, self.action_dim, (self.env.num_envs, out.size(1)))
+                rest_tensor_slice, method_tensor_slice = self.env.extract_action_method(random_action)
+                rest_api_indices = torch.argmax(rest_tensor_slice, dim=-1)
+                rest_api_method_indices = torch.argmax(method_tensor_slice, dim=-1)
+            else:
+                # greedy action
+                rest_tensor_slice, method_tensor_slice = self.env.extract_action_method(out)
+                rest_api_indices = torch.argmax(rest_tensor_slice, dim=1)
+                rest_api_method_indices = torch.argmax(method_tensor_slice, dim=1)
 
             num_rest_api_class = rest_tensor_slice.shape[1]
             num_rest_api_methods = method_tensor_slice.shape[1]
@@ -262,6 +274,7 @@ class IgcAgentTrainer(RlBaseModule):
             episode_experience.append(
                 (state_flat, concatenated_vector, rewards, next_state_flat, goal_state_flat)
             )
+
             rewards_per_trajectory.append(rewards)
             _state = next_state
             i += 1
@@ -317,6 +330,7 @@ class IgcAgentTrainer(RlBaseModule):
         :return:
         """
 
+        epsilon = 1.0
         self.current_goal = self._create_goal()
         # start by making Q-target and Q-policy the same
         self.update_target(self.agent_model, self.target_model)
@@ -333,8 +347,7 @@ class IgcAgentTrainer(RlBaseModule):
             losses = []
 
             for _ in range(self.num_episodes):
-
-                episode_experience, rewards_sum_per_trajectory, goal_reached_count = self.train_goal()
+                episode_experience, rewards_sum_per_trajectory, goal_reached_count = self.train_goal(epsilon)
                 total_goal_reached += goal_reached_count
                 self.update_replay_buffer(episode_experience)
                 total_reward += rewards_sum_per_trajectory.item()
@@ -379,3 +392,5 @@ class IgcAgentTrainer(RlBaseModule):
                 f"Cumulative reward: {total_reward} "
                 f"Mean loss: {np.mean(losses)}")
 
+            # Decay epsilon
+            epsilon *= self.epsilon_decay_factor
