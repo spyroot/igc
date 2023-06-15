@@ -214,8 +214,6 @@ class IgcAgentTrainer(RlBaseModule):
             goal_type=GoalTypeState.State
         )
 
-        # self.current_goal["goal_state"] = info["goal"]
-
         if not torch.is_same_size(_state, self.current_goal["state"]):
             raise ValueError("State and goal have different dimensions.")
 
@@ -268,9 +266,8 @@ class IgcAgentTrainer(RlBaseModule):
             _state = next_state
             i += 1
 
-        goal_reached_flags = [info['goal_reached'].item() for info in info]
+        goal_reached_flags = [goals['goal_reached'].item() for goals in info]
         goal_reached_count = sum(goal_reached_flags)
-
         rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
         return episode_experience, torch.sum(rewards_sum_per_trajectory, dim=0), goal_reached_count
 
@@ -370,7 +367,7 @@ class IgcAgentTrainer(RlBaseModule):
             goal_reached_counts.append(total_goal_reached)
             mean_losses.append(np.mean(losses))
 
-            # Log metrics
+            # log metrics
             self.metric_logger.log_metric("epoch_mean_loss", np.mean(losses), epoch_idx)
             self.metric_logger.log_metric("epoch_cumulative_reward", total_reward, epoch_idx)
             self.metric_logger.log_metric("epoch_goal_reached_count", total_goal_reached, epoch_idx)
