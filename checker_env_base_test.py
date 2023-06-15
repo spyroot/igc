@@ -1,6 +1,12 @@
-import os
+"""
 
+This checkers for rest api GYM  env
+Author: Mus mbayramo@stanford.edu
+
+"""
+import os
 from igc.ds.redfish_dataset import JSONDataset
+from igc.modules.llm.igc_llm_module import IgcLanguageModule
 from igc.shared.shared_main import shared_main
 
 
@@ -10,7 +16,7 @@ def create_test_env(cmd):
     :return:
     """
     print(cmd)
-    tokenizer = IgcLllModule.load_llm_embeddings_model(cmd, only_tokenizer=True)
+    tokenizer = IgcLanguageModule.load_llm_embeddings_model(cmd, only_tokenizer=True)
     directory_path = os.path.expanduser(cmd.raw_data_dir)
     dataset = JSONDataset(
         directory_path, verbose=True)

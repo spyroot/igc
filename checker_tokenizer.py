@@ -1,3 +1,10 @@
+"""
+
+checker for tokenizer.
+
+Author: Mus mbayramo@stanford.edu
+
+"""
 from igc.ds.redfish_masked_dataset import MaskedJSONDataset
 from igc.modules.shared.llm_shared import from_pretrained_default
 from igc.shared.shared_main import shared_main

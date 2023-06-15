@@ -27,6 +27,7 @@ from .igc_metric_logger import MetricLogger
 class RlBaseModule(IgcBaseModule):
     """
     """
+
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
@@ -34,7 +35,8 @@ class RlBaseModule(IgcBaseModule):
                  llm_tokenizer,
                  ds: Optional[JSONDataset] = None,
                  metric_logger: Optional[MetricLogger] = None,
-                 is_inference: Optional[bool] = "False"):
+                 is_inference: Optional[bool] = "False",
+                 device=None):
         """
         Base RL module
 
@@ -45,13 +47,15 @@ class RlBaseModule(IgcBaseModule):
         :param llm_model: 
         :param llm_tokenizer: 
         """
-        super().__init__(module_name,
-                         spec,
-                         llm_model,
-                         llm_tokenizer,
-                         ds=ds,
-                         metric_logger=metric_logger,
-                         is_inference=is_inference)
+        super().__init__(
+            module_name,
+            spec,
+            llm_model,
+            llm_tokenizer,
+            ds=ds,
+            metric_logger=metric_logger,
+            is_inference=is_inference,
+            device=device)
 
         self._log_level = spec.rl_log_level.upper()
         self.logger.info("Starting RL module")

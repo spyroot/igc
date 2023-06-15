@@ -110,6 +110,28 @@ def add_optimizer_group(parser):
     return parser
 
 
+def add_redfish_group(parser):
+    """
+    Optimizer parameters.
+
+    :param parser:
+    :return:
+    """
+    add_refish_group = parser.add_argument_group('Mock Server Optional')
+    add_refish_group.add_argument("--live", action="store_true", default="true", help="Enable live mode")
+    add_refish_group.add_argument("--redfish-ip", type=str, default="https://10.252.252.209",
+                                  help="IP address of the Redfish server")
+    add_refish_group.add_argument("--redfish-username", type=str, default="root", help="Username for authentication")
+    add_refish_group.add_argument("--redfish-password", type=str, default="",
+                                  help="Password for authentication")
+    add_refish_group.add_argument("--redfish-port", type=int, help="Port number for the Redfish server")
+    add_refish_group.add_argument("--insecure", action="store_true", help="Disable SSL certificate verification")
+    add_refish_group.add_argument("--is-http", action="store_true", help="Use HTTP instead of HTTPS")
+    add_refish_group.add_argument("--x-auth", type=str, help="X-Auth-Token for authentication")
+
+    return parser
+
+
 def add_model_type_group(parser):
     """
     LLM Model parameters.
@@ -211,7 +233,7 @@ def add_rl_trainer_group(parser):
 
     trainer_group.add_argument(
         "--max_trajectory_length",
-        type=int, default=None,
+        type=int, default=32,
         help="Maximum length of a trajectory.")
 
     trainer_group.add_argument(
@@ -220,8 +242,19 @@ def add_rl_trainer_group(parser):
         help="Experience buffer size.")
 
     trainer_group.add_argument(
+        "--rl_num_episodes",
+        type=int, default=32,
+        help="Number of episode to collect.")
+
+    trainer_group.add_argument(
         "--rl_batch_size",
         type=float, default=8,
+        help="Batch size we use for rl agent. "
+             "Note number environments will be the same since it vectorized.")
+
+    trainer_group.add_argument(
+        "--rl_lr",
+        type=float, default=1e-3,
         help="Batch size we use for rl agent. "
              "Note number environments will be the same since it vectorized.")
 
@@ -582,9 +615,9 @@ def add_reporting_group(parser):
 
 
 def shared_arg_parser(
-        is_deepspeed_arg_parser: Optional[bool] = False,
-        is_accelerate_arg_parser: Optional[bool] = False,
-        is_fairscale_arg_parser: Optional[bool] = False):
+    is_deepspeed_arg_parser: Optional[bool] = False,
+    is_accelerate_arg_parser: Optional[bool] = False,
+    is_fairscale_arg_parser: Optional[bool] = False):
     """
 
     :param is_deepspeed_arg_parser:
@@ -609,6 +642,7 @@ def shared_arg_parser(
     parser = add_rl_trainer_group(parser)
     parser = add_auto_encoder_group(parser)
     parser = add_accelerator_parser_group(parser)
+    parser = add_redfish_group(parser)
 
     parser.add_argument(
         "--local-rank",

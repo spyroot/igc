@@ -1,3 +1,10 @@
+"""
+
+Checker for masked dataset different cases
+
+Author: Mus mbayramo@stanford.edu
+
+"""
 import itertools
 import json
 import time

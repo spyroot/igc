@@ -5,7 +5,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 
 
 class RestBaseEncoder:
-    def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer):
+    def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, device=None):
         """
         :param model: (PreTrainedModel): The pre-trained model.
         :param tokenizer: (PreTrainedTokenizer): The pre-trained tokenizer.
@@ -15,11 +15,11 @@ class RestBaseEncoder:
         self.encoder_model = model.transformer
         self.model.config.is_decoder = False
         self.model.resize_token_embeddings(len(tokenizer))
+        self.device = device
 
         # subtracting 1 to exclude padding index
         input_shape = self.encoder_model.wpe.weight.shape
         self.emb_shape = (input_shape[0] - 1, input_shape[1])
-
         self.cache = {}
 
     # def encode(self, observation: str) -> torch.Tensor:
@@ -65,10 +65,8 @@ class RestBaseEncoder:
         for i in range(0, len(tokens), max_chunk_length):
             chunk_tokens = tokens[i:i + max_chunk_length]
             input_tensor = torch.tensor([chunk_tokens])
-
             with torch.no_grad():
                 chunk_embeddings = self.encoder_model(input_tensor).last_hidden_state
-                # print(f"FIRST {chunk_embeddings.shape}")
             embeddings.append(chunk_embeddings)
 
         elapsed_time = time.time() - start_time

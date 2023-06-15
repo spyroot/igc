@@ -63,7 +63,9 @@ class IgcMain:
                 rl_module.train()
 
     def load(self, specs: argparse.Namespace, module_name: str,  device: torch.device = "cpu"):
-        """Load a module.
+        """
+
+        Load a module.
 
         :param device:
         :param specs:

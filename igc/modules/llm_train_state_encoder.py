@@ -42,7 +42,8 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                  llm_tokenizer,
                  ds: Optional[MaskedJSONDataset] = None,
                  metric_logger: Optional[MetricLogger] = None,
-                 is_inference=False):
+                 is_inference=False,
+                 device=None):
         """
 
         :param spec:
@@ -58,7 +59,9 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             llm_tokenizer,
             ds=ds,
             metric_logger=metric_logger,
-            is_inference=is_inference)
+            is_inference=is_inference,
+            device=device
+        )
 
         self.is_quantize = False
         self.num_epochs = spec.num_train_epochs

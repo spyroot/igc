@@ -1,5 +1,11 @@
-from transformers import GPT2LMHeadModel
+"""
 
+This separate trainer so we can test different blocks
+
+Author: Mus mbayramo@stanford.edu
+
+"""
+from transformers import GPT2LMHeadModel
 from igc.ds.redfish_masked_dataset import MaskedJSONDataset
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer

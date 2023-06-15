@@ -27,7 +27,7 @@ import torch
 from igc.modules.base.igc_llm_base_module import LlmBaseModule
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.shared.shared_torch_builder import TorchBuilder
-from rest_action import RestActionSpace, ActionWithoutParam
+from igc.rest_action import RestActionSpace, ActionWithoutParam
 
 from collections import namedtuple
 from igc.ds.redfish_dataset import JSONDataset

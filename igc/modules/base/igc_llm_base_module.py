@@ -50,7 +50,8 @@ class LlmBaseModule(IgcBaseModule):
                  llm_tokenizer,
                  ds: Optional[JSONDataset] = None,
                  metric_logger: Optional[MetricLogger] = None,
-                 is_inference: Optional[bool] = False):
+                 is_inference: Optional[bool] = False,
+                 device=None):
         """
         Base LLM module
 
@@ -63,13 +64,14 @@ class LlmBaseModule(IgcBaseModule):
         :param is_inference: flag indicating if the module is for inference
 
         """
-        super().__init__(module_name,
-                         spec,
-                         llm_model,
-                         llm_tokenizer,
-                         ds=ds,
-                         metric_logger=metric_logger,
-                         is_inference=is_inference)
+        super().__init__(
+            module_name,
+            spec,
+            llm_model,
+            llm_tokenizer,
+            ds=ds,
+            metric_logger=metric_logger,
+            is_inference=is_inference, device=device)
 
         self._log_level = spec.llm_log_level.upper()
         if self.metric_logger is not None:

@@ -1,3 +1,15 @@
+"""
+
+This main tool used to discover all rest api
+collect the data.
+
+It wil be integrated to single CLI so discover
+phase will be merged.
+
+Author: Mus mbayramo@stanford.edu
+"""
+
+
 import argparse
 import logging
 import os

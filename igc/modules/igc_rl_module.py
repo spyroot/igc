@@ -4,45 +4,95 @@ import os
 from pathlib import Path
 
 import torch
-from transformers import (GPT2LMHeadModel)
 
 from .base.igc_metric_logger import MetricLogger
 from .base.igc_state import IgcBaseState
 from .igc_train_agent import IgcAgentTrainer
-from ..ds.redfish_dataset import JSONDataset
-from .llm.igc_llm_module import IgcLanguageModule
 from .igc_train_auto_state_encoder import AutoencoderTrainer
+from .llm.igc_llm_module import IgcLanguageModule
+from ..ds.redfish_dataset import JSONDataset
 from ..envs.rest_gym_batch_env import VectorizedRestApiEnv
 
 
 class IgcRlModule(IgcBaseState):
     """
     """
-    def __init__(self, spec: argparse.Namespace, metric_logger: MetricLogger, ds: JSONDataset, module_name: str):
+
+    def __init__(
+        self,
+        module_name: str,
+        spec: argparse.Namespace,
+        metric_logger: MetricLogger,
+        ds: JSONDataset,
+        llm_model=None,
+        device=None,
+    ):
         """
         :param spec:
         """
         super().__init__(module_name, spec)
-        model, tokenizer, last_epoch = IgcLanguageModule.load(spec, module_name="state_encoder")
+
+        if llm_model is None:
+            llm_model, _, last_epoch = IgcLanguageModule.load(spec, module_name="state_encoder")
+        else:
+            llm_model = llm_model
+
+        tokenizer = ds.tokenizer
 
         # create env
         env = VectorizedRestApiEnv(
             args=spec,
-            model=model,
+            model=llm_model,
             tokenizer=tokenizer,
             discovered_rest_api=ds,
-            max_episode=spec.max_episode_len,
-            num_envs=spec.batch_size
+            max_episode=spec.max_trajectory_length,
+            num_envs=spec.rl_batch_size
         )
 
         directory_path = os.path.expanduser(spec.raw_data_dir)
 
+        # module_name,
+        # spec,
+        # llm_model,
+        # llm_tokenizer,
+        # ds = ds,
+        # metric_logger = metric_logger,
+        # is_inference = is_inference,
+        # device = device
+
+        # def __init__(self,
+        #              module_name: str,
+        #              spec: argparse.Namespace,
+        #              llm_model,
+        #              llm_tokenizer,
+        #              ds: Optional[JSONDataset] = None,
+        #              metric_logger: Optional[MetricLogger] = None,
+        #              is_inference: Optional[bool] = "False",
+        #              device: Optional[torch.device] = None):
+
         self.spec = spec
         self.autoencoder = AutoencoderTrainer(
-            "state_autoencoder", spec, ds, model, tokenizer, metric_logger=metric_logger)
+            "state_autoencoder",
+            spec=spec,
+            llm_model=llm_model,
+            llm_tokenizer=tokenizer,
+            ds=ds,
+            metric_logger=metric_logger,
+            is_inference=True,
+            device=device
+        )
 
         self.rl_gent = IgcAgentTrainer(
-            "rl_agent", spec, ds, env, model, tokenizer, metric_logger=metric_logger)
+            "rl_agent",
+            spec=spec,
+            llm_model=llm_model,
+            llm_tokenizer=ds.tokenizer,
+            env=env,
+            ds=ds,
+            metric_logger=metric_logger,
+            is_inference=False,
+            device=device
+        )
 
     def train(self):
         """Main call to train all language models.
@@ -52,8 +102,8 @@ class IgcRlModule(IgcBaseState):
 
     @staticmethod
     def load_rl_model(
-            args: argparse.Namespace,
-            device: torch.device = "cpu"
+        args: argparse.Namespace,
+        device: torch.device = "cpu"
     ):
         """
         Load RL Agent.
@@ -80,8 +130,9 @@ class IgcRlModule(IgcBaseState):
                 f"No checkpoint files found "
                 f"in the checkpoint directory {checkpoint_files}.")
 
-        model = GPT2LMHeadModel.from_pretrained(args.model_type)
-        last_epoch = IgcLanguageModule.load_llm_embeddings_model(
-            model, args, device=device)
+        # model = GPT2LMHeadModel.from_pretrained(args.model_type)
+        # last_epoch = IgcLanguageModule.load(
+        #     model, args)
 
-        return model, last_epoch
+        # TODO
+        return None, 1

@@ -63,6 +63,4 @@ class Buffer:
         action_batch = torch.stack([sample[1] for sample in samples], dim=0)
         reward_batch = torch.stack([sample[2] for sample in samples], dim=0)
         next_state_batch = torch.stack([sample[3] for sample in samples], dim=0)
-
-        print("Sampled State batch shape state: ", state_batch.shape)
         return state_batch, action_batch, reward_batch, next_state_batch

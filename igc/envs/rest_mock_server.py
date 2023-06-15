@@ -1,21 +1,68 @@
 """
+This class represents a mock server that env sends.
+
+MockServer class represents a mock server that simulates
+the behavior of an environment that sends requests.
+
+It is designed to handle various HTTP methods such as GET, POST, PUT, DELETE, PATCH, and HEAD.
+
+For all GET requests, we always respond with a 200 status code.
+For actions that mutate a state, we check the callback, to synthetically
+mutate a state and inform the agent whether
+it's okay or not.
+
+Here's a description of what it does:
+
+The server always responds with a status code of 200 for GET requests.
+For actions that mutate a state, the server checks a callback function to artificially
+mutate the state and inform the agent whether the mutation is valid or not.
+
+The class provides methods to register callbacks for specific endpoints
+and methods, allowing customization of the server's behavior.
+It supports generating generic error responses with status code 400.
+The server can be configured to simulate an HTTP 500 error.
+
+It can read JSON response data from files and populate a dictionary of responses based on the requested URL and method.
+The server can handle incoming requests by matching the URL and method
+to the registered callbacks or the predefined responses.
+If a requested endpoint or method is not found, the server returns a 404 Not Found response.
+The server can also handle cases where the requested resource cannot generate a representation that
+corresponds to the specified Except header, returning a 406 Not Acceptable response.
+The class provides methods to set and unset the flag for simulating an HTTP 500 error.
+Overall, the MockServer class allows for the creation of a mock server that emulates the behavior of
+an actual server, enabling testing and development in a controlled environment.
+
+Author: Mus mbayramo@stanford.edu
 
 """
+import argparse
 import json
 import os
-import argparse
+from random import random
 from typing import Callable, Any, Dict, Optional
+
+import requests
+
 from igc.interfaces.rest_mapping_interface import RestMappingInterface
+from igc.modules.base.igc_abstract_logger import AbstractLogger
+import random
 
 
 class MockResponse:
     """
+    Represents a mock HTTP response.
     """
+
     def __init__(self, json_data, status_code, error=False, new_state=None):
         """
-        :param json_data:
-        :param status_code:
-        :param error:
+        Initialize the MockResponse object.
+
+        Both live and mock request encapsulated,  Agent see this.
+
+        :param json_data: JSON data of the response.
+        :param status_code: Status code of the response.
+        :param error: Indicates if the response represents an error.
+        :param new_state: New state information.
         """
         self.json_data = json_data
         self.status_code = status_code
@@ -24,15 +71,30 @@ class MockResponse:
 
     def json(self):
         """
-        :return:
+        Return the JSON data of the response.
+
+        :return: JSON data.
         """
         return self.json_data
 
     def state(self):
         """
-        :return:
+        Return the new state information.
+
+        :return: New state information.
         """
         return self.new_state
+
+    def __str__(self):
+        """
+        Return a string representation of the MockResponse.
+
+        :return: String representation.
+        """
+        return f"MockResponse(status_" \
+               f"code={self.status_code}, " \
+               f"error={self.error}, " \
+               f"new_state={self.new_state})"
 
 
 class MockErrors:
@@ -100,20 +162,46 @@ class MockServer:
     mock_errors = MockErrors()
     error_response = MockResponse(mock_errors.generate_error_response(), 400, error=True)
 
-    def __init__(self, args: argparse.Namespace, rest_mapping: RestMappingInterface = None):
+    def __init__(self,
+                 args: argparse.Namespace,
+                 rest_mapping: RestMappingInterface = None,
+                 redfish_ip: Optional[str] = "",
+                 redfish_username: Optional[str] = "root",
+                 redfish_password: Optional[str] = "",
+                 redfish_port: Optional[int] = 443,
+                 insecure: Optional[bool] = False,
+                 is_http: Optional[bool] = False,
+                 x_auth: Optional[str] = None,
+                 is_live: Optional[bool] = False
+                 ):
         """Initialize the MockServer object.
         :param args:
         """
 
         # flag to generate error 500
+        self._is_live = False
+        self._is_collect_all = False
         self._is_error_500 = False
         self._valid_methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'PATCH', "HEAD"]
 
         if not isinstance(args, argparse.Namespace):
             raise TypeError("Invalid args type. Expected argparse.Namespace.")
 
-        if not isinstance(rest_mapping, RestMappingInterface):
-            raise TypeError("Invalid rest_mapping type. Expected RestMappingInterface.")
+        if not is_live:
+            if not isinstance(rest_mapping, RestMappingInterface):
+                raise TypeError("Invalid rest_mapping type. Expected RestMappingInterface.")
+
+        self.logger = AbstractLogger.create_logger(__name__)
+        self.logger.info(f"Loading REST API Mock: "
+                         f"rest_mapping={rest_mapping}, "
+                         f"redfish_ip={redfish_ip}, "
+                         f"redfish_username={redfish_username}, "
+                         f"redfish_password={redfish_password}, "
+                         f"redfish_port={redfish_port}, "
+                         f"insecure={insecure}, "
+                         f"is_http={is_http}, "
+                         f"x_auth={x_auth}, "
+                         f"is_live={is_live}")
 
         self._rest_mapping = rest_mapping
         self.responses = {}
@@ -128,6 +216,260 @@ class MockServer:
         #  load all the json files
         self._construct_json_mocks()
         self._error_respond = None
+
+        # This for live execution
+        self._is_live = is_live
+        self._redfish_ip = redfish_ip
+        self.content_type = {'Content-Type': 'application/json; charset=utf-8'}
+        self.json_content_type = {'Content-Type': 'application/json; charset=utf-8'}
+        self._port = redfish_port
+        self._is_verify_cert = insecure
+        self._x_auth = x_auth
+        self._is_http = is_http
+
+        self._password = redfish_password
+        self._username = redfish_username
+
+        self._default_method = "https://"
+        if self._is_http:
+            self._default_method = "http://"
+
+        self.error_dir = os.path.join(args.raw_data_dir, "all_errors")
+        os.makedirs(self.error_dir, exist_ok=True)
+
+        self.observation_dir = os.path.join(args.raw_data_dir, "observation")
+        os.makedirs(self.observation_dir, exist_ok=True)
+
+    def is_live_req(self):
+        return self._is_live
+
+    @property
+    def redfish_ip(self) -> str:
+        """redfish port extractor
+        :return:
+        """
+        if ":" in self._redfish_ip:
+            return self._redfish_ip
+        else:
+            if self._port != 443:
+                return f"{self._redfish_ip}:{self._port}"
+            else:
+                return self._redfish_ip
+
+    @property
+    def username(self) -> str:
+        return self._username
+
+    @property
+    def password(self) -> str:
+        return self._password
+
+    @property
+    def x_auth(self) -> str:
+        return self._x_auth
+
+    def authentication_header(self):
+        pass
+
+    def _api_head_call(
+        self,
+        req: str,
+        hdr: dict
+    ) -> requests.models.Response:
+        """Make HTTP HEAD request.
+        :param req: path to a path request
+        :param hdr: header that will append.
+        :return: response.
+        """
+        headers = {}
+        headers.update(self.content_type)
+        if hdr is not None:
+            headers.update(hdr)
+
+        full_url = self.redfish_ip + req
+        self.logger.debug(f"GET Request URL: {full_url} "
+                          f"username {self.username} "
+                          f"password {self.password}")
+        self.logger.debug(f"GET Request Headers: {headers}")
+
+        if self.x_auth is not None:
+            headers.update({'X-Auth-Token': self.x_auth})
+            return requests.head(
+                full_url,
+                verify=self._is_verify_cert,
+                headers=headers
+            )
+        else:
+            headers.update({'Authorization': f"{self.username}:{self.password}"})
+            self.logger.debug(f"GET Request Headers (Authorization): {headers}")
+
+            return requests.head(
+                full_url,
+                verify=self._is_verify_cert,
+                headers=headers,
+                auth=(self.username, self.password)
+            )
+
+    def _api_delete_call(
+        self,
+        req: str,
+        hdr: dict
+    ) -> requests.models.Response:
+        """Make HTTP DELETE request.
+        :param req: path to a path request
+        :param hdr: header that will append.
+        :return: response.
+        """
+        headers = {}
+        headers.update(self.content_type)
+        if hdr is not None:
+            headers.update(hdr)
+
+        full_url = self.redfish_ip + req
+        self.logger.debug(f"GET Request URL: {full_url} "
+                          f"username {self.username} "
+                          f"password {self.password}")
+        self.logger.debug(f"GET Request Headers: {headers}")
+
+        if self.x_auth is not None:
+            headers.update({'X-Auth-Token': self.x_auth})
+            return requests.delete(
+                full_url,
+                verify=self._is_verify_cert,
+                headers=headers
+            )
+        else:
+            headers.update({'Authorization': f"{self.username}:{self.password}"})
+            self.logger.debug(f"GET Request Headers (Authorization): {headers}")
+            return requests.delete(
+                full_url,
+                verify=self._is_verify_cert,
+                headers=headers,
+                auth=(self.username, self.password)
+            )
+
+    def _api_post_call(
+        self, req: str,
+        payload: str,
+        hdr: dict
+    ) -> requests.models.Response:
+        """Make HTTP post request.
+        :param req: path to a path request
+        :param payload:  json payload
+        :param hdr: header that will append.
+        :return: response.
+        """
+        headers = {}
+        headers.update(self.content_type)
+        if hdr is not None:
+            headers.update(hdr)
+
+        full_url = self.redfish_ip + req
+        self.logger.debug(f"GET Request URL: {full_url} "
+                          f"username {self.username} "
+                          f"password {self.password}")
+        self.logger.debug(f"GET Request Headers: {headers}")
+
+        if self.x_auth is not None:
+            headers.update({'X-Auth-Token': self.x_auth})
+            return requests.post(
+                full_url,
+                data=payload,
+                verify=self._is_verify_cert,
+                headers=headers
+            )
+        else:
+            headers.update({'Authorization': f"{self.username}:{self.password}"})
+            self.logger.debug(f"GET Request Headers (Authorization): {headers}")
+            return requests.post(
+                full_url,
+                data=payload,
+                verify=self._is_verify_cert,
+                headers=headers,
+                auth=(self.username, self.password)
+            )
+
+    def _api_patch_call(
+        self,
+        req: str,
+        payload: str,
+        hdr: dict
+    ) -> requests.models.Response:
+        """Make api patch request.
+        :param req: path to a path request
+        :param payload: json payload
+        :param hdr: header that will append.
+        :return: response.
+        """
+        headers = {}
+        headers.update(self.content_type)
+        if hdr is not None:
+            headers.update(hdr)
+
+        full_url = self.redfish_ip + req
+        self.logger.debug(f"GET Request URL: {full_url} "
+                          f"username {self.username} "
+                          f"password {self.password}")
+        self.logger.debug(f"GET Request Headers: {headers}")
+
+        if self.x_auth is not None:
+            headers.update({'X-Auth-Token': self.x_auth})
+            return requests.patch(
+                full_url,
+                data=payload,
+                verify=self._is_verify_cert,
+                headers=headers
+            )
+        else:
+            headers.update({'Authorization': f"{self.username}:{self.password}"})
+            self.logger.debug(f"GET Request Headers (Authorization): {headers}")
+            return requests.patch(
+                full_url, data=payload,
+                verify=self._is_verify_cert,
+                headers=headers,
+                auth=(self.username, self.password)
+            )
+
+    def _api_get_call(
+        self,
+        req: str,
+        hdr: dict
+    ) -> requests.models.Response:
+        """Make HTTP GET request.
+
+        :param req: Path to a path request.
+        :param hdr: Headers to append.
+        :return: Response.
+        """
+        headers = {}
+        headers.update(self.content_type)
+
+        if hdr is not None:
+            headers.update(hdr)
+
+        full_url = self.redfish_ip + req
+        self.logger.debug(f"GET Request URL: {full_url} "
+                          f"username {self.username} "
+                          f"password {self.password}")
+        self.logger.debug(f"GET Request Headers: {headers}")
+
+        if self.x_auth is not None:
+            headers.update({'X-Auth-Token': self.x_auth})
+            return requests.get(
+                full_url,
+                verify=self._is_verify_cert,
+                headers=headers
+            )
+        else:
+            self.logger.info("")
+            headers.update({'Authorization': f"{self.username}:{self.password}"})
+            self.logger.debug(f"GET Request Headers (Authorization): {headers}")
+            return requests.get(
+                full_url,
+                verify=self._is_verify_cert,
+                headers=headers,
+                auth=(self.username, self.password)
+            )
 
     @staticmethod
     def generate_error_response():
@@ -252,10 +594,10 @@ class MockServer:
             }
 
     def callback_dispatcher(
-            self,
-            callback: Callable[[Any, Dict[str, Any]], MockResponse],
-            url: str,
-            json_data: Optional[str]
+        self,
+        callback: Callable[[Any, Dict[str, Any]], MockResponse],
+        url: str,
+        json_data: Optional[str]
     ) -> MockResponse:
         """
          Dispatches the callback function and handles the response.
@@ -276,16 +618,109 @@ class MockServer:
 
         return respond
 
-    def request(self, url, method='GET', json_data=None, accept_header=None):
+    def _save_error_response_to_file(self, url, response):
         """
-         Main interface to mock server
+        Save the JSON response to a separate file.
 
-        :param url:
-        :param method:
-        :param json_data:
-        :param accept_header:
-        :return:
+        :param url: URL of the request.
+        :param response: Response object containing the JSON data.
         """
+        filename = url.replace('/', '_') + f"_{random.randint(1, 100000)}.json"
+        error_dirs = f"{self.dir_mock_resp}/all_errors"
+        os.makedirs(error_dirs, exist_ok=True)
+
+        filepath = os.path.join(error_dirs, filename)
+
+        try:
+            json_data = response.json()
+            with open(filepath, 'w') as file:
+                json.dump(json_data, file, indent=4)
+        except ValueError:
+            # saving raw data
+            with open(filepath, 'wb') as file:
+                file.write(response.content)
+
+    def _save_observation_to_file(self, url, response):
+        """
+        Save all good observation, so we collect and update dateset
+
+        :param url: URL of the request.
+        :param response: Response object containing the JSON data.
+        """
+        filename = url.replace('/', '_') + f"_{random.randint(1, 100000)}.json"
+        filepath = os.path.join(self.observation_dir, filename)
+
+        try:
+            json_data = response.json()
+            with open(filepath, 'w') as file:
+                json.dump(json_data, file, indent=4)
+        except ValueError:
+            with open(filepath, 'wb') as file:
+                file.write(response.content)
+
+    def request(
+        self, url,
+        method='GET',
+        json_data=None, accept_header=None
+    ):
+        """
+         The main interface to mock server. Agent uses this
+
+         If the MockServer is in live mode, it sends the request using the corresponding API call
+        (e.g., api_get_call, api_post_call) based on the method parameter. The response is then
+        processed and saved accordingly. If the response has a status code of 299 or higher, it is
+        considered an error and saved to the error response directory. Otherwise, if the
+        `is_collect_all` flag is set, the response is saved to the observation directory for further
+        data collection. Finally, the processed response is returned as a MockResponse object.
+
+        If the MockServer is not in live mode, it checks if the provided method is valid.
+
+        If the
+        `json_data` is provided, it attempts to parse it as JSON. If parsing fails, an error response
+        is returned. If the `_is_error_500` flag is set, a critical error response is returned.
+
+        The MockServer then checks for a callback corresponding to the provided URL and method,
+        and if found, it dispatches the callback function. If not, it checks if there is a pre-defined
+        response for the provided URL and method, and if found, returns the corresponding response.
+        If no response is found, it checks if there is a matching endpoint URL with a different method,
+        and returns a "Method Not Allowed" error response. If the `accept_header` is specified and
+        the requested resource cannot generate a representation that matches the Accept header,
+        a "Not Acceptable" error response is returned. If none of the above conditions match,
+        a "Not Found" error response is returned.
+
+
+        :param url: The URL of the request.
+        :param method: The HTTP method of the request.
+        :param json_data: The JSON data of the request.
+        :param accept_header: The Accept header of the request.
+        :return: A MockResponse object representing the response.
+        """
+
+        if self._is_live:
+            if method == 'GET':
+                response = self._api_get_call(url, hdr={'Accept': accept_header})
+            elif method == 'POST':
+                response = self._api_post_call(url, json_data, hdr={'Accept': accept_header})
+            elif method == 'PATCH':
+                response = self._api_patch_call(url, json_data, hdr={'Accept': accept_header})
+            elif method == 'HEAD':
+                response = self._api_head_call(url, hdr={'Accept': accept_header})
+                return MockResponse(response, response.status_code)
+            elif method == 'DELETE':
+                response = self._api_delete_call(url, hdr={'Accept': accept_header})
+            else:
+                return MockResponse(None, 405, error=True)
+
+            # we collect all errors and all observation
+            if response.status_code >= 299:
+                self._save_error_response_to_file(url, response)
+            else:
+                # in case we want collect more data.
+                if self._is_collect_all:
+                    self._save_observation_to_file(url, response)
+
+            return MockResponse(response.json(), response.status_code)
+
         if method not in self._valid_methods:
             return MockServer.error_response
 

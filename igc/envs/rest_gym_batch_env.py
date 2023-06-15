@@ -25,6 +25,7 @@ from igc.envs.rest_mock_server import MockServer
 from .rest_gym_base import (
     RestApiBaseEnv, GoalTypeState, HttpMethod
 )
+from ..modules.encoders.base_encoder import BaseEncoder
 
 
 class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
@@ -73,11 +74,12 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         self._mock_rest = MockServer(args, discovered_rest_api)
 
         # encoder that take rest api respond and transform to embeddings.
-        self.encoder = RestBaseEncoder(model=model, tokenizer=tokenizer)
+        self.encoder = BaseEncoder(model=model, tokenizer=tokenizer)
 
         self.action_space = spaces.Box(
             low=0, high=1,
-            shape=(len(list(self._rest_api_methods)) + len(RestApiBaseEnv.METHOD_MAPPING),), dtype=np.float32)
+            shape=(len(list(self._rest_api_methods)) +
+                   len(RestApiBaseEnv.METHOD_MAPPING),), dtype=np.float32)
 
         self.observation_space = spaces.Box(
             low=-np.inf,
@@ -392,7 +394,7 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
             assert self.is_goal_reached(goal_state[i], state), "Goal not reached for env: {}".format(i)
             reached_goal_states.append(state)
 
-        # stack and pass so we compare with self.goal.
+        # stack and pass, so we compare with self.goal.
         reached_goal_states = torch.stack(reached_goal_states, dim=0)
         check_goal = self.check_goal(reached_goal_states)
 

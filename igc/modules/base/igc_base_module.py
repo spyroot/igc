@@ -32,13 +32,15 @@ class IgcBaseModule(IgcBaseState):
     """
 
     def __init__(
-        self, module_name: str,
+        self,
+        module_name: str,
         spec: argparse.Namespace,
         llm_model, llm_tokenizer,
         ds: Optional[JSONDataset] = None,
         metric_logger: Optional[MetricLogger] = None,
         is_inference: Optional[bool] = False,
-        device=None):
+        device=None
+    ):
         """
 
         Note module name is important for saving
@@ -369,7 +371,7 @@ class IgcBaseModule(IgcBaseState):
     def save_checkpoint(
         self, checkpoint_dir,
         epoch: int,
-        num_check_points_to_keep: Optional[int] = 3
+        num_check_points_to_keep: Optional[int] = 3,
     ):
         """
         Save model checkpoint.
@@ -379,6 +381,7 @@ class IgcBaseModule(IgcBaseState):
         :param num_check_points_to_keep:   number of checkpoints to keep.
         :return:
         """
+
         if self.rank > 0:
             return
 
@@ -392,14 +395,22 @@ class IgcBaseModule(IgcBaseState):
         }, checkpoint_file)
         self.logger.info(f"Rank: {self.rank} {self.module_name} checkpoint saved to {checkpoint_file}.")
 
-    def load_checkpoint(self, checkpoint_dir: str, resuming="True") -> int:
+    def load_checkpoint(self, checkpoint_dir: str, resuming="True", map_location=None) -> int:
         """
         Load model checkpoint for resuming training.
 
+        :param map_location:
         :param resuming:
         :param checkpoint_dir: Directory location of the checkpoints.
         :return: Last saved epoch from the checkpoint.
         """
+
+        if map_location is None:
+            map_to = {'cuda:1': 'cuda:0'}
+        else:
+            map_to = map_location
+
+
         # during re-resume we don't load model, we load from checkpoint
         model_file = self._model_file(checkpoint_dir)
         base_model_name = os.path.basename(self._model_file(checkpoint_dir))
@@ -417,7 +428,7 @@ class IgcBaseModule(IgcBaseState):
         if checkpoint_files:
             checkpoint_file = checkpoint_files[0]
             self.logger.info(f"Found latest checkpoint, loading {checkpoint_file}.")
-            checkpoint = torch.load(checkpoint_file, map_location={'cuda:1': 'cuda:0'})
+            checkpoint = torch.load(checkpoint_file, map_location=map_to)
 
             required_keys = ['model_state_dict', 'epoch']
             if resuming:
@@ -456,11 +467,13 @@ class IgcBaseModule(IgcBaseState):
         is_inference: bool = True,
         optimizer: Optional[torch.optim.Optimizer] = None,
         scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
+        map_location=None,
 
     ) -> tuple[Optional[int], bool]:
         """
         Load model from checkpoint for inference.
 
+        :param map_location:
         :param scheduler:
         :param optimizer:
         :param module_name:  module name.
@@ -474,6 +487,10 @@ class IgcBaseModule(IgcBaseState):
         :return: The epoch of the loaded checkpoint, or None if no checkpoint is found.
         :rtype: Optional[int] bool
         """
+        if map_location is None:
+            map_to = {'cuda:1': 'cuda:0'}
+        else:
+            map_to = map_location
 
         _checkpoint_path_dir = Path(specs.output_dir)
         _checkpoint_path_dir = _checkpoint_path_dir.resolve()

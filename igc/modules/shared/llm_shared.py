@@ -1,6 +1,5 @@
 import argparse
 from typing import Optional, Union, Dict, Tuple
-
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 

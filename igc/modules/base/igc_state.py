@@ -47,17 +47,21 @@ class IgcBaseState:
         self.rank = int(os.environ.get('LOCAL_RANK', -1))
 
         self.is_accelerator = False
-        if "use_accelerator" in spec and spec.use_accelerator:
-            self.accelerator = build_accelerator(spec)
-            self.is_accelerator = True
-            # let accelerator choose device.
-            self.device = self.accelerator.device
-            self.logger.info(f"Running accelerator device {device}")
-        elif hasattr(spec, "device"):
-            self.device = spec.device
+        if device is not None:
+            self.device = torch.device(device)
+            print(f"Using device {self.device}")
         else:
-            # if we are not using accelerator, we need to set device
-            self.device = get_device(self.rank) if device is None else device
+            if "use_accelerator" in spec and spec.use_accelerator:
+                self.accelerator = build_accelerator(spec)
+                self.is_accelerator = True
+                # let accelerator choose device.
+                self.device = self.accelerator.device
+                self.logger.info(f"Running accelerator device {device}")
+            elif hasattr(spec, "device"):
+                self.device = spec.device
+            else:
+                # if we are not using accelerator, we need to set device
+                self.device = get_device(self.rank) if device is None else device
 
     def _prepare_checkpoint_dir(self):
         """

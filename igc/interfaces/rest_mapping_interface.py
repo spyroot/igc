@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import  Iterator, Tuple
+from typing import Iterator, Tuple
 
 
 class RestMappingInterface(ABC):
@@ -36,4 +36,3 @@ class RestMappingInterface(ABC):
         :return: A dictionary mapping REST APIs to their corresponding methods.
         """
         pass
-
