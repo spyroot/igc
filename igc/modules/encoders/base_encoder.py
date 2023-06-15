@@ -38,7 +38,7 @@ class BaseEncoder:
         self._model = model
         self._tokenizer = tokenizer
         self._encoder_model = model.transformer
-
+        self._encoder_model.eval()
         model.transformer.config.is_decoder = False
         self._model.resize_token_embeddings(len(tokenizer))
 

@@ -7,7 +7,6 @@ import torch
 
 from .base.igc_metric_logger import MetricLogger
 from .base.igc_state import IgcBaseState
-from .encoders.base_encoder import BaseEncoder
 from .igc_train_agent import IgcAgentTrainer
 from .igc_train_auto_state_encoder import AutoencoderTrainer
 from .llm.igc_llm_module import IgcLanguageModule

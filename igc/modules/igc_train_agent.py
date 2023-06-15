@@ -306,18 +306,9 @@ class IgcAgentTrainer(RlBaseModule):
                 final_state, _, _, _, _ = episode_experience[-1]
                 relabeled_goal = final_state.clone()
 
-                # print("relabeled_goal shape:", relabeled_goal.shape)
-                # print("final_state shape:", final_state.shape)
-
                 relabeled_reward = self.env_reward_function(_state.clone(), relabeled_goal.clone())
                 relabeled_current_state = torch.cat([_state, relabeled_goal], dim=1).clone()
                 relabeled_next_state = torch.cat([_next_state, relabeled_goal], dim=1).clone()
-
-                # print("relabeled_goal shape:", relabeled_goal.shape)
-                # print("relabeled_current_state shape:", relabeled_current_state.shape)
-                # print("action_one_hot shape:", action_one_hot.shape)
-                # print("relabeled_reward shape:", relabeled_reward.shape)
-                # print("relabeled_next_state shape:", relabeled_next_state.shape)
 
                 self.replay_buffer.add(
                     relabeled_current_state,
