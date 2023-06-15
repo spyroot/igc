@@ -276,9 +276,10 @@ class IgcAgentTrainer(RlBaseModule):
 
     def update_replay_buffer(self, episode_experience):
         """
-        Adds experience to the replay buffer.
-        """
 
+        :param episode_experience:
+        :return:
+        """
         num_experiences_added = 0
         for timestep in range(len(episode_experience)):
             # copy experience from episode_experience to replay_buffer
@@ -325,12 +326,17 @@ class IgcAgentTrainer(RlBaseModule):
 
         # Run for a fixed number of epochs
         for epoch_idx in range(self.num_epochs):
+
             # total reward for the epoch
             total_reward = 0.0
-
-            losses = []
             total_goal_reached = 0
+
+            goal_reached_counts = []
+            mean_losses = []
+            losses = []
+
             for _ in range(self.num_episodes):
+
                 episode_experience, rewards_sum_per_trajectory, goal_reached_count = self.train_goal()
                 total_goal_reached += goal_reached_count
                 self.update_replay_buffer(episode_experience)
@@ -361,9 +367,18 @@ class IgcAgentTrainer(RlBaseModule):
                 loss.backward()
                 self.optimizer.step()
 
+            goal_reached_counts.append(total_goal_reached)
+            mean_losses.append(np.mean(losses))
+
+            # Log metrics
+            self.metric_logger.log_metric("epoch_mean_loss", np.mean(losses), epoch_idx)
+            self.metric_logger.log_metric("epoch_cumulative_reward", total_reward, epoch_idx)
+            self.metric_logger.log_metric("epoch_goal_reached_count", total_goal_reached, epoch_idx)
+
             self.update_target(self.agent_model, self.target_model)
             print(
-                f"Epoch: {epoch_idx} Goals reached {total_goal_reached} Cumulative reward: {total_reward} Mean loss: {np.mean(losses)}")
-            self.update_target(self.agent_model, self.target_model)
-            self.metric_logger.log_metric("epoch_cumulative_reward", total_reward, epoch_idx)
-            self.metric_logger.log_metric("epoch_mean_loss", np.mean(losses), epoch_idx)
+                f"Epoch: {epoch_idx} "
+                f"Goals reached {total_goal_reached} "
+                f"Cumulative reward: {total_reward} "
+                f"Mean loss: {np.mean(losses)}")
+
