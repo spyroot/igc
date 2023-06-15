@@ -245,6 +245,9 @@ class IgcAgentTrainer(RlBaseModule):
                 http_methods_one_hot = self.env.encode_batched_rest_api_method("GET", self.env.num_envs)
                 concatenated_vector = self.env.concat_batch_rest_api_method(
                     one_hot_vectors, http_methods_one_hot)
+
+                print("random")
+
             else:
                 out = self.agent_model.forward(input_state.to(self.device))
                 # greedy action
@@ -282,6 +285,7 @@ class IgcAgentTrainer(RlBaseModule):
         goal_reached_flags = [goals['goal_reached'].item() for goals in info]
         goal_reached_count = sum(goal_reached_flags)
 
+        print("Done")
         rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
         return episode_experience, torch.sum(rewards_sum_per_trajectory, dim=0), goal_reached_count
 
