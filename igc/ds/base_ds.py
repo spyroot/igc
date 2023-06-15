@@ -1,3 +1,9 @@
+"""
+Just random data for testing
+Mus mbayramo@stanford.edu
+"""
+
+
 import torch
 from torch.utils.data import Dataset
 

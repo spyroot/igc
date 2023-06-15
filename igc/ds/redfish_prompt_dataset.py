@@ -1,4 +1,21 @@
+"""
+This class represents a Torch dataset used in the IGC (Infrastructure Condition Reinforce Learner) system.
+
+It is designed as to ba main dataset for a prompt generation
+So some code from goal generation will move here.
+
+
+Author: Mus mbayramo@stanford.edu
+
+"""
+from enum import Enum
 from .redfish_dataset import JSONDataset
+
+
+class TrainPhase(Enum):
+    FINE_TUNING = 1
+    GOAL_PROMPTS = 2
+    GOAL_AND_PARAMETER = 3
 
 
 class PromptDataset(JSONDataset):
@@ -31,18 +48,18 @@ class PromptDataset(JSONDataset):
         return length
 
     def __getitem__(self, idx):
-        if self.train_phase == 1:
+        if self.train_phase == TrainPhase.FINE_TUNING:
             return {
                 "input_ids": self.chosen_dataset[idx]["input_ids"],
                 "attention_mask": self.chosen_dataset[idx]["attention_mask"],
                 "labels": self.chosen_dataset[idx]["input_ids"]
             }
-        elif self.train_phase == 2:
+        elif self.train_phase == TrainPhase.GOAL_PROMPTS:
             return self.chosen_dataset[idx]["input_ids"], \
                 self.chosen_dataset[idx]["attention_mask"], \
                 self.reject_dataset[idx]["input_ids"], \
                 self.reject_dataset[idx]["attention_mask"]
-        elif self.train_phase == 3:
+        elif self.train_phase == TrainPhase.GOAL_AND_PARAMETER:
             return self.prompt_dataset[idx]["input_ids"], \
                 self.prompt_dataset[idx]["attention_mask"], \
                 self.pad_token_id

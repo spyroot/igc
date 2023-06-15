@@ -1,0 +1,36 @@
+JSON_TOK_TABLE_JSON = '''
+       {
+           "special_tok_table": [
+               "@odata.id",
+               "\\"@odata.id\\"",
+               "target",
+               "\\"target\\"",
+               "Name",
+               "\\"Name\\"",
+               "Redfish.AllowableValues",
+               "\\"Redfish.AllowableValues\\"",
+               "Members",
+               "\\"Members\\"",
+               "Actions",
+               "\\"Actions\\"",
+               "Id",
+               "\\"Id\\"",
+               "\\"Links\\"",
+               "\\"#",
+               "#\\"",
+               "/redfish/v1/",
+               "{",
+               "}",
+               "[",
+               "]",
+               ",",
+               "\\"",
+               "\\":",
+               ",[",
+               "],",
+               "\\"},",
+               "\\"}\\"",
+               "."
+           ]
+       }
+       '''

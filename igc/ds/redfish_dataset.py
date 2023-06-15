@@ -1,3 +1,21 @@
+"""
+This class represents a Torch dataset used in the
+IGC (Infrastructure Condition Reinfoce Learner) system.
+
+During the discovery phase, it collects all API JSON responses and stores
+them in a separate directory (~/.json_responses).
+
+During the build process, it reads all the responses and forms a dataset,
+which is then saved as a tokenized Torch dataset.
+The special tokens are added to the tokenizer as well.
+
+Note that the tokenized dataset, all the responses, and the dataset itself are saved.
+
+On the client side, only the data is fetched. The entire structure is re-created from
+tar files created during the build process.
+
+Author: Mus mbayramo@stanford.edu
+"""
 import glob
 import json
 import logging
@@ -24,6 +42,8 @@ from .ds_utils import (
     unpack_tar_gz, md5_checksum, delete_directory_with_confirmation
 )
 from .igc_json_pipeline import JsonPipeline
+from . import JSON_TOK_TABLE_JSON
+from ..modules.base.igc_abstract_logger import AbstractLogger
 
 
 class DatasetConsistencyError(Exception):
@@ -31,7 +51,11 @@ class DatasetConsistencyError(Exception):
     pass
 
 
-class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderInterface):
+class JSONDataset(DownloadableDataset,
+                  RestMappingInterface,
+                  RestActionEncoderInterface,
+                  AbstractLogger
+                  ):
 
     def __init__(self,
                  dataset_dir: Optional[str] = "datasets",
@@ -45,17 +69,23 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                  target_transform=None,
                  is_force_download=False,
                  do_consistency_check=True,
-                 raw_json_directory_path: Optional[str] = "~/.json_responses"
+                 raw_json_directory_path: Optional[str] = "~/.json_responses",
+                 default_mirror_host="192.168.254.78"
                  ):
         """
-        :param dataset_dir:
-        :param default_tokenize:
-        :param max_len:
-        :param overlap:
-        :param verbose:
-        :param recreate_dataset:
-        :param tokenizer:
-        :param raw_json_directory_path: this default location we store all raw json responses.
+        :param dataset_dir: The directory to store the dataset.
+        :param default_tokenize: The default tokenizer name or path.
+        :param max_len: The maximum length of the tokenized sequences.
+        :param overlap: The overlap length for sliding window approach.
+        :param verbose: Whether to print verbose logs.
+        :param recreate_dataset: Whether to recreate the dataset.
+        :param tokenizer: A custom tokenizer instance.
+        :param transform: Custom transform to apply on the dataset.
+        :param target_transform: Custom transform to apply on the targets.
+        :param is_force_download: Whether to force download the dataset.
+        :param do_consistency_check: Whether to perform consistency check on the dataset.
+        :param raw_json_directory_path: The directory path to store raw JSON responses.
+        :param default_mirror_host; The mirror from where we pull all the data. (note default it my own host)
 
         """
         self._special_tokens = JSONDataset.build_special_tok_table()
@@ -71,17 +101,32 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         if dataset_dir is None:
             dataset_dir = "datasets/"
 
-        # torch dataset mirror
+        self.logger = AbstractLogger.create_logger(__name__)
+        self.logger.info(f"Loading REST API-to-response mapping with arguments: "
+                         f"dataset_dir={dataset_dir}, "
+                         f"default_tokenize={default_tokenize}, "
+                         f"max_len={max_len}, "
+                         f"overlap={overlap}, "
+                         f"verbose={verbose}, "
+                         f"recreate_dataset={recreate_dataset}, "
+                         f"tokenizer={tokenizer}, "
+                         f"transform={transform}, "
+                         f"target_transform={target_transform}, "
+                         f"is_force_download={is_force_download}, "
+                         f"do_consistency_check={do_consistency_check}, "
+                         f"raw_json_directory_path={raw_json_directory_path}")
+
         # dataset mirror
         self._default_dataset_spec = "dataset.json"
         self._mirrors = [
-            {"spec": 'http://192.168.254.78/ds/dataset.json'},
-            {"train_dataset": 'http://192.168.254.78/ds/igc.tar.gz'},
-            {"json_data": 'http://192.168.254.78/ds/json_data.tar.gz'},
-            {"tokenizer": 'http://192.168.254.78/ds/tokenizer.tar.gz'},
+            {"spec": f'http://{default_mirror_host}/ds/dataset.json'},
+            {"train_dataset": f'http://{default_mirror_host}/ds/igc.tar.gz'},
+            {"json_data": f'http://{default_mirror_host}/ds/json_data.tar.gz'},
+            {"tokenizer": f'http://{default_mirror_host}/ds/tokenizer.tar.gz'},
 
         ]
 
+        # all files
         self._resources = [
             ("dataset.json", "", "spec"),
             ("igc.tar.gz", "", "train_dataset"),
@@ -90,10 +135,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         ]
 
         # this required for dataset download
-        self._dataset_file_type = ["train_dataset", "json_data", "spec"]
-
-        self.logger = logging.getLogger(__name__)
-        logging.basicConfig(filename='dataset.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
+        self._dataset_file_type = ["train_dataset", "json_data", "spec", "tokenizer"]
 
         self.transform = transform
         self.target_transform = target_transform
@@ -116,14 +158,17 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         self.tokenizer = None
 
         if tokenizer is not None:
+            self.logger.info(f"Client provide tokenized: {tokenizer.name_or_path}")
             self.tokenizer = tokenizer
             tok_name = self.tokenizer.name_or_path
         else:
             self.tokenizer = self._load_tokenizer()
             if tokenizer is None:
                 self.tokenizer = GPT2Tokenizer.from_pretrained(default_tokenize)
+                self.logger.info(f"Using default gpt tokenizer: {self.tokenizer.name_or_path}")
                 tok_name = default_tokenize
             else:
+                self.logger.info(f"Using igc tokenizer: {self.tokenizer.name_or_path}")
                 tok_name = self.tokenizer.name_or_path
 
         self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -159,9 +204,6 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             Path(self._dataset_root_dir) / 'tokenizer.tar.gz')
         self._tarball_hash = ""
 
-        logging.debug(f"Dataset root directory {self._dataset_root_dir}")
-        logging.debug(f"Dataset raw directory {self._default_raw_dir}")
-
         # all dataset files
         self._dataset_file_names = [
             self._dataset_file_name,
@@ -189,6 +231,14 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             logging.info("Downloading dataset.")
             super().__init__(dataset_root_dir=self._dataset_root_dir)
 
+        self.logger.info(f"Dataset root directory: {self._dataset_root_dir}")
+        self.logger.info(f"Dataset raw directory: {self._default_raw_dir}")
+        self.logger.info(f"Dataset json directory_path: {raw_json_directory_path}")
+        self.logger.info(f"default_tokenize: {default_tokenize}")
+        self.logger.info(f"Force download enabled: {is_force_download}")
+        self.logger.info(f"Consistency check enabled: {do_consistency_check}")
+        self.logger.info(f"tokenizer: {tokenizer}")
+
         # unpack tarballs.
         self._unpack_tarballs()
         # create all tarballs if we have raw files, rebuilding.
@@ -208,27 +258,42 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         :return:
         """
         tok_dir = f"{self._dataset_root_dir}/tokenizer"
-        print(f"Loading tokenizer from {tok_dir}")
+        self.logger.info(f"Loading tokenizer from {tok_dir}")
         if os.path.exists(tok_dir):
             self.tokenizer = GPT2Tokenizer.from_pretrained(tok_dir)
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-            print(f"Loading tokenizer, from {tok_dir}. number of "
-                  f"tokens in the loaded tokenizer: {len(self.tokenizer)}")
+            self.logger.info(
+                f"Loading tokenizer from {tok_dir}. Number of tokens in the loaded tokenizer: {len(self.tokenizer)}")
 
             self.add_special_tokens()
             return self.tokenizer
         return None
 
-    def _load_dataset_spec(self):
-        """Read dataset spec and update mirror and resources.
-        :return:
+    @classmethod
+    def dataset_default_root(cls):
+        return "datasets"
+
+    @classmethod
+    def load_tokenizer(cls, tokenizer_dir: str = None):
         """
-        json_file_path = Path(self._dataset_root_dir) / self._default_dataset_spec
-        with open(json_file_path, "r") as json_file:
-            json_data = json.load(json_file)
-            self._mirrors = json_data["mirrors"]
-            self._resources = json_data["resources"]
+        Load the tokenizer from the specified directory and return it.
+
+        :param tokenizer_dir: The directory path where the tokenizer is located.
+        :return: The loaded tokenizer.
+        """
+        if tokenizer_dir is None:
+            tok_dir = f"{cls.dataset_default_root()}/tokenizer"
+        else:
+            tok_dir = tokenizer_dir
+
+        if not os.path.exists(tok_dir):
+            raise ValueError(f"Tokenizer directory '{tok_dir}' does not exist.")
+
+        tokenizer = GPT2Tokenizer.from_pretrained(tok_dir)
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+        return tokenizer
 
     @staticmethod
     def required_keys() -> List[str]:
@@ -441,7 +506,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
 
         # build a dataset
         if not self._check_dataset_files():
-            logging.debug(f"Re-building dataset {self._dataset_file_name}")
+            self.logger.debug(f"Re-building dataset {self._dataset_file_name}")
 
             # first we add all tokens
             self._build_tokenizer()
@@ -449,25 +514,25 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             self._load_dicts_from_data()
             self._construct_action_space()
 
-            logging.debug(f"Saving data to: {self._dataset_file_name}")
+            self.logger.debug(f"Saving data to: {self._dataset_file_name}")
             torch.save(self._data, self._dataset_file_name)
 
-            logging.debug(f"Saving masked data to: {self._dataset_masked_file_name}")
+            self.logger.debug(f"Saving masked data to: {self._dataset_masked_file_name}")
             torch.save(self._masked_data, self._dataset_masked_file_name)
 
-            logging.debug(f"Saving api respond data to: {self._rest_api_to_respond_file_name}")
+            self.logger.debug(f"Saving api respond data to: {self._rest_api_to_respond_file_name}")
             torch.save(self._rest_api_to_respond_, self._rest_api_to_respond_file_name)
 
-            logging.debug(f"Saving api respond method data to: {self._rest_api_to_respond_file_name}")
+            self.logger.debug(f"Saving api respond method data to: {self._rest_api_to_respond_file_name}")
             torch.save(self._rest_api_to_method, self._rest_api_to_method_file_name)
 
-            print(f"Saved dataset to disk. "
-                  f"size of dataset: {len(self)} "
-                  f"num hash entries: {len(self._data['hash_to_rest_api'])} \n"
-                  f"num hash to action entries: {len(self._data['hash_to_action_idx'])} \n"
-                  f"num action to hash entries: {len(self._data['action_idx_to_hash'])} "
-                  f"num action to indices entries: {len(self._data['action_idx_to_hash'])} "
-                  f"num masked entries: {len(self._masked_data['train_data'])} ")
+            self.logger.info(f"Saved dataset to disk. "
+                             f"size of dataset: {len(self)} "
+                             f"num hash entries: {len(self._data['hash_to_rest_api'])} \n"
+                             f"num hash to action entries: {len(self._data['hash_to_action_idx'])} \n"
+                             f"num action to hash entries: {len(self._data['action_idx_to_hash'])} "
+                             f"num action to indices entries: {len(self._data['action_idx_to_hash'])} "
+                             f"num masked entries: {len(self._masked_data['train_data'])} ")
 
             self._check_consistency()
 
@@ -491,6 +556,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                 if resource_name == tarball_name:
                     computed_hash = md5_checksum(tarball_path)
                     if computed_hash != resource_hash:
+                        self.logger.debug(f"Hash mismatch for resource: {resource_name}")
+                        self.logger.debug(f"File: {tarball_path}")
+                        self.logger.debug(f"Computed Hash: {computed_hash}")
+                        self.logger.debug(f"Expected Hash: {resource_hash}")
                         raise DatasetConsistencyError(
                             f"Hash mismatch for resource: {resource_name}\n"
                             f"File: {tarball_path}\n"
@@ -504,7 +573,8 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
     def _unpack_tarballs(self):
         """
         Unpack tarballs files directory.
-        if mandatory files not present, first try to locate tarballs and
+
+        if some mandatory files are not present, first try to locate tarballs and
         if tarball present unpack all.
 
         :return:
@@ -512,7 +582,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         # if tar file present unpack other create new dataset.
         if os.path.exists(self._dataset_tarball_name) and not glob.glob(
             os.path.join(self._default_raw_dir, '*')):
-            logging.debug(
+            self.logger.info(
                 f"Found tarball unpack {self._dataset_tarball_name} "
                 f"files to {self._default_raw_dir}")
             unpack_tar_gz(self._dataset_tarball_name, self._default_raw_dir)
@@ -520,7 +590,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         # if tarball of all api responds present, unpack.
         if os.path.exists(self._dataset_json_tarball_name) and not glob.glob(
             os.path.join(self._default_original_dir, '*')):
-            logging.debug(
+            self.logger.info(
                 f"Found tarball unpack {self._dataset_json_tarball_name} "
                 f"files to {self._default_original_dir}")
             unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
@@ -528,10 +598,25 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         # if tarball of all api responds present, unpack.
         if os.path.exists(self._dataset_tokenizer_tarball_name) and not glob.glob(
             os.path.join(self._default_original_dir, '*')):
-            logging.debug(
+            self.logger.info(
                 f"Found tarball unpack {self._dataset_tokenizer_tarball_name} "
                 f"files to {self._default_original_dir}")
             unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
+
+    def _load_dataset_spec(self):
+        """Read dataset spec and update mirror and resources.
+        :return:
+        """
+        json_file_path = Path(self._dataset_root_dir) / self._default_dataset_spec
+        self.logger.info(f"Loading dataset spec from: {json_file_path}")
+        try:
+            with open(json_file_path, "r") as json_file:
+                json_data = json.load(json_file)
+                self._mirrors = json_data["mirrors"]
+                self._resources = json_data["resources"]
+                self.logger.info("Dataset spec loaded successfully.")
+        except Exception as e:
+            self.logger.error(f"Error loading dataset spec: {e}")
 
     def _load_dataset(self):
         """
@@ -548,10 +633,10 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         :return:
         """
         start_time = time.time()
-        logging.info("Loading dataset.")
+        self.logger.info("Loading dataset.")
 
         if self._recreate_dataset:
-            logging.info("Forcing rebuild a dataset.")
+            self.logger.info("Forcing rebuild a dataset.")
             self._build_dataset()
 
         # if mandatory files not present,
@@ -563,11 +648,11 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
                 self._build_dataset()
                 return
         else:
-            print("Loading dataset.")
+            self.logger.info("Loading dataset.")
 
         # if tarball of all api responds present, unpack.
         if os.path.exists(self._dataset_json_tarball_name):
-            logging.debug(
+            self.logger.debug(
                 f"Found tarball unpack {self._dataset_json_tarball_name} "
                 f"files to {self._default_original_dir}")
             unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
@@ -820,12 +905,16 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         :return:
         """
         if tokenizer is None:
-            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+            tokenizer = JSONDataset.load_tokenizer()
         else:
             tokenizer = tokenizer
 
         if isinstance(json_data, str):
-            json_lines = json.dumps(json_data)
+            try:
+                json_lines = json.dumps(json_data)
+            except Exception as e:
+                print(f"Error converting json_data to JSON string: {e}")
+                json_lines = ""
         else:
             json_lines = json_data
 
@@ -885,9 +974,7 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         target_len = len(target_tokens)
         for i in range(input_ids.shape[1] - target_len + 1):
             if input_ids[0, i:i + target_len].tolist() == target_tokens:
-                # umask the key tokens
                 attention_mask[0, i:i + target_len] = 1
-                #  assuming the value starts  immediately after the key.
                 j = i + target_len
                 unmasked_tokens = []
                 while j < input_ids.shape[1] and input_ids[0, j].item() != period[0]:
@@ -930,7 +1017,11 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             else GPT2Tokenizer.from_pretrained("gpt2")
 
         if isinstance(json_data, str):
-            json_lines = json.dumps(json_data)
+            try:
+                json_lines = json.dumps(json_data)
+            except Exception as e:
+                print(f"Error converting json_data to JSON string: {e}")
+                json_lines = ""
         else:
             json_lines = json_data
 
@@ -1531,18 +1622,23 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
             "return_tensors": 'pt'
         }
 
+    def is_numpy(self) -> bool:
+        return False
+
+    def is_lfs(self) -> bool:
+        return False
+
     def _build_tokenizer(self):
         """
-
         :return:
         """
         json_pipeline = JsonPipeline(self._json_directory_path)
         json_pipeline.load_json_files()
         json_pipeline.build_tokens(self.tokenizer)
-        print("Finished new vocab size", self.tokenizer.vocab_size)
+        self.logger.info("Finished new vocab size", self.tokenizer.vocab_size)
 
     def add_special_tokens(self):
-        """
+        """Adds all special tokens
         :return:
         """
         self.tokenizer.add_tokens(["@odata.id",
@@ -1568,30 +1664,39 @@ class JSONDataset(DownloadableDataset, RestMappingInterface, RestActionEncoderIn
         ]
 
     @staticmethod
-    def build_special_tok_table():
-        return ["@odata.id",
-                "\"@odata.id\"",
-                "target",
-                "\"target\"",
-                "Name",
-                "\"Name\"",
-                "Redfish.AllowableValues",
-                "\"Redfish.AllowableValues\"",
-                "Members",
-                "\"Members\"",
-                "Actions",
-                "\"Actions\"",
-                "Id",
-                "\"Id\"",
-                "\"Links\"",
-                "\"#", "#",
-                "/redfish/v1/",
-                "{", "}",
-                "[", "]",
-                ",", "\"",
-                ":", " :", ": ", " : "
-                                 ",[",
-                "],",
-                "\"},", "\"}"
-                        "."
-                ]
+    def read_special_tok_table_from_json() -> List[str]:
+        """Read all special tokens from __init__ we need this token
+        to make sure on client side token are the same since
+        we use this for masking.
+        :return:
+        """
+        data = json.loads(JSON_TOK_TABLE_JSON)
+        return data["special_tok_table"]
+
+    @staticmethod
+    def build_special_tok_table() -> List[str]:
+        """
+        This method called to build a table for all tokens.
+        This token added to a tokenizer,  we also store in dataset
+        on client when we download dataset we need make
+        sure we use same token ids.
+
+        Again it important since during masking if we make
+        for example json array we need make we use same token ids
+
+        So when we restore tokenizer. i.e.
+        the one we save as part of dataset, we also store in torch
+        in case it all go side way we can check.
+
+        :return:
+        """
+        special_tokens = JSONDataset.read_special_tok_table_from_json()
+        modified_tokens = []
+
+        for token in special_tokens:
+            modified_tokens.append(token)
+            modified_tokens.append(f" {token}")
+            modified_tokens.append(f"{token} ")
+            modified_tokens.append(f" {token} ")
+
+        return modified_tokens

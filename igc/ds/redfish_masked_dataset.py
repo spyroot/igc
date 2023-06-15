@@ -1,3 +1,32 @@
+"""
+This class represents a Torch dataset used in the IGC (Infrastructure Condition Reinforce Learner) system.
+
+It is designed as a wrapper around the JSONDataset and provides an additional option to mask the data.
+
+The purpose of this class is to facilitate training and evaluation with masked data in the IGC system.
+It extends the functionality of the JSONDataset by introducing methods to mask specific parts of the JSON data,
+ such as the odata.id, target values, target keys, JSON objects, JSON arrays, and more. These masking options
+ allow users to selectively hide or modify certain parts of the JSON data during training or evaluation.
+
+The MaskedJSONDataset inherits from the JSONDataset class and retains all its features,
+such as loading JSON files, tokenizing the data using a specified tokenizer,
+and providing access to the data and labels.
+
+It also supports custom transforms and target transforms.
+
+Additionally, the class provides methods to enable or disable masking, and to specify different masking options
+depending on the desired behavior. The masking process involves manipulating the attention mask
+of the input data to selectively mask the targeted elements.
+
+The dataset can be used in combination with a pre-trained language model,
+such as GPT-2, to train the model on masked
+data or to evaluate its performance on masked inputs. The masking options provided
+by this class allow for various scenarios, such as training models to predict specific
+parts of the JSON data or to focus on certain aspects of the data.
+
+Author: Mus mbayramo@stanford.edu
+
+"""
 import warnings
 from abc import ABC
 from enum import auto, Enum
@@ -6,6 +35,7 @@ from typing import Optional, Any, Dict, Union, List
 import torch
 from transformers import PreTrainedTokenizer
 from .redfish_dataset import JSONDataset
+from ..modules.base.igc_abstract_logger import AbstractLogger
 
 
 class MaskingOption(Enum):
@@ -40,18 +70,20 @@ class MaskedJSONDataset(JSONDataset, ABC):
                  ):
         """
 
-        :param dataset_dir:
-        :param default_tokenize:
-        :param max_len:
-        :param overlap:
-        :param verbose:
-        :param recreate_dataset:
-        :param tokenizer:
-        :param transform:
-        :param target_transform:
-        :param is_force_download:
-        :param do_consistency_check:
-        :param raw_json_directory_path:
+        Initializes a MaskedJSONDataset object.
+
+        :param dataset_dir: Directory to store the dataset.
+        :param default_tokenize: Default tokenizer name.
+        :param max_len: Maximum sequence length.
+        :param overlap: Overlap between sequences.
+        :param verbose: Verbosity flag.
+        :param recreate_dataset: Flag to recreate the dataset.
+        :param tokenizer: Custom tokenizer.
+        :param transform: Custom transform.
+        :param target_transform: Custom target transform.
+        :param is_force_download: Flag to force download.
+        :param do_consistency_check: Flag to perform consistency checks.
+        :param raw_json_directory_path: Path to raw JSON directory.
         """
 
         self.token_to_mask = [
@@ -121,6 +153,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
         api_prefix = "/redfish/v1/"
         api_prefix_ids = self.tokenizer.encode(api_prefix)
 
+        # I need create more option and more robust way to mask
         self._masking_option = {
             MaskingOption.ODATA_ID: (redfish_odata, self._object_close),
             MaskingOption.ALLOWED_VALUE: (redfish_allow, self._array_close),
@@ -139,9 +172,16 @@ class MaskedJSONDataset(JSONDataset, ABC):
         self._cache = [None] * len(self._data["train_data"])
 
     def enable_masking(self):
+        """Enable masking,  for example we can pass
+        one epoch masking and then another epoch unmasked.
+        :return:
+        """
         self._dont_mask = False
 
     def disable_masking(self):
+        """Disable masking.
+        :return:
+        """
         self._dont_mask = True
 
     def mask_allowed_value(self):
@@ -207,6 +247,10 @@ class MaskedJSONDataset(JSONDataset, ABC):
         It computes Masks for specific key and value in json structure
         It mask both key and value.
 
+        The main idea, during training we mask particular json section
+
+        { key : value } the rest is 0.
+
         Shapes attention  [1, x]
         Shapes intput_idx [1, x]
 
@@ -225,7 +269,6 @@ class MaskedJSONDataset(JSONDataset, ABC):
         :param end_toks: The termination sequence to identify the end of the masked value
         :return: The computed new attention mask
         """
-
         return MaskedJSONDataset.mask_tensor_json_kv_span(
             data['input_ids'], data['attention_mask'],
             tokenizer, target_key, end_toks, return_original
@@ -239,6 +282,15 @@ class MaskedJSONDataset(JSONDataset, ABC):
         end_toks: Union[str, List[Union[str]]] = "\"},",
         return_original: bool = False,
     ) -> torch.Tensor:
+        """
+        See below
+        :param input_ids:
+        :param attention_mask:
+        :param target_key:
+        :param end_toks:
+        :param return_original:
+        :return:
+        """
         return MaskedJSONDataset.mask_tensor_json_kv_span(
             input_ids, attention_mask, self.tokenizer,
             target_key, end_toks, return_original=return_original
@@ -323,11 +375,16 @@ class MaskedJSONDataset(JSONDataset, ABC):
         Compute a mask that sets 1 for all positions in the
         input IDs that correspond to new token IDs.
 
+        A new token ids that added during dataset creation.
+        Check tokenizer folder for all tokens,  These
+        tokens create by recursive walk around all responses.
+
         :param input_ids: Tensor of shape (batch_size, sequence_length)
                           containing the input token IDs.
         :param attention_mask: Tensor of shape (batch_size, sequence_length)
                           containing the attention mask.
-        :return: Tensor of shape (batch_size, sequence_length) representing the computed attention mask.
+        :return: Tensor of shape (batch_size, sequence_length)
+                representing the computed attention mask.
         """
 
         new_tokenizer_size = len(self.tokenizer)
@@ -353,7 +410,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
     ) -> torch.Tensor:
 
         """
-        This vectorized version. I need test more.
+        This vectorized version. I need test more. so it TODO
 
         Usage:
             target_key = "@odata.id"
@@ -500,7 +557,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
         need and return it as a dict.
 
         we have 3 cases. case when we return just what we have in our dataset.
-        i.e parent class, in that case we only cache result
+        i.e. parent class, in that case we only cache result
 
         if any option of attention mask enabled , we pass
         to respected method and mask what we need and return.
@@ -508,9 +565,8 @@ class MaskedJSONDataset(JSONDataset, ABC):
         we have to option what we mask.  Option one we mask all token we added.
         idea here that we train GPT in such a way it learns representation.
 
-        Option two when we train attentions. for example we train to keep
-        attention on REST API's , or parameters rest API accept. etc
-
+        Option two when we train attentions. for example, we train to keep
+        attention on REST APIs , or parameters rest API accept. etc.
 
         :param idx:
         :return:
