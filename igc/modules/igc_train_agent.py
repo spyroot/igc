@@ -245,11 +245,9 @@ class IgcAgentTrainer(RlBaseModule):
                 http_methods_one_hot = self.env.encode_batched_rest_api_method("GET", self.env.num_envs)
                 concatenated_vector = self.env.concat_batch_rest_api_method(
                     one_hot_vectors, http_methods_one_hot)
-
-                print("random")
-
             else:
                 out = self.agent_model.forward(input_state.to(self.device))
+                # out = self.agent_model.forward(input_state.to(self.device))
                 # greedy action
                 rest_tensor_slice, method_tensor_slice = self.env.extract_action_method(out)
                 rest_api_indices = torch.argmax(rest_tensor_slice, dim=1)
@@ -273,6 +271,7 @@ class IgcAgentTrainer(RlBaseModule):
                 concatenated_vector = torch.cat([rest_api_one_hot, rest_api_method_one_hot], dim=1)
 
             next_state, rewards, done, truncated, info = self.env.step(concatenated_vector)
+            print(rewards)
             next_state_flat = next_state.view(next_state.size(0), -1).detach().cpu()
             episode_experience.append(
                 (state_flat, concatenated_vector, rewards, next_state_flat, goal_state_flat)
@@ -334,8 +333,8 @@ class IgcAgentTrainer(RlBaseModule):
 
         :return:
         """
-
-        epsilon = 1.0
+        # epsilon = 0
+        epsilon = 0.98
         self.current_goal = self._create_goal()
         # start by making Q-target and Q-policy the same
         self.update_target(self.agent_model, self.target_model)

@@ -1421,7 +1421,6 @@ class JSONDataset(DownloadableDataset,
             rest_api = random.choice(list(self._rest_api_to_respond_.keys()))
             supported_method = self._rest_api_to_method[rest_api]
             one_hot_vector = self.action_to_one_hot(rest_api)
-
             rest_apis.append(rest_api)
             supported_methods.append(supported_method)
             one_hot_vectors.append(one_hot_vector)

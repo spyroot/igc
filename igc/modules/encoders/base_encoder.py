@@ -30,7 +30,7 @@ class Conv1DLatent(nn.Module):
 
 
 class BaseEncoder:
-    def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer):
+    def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, device=None):
         """
         :param model: (PreTrainedModel): The pre-trained model.
         :param tokenizer: (PreTrainedTokenizer): The pre-trained tokenizer.
@@ -47,6 +47,8 @@ class BaseEncoder:
         self.emb_shape = (input_shape[0] - 1, input_shape[1])
         self._1d_conv = Conv1DLatent(input_dim=input_shape)
         self.cache = {}
+        self.device = device
+        self._1d_conv.to(self.device)
 
     def batchify(self, observation, max_chunk_length=1023):
         """
@@ -118,15 +120,20 @@ class BaseEncoder:
 
         input_tensor, input_mask = self.batchify(observation, max_chunk_length=max_chunk_length)
 
+        input_tensor = input_tensor.to(self.device)
+        input_mask = input_mask.to(self.device)
+
         with torch.no_grad():
             hidden_states = [
                 self._encoder_model(input_ids=chunk_input_tensor,
-                                    attention_mask=chunk_input_mask).last_hidden_state.unsqueeze(0)
+                                    attention_mask=chunk_input_mask, use_cache=True).last_hidden_state.unsqueeze(0)
                 for chunk_input_tensor, chunk_input_mask, in zip(input_tensor, input_mask)]
 
             combined_last_hidden_state = torch.cat(hidden_states, dim=0)
+            combined_last_hidden_state = combined_last_hidden_state.to(self.device)
             emb = self._1d_conv(combined_last_hidden_state)
             emb = torch.mean(emb, dim=0)
 
+        emb = emb.detach().cpu()
         self.cache[observation] = emb
         return emb

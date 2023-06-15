@@ -42,7 +42,9 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
                  render_mode: Optional[str] = None,
                  directory_path=None,
                  goal=None,
-                 num_envs=2):
+                 num_envs=2,
+                 device=None,
+                 encoder=None):
         """
         Initialize the RestApiEnv environment.
 
@@ -74,7 +76,11 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         self._mock_rest = MockServer(args, discovered_rest_api)
 
         # encoder that take rest api respond and transform to embeddings.
-        self.encoder = BaseEncoder(model=model, tokenizer=tokenizer)
+        self.device = device
+        if encoder is None:
+            self.encoder = BaseEncoder(model=model, tokenizer=tokenizer, device=device)
+        else:
+            self.encoder = encoder
 
         self.action_space = spaces.Box(
             low=0, high=1,
