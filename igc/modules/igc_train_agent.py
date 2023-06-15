@@ -25,6 +25,19 @@ from igc.modules.igc_experience_buffer import Buffer
 from igc.modules.igc_q_network import Igc_QNetwork
 
 
+def env_reward_function(state, goal):
+    """
+    Reward function for the goal_all_4_trajectory_reward_state_goal_single_trajectory method.
+    Rewards +1 when at least one state matches the goal state, and -1 otherwise.
+    """
+    # print(f"state {state.shape} {goal.shape}")
+    is_goal_reached = torch.any(torch.all(state == goal, dim=1), dim=0)
+    goal_reached = torch.where(is_goal_reached, torch.tensor(1.0), torch.tensor(0.0))
+    goal_reached = goal_reached.unsqueeze(dim=0).expand(state.size(0))
+    # print("Goal reached shape", goal_reached.shape)
+    return goal_reached
+
+
 class IgcAgentTrainer(RlBaseModule):
     """
     A class representing the IGC Agent Trainer.
@@ -148,6 +161,10 @@ class IgcAgentTrainer(RlBaseModule):
                          f"steps_per_episode={self.steps_per_episode}")
         print(f"buffer size {spec.rl_buffer_size}")
 
+        self.env_reward_function = env_reward_function
+        self.num_relabeled = 4
+        self.goal_reached = []
+
     @staticmethod
     def update_target(model: nn.Module, target_model: nn.Module):
         """
@@ -247,13 +264,15 @@ class IgcAgentTrainer(RlBaseModule):
             episode_experience.append(
                 (state_flat, concatenated_vector, rewards, next_state_flat, goal_state_flat)
             )
-
             rewards_per_trajectory.append(rewards)
             _state = next_state
             i += 1
 
+        goal_reached_flags = [info['goal_reached'].item() for info in info]
+        goal_reached_count = sum(goal_reached_flags)
+
         rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
-        return episode_experience, torch.sum(rewards_sum_per_trajectory, dim=0)
+        return episode_experience, torch.sum(rewards_sum_per_trajectory, dim=0), goal_reached_count
 
     def update_replay_buffer(self, episode_experience):
         """
@@ -267,21 +286,38 @@ class IgcAgentTrainer(RlBaseModule):
             combined_current_state = torch.cat([_state, goal], dim=1).clone()
             combined_next_state = torch.cat([_next_state, goal], dim=1).clone()
             self.replay_buffer.add(combined_current_state, action_one_hot.clone(), rewards.clone(), combined_next_state)
+
+            for _ in range(self.num_relabeled):
+                final_state, _, _, _, _ = episode_experience[-1]
+                relabeled_goal = final_state.clone()
+
+                # print("relabeled_goal shape:", relabeled_goal.shape)
+                # print("final_state shape:", final_state.shape)
+
+                relabeled_reward = self.env_reward_function(_state.clone(), relabeled_goal.clone())
+                relabeled_current_state = torch.cat([_state, relabeled_goal], dim=1).clone()
+                relabeled_next_state = torch.cat([_next_state, relabeled_goal], dim=1).clone()
+
+                # print("relabeled_goal shape:", relabeled_goal.shape)
+                # print("relabeled_current_state shape:", relabeled_current_state.shape)
+                # print("action_one_hot shape:", action_one_hot.shape)
+                # print("relabeled_reward shape:", relabeled_reward.shape)
+                # print("relabeled_next_state shape:", relabeled_next_state.shape)
+
+                self.replay_buffer.add(
+                    relabeled_current_state,
+                    action_one_hot.clone(),
+                    relabeled_reward.clone(),
+                    relabeled_next_state
+                )
+
             num_experiences_added += 1
-            # # goal
-            # final_state, _, _, _, _ = episode_experience[-1]
-            # relabeled_goal = final_state
-            #
-            # # compute new reward
-            # relabeled_reward = env_reward_function(next_state, relabeled_goal)
-            #
-            # # add to buffer
-            # replay_buffer.add(np.append(state.copy(), relabeled_goal.copy()),
-            #                   action,
-            #                   relabeled_reward,
-            #                   np.append(next_state.copy(), relabeled_goal.copy()))
 
     def train(self):
+        """
+
+        :return:
+        """
 
         self.current_goal = self._create_goal()
         # start by making Q-target and Q-policy the same
@@ -293,20 +329,16 @@ class IgcAgentTrainer(RlBaseModule):
             total_reward = 0.0
 
             losses = []
-            print(f"num episode we collecting {self.num_episodes}")
-            print(f"Running optimization {self.num_optimization_steps}")
-
+            total_goal_reached = 0
             for _ in range(self.num_episodes):
-                episode_experience, rewards_sum_per_trajectory = self.train_goal()
-                print(f"Total reward {rewards_sum_per_trajectory}")
+                episode_experience, rewards_sum_per_trajectory, goal_reached_count = self.train_goal()
+                total_goal_reached += goal_reached_count
                 self.update_replay_buffer(episode_experience)
+                total_reward += rewards_sum_per_trajectory.item()
 
-            print(f"Running optimization {self.num_optimization_steps}")
             for _ in range(self.num_optimization_steps):
                 state, action_one_hot, reward, next_state = self.replay_buffer.sample_batch()
-
                 self.optimizer.zero_grad()
-
                 next_state = next_state.to(self.device)
                 target_q_vals = self.target_model(next_state).detach()
 
@@ -330,7 +362,8 @@ class IgcAgentTrainer(RlBaseModule):
                 self.optimizer.step()
 
             self.update_target(self.agent_model, self.target_model)
-            print(f"Epoch: {epoch_idx} Cumulative reward: {total_reward} Mean loss: {np.mean(losses)}")
+            print(
+                f"Epoch: {epoch_idx} Goals reached {total_goal_reached} Cumulative reward: {total_reward} Mean loss: {np.mean(losses)}")
             self.update_target(self.agent_model, self.target_model)
             self.metric_logger.log_metric("epoch_cumulative_reward", total_reward, epoch_idx)
             self.metric_logger.log_metric("epoch_mean_loss", np.mean(losses), epoch_idx)

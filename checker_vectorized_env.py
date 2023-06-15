@@ -7,7 +7,6 @@ from igc.envs.rest_gym_base import RestApiBaseEnv
 from igc.envs.rest_gym_batch_env import VectorizedRestApiEnv
 from igc.envs.rest_gym_env import RestApiEnv
 from igc.envs.rest_mock_server import MockServer, MockResponse
-from igc.modules.llm_module import IgcLllModule
 from igc.shared.shared_main import shared_main
 import time
 
@@ -754,6 +753,7 @@ class EnvChecker:
         rewards_per_trajectory = []
         terminated = [False] * env.num_envs
         truncated = [False] * env.num_envs
+        goal_reached_count = 0
 
         while (not any(terminated) or not any(truncated)) and i < max_episode:
             if i == 2:
