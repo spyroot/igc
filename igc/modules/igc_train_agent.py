@@ -239,36 +239,36 @@ class IgcAgentTrainer(RlBaseModule):
             goal_state_flat = goal_state.view(goal_state.size(0), -1)
             input_state = torch.cat([state_flat, goal_state_flat], dim=1)
 
-            out = self.agent_model.forward(input_state.to(self.device))
             if np.random.uniform(0, 1) < epsilon:
                 # random action
-                random_action = torch.randint(0, self.action_dim, (self.env.num_envs, out.size(1)))
-                rest_tensor_slice, method_tensor_slice = self.env.extract_action_method(random_action)
-                rest_api_indices = torch.argmax(rest_tensor_slice, dim=-1)
-                rest_api_method_indices = torch.argmax(method_tensor_slice, dim=-1)
+                rest_apis, supported_methods, one_hot_vectors = self.dataset.sample_batch_of_rest_api(self.env.num_envs)
+                http_methods_one_hot = self.env.encode_batched_rest_api_method("GET", self.env.num_envs)
+                concatenated_vector = self.env.concat_batch_rest_api_method(
+                    one_hot_vectors, http_methods_one_hot)
             else:
+                out = self.agent_model.forward(input_state.to(self.device))
                 # greedy action
                 rest_tensor_slice, method_tensor_slice = self.env.extract_action_method(out)
                 rest_api_indices = torch.argmax(rest_tensor_slice, dim=1)
                 rest_api_method_indices = torch.argmax(method_tensor_slice, dim=1)
 
-            num_rest_api_class = rest_tensor_slice.shape[1]
-            num_rest_api_methods = method_tensor_slice.shape[1]
+                num_rest_api_class = rest_tensor_slice.shape[1]
+                num_rest_api_methods = method_tensor_slice.shape[1]
 
-            rest_api_one_hot = torch.nn.functional.one_hot(
-                rest_api_indices,
-                num_classes=num_rest_api_class
-            ).float().float().detach().cpu()
+                rest_api_one_hot = torch.nn.functional.one_hot(
+                    rest_api_indices,
+                    num_classes=num_rest_api_class
+                ).float().float().detach().cpu()
 
-            rest_api_method_one_hot = torch.nn.functional.one_hot(
-                rest_api_method_indices,
-                num_classes=num_rest_api_methods
-            ).float().float().detach().cpu()
+                rest_api_method_one_hot = torch.nn.functional.one_hot(
+                    rest_api_method_indices,
+                    num_classes=num_rest_api_methods
+                ).float().float().detach().cpu()
 
-            at_most_one_1_rest_api = torch.sum(rest_api_one_hot == 1) <= 1
-            at_most_one_1_rest_api_method = torch.sum(rest_api_method_one_hot == 1) <= 1
+                at_most_one_1_rest_api = torch.sum(rest_api_one_hot == 1) <= 1
+                at_most_one_1_rest_api_method = torch.sum(rest_api_method_one_hot == 1) <= 1
+                concatenated_vector = torch.cat([rest_api_one_hot, rest_api_method_one_hot], dim=1)
 
-            concatenated_vector = torch.cat([rest_api_one_hot, rest_api_method_one_hot], dim=1)
             next_state, rewards, done, truncated, info = self.env.step(concatenated_vector)
             next_state_flat = next_state.view(next_state.size(0), -1).detach().cpu()
             episode_experience.append(
@@ -281,6 +281,7 @@ class IgcAgentTrainer(RlBaseModule):
 
         goal_reached_flags = [goals['goal_reached'].item() for goals in info]
         goal_reached_count = sum(goal_reached_flags)
+
         rewards_sum_per_trajectory = torch.stack(rewards_per_trajectory, dim=0).sum(dim=0)
         return episode_experience, torch.sum(rewards_sum_per_trajectory, dim=0), goal_reached_count
 
