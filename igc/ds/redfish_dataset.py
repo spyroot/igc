@@ -91,9 +91,6 @@ class JSONDataset(
         :param default_mirror_host; The mirror from where we pull all the data. (note default it my own host)
 
         """
-        super(DownloadableDataset, self).__init__(
-            dataset_dir, skip_download=skip_download
-        )
 
         self._special_tokens = JSONDataset.build_special_tok_table()
         assert isinstance(raw_json_directory_path, str), 'directory_path should be a string'
@@ -244,10 +241,14 @@ class JSONDataset(
         self._list_masked_keys = ["@odata.id"]
         self._rest_trajectories = None
 
-        # call super method to download dataset
-        if not self._check_tarballs_files() or is_force_download:
-            logging.info("Downloading dataset.")
-            super().__init__(dataset_root_dir=self._dataset_root_dir)
+        if skip_download and skip_creation:
+            return
+
+        if not skip_download:
+            # call super method to download dataset
+            if not self._check_tarballs_files() or is_force_download:
+                logging.info("Downloading dataset.")
+                super().__init__(dataset_root_dir=self._dataset_root_dir)
 
         self.logger.info(f"Dataset root directory: {self._dataset_root_dir}")
         self.logger.info(f"Dataset raw directory: {self._default_raw_dir}")
@@ -256,9 +257,6 @@ class JSONDataset(
         self.logger.info(f"Force download enabled: {is_force_download}")
         self.logger.info(f"Consistency check enabled: {do_consistency_check}")
         self.logger.info(f"tokenizer: {tokenizer}")
-
-        if skip_download and skip_creation:
-            return
 
         # unpack tarballs.
         self._unpack_tarballs()
