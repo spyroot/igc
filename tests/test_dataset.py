@@ -93,19 +93,13 @@ class DatasetTest(unittest.TestCase):
         """
         with tempfile.TemporaryDirectory() as temp_dir:
             real_tmp_dir = os.path.realpath(temp_dir)
-            json_dataset = JSONDataset(
-                real_tmp_dir,
-                skip_creation=True,
-                skip_download=True,
-            )
-
             with tempfile.TemporaryDirectory() as json_temp_dir:
-                real_tmp_dir = os.path.realpath(json_temp_dir)
+                json_real_dir = os.path.realpath(json_temp_dir)
                 json_dataset = JSONDataset(
                     real_tmp_dir,
                     skip_creation=True,
                     skip_download=True,
-                    json_temp_dir=json_temp_dir
+                    raw_json_directory_path=json_real_dir
                 )
 
             self.assertEqual(json_dataset._max_len, 1024)
@@ -114,6 +108,8 @@ class DatasetTest(unittest.TestCase):
             self.assertEqual(json_dataset._recreate_dataset, False)
 
             self.assertEqual(real_tmp_dir, json_dataset.root_dir())
+            self.assertEqual(json_real_dir, json_dataset._unprocessed)
+
             self.assertEqual(f"{real_tmp_dir}/raw", json_dataset._default_raw_dir)
             self.assertEqual(f"{real_tmp_dir}/orig", json_dataset._default_original_dir)
             self.assertEqual(f"{real_tmp_dir}/raw", json_dataset.raw_dir())
