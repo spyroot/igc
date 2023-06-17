@@ -242,6 +242,8 @@ class JSONDataset(
         self.action_to_rest = {}
 
         self._list_masked_keys = ["@odata.id"]
+        self._json_schema_key = "$schema"
+
         self._rest_trajectories = None
 
         if skip_download and skip_creation:
@@ -520,12 +522,30 @@ class JSONDataset(
 
         return False
 
-    def respond_to_api_iterator(self):
-        """
+    def respond_to_api_iterator(self) -> Iterator[Tuple[str, str]]:
+        """Return iterator that emit rest api respond and rest api.
+
+        Example:
+
+        ('dataset_root/orig/10.252.252.209/_redfish_v1_UpdateService_SoftwareInventory.json',
+        '/redfish/v1/UpdateService/SoftwareInventory')
+
         :return:
         """
         for k in self._respond_to_api:
             yield k, self._respond_to_api[k]
+
+    def filtered_api_iterator(self) -> Iterator[Tuple[str, str]]:
+        """This method iterator to respond_to_api_iterator, but it filters out all
+        json schema files.
+        :return:
+        """
+        for file_path, api in self._respond_to_api.items():
+            with open(file_path, 'r') as f:
+                json_data = json.load(f)
+
+            if "$schema" not in json_data:
+                yield file_path, api
 
     def respond_to_api(self, rest_api_respond_file: str) -> str:
         """Return respond for particular rest api.
@@ -1238,7 +1258,7 @@ class JSONDataset(
                 targets = {}
 
                 # skip schema there is no point to extract target from that or api
-                if "$schema" not in json_data:
+                if self._json_schema_key not in json_data:
                     self.extract_recursive(json_data, allowable_values, targets)
 
                 json_lines += json_lines + "<|endoftext|>"
@@ -1467,7 +1487,9 @@ class JSONDataset(
         """
         return self._rest_api_to_method.get(rest_api, None)
 
-    def sample_rest_api(self) -> Tuple[str, List[str], torch.Tensor]:
+    def sample_rest_api(
+            self
+    ) -> Tuple[str, List[str], torch.Tensor]:
         """
         Randomly sample a REST API endpoint from the dataset
         and return rest api , method api accept and one hot vector
@@ -1507,7 +1529,10 @@ class JSONDataset(
 
         return rest_apis, supported_methods, torch.stack(one_hot_vectors)
 
-    def sample_batch(self, batch_size: int) -> Tuple[List[str], List[List[str]], torch.Tensor]:
+    def sample_batch(
+            self,
+            batch_size: int
+    ) -> Tuple[List[str], List[List[str]], torch.Tensor]:
         """
         Randomly sample REST API endpoints from the dataset
         and return rest APIs, supported methods, and one-hot vectors.
@@ -1545,7 +1570,7 @@ class JSONDataset(
         return self._resources
 
     def is_tarball(self) -> bool:
-        """Implement this method indicate yes tarball.
+        """Implement this method signals it tarball.
         :return:
         """
         return True
@@ -1563,21 +1588,21 @@ class JSONDataset(
         return True
 
     def root_dir(self) -> str:
-        """Download  dataset interface return requires
-          the root directory of the dataset.
+        """
+        Download  dataset interface return requires
+        the root directory of the dataset.
 
-          It dir where download will serialize data.
-
+        It dir where download will serialize data.
         :return:
         """
         return str(self._dataset_root_dir)
 
     def raw_dir(self) -> str:
-        """store raw path """
+        """Return raw path that must but under dataset root dir"""
         return str(self._default_raw_dir)
 
     def orig_dir(self) -> str:
-        """store raw path """
+        """Return orin path that must be under dataset root dir"""
         return str(self._default_original_dir)
 
     def tokenizer_dir(self) -> str:
@@ -1806,7 +1831,7 @@ class JSONDataset(
             if not os.path.exists(ds_file):
                 raise FileNotFoundError(f"File does not exist: {ds_file}")
 
-        if self._is_tokenizer_consistency():
+        if not self._is_tokenizer_consistency():
             raise FileNotFoundError(f"Some tokenizer files not found.")
 
     @staticmethod

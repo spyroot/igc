@@ -30,6 +30,12 @@ def download_custom_path():
     if dataset.is_tokenizer_loader():
         print("Tokenizer loaded")
 
+    for k in dataset.respond_to_api_iterator():
+        print(k)
+
+    for k in dataset.filtered_api_iterator():
+        print(k)
+
 
 def main():
     """
