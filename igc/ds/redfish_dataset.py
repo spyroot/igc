@@ -71,7 +71,7 @@ class JSONDataset(
                  is_force_download=False,
                  do_consistency_check=True,
                  raw_json_directory_path: Optional[str] = "~/.json_responses",
-                 default_mirror_host="192.168.254.78",
+                 default_mirror_host="https://github.com/spyroot/igc/tree/main/datasets",
                  skip_download=False,
                  skip_creation=False,
                  ):
@@ -122,10 +122,10 @@ class JSONDataset(
         # dataset mirror
         self._default_dataset_spec = "dataset.json"
         self._mirrors = [
-            {"spec": f'http://{default_mirror_host}/ds/dataset.json'},
-            {"train_dataset": f'http://{default_mirror_host}/ds/igc.tar.gz'},
-            {"json_data": f'http://{default_mirror_host}/ds/json_data.tar.gz'},
-            {"tokenizer": f'http://{default_mirror_host}/ds/tokenizer.tar.gz'},
+            {"spec": f'{default_mirror_host}/dataset.json'},
+            {"train_dataset": f'{default_mirror_host}/igc.tar.gz'},
+            {"json_data": f'{default_mirror_host}/json_data.tar.gz'},
+            {"tokenizer": f'{default_mirror_host}/ds/tokenizer.tar.gz'},
         ]
 
         # all files
