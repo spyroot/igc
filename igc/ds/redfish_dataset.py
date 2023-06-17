@@ -1,6 +1,6 @@
 """
 This class represents a Torch dataset used in the
-IGC (Infrastructure Condition Reinfoce Learner) system.
+IGC (Infrastructure Condition Reinforce Learner) system.
 
 During the discovery phase, it collects all API JSON responses and stores
 them in a separate directory (~/.json_responses).
@@ -31,7 +31,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
-from transformers import GPT2Tokenizer
+from transformers import GPT2Tokenizer, PreTrainedTokenizer
 
 from igc.interfaces.rest_mapping_interface import RestMappingInterface
 from igc.interfaces.rest_one_hot_interface import RestActionEncoderInterface
@@ -87,7 +87,7 @@ class JSONDataset(
         :param target_transform: Custom transform to apply on the targets.
         :param is_force_download: Whether to force download the dataset.
         :param do_consistency_check: Whether to perform consistency check on the dataset.
-        :param raw_json_directory_path: The directory path to store raw JSON responses.
+        :param raw_json_directory_path: The directory path to store raw JSON responses
         :param default_mirror_host; The mirror from where we pull all the data. (note default it my own host)
 
         """
@@ -181,6 +181,15 @@ class JSONDataset(
         self._default_raw_dir = str(dataset_path / 'raw')
         self._default_original_dir = str(dataset_path / 'orig')
         self._default_tok_dir = f"{self._dataset_root_dir}/tokenizer"
+        self._default_pre_dir = f"{self._dataset_root_dir}/pre"
+        self._default_post_dir = f"{self._dataset_root_dir}/post"
+        self._dirs = [
+            self._default_raw_dir,
+            self._default_original_dir,
+            self._default_tok_dir,
+            self._default_pre_dir,
+            self._default_post_dir
+        ]
 
         self._json_directory_path = self._default_original_dir
 
@@ -257,24 +266,25 @@ class JSONDataset(
         # load dataset
         self._load_dataset()
         # check consistency
+        self._dir_file_consistency()
         if do_consistency_check:
             self._check_consistency()
         # state
         self._entry_rest_api_result = None
 
-    def _load_tokenizer(self):
-        """ Load tokenizer.
-        :return:
+    def _load_tokenizer(self) -> Optional[PreTrainedTokenizer]:
+        """ Load tokenizer, note it important to load IGC tokenizer.
+        don't use default.
+
+        :return: None
         """
-        tok_dir = f"{self._dataset_root_dir}/tokenizer"
-        self.logger.info(f"Loading tokenizer from {tok_dir}")
-        if os.path.exists(tok_dir):
-            self.tokenizer = GPT2Tokenizer.from_pretrained(tok_dir)
+        self.logger.info(f"Loading tokenizer from {self._default_tok_dir}")
+        if os.path.exists(self._default_tok_dir):
+            self.tokenizer = GPT2Tokenizer.from_pretrained(self._default_tok_dir)
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-            self.logger.info(
-                f"Loading tokenizer from {tok_dir}. Number of tokens in the loaded tokenizer: {len(self.tokenizer)}")
-
+            self.logger.info(f"Loading tokenizer from {self._default_tok_dir}. "
+                             f"Number of tokens in the loaded tokenizer: {len(self.tokenizer)}")
             self.add_special_tokens()
             return self.tokenizer
         return None
@@ -1720,3 +1730,17 @@ class JSONDataset(
             modified_tokens.append(f" {token} ")
 
         return modified_tokens
+
+    def _dir_file_consistency(self):
+        """
+        Check that all directories and files exist that we expect.
+        :return:
+        """
+        for directory in self._dirs:
+            if not os.path.exists(directory):
+                raise FileNotFoundError(f"Directory does not exist: {directory}")
+
+        all_files = self._dataset_file_names + self._dataset_tarballs
+        for ds_file in all_files:
+            if not os.path.exists(ds_file):
+                raise FileNotFoundError(f"File does not exist: {ds_file}")
