@@ -5,6 +5,7 @@ experiment*/
 logs*/
 backup*/
 datasets/orig/*
+datasets/raw/*
 # C extensions
 *.so
 .idea
