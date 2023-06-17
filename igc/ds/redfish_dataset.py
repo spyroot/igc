@@ -92,7 +92,7 @@ class JSONDataset(
 
         """
         super(DownloadableDataset, self).__init__(
-            dataset_root_dir=dataset_dir, skip_download=skip_download
+            dataset_dir, skip_download=skip_download
         )
 
         self._special_tokens = JSONDataset.build_special_tok_table()
