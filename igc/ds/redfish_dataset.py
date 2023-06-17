@@ -491,11 +491,6 @@ class JSONDataset(
                 "resources": self._resources,
                 "tokenizer": {
                     "num_tokens": len(self.tokenizer)
-                },
-                "rest_api": {
-                    "num_rest_api": len(self._rest_api_to_respond_),
-                    "hash_to_rest_apis": len(self._data['hash_to_rest_api']),
-                    "action_idx_to_hash": len(self._data['action_idx_to_hash']),
                 }
             }
             json_file_path = Path(self._dataset_root_dir) / "dataset.json"
