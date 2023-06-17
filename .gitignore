@@ -3,9 +3,8 @@ __pycache__/
 *$py.class
 experiment*/
 logs*/
-datasets*/
 backup*/
-
+datasets/orig/*
 # C extensions
 *.so
 .idea
