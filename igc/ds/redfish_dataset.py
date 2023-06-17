@@ -295,6 +295,8 @@ class JSONDataset(
                 self.tokenizer = GPT2Tokenizer.from_pretrained(self._default_tokenize_name)
                 self.logger.info(f"Using default gpt tokenizer: {self.tokenizer.name_or_path}")
                 self._build_tokenizer()
+                self.tokenizer.save_pretrained(self.tokenizer_dir())
+                self.logger.info(f"Saving tokenizer to {self.tokenizer_dir()}")
         except HFValidationError as hvf_err:
             print(f"Failed create {self._default_tokenize_name} tokenizer "
                   f"check the name and try again error {str(hvf_err)}.")
