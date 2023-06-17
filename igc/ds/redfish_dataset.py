@@ -96,6 +96,7 @@ class JSONDataset(
 
         self._special_tokens = JSONDataset.build_special_tok_table()
         self._default_tokenize_name = default_tokenize
+        self._skip_download = skip_download
 
         assert isinstance(raw_json_directory_path, str), 'directory_path should be a string'
         assert isinstance(default_tokenize, str), 'default_tokenize should be a string'
@@ -283,15 +284,18 @@ class JSONDataset(
         # state
         self._entry_rest_api_result = None
 
-    def _load_tokenizer(self) -> PreTrainedTokenizer:
+    def _load_tokenizer(self) -> Optional[PreTrainedTokenizer]:
         """ Load tokenizer, note it important to load IGC tokenizer.
         don't use default.
+
+        If we set download skip it will build a tokenizer.
 
         :return: PreTrainedTokenizer
         """
         self.logger.info(f"Loading tokenizer from {self.tokenizer_dir()}")
         try:
-            if not os.path.exists(self.tokenizer_dir()):
+            # we do this only if tokenizer dir not present, and we are skipping download.
+            if not os.path.exists(self.tokenizer_dir()) and self._skip_download:
                 self.tokenizer = GPT2Tokenizer.from_pretrained(self._default_tokenize_name)
                 self.logger.info(f"Using default gpt tokenizer: {self.tokenizer.name_or_path}")
                 self._build_tokenizer()
@@ -302,14 +306,17 @@ class JSONDataset(
                   f"check the name and try again error {str(hvf_err)}.")
             sys.exit(1)
 
-        # load
-        self.tokenizer = GPT2Tokenizer.from_pretrained(self.tokenizer_dir())
-        self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-        self.logger.info(f"Loading tokenizer from {self._default_tok_dir}. "
-                         f"Number of tokens in the loaded tokenizer: {len(self.tokenizer)}")
-        self.add_special_tokens()
-        return self.tokenizer
+        # load if we can, else return None , we will download it later.
+        if os.path.exists(self.tokenizer_dir()):
+            self.tokenizer = GPT2Tokenizer.from_pretrained(self.tokenizer_dir())
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+            self.logger.info(f"Loading tokenizer from {self._default_tok_dir}. "
+                             f"Number of tokens in the loaded tokenizer: {len(self.tokenizer)}")
+            self.add_special_tokens()
+            return self.tokenizer
+
+        return None
 
     @classmethod
     def dataset_default_root(cls):
