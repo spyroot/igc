@@ -249,6 +249,12 @@ class JSONDataset(
             if not self._check_tarballs_files() or is_force_download:
                 logging.info("Downloading dataset.")
                 super().__init__(dataset_root_dir=self._dataset_root_dir)
+        else:
+            if self._unprocessed is None or not os.path.exists(self._unprocessed):
+                raise ValueError("Download set to skip and unprocessed directory not found.")
+            else:
+                if not any(glob.glob(os.path.join(self._unprocessed, '**/*.json'), recursive=True)):
+                    raise ValueError(f"Download set to skip , and no json file found in {self._unprocessed}.")
 
         self.logger.info(f"Dataset root directory: {self._dataset_root_dir}")
         self.logger.info(f"Dataset raw directory: {self._default_raw_dir}")
