@@ -488,7 +488,15 @@ class JSONDataset(
             # update dataset.json
             json_data = {
                 "mirrors": self._mirrors,
-                "resources": self._resources
+                "resources": self._resources,
+                "tokenizer": {
+                    "num_tokens": len(self.tokenizer)
+                },
+                "rest_api": {
+                    "num_rest_api": len(self._rest_api_to_respond_),
+                    "hash_to_rest_apis": len(self._data['hash_to_rest_api']),
+                    "action_idx_to_hash": len(self._data['action_idx_to_hash']),
+                }
             }
             json_file_path = Path(self._dataset_root_dir) / "dataset.json"
             self._update_hash_values(str(json_file_path), json_data)
@@ -1293,6 +1301,9 @@ class JSONDataset(
             self._data["special_tokens"][special_token] = tokenizer["input_ids"]
 
     def get_special_tokens(self):
+        """Return all special tokens, added to tokenizer.
+        :return
+        """
         return self._data["special_tokens"]
 
     def action(self, one_hot_vec: torch.Tensor) -> str:
