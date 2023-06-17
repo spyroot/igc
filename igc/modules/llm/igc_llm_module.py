@@ -1,10 +1,19 @@
+"""
+This class re-present IGC llm submodule.
+
+Essentially it composite object of many module that might form LLM.
+
+Author:Mus mbayramo@stanford.edu
+"""
 import argparse
 import sys
 import warnings
-from typing import Optional, Dict, Union, List
+from enum import auto, Enum
+from typing import Optional, Dict, Union, List, Tuple
 
 import loguru
 import torch
+from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from igc.ds.redfish_dataset import JSONDataset
 from igc.ds.redfish_masked_dataset import MaskedJSONDataset
@@ -13,13 +22,27 @@ from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.modules.igc_train_auto_state_encoder import AutoencoderTrainer
 from igc.modules.llm_train_goal_extract import GoalExtractorTrainer
 from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
-from igc.modules.shared.llm_shared import from_pretrained_default
+from igc.modules.shared.llm_shared import from_pretrained_default, load_igc_tokenizer
+
+
+class ModelType(Enum):
+    """
+
+    """
+    PRETRAINED = auto()
+    FINETUNED = auto()
+    UNTRAINED = auto()
 
 
 class IgcLanguageModule:
     """
     """
-    modules = ["goal_extractor", "parameter_extractor", "state_encoder", "state_autoencoder"]
+    modules = [
+        "goal_extractor",
+        "parameter_extractor",
+        "state_encoder",
+        "state_autoencoder"
+    ]
 
     def __init__(self,
                  spec: argparse.Namespace,
@@ -27,13 +50,19 @@ class IgcLanguageModule:
                  ds: Union[JSONDataset, MaskedJSONDataset],
                  from_pretrained=from_pretrained_default):
         """
-        :param spec:
-        """
 
+        :param spec: all model specs.
+        :param metric_logger: a metric logger objet use to report metric.
+        :param ds: A dataset used to train llm model.
+        :param from_pretrained:
+        """
         if spec is None:
             raise ValueError("Specs cannot be None")
 
-        self.modules = ["goal_extractor", "parameter_extractor", "state_encoder", "state_autoencoder"]
+        self.modules = ["goal_extractor",
+                        "parameter_extractor",
+                        "state_encoder",
+                        "state_autoencoder"]
 
         self._from_pretrained_fn = from_pretrained
         self._metric_logger = metric_logger
@@ -51,21 +80,34 @@ class IgcLanguageModule:
         self.logger.remove()
         self.logger.add(sys.stdout, level=self._log_level)
 
-    def load_finetuned_llm(self, use_pretrained_only: Optional[bool] = False):
+    def load_finetuned_llm(
+            self, use_pretrained_only: Optional[bool] = False
+    ):
+
         """Load either pre-trained model only or fine-tuned llm.
+        If we want experiment with auto encoder with some pre-trained model
+        without doing any fine-tuning.
 
         :param use_pretrained_only:  if we only want to use stock pre-training model. i.e not fined.
         :return:
         """
         _is_llm_pre_trained = False
+        llm_state = ModelType.UNTRAINED
+        llm_tokenizer = self._dataset.tokenizer
+
         if use_pretrained_only:
             _model, _ = self._from_pretrained_fn(
                 self._spec, only_tokenizer=False, only_model=True
             )
             _model.resize_token_embeddings(len(self._dataset.tokenizer))
-            return _model, self._dataset.tokenizer
+            llm_state = ModelType.PRETRAINED
+            return _model, llm_tokenizer, llm_state
 
         self.logger.info("Starting training.")
+
+        llm_model = None
+        llm_tokenizer = None
+
         # we train State Encoder the goal here take rest api response, and re-present as state.
         if self._spec.llm == "latent" or self._spec.llm == "all":
             self.logger.info("Starting training state encoder.")
@@ -90,9 +132,30 @@ class IgcLanguageModule:
                 pretrained_model.resize_token_embeddings(len(self._dataset.tokenizer))
 
             llm_embeddings.train()
-            return llm_embeddings.model, self._dataset.tokenizer, True
+            llm_model = llm_embeddings.get_model()
+            llm_tokenizer = llm_embeddings.get_tokenizer()
 
-        return None, None, False
+        return llm_model, llm_tokenizer, llm_state
+
+    def load_finetuned_state_encoder(self, path: str = None):
+        """
+        :return:
+        """
+        _model = None
+        self.logger.info("Loading state encoder fined tuned state.")
+        modules = self.load(
+            self._spec if path is None else path,
+            module_name="state_encoder",
+            device=self._spec.device
+        )
+        module = modules["state_encoder"]
+        _model = module.model
+
+        if _model is None:
+            warnings.warn("Please train state encoder first.")
+            return
+
+        return _model
 
     def train(self, use_pretrained_only: bool = False):
         """Main call to train all language models.
@@ -100,23 +163,12 @@ class IgcLanguageModule:
         """
         _model = None
         self.logger.info("Starting training.")
-        _model, tokenizer, is_pre_trained_or_tuned = self.load_finetuned_llm(
+        _model, tokenizer, model_state = self.load_finetuned_llm(
             use_pretrained_only=use_pretrained_only
         )
 
-        if is_pre_trained_or_tuned:
-            self.logger.info("Loading state encoder state.")
-            modules = self.load(
-                self._spec,
-                module_name="state_encoder",
-                device=self._spec.device
-            )
-            module = modules["state_encoder"]
-            _model = module.model
-
-        if _model is None:
-            warnings.warn("Please train state encoder first.")
-            return
+        if model_state == ModelType.FINETUNED:
+            _model = self.load_finetuned_state_encoder()
 
         # we train goal extractor
         if self._spec.llm == "goal" or self._spec.llm == "all":
@@ -155,12 +207,13 @@ class IgcLanguageModule:
             self.logger.info("Starting training state auto encoder.")
             autoencoder = AutoencoderTrainer(
                 "state_autoencoder",
-                self._spec,
-                _model,
-                tokenizer,
+                spec=self._spec,
+                llm_model=_model,
+                llm_tokenizer=tokenizer,
                 ds=self._dataset,
                 metric_logger=self._metric_logger,
-                is_inference=False)
+                is_inference=False,
+                device=self._spec.device)
 
             if hasattr(_model, 'resize_token_embeddings'):
                 _model.resize_token_embeddings(len(tokenizer))
@@ -174,16 +227,25 @@ class IgcLanguageModule:
         pass
 
     @staticmethod
-    def make_base_model(spec: argparse.Namespace):
-        return from_pretrained_default(spec)
+    def make_base_model(
+            spec: Union[str, argparse.Namespace]
+    ) -> Tuple[Optional[PreTrainedModel], Optional[PreTrainedTokenizer]]:
+        """Create base llm model with igc tokenizer.
+        :param spec: path or spec
+        :return: pretrained model and tokenizer
+        """
+        model, _ = from_pretrained_default(
+            spec, only_model=True, only_tokenizer=False, device_map=spec.device)
+        tokenizer = load_igc_tokenizer()
+        return model, tokenizer
 
     @staticmethod
     def make_model(
-        spec: argparse.Namespace,
-        module_name: str,
-        base_model: None,
-        base_tokenizer,
-        device=None,
+            spec: argparse.Namespace,
+            module_name: str,
+            base_model: None,
+            base_tokenizer,
+            device=None,
     ) -> Optional[LlmBaseModule]:
         """
         Create an igc module based on the module name.
@@ -220,9 +282,9 @@ class IgcLanguageModule:
 
     @staticmethod
     def load(
-        spec: argparse.Namespace,
-        device: torch.device = "cpu",
-        module_name: Union[str, List[str]] = None,
+            spec: argparse.Namespace,
+            device: torch.device = "cpu",
+            module_name: Union[str, List[str]] = None,
     ) -> Dict[str, LlmBaseModule]:
         """
 
@@ -243,9 +305,15 @@ class IgcLanguageModule:
                 raise ValueError(f"Invalid module_name: {module_name}. "
                                  f"Must be one of {IgcLanguageModule.modules}")
 
-            module = IgcLanguageModule.make_model(spec, module_name, base_model, base_tokenizer)
-            module.load(module_name, module.model, spec,
-                        device=device, is_inference=True, optimizer=None, scheduler=None)
+            module = IgcLanguageModule.make_model(
+                spec, module_name, base_model, base_tokenizer
+            )
+            module.load(
+                module_name, module.model, spec,
+                device=device, is_inference=True,
+                optimizer=None, scheduler=None
+            )
+
             modules[module_name] = module
             modules[module_name].set_tokenizer(base_tokenizer)
 

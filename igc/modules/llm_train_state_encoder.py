@@ -25,6 +25,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.quantization import convert
 from torch.utils.data import DataLoader, RandomSampler
+from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from igc.ds.redfish_masked_dataset import MaskingOption, MaskedJSONDataset
 from igc.modules.base.igc_llm_base_module import LlmBaseModule
@@ -39,8 +40,8 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
-                 llm_model=None,
-                 llm_tokenizer=None,
+                 llm_model: PreTrainedModel = None,
+                 llm_tokenizer: PreTrainedTokenizer = None,
                  dataset: Union[MaskedJSONDataset] = None,
                  metric_logger: Optional[MetricLogger] = None,
                  is_inference=False,
@@ -95,6 +96,21 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         self._mask_probability = 1.0
         self._best_validation_metric = float('-inf')
         self.dataset = dataset
+
+    def get_model(self) -> PreTrainedModel:
+        """Return module model.
+        :return:
+        """
+        return self.model
+
+    def get_tokenizer(self) -> PreTrainedTokenizer:
+        """Return module model.
+        :return:
+        """
+        if self.dataset.tokenizer is None:
+            self.dataset.load_tokenizer()
+
+        return self.dataset.tokenizer
 
     @staticmethod
     def custom_collate_fn(samples):

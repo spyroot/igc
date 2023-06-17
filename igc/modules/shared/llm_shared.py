@@ -1,6 +1,15 @@
+"""
+All default llm model creation and loading is done here.
+
+Author:Mus mbayramo@stanford.edu
+"""
 import argparse
+import os
 from typing import Optional, Union, Dict, Tuple
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import (GPT2LMHeadModel,
+                          GPT2Tokenizer,
+                          PreTrainedModel,
+                          PreTrainedTokenizer)
 
 
 def from_pretrained_default(
@@ -9,7 +18,7 @@ def from_pretrained_default(
     only_model: bool = False,
     add_padding: bool = True,
     device_map: Union[str, Dict[str, str]] = "auto"
-) -> Tuple[Optional[GPT2LMHeadModel], Optional[GPT2Tokenizer]]:
+) -> Tuple[Optional[PreTrainedModel], Optional[PreTrainedTokenizer]]:
     """
     This is default callback used to load default model that we fine tune.
 
@@ -46,6 +55,27 @@ def from_pretrained_default(
     return model, tokenizer
 
 
+def load_igc_tokenizer(tokenizer_dir: str = None) -> PreTrainedTokenizer:
+    """
+    Load the tokenizer from the specified directory and return it.
+
+    :param tokenizer_dir: The directory path where the tokenizer is located.
+    :return: The loaded tokenizer.
+    """
+    if tokenizer_dir is None:
+        tok_dir = f"datasets/tokenizer"
+    else:
+        tok_dir = tokenizer_dir
+
+    if not os.path.exists(tok_dir):
+        raise ValueError(f"Tokenizer directory '{tok_dir}' does not exist.")
+
+    tokenizer = GPT2Tokenizer.from_pretrained(tok_dir)
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token_id = tokenizer.eos_token_id
+    return tokenizer
+
+
 def save_pretrained_default(
     huggingface_dir,
     model: GPT2Tokenizer,
@@ -77,14 +107,14 @@ def load_pretrained_default(
     args: argparse.Namespace,
     path_to_model: str,
     device_map="auto"
-) -> Tuple[GPT2Tokenizer, GPT2LMHeadModel]:
+) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
     """
-      Load fine tuned model, the default GPT2 model and tokenizer.
+      Load fine-tuned model, the default GPT2 model and tokenizer.
 
-    :param args:
-    :param path_to_model:
-    :param device_map:
-    :return:
+    :param args: argparse namespace that contains various optional parameters for the model.
+    :param path_to_model:String specifying the path to the pre-trained model.
+    :param device_map: Device map for the model. Can be set to "auto".
+    :return: A tuple consisting of the pre-trained GPT-2 model and its tokenizer.
     """
 
     tokenizer = GPT2Tokenizer.from_pretrained(

@@ -42,13 +42,12 @@ class AutoencoderTrainer(IgcBaseModule):
                  is_inference: Optional[bool] = "False",
                  device: Optional[torch.device] = None):
         """
-
-        :param module_name:
-        :param spec:
-        :param ds:
-        :param metric_logger:
+        :param module_name: Name of the module.
+        :param spec: Specifications for trainer
         :param llm_model:
         :param llm_tokenizer:
+        :param ds: dataset
+        :param metric_logger: trainer metric logger
         """
         super().__init__(
             module_name,

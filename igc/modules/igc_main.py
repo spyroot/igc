@@ -1,3 +1,10 @@
+"""
+This class is main class that encapsulate trainer logic.
+The reason it's done this , I'm going some trainer logic to async io
+since we can parallelize some of the training logic.
+
+Author:Mus mbayramo@stanford.edu
+"""
 import argparse
 import os
 
@@ -26,6 +33,9 @@ class IgcMain:
         from_pretrained_save_fn=save_pretrained_default,
     ):
         """
+        from_pretrained_default creates initial model.
+        if model saved in hugging face format we ue load_pretrained_default and save_pretrained_default
+        to save and load model.
 
         :param specs: An `argparse.Namespace` object containing the specifications and arguments.
         :param from_pretrained: A function for loading the pretrained model and tokenizer.
@@ -46,6 +56,16 @@ class IgcMain:
     def train(self):
         """
         Main igc trainer.
+
+        * Fine tune llm and save the model experiments/state_encoder
+        * Training auto encoder and save the model experiments/state_auto_encoder
+        Optional:
+                * Use fine-tuned model and train goal extractor.
+                * Use fined-tuned model and trains sub-goal and parameters extractor.
+
+        * Use tune tuned model and load state_auto_encoder
+        * Create vectorized rest api vectorized env and use auto encoder to compress state.
+        * Train RL agent.
 
         :return:
         """
@@ -80,8 +100,12 @@ class IgcMain:
             verbose=True,
             do_consistency_check=specs.do_consistency_check)
 
-        llm_module = IgcLanguageModule(self._specs, self._metric_logger, dataset)
-        modules = llm_module.load(specs, device=device, module_name=module_name)
+        llm_module = IgcLanguageModule(
+            self._specs, self._metric_logger, dataset
+        )
+        modules = llm_module.load(
+            specs, device=device, module_name=module_name
+        )
         return modules
 
     def run(self):
