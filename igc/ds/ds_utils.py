@@ -368,12 +368,9 @@ def check_integrity(path: str, md5: Optional[str] = None) -> bool:
              False otherwise.
     """
     if not os.path.isfile(path):
-        print(f"not a file {path}")
         return False
 
     if md5 is None:
-        print("chcksum is not.")
-
         return True
 
     result = check_md5(path, md5)

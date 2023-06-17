@@ -208,7 +208,8 @@ python trainer.py --train llm --num_train_epochs 1000 \
 * Training auto state encoder.
 
 ```bash
-python trainer.py --train llm --num_train_epochs 1000 --llm encoder --llm_log_level info --log_level info
+python trainer.py --train llm --num_train_epochs 1000 \
+--llm encoder --llm_log_level info --log_level info
 ```
 
 ``accelerate
