@@ -426,45 +426,48 @@ class JSONDataset(
         # create tarball if not present, for all raw json
         if not os.path.exists(self._dataset_json_tarball_name):
             logging.debug(f"Creating tarball {self._dataset_json_tarball_name}")
-            _, _tarball_hash = create_tar_gz(
-                self._json_directory_path, self._dataset_json_tarball_name)
+            if os.path.exists(self._json_directory_path):
+                _, _tarball_hash = create_tar_gz(
+                    self._json_directory_path, self._dataset_json_tarball_name)
 
-            # update hash values in _resources
-            tarball_name = os.path.basename(self._dataset_json_tarball_name)
-            for i, resource in enumerate(self._resources):
-                if resource[0] == tarball_name:
-                    self._resources[i] = (resource[0], _tarball_hash, resource[2])
-                    regenerate_hash = True
+                # update hash values in _resources
+                tarball_name = os.path.basename(self._dataset_json_tarball_name)
+                for i, resource in enumerate(self._resources):
+                    if resource[0] == tarball_name:
+                        self._resources[i] = (resource[0], _tarball_hash, resource[2])
+                        regenerate_hash = True
 
         if self._check_dataset_files():
             # create tarball if not present, for all raw json
             if not os.path.exists(self._dataset_tarball_name):
                 os.makedirs(self._dataset_root_dir, exist_ok=True)
                 logging.debug(f"Creating tarball {self._dataset_tarball_name} file.")
-                _, _tarball_hash = create_tar_gz(
-                    self.raw_dir(), self._dataset_tarball_name)
+                if os.path.exists(self.raw_dir()):
+                    _, _tarball_hash = create_tar_gz(
+                        self.raw_dir(), self._dataset_tarball_name)
 
-                # update hash
-                tarball_name = os.path.basename(self._dataset_tarball_name)
-                for i, resource in enumerate(self._resources):
-                    if resource[0] == tarball_name:
-                        self._resources[i] = (resource[0], _tarball_hash, resource[2])
-                        regenerate_hash = True
+                    # update hash
+                    tarball_name = os.path.basename(self._dataset_tarball_name)
+                    for i, resource in enumerate(self._resources):
+                        if resource[0] == tarball_name:
+                            self._resources[i] = (resource[0], _tarball_hash, resource[2])
+                            regenerate_hash = True
 
         if not os.path.exists(self._dataset_tokenizer_tarball_name):
             # create tarball if not present,  compress tokenizer
             if not os.path.exists(self._dataset_tokenizer_tarball_name):
                 os.makedirs(self._dataset_root_dir, exist_ok=True)
                 logging.debug(f"Creating tarball {self._dataset_tokenizer_tarball_name} file.")
-                _, _tarball_hash = create_tar_gz(
-                    self.tokenizer_dir(), self._dataset_tokenizer_tarball_name)
+                if os.path.exists(self.tokenizer_dir()):
+                    _, _tarball_hash = create_tar_gz(
+                        self.tokenizer_dir(), self._dataset_tokenizer_tarball_name)
 
-                # update hash
-                tarball_name = os.path.basename(self._dataset_tokenizer_tarball_name)
-                for i, resource in enumerate(self._resources):
-                    if resource[0] == tarball_name:
-                        self._resources[i] = (resource[0], _tarball_hash, resource[2])
-                        regenerate_hash = True
+                    # update hash
+                    tarball_name = os.path.basename(self._dataset_tokenizer_tarball_name)
+                    for i, resource in enumerate(self._resources):
+                        if resource[0] == tarball_name:
+                            self._resources[i] = (resource[0], _tarball_hash, resource[2])
+                            regenerate_hash = True
 
         # update dataset spec and add hash values.
         if regenerate_hash:
