@@ -296,7 +296,8 @@ class JSONDataset(
                 self.logger.info(f"Using default gpt tokenizer: {self.tokenizer.name_or_path}")
                 self._build_tokenizer()
         except HFValidationError as hvf_err:
-            print(f"Failed create tokenizer check the name of tokenizer {self._default_tokenize_name}")
+            print(f"Failed create {self._default_tokenize_name} tokenizer "
+                  f"check the name and try again.")
             sys.exit(1)
 
         # load
