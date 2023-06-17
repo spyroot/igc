@@ -673,12 +673,12 @@ class JSONDataset(
             unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
 
         # if tarball of tokenizer present, unpack.
-        if os.path.exists(self._dataset_tokenizer_tarball_name) and not glob.glob(
-                os.path.join(self._default_original_dir, '*')):
+        if os.path.exists(self._dataset_tokenizer_tarball_name) and not glob.glob(os.path.join(
+                self.tokenizer_dir(), '*')):
             self.logger.info(
                 f"Found tarball unpack {self._dataset_tokenizer_tarball_name} "
                 f"files to {self._default_original_dir}")
-            unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
+            unpack_tar_gz(self._dataset_tokenizer_tarball_name, self.tokenizer_dir())
 
     def _load_dataset_spec(self):
         """Read dataset spec and update mirror and resources.
