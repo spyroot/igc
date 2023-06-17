@@ -21,18 +21,21 @@
         ],
         [
             "igc.tar.gz",
-            "5b91d64f80b9327c75eac431351a3a97",
+            "47cfeade94b9948b7e94263722740e47",
             "train_dataset"
         ],
         [
             "json_data.tar.gz",
-            "a9f6a18789a8847555f7c0dff73f114a",
+            "0b55e7e8661526588c1864098d4e0fe9",
             "json_data"
         ],
         [
             "tokenizer.tar.gz",
-            "a8cedcec1f24bfa89cf2861d757ede0d",
+            "ac70724a6e4d029e236dd226c91657bd",
             "tokenizer"
         ]
-    ]
+    ],
+    "tokenizer": {
+        "num_tokens": 53140
+    }
 }
