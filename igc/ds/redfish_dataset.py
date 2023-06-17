@@ -91,8 +91,11 @@ class JSONDataset(
         :param default_mirror_host; The mirror from where we pull all the data. (note default it my own host)
 
         """
-        self._special_tokens = JSONDataset.build_special_tok_table()
+        super(DownloadableDataset, self).__init__(
+            dataset_dir=dataset_dir, skip_download=skip_download
+        )
 
+        self._special_tokens = JSONDataset.build_special_tok_table()
         assert isinstance(raw_json_directory_path, str), 'directory_path should be a string'
         assert isinstance(default_tokenize, str), 'default_tokenize should be a string'
         assert isinstance(max_len, int), 'max_len should be an integer'

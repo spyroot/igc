@@ -25,7 +25,6 @@ from urllib.error import URLError
 
 from loguru import logger
 from torch.utils.data import Dataset
-
 from .ds_utils import download_dataset
 from ..modules.base.igc_abstract_logger import AbstractLogger
 
@@ -42,7 +41,8 @@ class DownloadableDataset(Dataset, AbstractLogger):
                  pre_process_dir: Optional[str] = "pre",
                  post_process_dir: Optional[str] = "post",
                  pre_transforms: Optional[List[Callable]] = None,
-                 post_transforms: Optional[List[Callable]] = None):
+                 post_transforms: Optional[List[Callable]] = None,
+                 skip_download: Optional[bool] = False):
         """
         A dataset root is where we need download all files.
 
@@ -58,6 +58,8 @@ class DownloadableDataset(Dataset, AbstractLogger):
                                 For example callback that unbar a file.
 
         """
+        self.skip_download = skip_download
+
         assert isinstance(dataset_root_dir, str), 'dataset_root_dir should be a string'
         assert isinstance(dataset_download_dir, str), 'dataset_download_dir should be a string'
         assert isinstance(pre_process_dir, str), 'pre_process_dir should be a string'
@@ -86,7 +88,8 @@ class DownloadableDataset(Dataset, AbstractLogger):
         self._dataset_default_types = ['train_small', 'val_small']
         #
         super().__init__()
-        self._create()
+        if not skip_download:
+            self._create()
 
     def _create(self):
         """First call each callback in pre_transforms list.

@@ -11,7 +11,8 @@ def custom_path():
     logging.basicConfig(level=logging.INFO)
     dataset = JSONDataset(
         "test_datasets",
-        do_consistency_check=False
+        do_consistency_check=False,
+        skip_download=True
     )
 
 
