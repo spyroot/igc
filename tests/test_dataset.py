@@ -74,10 +74,10 @@ class DatasetTest(unittest.TestCase):
                              json_dataset._dataset_tokenizer_tarball_name)
 
             self.assertEqual(json_dataset._mirrors, [
-                {"spec": f'http://192.168.254.78/ds/dataset.json'},
-                {"train_dataset": f'http://192.168.254.78/ds/igc.tar.gz'},
-                {"json_data": f'http://192.168.254.78/ds/json_data.tar.gz'},
-                {"tokenizer": f'http://192.168.254.78/ds/tokenizer.tar.gz'},
+                {"spec": f"{json_dataset._default_mirror_host}/dataset.json"},
+                {"train_dataset": f"{json_dataset._default_mirror_host}/igc.tar.gz"},
+                {"json_data": f"{json_dataset._default_mirror_host}/json_data.tar.gz"},
+                {"tokenizer": f"{json_dataset._default_mirror_host}/tokenizer.tar.gz"},
             ])
 
             self.assertEqual(json_dataset._resources, [
@@ -132,10 +132,10 @@ class DatasetTest(unittest.TestCase):
                              json_dataset._dataset_tokenizer_tarball_name)
 
             self.assertEqual(json_dataset._mirrors, [
-                {"spec": f'http://192.168.254.78/ds/dataset.json'},
-                {"train_dataset": f'http://192.168.254.78/ds/igc.tar.gz'},
-                {"json_data": f'http://192.168.254.78/ds/json_data.tar.gz'},
-                {"tokenizer": f'http://192.168.254.78/ds/tokenizer.tar.gz'},
+                {"spec": f"{json_dataset._default_mirror_host}/dataset.json"},
+                {"train_dataset": f"{json_dataset._default_mirror_host}/igc.tar.gz"},
+                {"json_data": f"{json_dataset._default_mirror_host}/json_data.tar.gz"},
+                {"tokenizer": f"{json_dataset._default_mirror_host}/tokenizer.tar.gz"},
             ])
 
             self.assertEqual(json_dataset._resources, [

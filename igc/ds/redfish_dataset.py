@@ -121,13 +121,14 @@ class JSONDataset(
 
         # dataset mirror
         self._default_dataset_spec = "dataset.json"
+        self._default_mirror_host = default_mirror_host
+
         self._mirrors = [
             {"spec": f'{default_mirror_host}/dataset.json'},
             {"train_dataset": f'{default_mirror_host}/igc.tar.gz'},
             {"json_data": f'{default_mirror_host}/json_data.tar.gz'},
-            {"tokenizer": f'{default_mirror_host}/ds/tokenizer.tar.gz'},
+            {"tokenizer": f'{default_mirror_host}/tokenizer.tar.gz'},
         ]
-
         # all files
         self._resources = [
             ("dataset.json", "", "spec"),
