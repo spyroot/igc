@@ -16,6 +16,7 @@ Mus mbayramo@stanford.edu
 """
 import json
 import os
+import re
 import subprocess
 import warnings
 from abc import abstractmethod
@@ -25,7 +26,8 @@ from urllib.error import URLError
 
 from loguru import logger
 from torch.utils.data import Dataset
-from .ds_utils import download_dataset
+
+from .ds_utils import download_dataset, check_integrity
 from ..modules.base.igc_abstract_logger import AbstractLogger
 
 
@@ -320,6 +322,18 @@ class DownloadableDataset(Dataset, AbstractLogger):
         """Return true if dataset is downloaded.
         :return:
         """
+        if not hasattr(self, '_is_downloaded_done'):
+            spec_file_path = os.path.join(
+                self.root_dir(), self.dataset_spec_file_name()
+            )
+            with open(spec_file_path, 'r') as f:
+                data = json.load(f)
+
+            resources = data['resources']
+            self._is_downloaded_done = all(
+                os.path.exists(os.path.join(
+                    self.root_dir(), r[0])) for r in resources
+            )
         return self._is_downloaded_done
 
     @abstractmethod
@@ -365,6 +379,9 @@ class DownloadableDataset(Dataset, AbstractLogger):
         default dataset spec file name
         :return:
         """
+        if not hasattr(self, '_is_downloaded_done'):
+            self._default_spec_filename = "dataset.json"
+
         return self._default_spec_filename
 
     def download_file(self, mirror_url: str, _filename: str, checksum: str = None):
@@ -394,6 +411,10 @@ class DownloadableDataset(Dataset, AbstractLogger):
             else:
                 logger.debug(f"No checksum provided.")
 
+            if checksum is not None:
+                if check_integrity(f"{self.root_dir()}/{_filename}", md5=checksum):
+                    return True
+
             self._is_downloaded_done, file_path = download_dataset(
                 url=mirror_url,
                 path=self.root_dir(),
@@ -415,8 +436,8 @@ class DownloadableDataset(Dataset, AbstractLogger):
         return False
 
     def download_spec_and_get_hashes(self) -> Dict[str, str]:
-        """Download the dataset spec file and
-        extract the hash values.
+        """Download the dataset spec file and extract
+        the hash values.
 
         The spec file, must contain all this hash values.
         if no hash found it return empty dict.
@@ -438,29 +459,38 @@ class DownloadableDataset(Dataset, AbstractLogger):
             self.root_dir(), self.dataset_spec_file_name()
         )
 
-        if os.path.exists(spec_file_path):
+        if not os.path.exists(spec_file_path):
             self.logger.warning("spec file not found.")
-            try:
-                with open(spec_file_path, "r") as spec_file:
-                    self.logger.debug(f"Loaded spec file from {spec_file_path}")
-                    spec_data = json.load(spec_file)
-                    for resource in spec_data.get("resources", []):
-                        self.logger.debug(f"Processing resource {resource}")
-                        if isinstance(resource, dict):
-                            file_name = resource.get("file_name")
-                            file_md5 = resource.get("file_md5")
-                        elif isinstance(resource, list) and len(resource) >= 3:
-                            file_name = resource[0]
-                            file_md5 = resource[1]
-                        else:
-                            continue
-                        if file_name and file_md5:
-                            spec_hash_values[file_name] = file_md5
-            except (FileNotFoundError, json.JSONDecodeError) as e:
-                self.logger.error(
-                    "Failed to load the dataset specification file: {}".format(e))
+            return spec_hash_values
+
+        self.logger.warning(f"dataset spec file {spec_file_path} found.")
+        try:
+            with open(spec_file_path, "r") as spec_file:
+                self.logger.debug(f"Loaded spec file from {spec_file_path}")
+                spec_data = json.load(spec_file)
+                for resource in spec_data.get("resources", []):
+                    self.logger.debug(f"Processing resource {resource}")
+                    if isinstance(resource, dict):
+                        file_name = resource.get("file_name")
+                        file_md5 = resource.get("file_md5")
+                    elif isinstance(resource, list) and len(resource) >= 3:
+                        file_name = resource[0]
+                        file_md5 = resource[1]
+                    else:
+                        continue
+                    if file_name and file_md5:
+                        spec_hash_values[file_name] = file_md5
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            self.logger.error(
+                "Failed to load the dataset specification file: {}".format(e))
 
         return spec_hash_values
+
+    @staticmethod
+    def is_valid_url(url: str) -> bool:
+        regex_pattern = r"^(?:http|ftp)s?://"
+        regex = re.compile(regex_pattern, re.IGNORECASE)
+        return bool(regex.match(url))
 
     def download_if_need(self) -> bool:
         """
@@ -479,16 +509,20 @@ class DownloadableDataset(Dataset, AbstractLogger):
         # now download other files, we get iterate over each mirror
         # if no hash present i.e, no spec file we skip that step
         for (m, f, md5) in self.mirrors():
+            if not DownloadableDataset.is_valid_url(m):
+                self.logger.info(f"Skipping {m}, url is not valid.")
+                continue
+
             if md5 is not None and len(md5) > 0:
                 # md5 is provided in the mirror
-                self.download_file(m, f, md5)
+                self.download_file(m, f, checksum=md5)
             elif f in spec_hash_values:
                 # md5 is in spec_hash_values
                 md5 = spec_hash_values[f]
-                self.download_file(m, f, md5)
+                self.download_file(m, f, checksum=md5)
             else:
                 # md5 is not available
-                self.download_file(m, f, None)
+                self.download_file(m, f, checksum=None)
 
         if self.is_downloaded:
             self.logger.info("File downloaded.")

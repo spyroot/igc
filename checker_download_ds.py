@@ -24,11 +24,15 @@ def download_custom_path():
         "test_datasets",
         do_consistency_check=False
     )
+    if dataset.is_downloaded():
+        print("Dataset is already downloaded")
+
+    if dataset.is_tokenizer_loader():
+        print("Tokenizer loaded")
 
 
 def main():
     """
-
     :return:
     """
     download_custom_path()

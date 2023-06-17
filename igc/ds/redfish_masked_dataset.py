@@ -65,7 +65,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
                  transform=None,
                  target_transform=None,
                  is_force_download=False,
-                 do_consistency_check=True,
+                 do_consistency_check=False,
                  raw_json_directory_path: Optional[str] = "~/.json_responses",
                  ):
         """
@@ -609,4 +609,3 @@ class MaskedJSONDataset(JSONDataset, ABC):
 
         self._cache[idx] = data
         return data
-

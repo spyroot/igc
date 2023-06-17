@@ -276,7 +276,7 @@ class JSONDataset(
         # load dataset
         self._load_dataset()
         # check consistency
-        self._dir_file_consistency()
+        self._is_dir_file_consistency()
         if do_consistency_check:
             self._check_consistency()
         # state
@@ -1296,7 +1296,7 @@ class JSONDataset(
             self._data["special_tokens"][special_token] = tokenizer["input_ids"]
 
     def get_special_tokens(self):
-        """Return all special tokens, added to tokenizer.
+        """Return all special tokens, added to tokenizer
         :return
         """
         return self._data["special_tokens"]
@@ -1792,7 +1792,7 @@ class JSONDataset(
 
         return modified_tokens
 
-    def _dir_file_consistency(self):
+    def _is_dir_file_consistency(self):
         """
         Check that all directories and files exist that we expect.
         :return:
@@ -1805,3 +1805,36 @@ class JSONDataset(
         for ds_file in all_files:
             if not os.path.exists(ds_file):
                 raise FileNotFoundError(f"File does not exist: {ds_file}")
+
+        if self._is_tokenizer_consistency():
+            raise FileNotFoundError(f"Some tokenizer files not found.")
+
+    @staticmethod
+    def default_tokenizer_files():
+        """
+        :return:
+        """
+        return [
+            "added_tokens.json",
+            "merges.txt",
+            "special_tokens_map.json",
+            "tokenizer_config.json",
+            "vocab.json"
+        ]
+
+    def _is_tokenizer_consistency(self):
+        """CHeck that all required tokenizer files exist.
+        :return:
+        """
+        return all(
+            os.path.exists(os.path.join(self.tokenizer_dir(), f))
+            for f in JSONDataset.default_tokenizer_files()
+        )
+
+    def is_tokenizer_loader(self) -> False:
+        """Return true if tokenizer is loaded.
+        :return:
+        """
+        if self.tokenizer:
+            return self._default_tok_dir == self.tokenizer.name_or_path
+        return False
