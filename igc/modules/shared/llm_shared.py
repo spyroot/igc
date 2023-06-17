@@ -6,32 +6,42 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 def from_pretrained_default(
     args: Union[str, argparse.Namespace],
     only_tokenizer: bool = False,
-    add_padding: bool = True, device_map: Union[str, Dict[str, str]] = "auto"
-) -> Tuple[Optional[GPT2LMHeadModel], GPT2Tokenizer]:
+    only_model: bool = False,
+    add_padding: bool = True,
+    device_map: Union[str, Dict[str, str]] = "auto"
+) -> Tuple[Optional[GPT2LMHeadModel], Optional[GPT2Tokenizer]]:
     """
     This is default callback used to load default model that we fine tune.
 
-    :param device_map:
-    :param add_padding:
+    :param only_model:  return only model, no tokenizer.
+    :param device_map:  where to upload model
+    :param add_padding: add pad tokens to tokenizer, that make sense if we also restore tokenizer.
     :param args: Argument parser namespace or string specifying the model_type.
     :param only_tokenizer: Whether to return only the tokenizer.
-    :return: Tuple of model and tokenizer (or just tokenizer if only_tokenizer is True).
+    :return: Tuple of model and tokenizer (or None if only_model is True).
     """
     model = None
+    tokenizer = None
+
     if not only_tokenizer:
         if isinstance(args, str):
-            model = GPT2LMHeadModel.from_pretrained(args, device_map=device_map)
+            model = GPT2LMHeadModel.from_pretrained(
+                args, device_map=device_map
+            )
         else:
-            model = GPT2LMHeadModel.from_pretrained(args.model_type, device_map=device_map)
+            model = GPT2LMHeadModel.from_pretrained(
+                args.model_type, device_map=device_map
+            )
 
-    if isinstance(args, str):
-        tokenizer = GPT2Tokenizer.from_pretrained(args)
-    else:
-        tokenizer = GPT2Tokenizer.from_pretrained(args.model_type)
+    if not only_model:
+        if isinstance(args, str):
+            tokenizer = GPT2Tokenizer.from_pretrained(args)
+        else:
+            tokenizer = GPT2Tokenizer.from_pretrained(args.model_type)
 
-    if add_padding:
-        tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.pad_token_id = tokenizer.eos_token_id
+        if add_padding:
+            tokenizer.pad_token = tokenizer.eos_token
+            tokenizer.pad_token_id = tokenizer.eos_token_id
 
     return model, tokenizer
 
@@ -39,7 +49,9 @@ def from_pretrained_default(
 def save_pretrained_default(
     huggingface_dir,
     model: GPT2Tokenizer,
-    gpt_tokenizer: GPT2Tokenizer, only_tokenizer=False):
+    gpt_tokenizer: GPT2Tokenizer,
+    only_tokenizer=False
+):
     """
       Save the default GPT2 model and tokenizer.
 

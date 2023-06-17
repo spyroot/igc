@@ -17,13 +17,15 @@ Parameters just passed to agent. i.e. we don't train on parameters.
 Author:Mus mbayramo@stanford.edu
 """
 import argparse
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import torch
 from torch import Tensor
 from torch.quantization import convert
 from torch.utils.data import DataLoader, RandomSampler
+
+from igc.ds.redfish_dataset import JSONDataset
 from igc.modules.base.igc_llm_base_module import LlmBaseModule
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.shared.shared_torch_builder import TorchBuilder
@@ -38,26 +40,26 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
-                 llm_model,
-                 llm_tokenizer,
-                 ds: Optional[MaskedJSONDataset] = None,
+                 llm_model=None,
+                 llm_tokenizer=None,
+                 dataset: Union[JSONDataset, MaskedJSONDataset] = None,
                  metric_logger: Optional[MetricLogger] = None,
                  is_inference=False,
                  device=None):
         """
+        :param llm_model:
+        :param llm_tokenizer:
 
-        :param spec:
-        :param ds: 
-        :param metric_logger: 
-        :param llm_model: 
-        :param llm_tokenizer: 
+        :param spec: specs for llm trainer
+        :param dataset: Union[JSONDataset, MaskedJSONDataset].
+        :param metric_logger:  a metric logger used to log training progress
         """
         super().__init__(
             module_name,
             spec,
             llm_model,
             llm_tokenizer,
-            ds=ds,
+            ds=dataset,
             metric_logger=metric_logger,
             is_inference=is_inference,
             device=device
@@ -67,13 +69,13 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         self.num_epochs = spec.num_train_epochs
         self.batch_size = spec.per_device_train_batch_size
 
-        self.batch_log = 10
+        self._batch_log = 10
         self._eval_freq = 10
         self._masked_freq = 5
 
         self._eval_freq = 8
-        self.shuffle = True
-        self.num_workers = spec.num_workers
+        self._is_shuffle = True
+        self._num_workers = spec.num_workers
         self._default_mask_token = "@odata.id"
         self._lr = spec.llm_learning_rate
 
@@ -282,22 +284,22 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             MaskingOption.ODATA_ID
         ]
 
-        self.logger.info(f"Creating dataloader {self.batch_size} num worker {self.num_workers}")
+        self.logger.info(f"Creating dataloader {self.batch_size} num worker {self._num_workers}")
         train_data, eval_data = self.split_dataset()
 
         train_dataloader = DataLoader(
             train_data,
             batch_size=self.batch_size,
             sampler=sampler,
-            num_workers=self.num_workers,
-            shuffle=self.shuffle,
+            num_workers=self._num_workers,
+            shuffle=self._is_shuffle,
             collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)
 
         eval_dataloader = DataLoader(
             eval_data,
             batch_size=self.batch_size,
             sampler=sampler,
-            num_workers=self.num_workers,
+            num_workers=self._num_workers,
             shuffle=False,
             drop_last=True,
             collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)

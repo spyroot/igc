@@ -135,7 +135,7 @@ class IgcBaseModule(IgcBaseState):
         self._overfit = spec.overfit
 
         self.optimizer = None
-        self.num_workers = spec.num_workers
+        self._num_workers = spec.num_workers
 
         # model saving
         self.save_strategy = spec.save_strategy

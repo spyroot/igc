@@ -190,8 +190,19 @@ but it very hard to fit even in 4 GPU system with 24Gb memory
 
 
 
-```bash
+# Instruction
 
+* Training state encoder
+
+```bash
+python trainer.py --train llm --num_train_epochs 1000 --llm latent --llm_log_level info --log_level info
+```
+
+* Training auto state encoder.
+
+```bash
+python trainer.py --train llm --num_train_epochs 1000 --llm encoder --llm_log_level info --log_level info
+```
 
 ``accelerate
 ``

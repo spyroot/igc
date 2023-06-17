@@ -7,6 +7,7 @@ import loguru
 import torch
 
 from igc.ds.redfish_dataset import JSONDataset
+from igc.ds.redfish_masked_dataset import MaskedJSONDataset
 from igc.modules.base.igc_llm_base_module import LlmBaseModule
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.modules.igc_train_auto_state_encoder import AutoencoderTrainer
@@ -23,7 +24,7 @@ class IgcLanguageModule:
     def __init__(self,
                  spec: argparse.Namespace,
                  metric_logger: MetricLogger,
-                 ds: JSONDataset,
+                 ds: Union[JSONDataset, MaskedJSONDataset],
                  from_pretrained=from_pretrained_default):
         """
         :param spec:
@@ -35,9 +36,9 @@ class IgcLanguageModule:
         self.modules = ["goal_extractor", "parameter_extractor", "state_encoder", "state_autoencoder"]
 
         self._from_pretrained_fn = from_pretrained
-        self.metric_logger = metric_logger
-        self.spec = spec
-        self.ds = ds
+        self._metric_logger = metric_logger
+        self._spec = spec
+        self._dataset = ds
         self._configure_logger()
 
     def _configure_logger(self):
@@ -45,37 +46,51 @@ class IgcLanguageModule:
         Configures the logger for the module.
         """
         module_name = self.__class__.__name__
-        self._log_level = self.spec.log_level.upper()
+        self._log_level = self._spec.log_level.upper()
         self.logger = loguru.logger.bind(module_name=module_name)
         self.logger.remove()
         self.logger.add(sys.stdout, level=self._log_level)
 
-    def load_finetuned_llm(self, use_pretrained_only=False):
-        """
+    def load_finetuned_llm(self, use_pretrained_only: Optional[bool] = False):
+        """Load either pre-trained model only or fine-tuned llm.
+
+        :param use_pretrained_only:  if we only want to use stock pre-training model. i.e not fined.
         :return:
         """
         _is_llm_pre_trained = False
         if use_pretrained_only:
-            _model, tokenizer = self._from_pretrained_fn(self.spec, only_tokenizer=False)
-            _model.resize_token_embeddings(len(self.ds.tokenizer))
-            return _model, tokenizer, True
+            _model, _ = self._from_pretrained_fn(
+                self._spec, only_tokenizer=False, only_model=True
+            )
+            _model.resize_token_embeddings(len(self._dataset.tokenizer))
+            return _model, self._dataset.tokenizer
 
         self.logger.info("Starting training.")
         # we train State Encoder the goal here take rest api response, and re-present as state.
-        if self.spec.llm == "latent" or self.spec.llm == "all":
-
+        if self._spec.llm == "latent" or self._spec.llm == "all":
             self.logger.info("Starting training state encoder.")
-            _model, t = self._from_pretrained_fn(self.spec, only_tokenizer=False)
-            llm_embeddings = LlmEmbeddingsTrainer(
-                "state_encoder",
-                self.spec, _model, self.ds.tokenizer,
-                ds=self.ds, metric_logger=self.metric_logger)
+            pretrained_model, t = self._from_pretrained_fn(
+                self._spec,
+                only_tokenizer=False,
+                device_map=self._spec.device
+            )
 
-            if hasattr(_model, 'resize_token_embeddings'):
-                _model.resize_token_embeddings(len(self.ds.tokenizer))
+            llm_embeddings = LlmEmbeddingsTrainer(
+                module_name="state_encoder",
+                spec=self._spec,
+                llm_model=pretrained_model,
+                llm_tokenizer=self._dataset.tokenizer,
+                dataset=self._dataset,
+                metric_logger=self._metric_logger,
+                is_inference=False,
+                device=self._spec.device
+            )
+
+            if hasattr(pretrained_model, 'resize_token_embeddings'):
+                pretrained_model.resize_token_embeddings(len(self._dataset.tokenizer))
 
             llm_embeddings.train()
-            return llm_embeddings.model, self.ds.tokenizer, True
+            return llm_embeddings.model, self._dataset.tokenizer, True
 
         return None, None, False
 
@@ -83,7 +98,6 @@ class IgcLanguageModule:
         """Main call to train all language models.
         :return:
         """
-
         _model = None
         self.logger.info("Starting training.")
         _model, tokenizer, is_pre_trained_or_tuned = self.load_finetuned_llm(
@@ -92,7 +106,11 @@ class IgcLanguageModule:
 
         if is_pre_trained_or_tuned:
             self.logger.info("Loading state encoder state.")
-            modules = self.load(self.spec, module_name="state_encoder", device=self.spec.device)
+            modules = self.load(
+                self._spec,
+                module_name="state_encoder",
+                device=self._spec.device
+            )
             module = modules["state_encoder"]
             _model = module.model
 
@@ -100,34 +118,32 @@ class IgcLanguageModule:
             warnings.warn("Please train state encoder first.")
             return
 
-        # we train goal extractor the goal here extract
-        # goal from high level sentence
-        if self.spec.llm == "goal" or self.spec.llm == "all":
+        # we train goal extractor
+        if self._spec.llm == "goal" or self._spec.llm == "all":
             self.logger.info("Starting training goal extractor.")
-
             goal_extractor = GoalExtractorTrainer(
                 "goal_extractor",
-                self.spec,
+                self._spec,
                 _model,
                 tokenizer,
-                ds=self.ds,
-                metric_logger=self.metric_logger)
+                ds=self._dataset,
+                metric_logger=self._metric_logger
+            )
             if hasattr(_model, 'resize_token_embeddings'):
                 _model.resize_token_embeddings(len(tokenizer))
-
             goal_extractor.train_goal_representation()
 
         # we train goal and parameter extractor, the goal here to extract
         # high level goal and parameters for that goal.
-        if self.spec.llm == "parameter" or self.spec.llm == "all":
+        if self._spec.llm == "parameter" or self._spec.llm == "all":
             self.logger.info("Starting training goal parameter extractor.")
             parameter_extractor = GoalExtractorTrainer(
                 "parameter_extractor",
-                self.spec,
+                self._spec,
                 _model,
                 tokenizer,
-                ds=self.ds,
-                metric_logger=self.metric_logger,
+                ds=self._dataset,
+                metric_logger=self._metric_logger,
                 is_inference=False
             )
             if hasattr(_model, 'resize_token_embeddings'):
@@ -135,16 +151,15 @@ class IgcLanguageModule:
             parameter_extractor.train_goal_and_parameter_extractor()
 
         # we train auto encoder the aim here to reduce state re-presentation
-        if self.spec.llm == "encoder" or self.spec.llm == "all":
+        if self._spec.llm == "encoder" or self._spec.llm == "all":
             self.logger.info("Starting training state auto encoder.")
-
             autoencoder = AutoencoderTrainer(
                 "state_autoencoder",
-                self.spec,
+                self._spec,
                 _model,
                 tokenizer,
-                ds=self.ds,
-                metric_logger=self.metric_logger,
+                ds=self._dataset,
+                metric_logger=self._metric_logger,
                 is_inference=False)
 
             if hasattr(_model, 'resize_token_embeddings'):
@@ -167,18 +182,27 @@ class IgcLanguageModule:
         spec: argparse.Namespace,
         module_name: str,
         base_model: None,
-        base_tokenizer) -> Optional[LlmBaseModule]:
-
+        base_tokenizer,
+        device=None,
+    ) -> Optional[LlmBaseModule]:
         """
         Create an igc module based on the module name.
 
+        :param device:
         :param spec: specs for each module
         :param module_name: igc module name
         :param base_model: base llm model
         :param base_tokenizer:  base llm tokenizer
         :return:
         """
-        return LlmBaseModule(module_name, spec, base_model, base_tokenizer, is_inference=True)
+        return LlmBaseModule(
+            module_name=module_name,
+            spec=spec,
+            llm_model=base_model,
+            llm_tokenizer=base_tokenizer,
+            is_inference=True,
+            device=device,
+        )
 
     @staticmethod
     def load_tokenizer(spec: argparse.Namespace):
@@ -188,8 +212,10 @@ class IgcLanguageModule:
         :param spec:
         :return:
         """
-        _, tokenizer = from_pretrained_default(spec.model_type, only_tokenizer=True)
-
+        _, tokenizer = from_pretrained_default(
+            spec.model_type,
+            only_tokenizer=True
+        )
         return tokenizer
 
     @staticmethod
@@ -225,9 +251,18 @@ class IgcLanguageModule:
 
         else:
             for model_name in IgcLanguageModule.modules:
-                module = IgcLanguageModule.make_model(spec, model_name, base_model, base_tokenizer)
-                module.load(model_name, module.model, spec,
-                            device=device, is_inference=True, optimizer=None, scheduler=None)
+                module = IgcLanguageModule.make_model(
+                    spec, model_name, base_model, base_tokenizer
+                )
+                module.load(
+                    model_name,
+                    module.model,
+                    spec,
+                    device=device,
+                    is_inference=True,
+                    optimizer=None,
+                    scheduler=None
+                )
                 modules[model_name] = module
                 modules[model_name].set_tokenizer(base_tokenizer)
 
