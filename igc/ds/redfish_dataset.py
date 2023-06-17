@@ -281,8 +281,11 @@ class JSONDataset(
         self._is_dir_file_consistency()
         if do_consistency_check:
             self._check_consistency()
+
         # state
         self._entry_rest_api_result = None
+        self._filtered_indices = None
+        self._filtered_api = None
 
     def _load_tokenizer(self) -> Optional[PreTrainedTokenizer]:
         """ Load tokenizer, note it important to load IGC tokenizer.
@@ -540,12 +543,31 @@ class JSONDataset(
         json schema files.
         :return:
         """
-        for file_path, api in self._respond_to_api.items():
+        for i, (file_path, api) in enumerate(self._respond_to_api.items()):
             with open(file_path, 'r') as f:
                 json_data = json.load(f)
 
             if "$schema" not in json_data:
-                yield file_path, api
+                if "@odata.context" in json_data:
+                    odata_context = json_data["@odata.context"]
+                    if "/redfish/v1/$metadata#JsonSchemaFile.JsonSchemaFile" not in odata_context:
+                        yield i, file_path, api
+
+    @property
+    def filtered_api_indices(self):
+        """
+        :return:
+        """
+        if self._filtered_indices is None:
+            self._filtered_indices = [i for i, _, _ in self.filtered_api_iterator()]
+        return self._filtered_indices
+
+    @property
+    def filtered_api_keys(self):
+        if self._filtered_api is None:
+            self._filtered_api = [api for _, _, api in self.filtered_api_iterator()]
+
+        return self._filtered_api
 
     def respond_to_api(self, rest_api_respond_file: str) -> str:
         """Return respond for particular rest api.
@@ -1500,7 +1522,7 @@ class JSONDataset(
         """
 
         # sample rest api action and method
-        rest_api = random.choice(list(self._rest_api_to_respond_.keys()))
+        rest_api = random.choice(self.filtered_api_keys)
         supported_method = self._rest_api_to_method[rest_api]
         return rest_api, supported_method, self.action_to_one_hot(rest_api)
 
@@ -1520,7 +1542,7 @@ class JSONDataset(
         supported_methods = []
 
         for _ in range(batch_size):
-            rest_api = random.choice(list(self._rest_api_to_respond_.keys()))
+            rest_api = random.choice(self.filtered_api_keys)
             supported_method = self._rest_api_to_method[rest_api]
             one_hot_vector = self.action_to_one_hot(rest_api)
             rest_apis.append(rest_api)
@@ -1543,7 +1565,7 @@ class JSONDataset(
         :return: A tuple containing the sampled REST API endpoints,
                 supported methods, and one-hot vectors.
         """
-        rest_api = random.choice(list(self._rest_api_to_respond_.keys()))
+        rest_api = random.choice(self.filtered_api_keys)
         supported_method = self._rest_api_to_method[rest_api]
         one_hot_vector = self.action_to_one_hot(rest_api)
 
