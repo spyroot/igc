@@ -22,6 +22,7 @@ import logging
 import os
 import random
 import shutil
+import sys
 import time
 import zlib
 from pathlib import Path
@@ -30,6 +31,7 @@ from typing import Optional, Any, List, Tuple, Union, Iterator
 import numpy as np
 import torch
 import torch.nn.functional as F
+from huggingface_hub.utils import HFValidationError
 from tqdm import tqdm
 from transformers import GPT2Tokenizer, PreTrainedTokenizer
 
@@ -93,7 +95,7 @@ class JSONDataset(
         """
 
         self._special_tokens = JSONDataset.build_special_tok_table()
-        self._default_tokenize = default_tokenize
+        self._default_tokenize_name = default_tokenize
 
         assert isinstance(raw_json_directory_path, str), 'directory_path should be a string'
         assert isinstance(default_tokenize, str), 'default_tokenize should be a string'
@@ -288,10 +290,14 @@ class JSONDataset(
         :return: PreTrainedTokenizer
         """
         self.logger.info(f"Loading tokenizer from {self.tokenizer_dir()}")
-        if not os.path.exists(self.tokenizer_dir()):
-            self.tokenizer = GPT2Tokenizer.from_pretrained(self.tokenizer_dir())
-            self.logger.info(f"Using default gpt tokenizer: {self.tokenizer.name_or_path}")
-            self._build_tokenizer()
+        try:
+            if not os.path.exists(self.tokenizer_dir()):
+                self.tokenizer = GPT2Tokenizer.from_pretrained(self._default_tokenize_name)
+                self.logger.info(f"Using default gpt tokenizer: {self.tokenizer.name_or_path}")
+                self._build_tokenizer()
+        except HFValidationError as hvf_err:
+            print(f"Failed create tokenizer check the name of tokenizer {self._default_tokenize_name}")
+            sys.exit(1)
 
         # load
         self.tokenizer = GPT2Tokenizer.from_pretrained(self.tokenizer_dir())
