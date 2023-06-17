@@ -123,7 +123,6 @@ class JSONDataset(DownloadableDataset,
             {"train_dataset": f'http://{default_mirror_host}/ds/igc.tar.gz'},
             {"json_data": f'http://{default_mirror_host}/ds/json_data.tar.gz'},
             {"tokenizer": f'http://{default_mirror_host}/ds/tokenizer.tar.gz'},
-
         ]
 
         # all files
@@ -1490,7 +1489,7 @@ class JSONDataset(DownloadableDataset,
 
         :return:
         """
-        return self._dataset_root_dir
+        return str(self._dataset_root_dir)
 
     def dataset_types(self):
         """Download dataset interface requires each file has dataset type.

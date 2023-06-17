@@ -34,8 +34,8 @@ from typing import Optional, Any, Dict, Union, List
 
 import torch
 from transformers import PreTrainedTokenizer
+
 from .redfish_dataset import JSONDataset
-from ..modules.base.igc_abstract_logger import AbstractLogger
 
 
 class MaskingOption(Enum):

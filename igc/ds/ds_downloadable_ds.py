@@ -1,4 +1,4 @@
-"""
+:q"""
 This file contains the base interface that describe a
 Downloadable Dataset. it has base implementation to download
 dataset from a list of mirrors.
@@ -444,8 +444,14 @@ class DownloadableDataset(Dataset, AbstractLogger):
                     spec_data = json.load(spec_file)
                     for resource in spec_data.get("resources", []):
                         self.logger.debug(f"Processing resource {resource}")
-                        file_name = resource.get("file_name")
-                        file_md5 = resource.get("file_md5")
+                        if isinstance(resource, dict):
+                            file_name = resource.get("file_name")
+                            file_md5 = resource.get("file_md5")
+                        elif isinstance(resource, list) and len(resource) >= 3:
+                            file_name = resource[0]
+                            file_md5 = resource[1]
+                        else:
+                            continue
                         if file_name and file_md5:
                             spec_hash_values[file_name] = file_md5
             except (FileNotFoundError, json.JSONDecodeError) as e:
