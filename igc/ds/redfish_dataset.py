@@ -51,11 +51,12 @@ class DatasetConsistencyError(Exception):
     pass
 
 
-class JSONDataset(DownloadableDataset,
-                  RestMappingInterface,
-                  RestActionEncoderInterface,
-                  AbstractLogger
-                  ):
+class JSONDataset(
+    DownloadableDataset,
+    RestMappingInterface,
+    RestActionEncoderInterface,
+    AbstractLogger
+):
 
     def __init__(self,
                  dataset_dir: Optional[str] = "datasets",
@@ -70,7 +71,9 @@ class JSONDataset(DownloadableDataset,
                  is_force_download=False,
                  do_consistency_check=True,
                  raw_json_directory_path: Optional[str] = "~/.json_responses",
-                 default_mirror_host="192.168.254.78"
+                 default_mirror_host="192.168.254.78",
+                 skip_download=False,
+                 skip_creation=False,
                  ):
         """
         :param dataset_dir: The directory to store the dataset.
@@ -145,7 +148,7 @@ class JSONDataset(DownloadableDataset,
 
         _unprocessed = Path(raw_json_directory_path).expanduser()
         _unprocessed = Path(_unprocessed).resolve()
-        self._unprocessed = str(_unprocessed)
+        self._unprocessed = os.path.realpath(_unprocessed)
         self._verbose = verbose
         self._max_len = max_len
         self._overlap = overlap
@@ -153,7 +156,7 @@ class JSONDataset(DownloadableDataset,
         # dataset root dir, default datasets
         dataset_path = os.path.abspath(dataset_dir)
         dataset_path = Path(dataset_path).resolve()
-        self._dataset_root_dir = str(dataset_path)
+        self._dataset_root_dir = os.path.realpath(dataset_path)
         self.tokenizer = None
 
         if tokenizer is not None:
@@ -176,6 +179,8 @@ class JSONDataset(DownloadableDataset,
         # default location for raw and orig files.
         self._default_raw_dir = str(dataset_path / 'raw')
         self._default_original_dir = str(dataset_path / 'orig')
+        self._default_tok_dir = f"{self._dataset_root_dir}/tokenizer"
+
         self._json_directory_path = self._default_original_dir
 
         if is_force_download:
@@ -214,6 +219,7 @@ class JSONDataset(DownloadableDataset,
         self._dataset_tarballs = [
             self._dataset_tarball_name,
             self._dataset_json_tarball_name,
+            self._dataset_tokenizer_tarball_name,
         ]
 
         # dictionary to map hash values to action one-hot vectors
@@ -238,13 +244,16 @@ class JSONDataset(DownloadableDataset,
         self.logger.info(f"Consistency check enabled: {do_consistency_check}")
         self.logger.info(f"tokenizer: {tokenizer}")
 
+        if skip_download and skip_creation:
+            return
+
         # unpack tarballs.
         self._unpack_tarballs()
         # create all tarballs if we have raw files, rebuilding.
         self._create_tarball()
         # load or build dataset
         self._load_tokenizer()
-        #
+        # load dataset
         self._load_dataset()
         # check consistency
         if do_consistency_check:
@@ -580,7 +589,7 @@ class JSONDataset(DownloadableDataset,
         """
         # if tar file present unpack other create new dataset.
         if os.path.exists(self._dataset_tarball_name) and not glob.glob(
-            os.path.join(self._default_raw_dir, '*')):
+                os.path.join(self._default_raw_dir, '*')):
             self.logger.info(
                 f"Found tarball unpack {self._dataset_tarball_name} "
                 f"files to {self._default_raw_dir}")
@@ -588,7 +597,7 @@ class JSONDataset(DownloadableDataset,
 
         # if tarball of all api responds present, unpack.
         if os.path.exists(self._dataset_json_tarball_name) and not glob.glob(
-            os.path.join(self._default_original_dir, '*')):
+                os.path.join(self._default_original_dir, '*')):
             self.logger.info(
                 f"Found tarball unpack {self._dataset_json_tarball_name} "
                 f"files to {self._default_original_dir}")
@@ -596,7 +605,7 @@ class JSONDataset(DownloadableDataset,
 
         # if tarball of all api responds present, unpack.
         if os.path.exists(self._dataset_tokenizer_tarball_name) and not glob.glob(
-            os.path.join(self._default_original_dir, '*')):
+                os.path.join(self._default_original_dir, '*')):
             self.logger.info(
                 f"Found tarball unpack {self._dataset_tokenizer_tarball_name} "
                 f"files to {self._default_original_dir}")
@@ -773,9 +782,9 @@ class JSONDataset(DownloadableDataset,
         return converted_name
 
     def create_chunks(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor
     ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
         """
 
@@ -889,10 +898,10 @@ class JSONDataset(DownloadableDataset,
 
     @staticmethod
     def mask_specific_key(
-        json_data,
-        target_key: str,
-        tokenizer=None,
-        debug: Optional[bool] = False
+            json_data,
+            target_key: str,
+            tokenizer=None,
+            debug: Optional[bool] = False
     ) -> torch.Tensor:
         """
         Masks specific key in json structure.
@@ -937,11 +946,11 @@ class JSONDataset(DownloadableDataset,
 
     @staticmethod
     def mask_json_key_and_value(
-        encoding,
-        target_key,
-        tokenizer,
-        debug=False,
-        return_original=False,
+            encoding,
+            target_key,
+            tokenizer,
+            debug=False,
+            return_original=False,
     ) -> torch.Tensor:
         """Mask specific key and value in json structure,
          technically will work in other cases.
@@ -990,10 +999,10 @@ class JSONDataset(DownloadableDataset,
 
     @staticmethod
     def mask_specific_key_and_value(
-        json_data,
-        target_key,
-        tokenizer=None,
-        debug=False
+            json_data,
+            target_key,
+            tokenizer=None,
+            debug=False
     ):
         """
         Mask specific key and value in json structure,
@@ -1051,10 +1060,10 @@ class JSONDataset(DownloadableDataset,
         return attention_mask
 
     def _process_and_mask_json_file(
-        self,
-        json_file_path: str,
-        json_file_name: str,
-        mask_target_key: str
+            self,
+            json_file_path: str,
+            json_file_name: str,
+            mask_target_key: str
     ) -> None:
         """
 
@@ -1242,8 +1251,8 @@ class JSONDataset(DownloadableDataset,
         return self._rest_api_to_method.get(action, "Unknown")
 
     def action_to_one_hot(
-        self,
-        rest_api: str
+            self,
+            rest_api: str
     ) -> Union[np.ndarray, torch.Tensor]:
 
         """Must take a string and return one hot vector either as tensor or ndarray
@@ -1262,8 +1271,8 @@ class JSONDataset(DownloadableDataset,
         return one_hot_tensor
 
     def one_hot_vector_to_action(
-        self,
-        one_hot_vector: Union[np.ndarray, torch.Tensor]
+            self,
+            one_hot_vector: Union[np.ndarray, torch.Tensor]
     ) -> str:
         """
         Takes a one-hot vector and returns the corresponding REST API.
@@ -1402,7 +1411,7 @@ class JSONDataset(DownloadableDataset,
         return rest_api, supported_method, self.action_to_one_hot(rest_api)
 
     def sample_batch_of_rest_api(
-        self, batch_size: int
+            self, batch_size: int
     ) -> Tuple[List[str], List[List[str]], torch.Tensor]:
         """
         Randomly sample REST API endpoints from the dataset
@@ -1490,6 +1499,18 @@ class JSONDataset(DownloadableDataset,
         :return:
         """
         return str(self._dataset_root_dir)
+
+    def raw_dir(self) -> str:
+        """store raw path """
+        return str(self._default_raw_dir)
+
+    def orig_dir(self) -> str:
+        """store raw path """
+        return str(self._default_original_dir)
+
+    def tokenizer_dir(self) -> str:
+        """store raw path """
+        return str(self._default_tok_dir)
 
     def dataset_types(self):
         """Download dataset interface requires each file has dataset type.

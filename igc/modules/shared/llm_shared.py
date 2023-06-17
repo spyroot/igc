@@ -32,6 +32,10 @@ def from_pretrained_default(
     model = None
     tokenizer = None
 
+    # it looks like hugging face doesn't like mps
+    if device_map == "mps":
+        device_map = "auto"
+
     if not only_tokenizer:
         if isinstance(args, str):
             model = GPT2LMHeadModel.from_pretrained(

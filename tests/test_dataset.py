@@ -1,4 +1,5 @@
 import os
+import tempfile
 import unittest
 import torch
 from transformers import GPT2Tokenizer
@@ -33,6 +34,120 @@ j_data = {
 
 
 class DatasetTest(unittest.TestCase):
+
+    def test_create_custom_dir(self):
+        """Test that we can create custom dir and all files and downloaded.
+        :return:
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            real_tmp_dir = os.path.realpath(temp_dir)
+            json_dataset = JSONDataset(
+                real_tmp_dir,
+                skip_creation=True,
+                skip_download=True,
+            )
+            self.assertEqual(json_dataset._max_len, 1024)
+            self.assertEqual(json_dataset._overlap, 256)
+            self.assertEqual(json_dataset._verbose, False)
+            self.assertEqual(json_dataset._recreate_dataset, False)
+
+            self.assertEqual(real_tmp_dir, json_dataset.root_dir())
+            self.assertEqual(f"{real_tmp_dir}/raw", json_dataset._default_raw_dir)
+            self.assertEqual(f"{real_tmp_dir}/orig", json_dataset._default_original_dir)
+            self.assertEqual(f"{real_tmp_dir}/raw", json_dataset.raw_dir())
+            self.assertEqual(f"{real_tmp_dir}/orig", json_dataset.orig_dir())
+            self.assertEqual(f"{real_tmp_dir}/tokenizer", json_dataset.tokenizer_dir())
+
+            self.assertEqual(f"{real_tmp_dir}/raw/processed_dataset_gpt2.pt",
+                             json_dataset._dataset_file_name)
+            self.assertEqual(f"{real_tmp_dir}/raw/processed_masked_dataset_gpt2.pt",
+                             json_dataset._dataset_masked_file_name)
+            self.assertEqual(f"{real_tmp_dir}/raw/rest_api_to_method_gpt2.pt",
+                             json_dataset._rest_api_to_method_file_name)
+            self.assertEqual(f"{real_tmp_dir}/raw/rest_api_to_respond_gpt2.pt",
+                             json_dataset._rest_api_to_respond_file_name)
+            self.assertEqual(f"{real_tmp_dir}/igc.tar.gz",
+                             json_dataset._dataset_tarball_name)
+            self.assertEqual(f"{real_tmp_dir}/json_data.tar.gz",
+                             json_dataset._dataset_json_tarball_name)
+            self.assertEqual(f"{real_tmp_dir}/tokenizer.tar.gz",
+                             json_dataset._dataset_tokenizer_tarball_name)
+
+            self.assertEqual(json_dataset._mirrors, [
+                {"spec": f'http://192.168.254.78/ds/dataset.json'},
+                {"train_dataset": f'http://192.168.254.78/ds/igc.tar.gz'},
+                {"json_data": f'http://192.168.254.78/ds/json_data.tar.gz'},
+                {"tokenizer": f'http://192.168.254.78/ds/tokenizer.tar.gz'},
+            ])
+
+            self.assertEqual(json_dataset._resources, [
+                ("dataset.json", "", "spec"),
+                ("igc.tar.gz", "", "train_dataset"),
+                ("json_data.tar.gz", "", "json_data"),
+                ("tokenizer.tar.gz", "", "tokenizer"),
+            ])
+
+    def test_create_custom_json_folder(self):
+        """Test that we can create custom dir and all files and downloaded.
+        :return:
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            real_tmp_dir = os.path.realpath(temp_dir)
+            json_dataset = JSONDataset(
+                real_tmp_dir,
+                skip_creation=True,
+                skip_download=True,
+            )
+
+            with tempfile.TemporaryDirectory() as json_temp_dir:
+                real_tmp_dir = os.path.realpath(json_temp_dir)
+                json_dataset = JSONDataset(
+                    real_tmp_dir,
+                    skip_creation=True,
+                    skip_download=True,
+                    json_temp_dir=json_temp_dir
+                )
+
+            self.assertEqual(json_dataset._max_len, 1024)
+            self.assertEqual(json_dataset._overlap, 256)
+            self.assertEqual(json_dataset._verbose, False)
+            self.assertEqual(json_dataset._recreate_dataset, False)
+
+            self.assertEqual(real_tmp_dir, json_dataset.root_dir())
+            self.assertEqual(f"{real_tmp_dir}/raw", json_dataset._default_raw_dir)
+            self.assertEqual(f"{real_tmp_dir}/orig", json_dataset._default_original_dir)
+            self.assertEqual(f"{real_tmp_dir}/raw", json_dataset.raw_dir())
+            self.assertEqual(f"{real_tmp_dir}/orig", json_dataset.orig_dir())
+            self.assertEqual(f"{real_tmp_dir}/tokenizer", json_dataset.tokenizer_dir())
+
+            self.assertEqual(f"{real_tmp_dir}/raw/processed_dataset_gpt2.pt",
+                             json_dataset._dataset_file_name)
+            self.assertEqual(f"{real_tmp_dir}/raw/processed_masked_dataset_gpt2.pt",
+                             json_dataset._dataset_masked_file_name)
+            self.assertEqual(f"{real_tmp_dir}/raw/rest_api_to_method_gpt2.pt",
+                             json_dataset._rest_api_to_method_file_name)
+            self.assertEqual(f"{real_tmp_dir}/raw/rest_api_to_respond_gpt2.pt",
+                             json_dataset._rest_api_to_respond_file_name)
+            self.assertEqual(f"{real_tmp_dir}/igc.tar.gz",
+                             json_dataset._dataset_tarball_name)
+            self.assertEqual(f"{real_tmp_dir}/json_data.tar.gz",
+                             json_dataset._dataset_json_tarball_name)
+            self.assertEqual(f"{real_tmp_dir}/tokenizer.tar.gz",
+                             json_dataset._dataset_tokenizer_tarball_name)
+
+            self.assertEqual(json_dataset._mirrors, [
+                {"spec": f'http://192.168.254.78/ds/dataset.json'},
+                {"train_dataset": f'http://192.168.254.78/ds/igc.tar.gz'},
+                {"json_data": f'http://192.168.254.78/ds/json_data.tar.gz'},
+                {"tokenizer": f'http://192.168.254.78/ds/tokenizer.tar.gz'},
+            ])
+
+            self.assertEqual(json_dataset._resources, [
+                ("dataset.json", "", "spec"),
+                ("igc.tar.gz", "", "train_dataset"),
+                ("json_data.tar.gz", "", "json_data"),
+                ("tokenizer.tar.gz", "", "tokenizer"),
+            ])
 
     def test_create_chunks(self, model_name='gpt2'):
         """

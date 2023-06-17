@@ -54,7 +54,7 @@ class DownloadableDataset(Dataset, AbstractLogger):
                                 (i.e.s for example it can crete tar files before ,
                                 start web server etc. if we do some unit testing.)
         :param post_transforms:  List of post transforms. list of
-                                 callback each callback receive a full path to a file)
+                                 callback each callback receive a full path to a file
                                 For example callback that unbar a file.
 
         """
@@ -329,7 +329,7 @@ class DownloadableDataset(Dataset, AbstractLogger):
 
     def dataset_types(self):
         """Caller can overwrite this if dataset has different types.
-        i.e. dataset type implied small , medium , large etc or some or other type.
+        i.e. dataset type implied small , medium , large etc. or some or other type.
         :return:
         """
         return self._dataset_default_types
