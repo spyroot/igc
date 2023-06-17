@@ -73,7 +73,7 @@ class JSONDataset(
                  is_force_download=False,
                  do_consistency_check=True,
                  raw_json_directory_path: Optional[str] = "~/.json_responses",
-                 default_mirror_host="https://github.com/spyroot/igc/tree/main/datasets",
+                 default_mirror_host="http://35.202.223.94/igc/datasets",
                  skip_download: Optional[bool] = False,
                  skip_creation: Optional[bool] = False,
                  ):
