@@ -1,5 +1,4 @@
 import logging
-
 from igc.ds.redfish_dataset import JSONDataset
 from igc.ds.redfish_masked_dataset import MaskedJSONDataset
 

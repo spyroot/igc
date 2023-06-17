@@ -256,9 +256,9 @@ class JSONDataset(
         else:
             if self._unprocessed is None or not os.path.exists(self._unprocessed):
                 raise ValueError("Download set to skip and unprocessed directory not found.")
-            else:
-                if not any(glob.glob(os.path.join(self._unprocessed, '**/*.json'), recursive=True)):
-                    raise ValueError(f"Download set to skip , and no json file found in {self._unprocessed}.")
+
+            if not any(glob.glob(os.path.join(self._unprocessed, '**/*.json'), recursive=True)):
+                raise ValueError(f"Download set to skip , and no json file found in {self._unprocessed}.")
 
         self.logger.info(f"Dataset root directory: {self._dataset_root_dir}")
         self.logger.info(f"Dataset raw directory: {self._default_raw_dir}")
@@ -297,7 +297,7 @@ class JSONDataset(
                 self._build_tokenizer()
         except HFValidationError as hvf_err:
             print(f"Failed create {self._default_tokenize_name} tokenizer "
-                  f"check the name and try again.")
+                  f"check the name and try again error {str(hvf_err)}.")
             sys.exit(1)
 
         # load
