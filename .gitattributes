@@ -1,4 +1,6 @@
 *.tar.gz filter=lfs diff=lfs merge=lfs -text
 *.pt filter=lfs diff=lfs merge=lfs -text
 datasets/raw/*.pt filter=lfs diff=lfs merge=lfs -text
+datasets/raw/processed_dataset_gpt2.pt filter=lfs diff=lfs merge=lfs -text
+datasets/raw/processed_masked_dataset_gpt2.pt filter=lfs diff=lfs merge=lfs -text
 *.zip filter=lfs diff=lfs merge=lfs -text
