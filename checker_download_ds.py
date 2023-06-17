@@ -15,12 +15,23 @@ def custom_path():
     )
 
 
+def download_custom_path():
+    """
+    :return:
+    """
+    logging.basicConfig(level=logging.INFO)
+    dataset = MaskedJSONDataset(
+        "test_datasets",
+        do_consistency_check=False
+    )
+
+
 def main():
     """
 
     :return:
     """
-    custom_path()
+    download_custom_path()
 
 
 if __name__ == '__main__':
