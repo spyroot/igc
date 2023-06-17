@@ -174,9 +174,7 @@ class JSONDataset(
         self._dirs = [
             self._default_raw_dir,
             self._default_original_dir,
-            self._default_tok_dir,
-            self._default_pre_dir,
-            self._default_post_dir
+            self._default_tok_dir
         ]
 
         self._json_directory_path = self._default_original_dir
@@ -297,7 +295,7 @@ class JSONDataset(
             # we do this only if tokenizer dir not present, and we are skipping download.
             if not os.path.exists(self.tokenizer_dir()) and self._skip_download:
                 self.tokenizer = GPT2Tokenizer.from_pretrained(self._default_tokenize_name)
-                self.logger.info(f"Using default gpt tokenizer: {self.tokenizer.name_or_path}")
+                self.logger.info(f"Creating default gpt tokenizer: {self.tokenizer.name_or_path}")
                 self._build_tokenizer()
                 self.tokenizer.save_pretrained(self.tokenizer_dir())
                 self.logger.info(f"Saving tokenizer to {self.tokenizer_dir()}")
@@ -311,8 +309,8 @@ class JSONDataset(
             self.tokenizer = GPT2Tokenizer.from_pretrained(self.tokenizer_dir())
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-            self.logger.info(f"Loading tokenizer from {self._default_tok_dir}. "
-                             f"Number of tokens in the loaded tokenizer: {len(self.tokenizer)}")
+            self.logger.info(f"Loading tokenizer from {self._default_tok_dir}. ")
+            self.logger.info(f"Number tokens in the loaded tokenizer: {len(self.tokenizer)}")
             self.add_special_tokens()
             return self.tokenizer
 
@@ -671,7 +669,7 @@ class JSONDataset(
                 f"files to {self._default_original_dir}")
             unpack_tar_gz(self._dataset_json_tarball_name, self._default_original_dir)
 
-        # if tarball of all api responds present, unpack.
+        # if tarball of tokenizer present, unpack.
         if os.path.exists(self._dataset_tokenizer_tarball_name) and not glob.glob(
                 os.path.join(self._default_original_dir, '*')):
             self.logger.info(
