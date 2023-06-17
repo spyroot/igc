@@ -16,11 +16,11 @@ import torch
 from torch.utils.data import random_split, Subset
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from igc.ds.redfish_dataset import JSONDataset
-
-from .igc_metric_logger import MetricLogger
-from .igc_specs import make_default_spec
 from .igc_state import IgcBaseState
+from .igc_specs import make_default_spec
+from .igc_metric_logger import MetricLogger
+from ...ds.redfish_dataset import JSONDataset
+from ...ds.redfish_masked_dataset import MaskedJSONDataset
 from .igc_tokenize_state import GenericTokenizeState
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])

@@ -21,16 +21,15 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import Tensor
 from torch.quantization import convert
 from torch.utils.data import DataLoader, RandomSampler
 
-from igc.ds.redfish_dataset import JSONDataset
+from igc.ds.redfish_masked_dataset import MaskingOption, MaskedJSONDataset
 from igc.modules.base.igc_llm_base_module import LlmBaseModule
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.shared.shared_torch_builder import TorchBuilder
-from igc.ds.redfish_masked_dataset import MaskingOption, MaskedJSONDataset
-import torch.nn.functional as F
 
 
 class LlmEmbeddingsTrainer(LlmBaseModule):
@@ -42,7 +41,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                  spec: argparse.Namespace,
                  llm_model=None,
                  llm_tokenizer=None,
-                 dataset: Union[JSONDataset, MaskedJSONDataset] = None,
+                 dataset: Union[MaskedJSONDataset] = None,
                  metric_logger: Optional[MetricLogger] = None,
                  is_inference=False,
                  device=None):
@@ -95,6 +94,7 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         )
         self._mask_probability = 1.0
         self._best_validation_metric = float('-inf')
+        self.dataset = dataset
 
     @staticmethod
     def custom_collate_fn(samples):
@@ -264,7 +264,9 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
 
         torch.cuda.empty_cache()
         validation_accuracy = float('-inf')
-        self.logger.info(f"Uploading model from {self.model.device} to device {self.device}")
+        self.logger.info(f"Uploading model from {self.model.device} "
+                         f"to device {self.device}, "
+                         f"using accelerate: {self.is_accelerator}")
         self.model.to(self.device)
 
         if self.module_checkpoint_dir is not None:

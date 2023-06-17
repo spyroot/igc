@@ -34,7 +34,9 @@ from .igc_metric_logger import MetricLogger
 from sklearn.metrics import f1_score
 
 from .prompt_types import PromptType
-from ..shared.llm_shared import load_pretrained_default, save_pretrained_default
+from ..shared.llm_shared import (
+    load_pretrained_default, save_pretrained_default
+)
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
@@ -53,7 +55,7 @@ class LlmBaseModule(IgcBaseModule):
                  is_inference: Optional[bool] = False,
                  device=None):
         """
-        Base LLM module
+        Base LLM module, shared by all LLM submodules.
 
         :param module_name: name of the module
         :param spec: store all specs.
@@ -71,7 +73,8 @@ class LlmBaseModule(IgcBaseModule):
             llm_tokenizer,
             ds=ds,
             metric_logger=metric_logger,
-            is_inference=is_inference, device=device)
+            is_inference=is_inference,
+            device=device)
 
         self._log_level = spec.llm_log_level.upper()
         if self.metric_logger is not None:
