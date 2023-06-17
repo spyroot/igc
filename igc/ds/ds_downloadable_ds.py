@@ -58,9 +58,7 @@ class DownloadableDataset(Dataset, AbstractLogger):
                                 For example callback that unbar a file.
 
         """
-        print("Download called")
         self.skip_download = skip_download
-
         assert isinstance(dataset_root_dir, str), 'dataset_root_dir should be a string'
         assert isinstance(dataset_download_dir, str), 'dataset_download_dir should be a string'
         assert isinstance(pre_process_dir, str), 'pre_process_dir should be a string'

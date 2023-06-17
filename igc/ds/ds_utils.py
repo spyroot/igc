@@ -142,7 +142,8 @@ def create_tar_gz(directory_path: str, output_file: str) -> Tuple[str, str]:
 
     if not os.path.isdir(directory_path):
         raise ValueError(
-            "Invalid directory path. Please provide a valid directory.")
+            f"Invalid directory path. {directory_path} "
+            f"Please provide a valid directory.")
 
     directory_name = os.path.basename(directory_path)
     if not output_file.endswith(".tar.gz"):
