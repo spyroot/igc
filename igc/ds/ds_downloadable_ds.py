@@ -1,4 +1,4 @@
-:q"""
+"""
 This file contains the base interface that describe a
 Downloadable Dataset. it has base implementation to download
 dataset from a list of mirrors.
