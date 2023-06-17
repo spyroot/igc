@@ -160,6 +160,22 @@ class JSONDataset(
         self._dataset_root_dir = os.path.realpath(dataset_path)
         self.tokenizer = None
 
+        # default location for raw and orig files.
+        self._default_raw_dir = str(dataset_path / 'raw')
+        self._default_original_dir = str(dataset_path / 'orig')
+        self._default_tok_dir = f"{self._dataset_root_dir}/tokenizer"
+        self._default_pre_dir = f"{self._dataset_root_dir}/pre"
+        self._default_post_dir = f"{self._dataset_root_dir}/post"
+        self._dirs = [
+            self._default_raw_dir,
+            self._default_original_dir,
+            self._default_tok_dir,
+            self._default_pre_dir,
+            self._default_post_dir
+        ]
+
+        self._json_directory_path = self._default_original_dir
+
         if tokenizer is not None:
             self.logger.info(f"Client provide tokenized: {tokenizer.name_or_path}")
             self.tokenizer = tokenizer
@@ -176,22 +192,6 @@ class JSONDataset(
 
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-
-        # default location for raw and orig files.
-        self._default_raw_dir = str(dataset_path / 'raw')
-        self._default_original_dir = str(dataset_path / 'orig')
-        self._default_tok_dir = f"{self._dataset_root_dir}/tokenizer"
-        self._default_pre_dir = f"{self._dataset_root_dir}/pre"
-        self._default_post_dir = f"{self._dataset_root_dir}/post"
-        self._dirs = [
-            self._default_raw_dir,
-            self._default_original_dir,
-            self._default_tok_dir,
-            self._default_pre_dir,
-            self._default_post_dir
-        ]
-
-        self._json_directory_path = self._default_original_dir
 
         if is_force_download:
             delete_directory_with_confirmation(self._dataset_root_dir)
