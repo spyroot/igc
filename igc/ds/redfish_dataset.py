@@ -72,14 +72,14 @@ class JSONDataset(
                  do_consistency_check=True,
                  raw_json_directory_path: Optional[str] = "~/.json_responses",
                  default_mirror_host="https://github.com/spyroot/igc/tree/main/datasets",
-                 skip_download=False,
-                 skip_creation=False,
+                 skip_download: Optional[bool] = False,
+                 skip_creation: Optional[bool] = False,
                  ):
         """
         :param dataset_dir: The directory to store the dataset.
         :param default_tokenize: The default tokenizer name or path.
         :param max_len: The maximum length of the tokenized sequences.
-        :param overlap: The overlap length for sliding window approach.
+        :param overlap: The overlap length for sliding window approach used during tokenization.
         :param verbose: Whether to print verbose logs.
         :param recreate_dataset: Whether to recreate the dataset.
         :param tokenizer: A custom tokenizer instance.
@@ -291,6 +291,9 @@ class JSONDataset(
 
     @classmethod
     def dataset_default_root(cls):
+        """This default root directory for all datasets.
+        :return:
+        """
         return "datasets"
 
     @classmethod
@@ -351,6 +354,42 @@ class JSONDataset(
             logging.info("Found all required tarball file.")
         return result
 
+    def _copy_json_responses(self, file_filter: [str, List[str]] = None):
+        """Copy all collected JSON responses to the dataset directory. These JSON files
+        are used by the Mock API server for offline training.
+
+        :param file_filter: in case we need filter files
+        :return:
+        """
+        # Copy all JSON files if not present already
+        if not os.path.exists(self._json_directory_path):
+            self.logger.info(
+                f"Copy JSON files from {self._unprocessed} "
+                f"to {self._json_directory_path}/")
+
+            _file_filters = []
+            if file_filter is not None:
+                if isinstance(file_filter, str):
+                    _file_filters = [file_filter]
+                elif isinstance(file_filter, list):
+                    _file_filters = file_filter
+
+            self._json_files = []
+            for root, dirs, files in os.walk(self._unprocessed):
+                for file in files:
+                    if file.endswith('.json'):
+                        if len(_file_filters) > 0:
+                            if all(f_filter not in file for f_filter in _file_filters):
+                                self._json_files.append(file)
+                        else:
+                            self._json_files.append(file)
+
+            if not self._json_files:
+                raise Exception(f"No JSON files found inside the directory {self._unprocessed}.")
+
+            logging.debug(f"Copy all discovered data to {self._json_directory_path}")
+            shutil.copytree(self._unprocessed, f"{self._json_directory_path}/")
+
     @staticmethod
     def _update_hash_values(json_file_path, data):
         """Update dataset.json file, this mainly to update all hash values.
@@ -361,30 +400,16 @@ class JSONDataset(
             json_file.write(data_json)
 
     def _create_tarball(self):
-        """Create tarballs if needed, and updates dataset.json
-          where dataset.json stores all mirrors,
+        """Create tarballs if needed, and updates dataset.json with new hash values.
+          and dataset.json stores all mirrors, and resources.
 
           It will update all hash values for each tarball file.
         :return: Nothing.
         """
-        # copy all json if not present already
-        if not os.path.exists(self._json_directory_path):
-            self.logger.info(f"Copy json files from "
-                             f"{self._unprocessed} to {self._json_directory_path}/")
-            self._json_files = []
-            for root, dirs, files in os.walk(self._unprocessed):
-                for file in files:
-                    if file.endswith('.json'):
-                        self._json_files.append(file)
 
-            if not self._json_files:
-                raise Exception(f"No JSON files found inside the directory {self._unprocessed}.")
-
-            logging.debug(f"Copy all discovered data to {self._json_directory_path}")
-            shutil.copytree(self._unprocessed, f"{self._json_directory_path}/")
+        self._copy_json_responses()
 
         regenerate_hash = False
-
         # create tarball if not present, for all raw json
         if not os.path.exists(self._dataset_json_tarball_name):
             logging.debug(f"Creating tarball {self._dataset_json_tarball_name}")
@@ -404,7 +429,7 @@ class JSONDataset(
                 os.makedirs(self._dataset_root_dir, exist_ok=True)
                 logging.debug(f"Creating tarball {self._dataset_tarball_name} file.")
                 _, _tarball_hash = create_tar_gz(
-                    self._default_raw_dir, self._dataset_tarball_name)
+                    self.raw_dir(), self._dataset_tarball_name)
 
                 # update hash
                 tarball_name = os.path.basename(self._dataset_tarball_name)
@@ -419,7 +444,7 @@ class JSONDataset(
                 os.makedirs(self._dataset_root_dir, exist_ok=True)
                 logging.debug(f"Creating tarball {self._dataset_tokenizer_tarball_name} file.")
                 _, _tarball_hash = create_tar_gz(
-                    self.root_dir(), self._dataset_tokenizer_tarball_name)
+                    self.tokenizer_dir(), self._dataset_tokenizer_tarball_name)
 
                 # update hash
                 tarball_name = os.path.basename(self._dataset_tokenizer_tarball_name)

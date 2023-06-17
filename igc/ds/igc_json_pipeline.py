@@ -1,3 +1,12 @@
+"""
+This pipeline used to process all json responses and build tokenized
+fine-tuned for JSON API reposes.
+
+it essentially does recursive passed to build key value pair
+for example extract all rest api end points.
+
+Author: Mus mbayramo@stanford.edu
+"""
 import json
 import os
 import re
@@ -7,7 +16,7 @@ from tqdm import tqdm
 class JsonPipeline:
     def __init__(self, json_directory_path):
         """
-        Late I remove from dataset so we can plug any API processing,
+        Late I remove from dataset, so we can plug any API processing,
 
         :param json_directory_path:
         """
@@ -129,7 +138,7 @@ class JsonPipeline:
                     break
 
     def build_tokens(self, tokenizer):
-        """
+        """We build all tokenizers here.
         """
         filtered_api_targets = [target for target in self._api_targets if not re.search(r"\.\d+$", target)]
         filtered_actions = [action for action in self._action_to_rest if not re.search(r"\.\d+$", action)]
