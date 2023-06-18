@@ -339,11 +339,17 @@ class IgcBaseModule(IgcBaseState):
     @staticmethod
     def copy_checkpoint(
             specs: Union[str, argparse.Namespace],
-            module_name: str
-    ):
-        """ Copy last checkpoint and make last model.
+            module_name: str,
+            pre_trained: PreTrainedModel,
+    ) -> tuple[Union[None, PreTrainedModel], int, str]:
+        """
+        Copy last checkpoint to last saved model to model dir and return
+        a new pre-trained model with loaded state.
 
-        :return:
+        :param specs: specs that contains output_dir attribute
+        :param module_name: llm module name
+        :param pre_trained: pre-trained model where we load last state
+        :return: return pre-trained model, epoch and checkpoint file
         """
         if isinstance(specs, argparse.Namespace):
             _checkpoint_path_dir = Path(specs.output_dir)
@@ -362,12 +368,13 @@ class IgcBaseModule(IgcBaseState):
         checkpoint_files = [f for f in os.listdir(module_checkpoint_dir) if f.endswith('.pt')]
         checkpoint_files = [os.path.join(module_checkpoint_dir, f) for f in checkpoint_files]
         checkpoint_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+        last_model_path = IgcBaseModule.model_file(_checkpoint_dir, module_name)
 
         if checkpoint_files:
             checkpoint_file = checkpoint_files[0]
         else:
             print(f"No checkpoint files found in dir {module_checkpoint_dir}")
-            return None, False
+            return None, 0, last_model_path
 
         model = torch.load(checkpoint_file)
         required_keys = ['model_state_dict', 'epoch']
@@ -375,7 +382,7 @@ class IgcBaseModule(IgcBaseState):
         if missing_keys:
             print(f"Checkpoint file {checkpoint_file} "
                   f"is missing the following keys: {missing_keys}")
-            return 0, False
+            return None, 0, last_model_path
 
         if 'optimizer_state_dict' in model:
             model.pop('optimizer_state_dict', None)
@@ -387,12 +394,16 @@ class IgcBaseModule(IgcBaseState):
         else:
             epoch = 0
 
-        model.eval()
-        for param in model.parameters():
+        pre_trained.load_state_dict(model['model_state_dict'])
+        for param in pre_trained.parameters():
             param.requires_grad = False
 
-        torch.save(model, checkpoint_file)
-        return model, epoch
+        last_model_path = IgcBaseModule.model_file(_checkpoint_dir, module_name)
+        pre_trained.eval()
+        torch.save(
+            model, last_model_path
+        )
+        return model, epoch, last_model_path
 
     def save_model(self, checkpoint_dir):
         """

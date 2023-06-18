@@ -27,6 +27,7 @@ class IgcMain:
     IGC main class
 
     """
+
     def __init__(
         self,
         specs: argparse.Namespace,
@@ -44,16 +45,40 @@ class IgcMain:
         :param from_pretrained_load_fn: A function for loading a pretrained model from a directory.
         :param from_pretrained_save_fn: A function for saving the pretrained model and tokenizer.
         """
+        self._dataset = None
         """
         :param specs:
         """
+        self._dataset = None
+        self._metric_logger = None
         self._from_pretrained_fn = from_pretrained
         self._from_pretrained_load_fn = from_pretrained_load_fn
         self._from_pretrained_save_fn = from_pretrained_save_fn
 
         self._metric_logger = MetricLogger(specs.metric_report, **vars(specs))
-        self._directory_path = os.path.expanduser(specs.raw_data_dir)
+        self._directory_path = os.path.abspath(os.path.expanduser(specs.json_data_dir))
+        self._dataset_dir = os.path.abspath(specs.dataset_dir)
         self._specs = specs
+
+    @property
+    def metric_logger(self):
+        """
+
+        :return:
+        """
+        if self._metric_logger is None:
+            self._metric_logger = MetricLogger(
+                self._specs.metric_report, **vars(self._specs))
+        return self._metric_logger
+
+    @property
+    def dataset(self):
+        if self._dataset is None:
+            self._dataset = MaskedJSONDataset(
+                self._dataset_dir,
+                do_consistency_check=self._specs.do_consistency_check
+            )
+        return self._dataset
 
     def train(self):
         """
@@ -72,19 +97,16 @@ class IgcMain:
         :return:
         """
         if self._specs.train:
-            dataset = MaskedJSONDataset(
-                "datasets",
-                do_consistency_check=False
-            )
+
             if (self._specs.train == "llm" or self._specs.train == "all") and self._specs.llm is not None:
-                llm_module = IgcLanguageModule(self._specs, self._metric_logger, dataset)
+                llm_module = IgcLanguageModule(self._specs, self.metric_logger, self.dataset)
                 llm_module.train()
 
             if (self._specs.train == "agent" or self._specs.train == "all") and self._specs.rl is not None:
-                rl_module = IgcRlModule(self._specs, self._metric_logger, dataset)
+                rl_module = IgcRlModule(self._specs, self.metric_logger, self.dataset)
                 rl_module.train()
 
-    def load(self, specs: argparse.Namespace, module_name: str,  device: torch.device = "cpu"):
+    def load(self, specs: argparse.Namespace, module_name: str, device: torch.device = "cpu"):
         """
 
         Load a module.
@@ -94,20 +116,19 @@ class IgcMain:
         :param module_name:
         :return:
         """
-        _metric_logger = MetricLogger(specs.metric_report, **vars(specs))
-        _, tokenizer = self._from_pretrained_fn(self._specs, only_tokenizer=True)
-
-        dataset = MaskedJSONDataset(
-            self._directory_path,
-            verbose=True,
-            do_consistency_check=specs.do_consistency_check)
+        model, tokenizer = self._from_pretrained_fn(
+            self._specs, only_tokenizer=False, only_model=True)
 
         llm_module = IgcLanguageModule(
-            self._specs, self._metric_logger, dataset
-        )
+            self._specs,
+            metric_logger=self.metric_logger,
+            ds=self.dataset,
+            from_pretrained=self._from_pretrained_fn)
+
         modules = llm_module.load(
             specs, device=device, module_name=module_name
         )
+
         return modules
 
     def run(self):
@@ -115,8 +136,18 @@ class IgcMain:
 
         :return:
         """
+        self._dataset = MaskedJSONDataset(
+            self._dataset_dir,
+            do_consistency_check=self._specs.do_consistency_check
+        )
+
         # copy last checkpoint as last model with opt etc. so we can use it.
-        if self._specs.copy_llm_checkpoint:
-            IgcBaseModule.copy_checkpoint(self._specs, "state_encoder")
+        if self._specs.copy_llm:
+            model, _ = from_pretrained_default(self._specs, only_model=True)
+            model.resize_token_embeddings(len(self._dataset.tokenizer))
+            model = model.to_bettertransformer()
+            model, epoch, model_path = IgcBaseModule.copy_checkpoint(self._specs, "state_encoder", model)
+            print("Saved model to checkpoint file: ", model_path)
+
         else:
             self.train()

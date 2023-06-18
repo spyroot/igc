@@ -1,5 +1,7 @@
 import os
 import re
+from argparse import ArgumentParser, HelpFormatter
+
 import torch
 from transformers import deepspeed
 from .shared_arg_parser import shared_arg_parser
@@ -15,7 +17,7 @@ def shared_main(
 
     :return:
     """
-    args = shared_arg_parser()
+    args, parser_groups = shared_arg_parser()
     if args.local_rank == -1:
         if args.device is None:
             args.device = get_device()
@@ -56,6 +58,4 @@ def shared_main(
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(args.log_dir, exist_ok=True)
 
-    return args
-
-
+    return args, parser_groups

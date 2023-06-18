@@ -15,7 +15,6 @@ def set_logger(spec):
     :param spec: The argparse.Namespace object containing the program arguments.
     """
     log_level = spec.llm_log_level.upper()
-
     loguru.logger.remove()
     loguru.logger.add("logfile.log", level=log_level)
 
@@ -76,6 +75,7 @@ def add_optimizer_group(parser):
     :param parser:
     :return:
     """
+    group_name = "optimizer"
     optimizer_group = parser.add_argument_group('Optimizer')
     optimizer_group.add_argument(
         "--llm_optimizer",
@@ -83,23 +83,27 @@ def add_optimizer_group(parser):
         default="AdamW2",
         choices=TorchBuilder.get_supported_optimizers(),
         help="LLM Optimizer to use."
+
     )
 
     optimizer_group.add_argument(
         "--llm_learning_rate",
         type=float, default=1e-5,
         # type=float, default=5e-5,
-        help="Initial learning rate (after the potential warmup period) to use.")
+        help="Initial learning rate (after the potential warmup period) to use.",
+    )
 
     optimizer_group.add_argument(
         "--llm_weight_decay",
         type=float, default=0.0,
-        help="Weight decay to use.")
+        help="Weight decay to use."
+    )
 
     optimizer_group.add_argument(
         "--gradient_checkpointing",
         type=bool, default=True,
-        help="Gradient checkpointing to save memory.")
+        help="Gradient checkpointing to save memory."
+    )
 
     optimizer_group.add_argument(
         "--gradient_accumulation_steps",
@@ -305,14 +309,13 @@ def add_trainer_group(parser):
     trainer_group = parser.add_argument_group('Trainer')
 
     trainer_group.add_argument(
-        "--copy_llm_checkpoint",
-        type=bool, default=False,
+        "--copy_llm", action='store_true', default=False,
         help="The batch size per GPU/TPU core/CPU for training.")
 
     trainer_group.add_argument(
         "--test_llm",
-        type=bool, default=False,
-        help="The batch size per GPU/TPU core/CPU for training.")
+        action='store_true', default=False,
+        help="Run a test inference check on llm fine tuned model.")
 
     trainer_group.add_argument(
         "--per_device_train_batch_size",
@@ -614,15 +617,20 @@ def add_dataset_dataloader(parser):
         help="Number of workers to use for data loading.")
 
     group.add_argument(
-        "--raw_data_dir",
+        "--json_data_dir",
         type=str, default="~/.json_responses",
         help="A directory where all discovered rest API json files. "
              "This mainly need a node that build dataset")
 
     group.add_argument(
+        "--dataset_dir",
+        type=str, default="datasets",
+        help="A location where we unpack or build a dataset.")
+
+    group.add_argument(
         "--do_consistency_check",
-        type=bool, default=True,
-        help="Whether we perform dataset consistency check.")
+        type=bool, default=False,
+        help="Whether we perform dataset consistency check post build or during a load procedure.")
 
     return parser
 
@@ -655,22 +663,41 @@ def shared_arg_parser(
     """
     parser = argparse.ArgumentParser(
         description="IGC Training Script",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        add_help=True)
 
-    parser = add_trainer_group(parser)
-    parser = add_optimizer_group(parser)
-    parser = add_scheduler_group(parser)
-    parser = add_logging_group(parser)
-    parser = add_checkpoint_group(parser)
-    parser = add_data_types_group(parser)
-    parser = add_distribute_backends(parser)
-    parser = add_dataset_dataloader(parser)
-    parser = add_reporting_group(parser)
-    parser = add_model_type_group(parser)
-    parser = add_rl_trainer_group(parser)
-    parser = add_auto_encoder_group(parser)
-    parser = add_accelerator_parser_group(parser)
-    parser = add_redfish_group(parser)
+    global_trainer_group = add_trainer_group(parser)
+    global_optimizer_group = add_optimizer_group(parser)
+    global_scheduler = add_scheduler_group(parser)
+    global_logging = add_logging_group(parser)
+    checkpointing = add_checkpoint_group(parser)
+    data_type = add_data_types_group(parser)
+    distributed = add_distribute_backends(parser)
+    data_loader = add_dataset_dataloader(parser)
+    reporting_parser = add_reporting_group(parser)
+    model_types_group = add_model_type_group(parser)
+    rl_trainer_group = add_rl_trainer_group(parser)
+    autoencoder_group = add_auto_encoder_group(parser)
+    accelerator = add_accelerator_parser_group(parser)
+    mock_and_redfish_group = add_redfish_group(parser)
+    parser = mock_and_redfish_group
+
+    sections = [
+        ("main", global_trainer_group),
+        ("optimizer", global_optimizer_group),
+        ("scheduler", global_scheduler),
+        ("logging", global_logging),
+        ("checkpoint", checkpointing),
+        ("data_types", data_type),
+        ("distribute_backends", distributed),
+        ("dataset_dataloader", data_loader),
+        ("reporting", reporting_parser),
+        ("model_type", model_types_group),
+        ("rl_trainer", rl_trainer_group),
+        ("auto_encoder", autoencoder_group),
+        ("accelerator", accelerator),
+        ("redfish", mock_and_redfish_group)
+    ]
 
     parser.add_argument(
         "--local-rank",
@@ -679,10 +706,11 @@ def shared_arg_parser(
 
     if is_fairscale_arg_parser:
         optimizer_group = parser.add_argument_group('Optimizer')
-        optimizer_group.add_argument("--optimizer",
-                                     type=str, default="adamw2",
-                                     choices=['adamw', 'adamw2', 'sgd', 'adagrad'],
-                                     help="Optimizer to use. adamw2 is default hugging face version of adam.")
+        optimizer_group.add_argument(
+            "--optimizer",
+            type=str, default="adamw2",
+            choices=['adamw', 'adamw2', 'sgd', 'adagrad'],
+            help="Optimizer to use. adamw2 is default hugging face version of adam.")
 
         optimizer_group.add_argument(
             "--scale-loss", action='store_true',
@@ -714,6 +742,6 @@ def shared_arg_parser(
         except ImportError:
             pass
 
-    # Set up the logger based on the log level in the arguments
     set_logger(args)
-    return args
+
+    return args, sections
