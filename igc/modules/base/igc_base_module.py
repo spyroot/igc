@@ -10,7 +10,7 @@ import os
 import warnings
 from pathlib import Path
 from collections import namedtuple
-from typing import Optional, Any
+from typing import Optional, Any, Union
 
 import torch
 from torch.utils.data import random_split, Subset
@@ -32,14 +32,14 @@ class IgcBaseModule(IgcBaseState):
     """
 
     def __init__(
-        self,
-        module_name: str,
-        spec: argparse.Namespace,
-        llm_model, llm_tokenizer,
-        ds: Optional[JSONDataset] = None,
-        metric_logger: Optional[MetricLogger] = None,
-        is_inference: Optional[bool] = False,
-        device=None
+            self,
+            module_name: str,
+            spec: argparse.Namespace,
+            llm_model, llm_tokenizer,
+            ds: Optional[JSONDataset] = None,
+            metric_logger: Optional[MetricLogger] = None,
+            is_inference: Optional[bool] = False,
+            device=None
     ):
         """
 
@@ -242,9 +242,9 @@ class IgcBaseModule(IgcBaseState):
         return random_split(self.dataset, [train_size, eval_size])
 
     def split_slice_dataset(
-        self,
-        train_ratio: float = 0.8,
-        sample_ratio: float = 0.01) -> list[Subset[Any]]:
+            self,
+            train_ratio: float = 0.8,
+            sample_ratio: float = 0.01) -> list[Subset[Any]]:
         """
         Split a subset of the dataset and specify the amount of sample used.
 
@@ -317,6 +317,64 @@ class IgcBaseModule(IgcBaseState):
             warnings.warn(f"Checkpoint file {model_file} not found.")
             return False
 
+    @staticmethod
+    def copy_checkpoint(
+            specs: Union[str, argparse.Namespace],
+            module_name: str
+    ):
+        """ Copy last checkpoint and make last model.
+
+        :return:
+        """
+        if isinstance(specs, argparse.Namespace):
+            _checkpoint_path_dir = Path(specs.output_dir)
+        elif isinstance(specs, str):
+            _checkpoint_path_dir = Path(specs)
+        else:
+            raise TypeError(
+                "Invalid type for 'specs'. Expected argparse.Namespace or str.")
+
+        _checkpoint_path_dir = _checkpoint_path_dir.resolve()
+        if not _checkpoint_path_dir.is_dir():
+            raise ValueError("Indicate path to checkpoint dir.")
+
+        _checkpoint_dir = str(_checkpoint_path_dir)
+        module_checkpoint_dir = f"{_checkpoint_dir}/{module_name}"
+        checkpoint_files = [f for f in os.listdir(module_checkpoint_dir) if f.endswith('.pt')]
+        checkpoint_files = [os.path.join(module_checkpoint_dir, f) for f in checkpoint_files]
+        checkpoint_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+
+        if checkpoint_files:
+            checkpoint_file = checkpoint_files[0]
+        else:
+            print(f"No checkpoint files found in dir {module_checkpoint_dir}")
+            return None, False
+
+        model = torch.load(checkpoint_file)
+        required_keys = ['model_state_dict', 'epoch']
+        missing_keys = [key for key in required_keys if key not in model]
+        if missing_keys:
+            print(f"Checkpoint file {checkpoint_file} "
+                  f"is missing the following keys: {missing_keys}")
+            return 0, False
+
+        if 'optimizer_state_dict' in model:
+            model.pop('optimizer_state_dict', None)
+        if 'optimizer_state_dict' in model:
+            model.pop('scheduler_state_dict', None)
+
+        if 'epoch' in model:
+            epoch = model['epoch']
+        else:
+            epoch = 0
+
+        model.eval()
+        for param in model.parameters():
+            param.requires_grad = False
+
+        torch.save(model, checkpoint_file)
+        return model, epoch
+
     def save_model(self, checkpoint_dir):
         """
 
@@ -369,9 +427,9 @@ class IgcBaseModule(IgcBaseState):
         self._is_trained = checkpoint['is_trained']
 
     def save_checkpoint(
-        self, checkpoint_dir,
-        epoch: int,
-        num_check_points_to_keep: Optional[int] = 3,
+            self, checkpoint_dir,
+            epoch: int,
+            num_check_points_to_keep: Optional[int] = 3,
     ):
         """
         Save model checkpoint.
@@ -409,7 +467,6 @@ class IgcBaseModule(IgcBaseState):
             map_to = {'cuda:1': 'cuda:0'}
         else:
             map_to = map_location
-
 
         # during re-resume we don't load model, we load from checkpoint
         model_file = self._model_file(checkpoint_dir)
@@ -460,14 +517,14 @@ class IgcBaseModule(IgcBaseState):
 
     @staticmethod
     def load(
-        module_name: str,
-        model: torch.nn.Module,
-        specs: argparse.Namespace,
-        device: torch.device = "cpu",
-        is_inference: bool = True,
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
-        map_location=None,
+            module_name: str,
+            model: torch.nn.Module,
+            specs: argparse.Namespace,
+            device: torch.device = "cpu",
+            is_inference: bool = True,
+            optimizer: Optional[torch.optim.Optimizer] = None,
+            scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
+            map_location=None,
 
     ) -> tuple[Optional[int], bool]:
         """
