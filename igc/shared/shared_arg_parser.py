@@ -122,34 +122,38 @@ def add_redfish_group(parser):
         "--live", action='store_true',
         default=False, help="Enable live mode. All request will be send to redfish host.")
     redfish_group.add_argument(
-        "--live-test", action='store_true',
-        default=False, help="will execute couple of test before we start RL trainer.")
+        "--live-test", action='store_true', default=False,
+        help="will execute couple of test before we start RL trainer.")
     redfish_group.add_argument(
         "--redfish-ip", type=str, default="https://10.252.252.209",
         help="IP address of the Redfish server")
     redfish_group.add_argument(
-        "--redfish-username",
-        type=str, default="root", help="Username for authentication")
+        "--redfish-username", type=str, default="root",
+        help="Username for authentication")
     redfish_group.add_argument(
-        "--redfish-password",
-        type=str, default="", help="Password for authentication")
+        "--redfish-password", type=str, default="",
+        help="Password for authentication")
     redfish_group.add_argument(
-        "--redfish-port", type=int, help="Port number for the Redfish server.")
+        "--redfish-port", type=int,
+        help="Port number for the Redfish server.")
     redfish_group.add_argument(
-        "--insecure", action="store_true", help="Disable SSL certificate verification.")
+        "--insecure", action="store_true",
+        help="Disable SSL certificate verification.")
     redfish_group.add_argument(
-        "--is-http", action="store_true", help="Use HTTP transport instead of HTTPS.")
+        "--is-http", action="store_true",
+        help="Use HTTP transport instead of HTTPS.")
     redfish_group.add_argument(
-        "--x-auth", type=str, help="Enables X-Auth-Token for authentication otherwise use Basic Auth.")
+        "--x-auth", type=str,
+        help="Enables X-Auth-Token for authentication otherwise use Basic Auth.")
 
     return parser
 
 
 def add_model_type_group(parser):
     """
-    LLM Model parameters.
+    LLM Model parameters, a name of pre-trained model
 
-    :param parser:
+    :param parser: existing parser
     :return:
     """
     model_type_group = parser.add_argument_group('Model Type')
@@ -157,7 +161,7 @@ def add_model_type_group(parser):
         "--model_type",
         type=str, default="gpt2",
         choices=['gpt2-xl', 'gpt2-large', 'gpt2-medium', 'gpt2'],
-        help="Model type."
+        help="Model type, note for anything beyond we need huge memory."
     )
     return parser
 
