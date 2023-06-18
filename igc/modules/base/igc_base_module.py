@@ -8,20 +8,19 @@ Author:Mus mbayramo@stanford.edu
 import argparse
 import os
 import warnings
-from pathlib import Path
 from collections import namedtuple
+from pathlib import Path
 from typing import Optional, Any, Union
 
 import torch
 from torch.utils.data import random_split, Subset
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from .igc_state import IgcBaseState
-from .igc_specs import make_default_spec
 from .igc_metric_logger import MetricLogger
-from ...ds.redfish_dataset import JSONDataset
-from ...ds.redfish_masked_dataset import MaskedJSONDataset
+from .igc_specs import make_default_spec
+from .igc_state import IgcBaseState
 from .igc_tokenize_state import GenericTokenizeState
+from ...ds.redfish_dataset import JSONDataset
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
@@ -285,23 +284,43 @@ class IgcBaseModule(IgcBaseState):
         """
         return
 
-    def _model_file(self, checkpoint_dir):
+    def _model_file(self, checkpoint_dir: str) -> str:
         """
-
         :param checkpoint_dir:
         :return:
         """
-        return f"{checkpoint_dir}/{self.module_name}_last.pt"
+        if len(checkpoint_dir) == 0:
+            raise ValueError("Invalid checkpoint dir. "
+                             "Please specify a valid name.")
+
+        if not os.path.isdir(checkpoint_dir):
+            raise ValueError(f"Invalid checkpoint dir: {checkpoint_dir}. "
+                             "Please specify a valid directory.")
+
+        return os.path.join(checkpoint_dir, f"{self.module_name}_last.pt")
 
     @staticmethod
-    def model_file(model_dir: str, name: str):
+    def model_file(model_dir: str, name: str) -> str:
         """
+        Save model file as last model
 
-        :param model_dir:
-        :param name:
-        :return:
+        :param model_dir: a directory to save model
+        :param name: a name of module
+        :return: a path to model file
         """
-        return f"{model_dir}/{name}_last.pt"
+        if len(model_dir) == 0:
+            raise ValueError("Invalid model_dir. Please specify "
+                             "a valid model_dir.")
+
+        if len(name) == 0:
+            raise ValueError("Invalid module name. "
+                             "Please specify a valid module name.")
+
+        if not os.path.isdir(model_dir):
+            raise ValueError(f"Invalid model_dir: {model_dir}. "
+                             f"Please specify a valid directory.")
+
+        return os.path.join(model_dir, f"{name}_last.pt")
 
     @staticmethod
     def can_resume(model_dir: str, name: str):
@@ -453,7 +472,11 @@ class IgcBaseModule(IgcBaseState):
         }, checkpoint_file)
         self.logger.info(f"Rank: {self.rank} {self.module_name} checkpoint saved to {checkpoint_file}.")
 
-    def load_checkpoint(self, checkpoint_dir: str, resuming="True", map_location=None) -> int:
+    def load_checkpoint(
+        self, checkpoint_dir: str,
+        resuming="True",
+        map_location=None
+    ) -> int:
         """
         Load model checkpoint for resuming training.
 

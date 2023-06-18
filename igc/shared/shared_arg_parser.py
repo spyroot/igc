@@ -28,11 +28,10 @@ def add_accelerator_parser_group(parser) -> argparse.ArgumentParser:
     """
     accelerate_group = parser.add_argument_group(description="Accelerator Argument Parser")
     accelerate_group.add_argument(
-        "--use_accelerator",
-        action='store_true', default=False, help="Enable accelerator. By default, IGC will use it.")
+        "--use_accelerator", action='store_true',
+        default=False, help="Enable accelerator. By default, IGC will use it.")
     accelerate_group.add_argument(
-        "--device_placement",
-        type=bool, default=True, help="Device placement flag")
+        "--device_placement", type=bool, default=True, help="Device placement flag")
     accelerate_group.add_argument(
         "--split_batches", type=bool, default=False, help="Split batches flag")
     accelerate_group.add_argument(
@@ -112,22 +111,36 @@ def add_optimizer_group(parser):
 
 def add_redfish_group(parser):
     """
-    Optimizer parameters.
+    This for a Mock server.  If we want to execute live,
+    we need to add the following parameters:
 
-    :param parser:
+    :param parser: existing parser that we use to add
     :return:
     """
-    add_refish_group = parser.add_argument_group('Mock Server Optional')
-    add_refish_group.add_argument("--live", action="store_true", default="true", help="Enable live mode")
-    add_refish_group.add_argument("--redfish-ip", type=str, default="https://10.252.252.209",
-                                  help="IP address of the Redfish server")
-    add_refish_group.add_argument("--redfish-username", type=str, default="root", help="Username for authentication")
-    add_refish_group.add_argument("--redfish-password", type=str, default="",
-                                  help="Password for authentication")
-    add_refish_group.add_argument("--redfish-port", type=int, help="Port number for the Redfish server")
-    add_refish_group.add_argument("--insecure", action="store_true", help="Disable SSL certificate verification")
-    add_refish_group.add_argument("--is-http", action="store_true", help="Use HTTP instead of HTTPS")
-    add_refish_group.add_argument("--x-auth", type=str, help="X-Auth-Token for authentication")
+    redfish_group = parser.add_argument_group('Mock Server Optional')
+    redfish_group.add_argument(
+        "--live", action='store_true',
+        default=False, help="Enable live mode. All request will be send to redfish host.")
+    redfish_group.add_argument(
+        "--live-test", action='store_true',
+        default=False, help="will execute couple of test before we start RL trainer.")
+    redfish_group.add_argument(
+        "--redfish-ip", type=str, default="https://10.252.252.209",
+        help="IP address of the Redfish server")
+    redfish_group.add_argument(
+        "--redfish-username",
+        type=str, default="root", help="Username for authentication")
+    redfish_group.add_argument(
+        "--redfish-password",
+        type=str, default="", help="Password for authentication")
+    redfish_group.add_argument(
+        "--redfish-port", type=int, help="Port number for the Redfish server.")
+    redfish_group.add_argument(
+        "--insecure", action="store_true", help="Disable SSL certificate verification.")
+    redfish_group.add_argument(
+        "--is-http", action="store_true", help="Use HTTP transport instead of HTTPS.")
+    redfish_group.add_argument(
+        "--x-auth", type=str, help="Enables X-Auth-Token for authentication otherwise use Basic Auth.")
 
     return parser
 
@@ -286,6 +299,17 @@ def add_trainer_group(parser):
     """
 
     trainer_group = parser.add_argument_group('Trainer')
+
+    trainer_group.add_argument(
+        "--copy_llm_checkpoint",
+        type=bool, default=False,
+        help="The batch size per GPU/TPU core/CPU for training.")
+
+    trainer_group.add_argument(
+        "--test_llm",
+        type=bool, default=False,
+        help="The batch size per GPU/TPU core/CPU for training.")
+
     trainer_group.add_argument(
         "--per_device_train_batch_size",
         type=int, default=4,
@@ -442,7 +466,7 @@ def add_logging_group(parser):
 
     group.add_argument("--log_on_each_node",
                        type=bool, default=False,
-                       help=" In multinode distributed training, whether to log using "
+                       help=" In distribute setting use log on each node."
                             "`log_level` once per node, or only on the main")
 
     group.add_argument("--log_steps",

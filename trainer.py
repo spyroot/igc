@@ -6,6 +6,7 @@ def main(cmd):
     """
     :return:
     """
+
     igc = IgcMain(cmd)
     igc.run()
 

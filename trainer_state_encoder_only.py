@@ -26,7 +26,7 @@ def main(cmd):
     model.resize_token_embeddings(len(dataset.tokenizer))
 
     latent_model = LlmEmbeddingsTrainer(
-        "test_mod", cmd, model, dataset.tokenizer, ds=dataset,
+        "test_mod", cmd, model, dataset.tokenizer, dataset=dataset,
         metric_logger=metric_logger, is_inference=False)
     latent_model.train()
 

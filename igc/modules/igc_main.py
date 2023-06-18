@@ -9,10 +9,11 @@ import argparse
 import os
 
 import torch
+
+from .base.igc_base_module import IgcBaseModule
 from .base.igc_metric_logger import MetricLogger
 from igc.modules.llm.igc_llm_module import IgcLanguageModule
 from .igc_rl_module import IgcRlModule
-from ..ds.redfish_dataset import JSONDataset
 from .shared.llm_shared import (
     from_pretrained_default,
     load_pretrained_default,
@@ -27,7 +28,8 @@ class IgcMain:
 
     """
     def __init__(
-        self, specs: argparse.Namespace,
+        self,
+        specs: argparse.Namespace,
         from_pretrained=from_pretrained_default,
         from_pretrained_load_fn=load_pretrained_default,
         from_pretrained_save_fn=save_pretrained_default,
@@ -95,7 +97,7 @@ class IgcMain:
         _metric_logger = MetricLogger(specs.metric_report, **vars(specs))
         _, tokenizer = self._from_pretrained_fn(self._specs, only_tokenizer=True)
 
-        dataset = JSONDataset(
+        dataset = MaskedJSONDataset(
             self._directory_path,
             verbose=True,
             do_consistency_check=specs.do_consistency_check)
@@ -109,4 +111,12 @@ class IgcMain:
         return modules
 
     def run(self):
-        self.train()
+        """
+
+        :return:
+        """
+        # copy last checkpoint as last model with opt etc. so we can use it.
+        if self._specs.copy_llm_checkpoint:
+            IgcBaseModule.copy_checkpoint(self._specs, "state_encoder")
+        else:
+            self.train()

@@ -34,7 +34,7 @@ def main(cmd):
     model.resize_token_embeddings(len(dataset.tokenizer))
 
     latent_module = LlmEmbeddingsTrainer(
-        "test_mod", cmd, model, dataset.tokenizer, ds=dataset,
+        "test_mod", cmd, model, dataset.tokenizer, dataset=dataset,
         metric_logger=metric_logger, is_inference=False, device=cpu_device)
     latent_module.load_checkpoint("experiments/gpt2_4_AdamW2_StepLR_lr_1e-05/state_encoder",
                                   resuming=False, map_location=cmd.device)
