@@ -18,14 +18,14 @@ import torch.nn as nn
 
 from torch.utils.data import DataLoader
 from igc.ds.redfish_dataset import JSONDataset
-from .base.igc_base_module import IgcBaseModule
+from .base.igc_base_module import IgcModule
 from .base.igc_metric_logger import MetricLogger
 from igc.modules.llm.igc_autoencoder import AutoStateEncoder
 from igc.shared.shared_torch_builder import TorchBuilder
 import torch.nn.functional as F
 
 
-class AutoencoderTrainer(IgcBaseModule):
+class AutoencoderTrainer(IgcModule):
     """
 
     Autoencoder trainer used to train the autoencoder to reduce

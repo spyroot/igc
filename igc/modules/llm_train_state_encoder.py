@@ -18,6 +18,7 @@ Author:Mus mbayramo@stanford.edu
 """
 import argparse
 from typing import Optional, Tuple, Union
+import time
 
 import numpy as np
 import torch
@@ -28,12 +29,12 @@ from torch.utils.data import DataLoader, RandomSampler
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from igc.ds.redfish_masked_dataset import MaskingOption, MaskedJSONDataset
-from igc.modules.base.igc_llm_base_module import LlmBaseModule
+from igc.modules.base.igc_llm_base_module import LlmModule
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.shared.shared_torch_builder import TorchBuilder
 
 
-class LlmEmbeddingsTrainer(LlmBaseModule):
+class LlmEmbeddingsTrainer(LlmModule):
     """
     """
 
@@ -87,15 +88,16 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
             **vars(spec)
         )
 
+        self._mask_probability = 1.0
+        self._best_validation_metric = float('-inf')
+        self.dataset = dataset
+
         self.logger.info(
             f"Rank {self.rank} creating llm trainer, num epochs {self.num_epochs} "
             f"batch_size {self.batch_size} "
             f"dataset size {len(self.dataset)} "
             f"is overfit {self._overfit} "
         )
-        self._mask_probability = 1.0
-        self._best_validation_metric = float('-inf')
-        self.dataset = dataset
 
     def get_model(self) -> PreTrainedModel:
         """Return module model.
@@ -165,66 +167,36 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         """
 
         self.model.eval()
-        total_loss = 0
         correct_predictions = 0
         total_predictions = 0
 
         with torch.no_grad():
             for i, batch in enumerate(validation_dataset):
-                labels = batch["input_ids"][:, 1:].clone().detach()
+                batch_size = batch_inputs['input_ids'].size(0)
+                target_ids = batch["input_ids"][:, 1:].clone().detach()
                 mask = (batch["input_ids"] == self.tokenizer.pad_token_id)
-                labels = labels.masked_fill(mask[:, 1:], -100)
+                mask = mask.to(self.device)
+                target_ids = target_ids.to(self.device)
 
-                batch['input_ids'] = batch['input_ids'][:, :-1]
-                batch['attention_mask'] = batch['attention_mask'][:, :-1]
+                target_ids = target_ids.masked_fill(mask[:, 1:], -100)
+                original_mask = batch['attention_mask']
+                shifted_input = batch['input_ids'][:, :-1].to(self.device)
+                shifter_mask = batch['attention_mask'][:, :-1].to(self.device)
+                target_ids = target_ids.to(self.device)
 
                 batch_inputs = {
-                    'input_ids': batch['input_ids'].to(self.device),
-                    'attention_mask': batch['attention_mask'].to(self.device),
-                    'labels': labels.to(self.device)
+                    'input_ids': shifted_input,
+                    'attention_mask': shifter_mask,
                 }
 
-                mask_indices = mask[:, :-1].to(self.device)
                 outputs = self.model(**batch_inputs)
-                predicted_tokens = torch.argmax(outputs.logits, dim=-1)
-                predicted_masked_tokens = predicted_tokens[mask_indices]
-                predicted_masked_tokens = predicted_masked_tokens.to(self.device)
-                batch["input_ids"] = batch["input_ids"].to(self.device)
-
-                # masked tokens with original tokens
-                original_tokens = batch["input_ids"][mask_indices].to(self.device)
-                accuracy_bool = predicted_masked_tokens == original_tokens
-                correct_predictions += accuracy_bool.sum().item()
-                total_predictions += original_tokens.numel()
-
-                # # perplexity
-                # logits = outputs.logits
-                # logits = logits.to(self.device)
-                # loss = F.cross_entropy(logits.view(-1, logits.size(-1)),
-                #                        labels.view(-1).to(self.device), ignore_index=-100)
-                # total_loss += loss.item() * labels.numel()
-                # total_predictions = total_predictions + labels.numel()
-
-            # # masked_input_ids = batch["input_ids"].clone().detach()
-            # mask_indices = torch.rand(batch["input_ids"].shape) < self._mask_probability
-            # # masked_input_ids[mask_indices] = -100
-            #
-            # outputs = self.model(**batch_inputs)
-            # predicted_tokens = torch.argmax(outputs.logits, dim=-1)
-            # predicted_masked_tokens = predicted_tokens[mask_indices]
-            # predicted_masked_tokens = predicted_masked_tokens.to(self.device)
-            #
-            # # compare predicted masked tokens with original tokens
-            # original_tokens = batch["input_ids"][mask_indices].to(self.device)
-            #
-            # print(f"predicted {predicted_tokens.shape}, {original_tokens.shape}")
-            #
-            # accuracy_bool = predicted_masked_tokens == original_tokens
-            # correct_predictions += accuracy_bool.sum().item()
-            # total_predictions += original_tokens.numel()
+                compute_accuracy = self.compute_accuracy(
+                    outputs.logits, target_ids, original_mask
+                )
+                correct_predictions += compute_accuracy * batch_size
+                total_predictions += batch_size
 
         accuracy = correct_predictions / total_predictions * 100.0
-        # perplexity = torch.exp(total_loss / torch.tensor(total_predictions)).item()
         return accuracy
 
     def is_distributed(self):
@@ -283,12 +255,10 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         self.logger.info(f"Uploading model from {self.model.device} "
                          f"to device {self.device}, "
                          f"using accelerate: {self.is_accelerator}")
-        self.model.to(self.device)
 
-        if self.module_checkpoint_dir is not None:
-            last_epoch = self.load_checkpoint(self.module_checkpoint_dir)
-        else:
-            last_epoch = 0
+        self.model.to(self.device)
+        last_epoch = self.load_checkpoint(
+            self.module_checkpoint_dir) if self.module_checkpoint_dir is not None else 0
 
         self.model.train()
         train_dataset, eval_dataset = self.split_dataset()
@@ -359,33 +329,24 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
                 else:
                     self.dataset.disable_masking()
 
-                labels = batch["input_ids"][:, 1:].clone().detach()
+                target_ids = batch["input_ids"][:, 1:].clone().detach()
                 mask = (batch["input_ids"] == self.tokenizer.pad_token_id)
-                labels = labels.masked_fill(mask[:, 1:], -100)
+                target_ids = target_ids.masked_fill(mask[:, 1:], -100)
 
                 batch['input_ids'] = batch['input_ids'][:, :-1]
                 batch['attention_mask'] = batch['attention_mask'][:, :-1]
 
                 input_ids = batch['input_ids'].to(self.device)
                 masks = batch['attention_mask'].to(self.device)
+                target_ids = target_ids.to(self.device)
 
                 batch_inputs = {
                     'input_ids': input_ids,
-                    'attention_mask': masks
+                    'attention_mask': masks,
+                    'labels': target_ids
                 }
 
-                # if epoch % self._masked_freq == 0:
-                #     for j in range(batch_inputs['input_ids'].size(0)):
-                #         batch_inputs["attention_mask"] = JSONDataset.mask_json_key_and_value(
-                #             batch_inputs, self._default_mask_token, self.tokenizer)
-                #
-                # batch_inputs = {
-                #     'input_ids': batch['input_ids'].to(self.device),
-                #     'attention_mask': batch['attention_mask'].to(self.device)
-                # }
-
-                labels = labels.to(self.device)
-                outputs = self.model(**batch_inputs, labels=labels)
+                outputs = self.model(**batch_inputs)
                 loss = outputs.loss
 
                 self.optimizer.zero_grad()
@@ -453,3 +414,123 @@ class LlmEmbeddingsTrainer(LlmBaseModule):
         del self.optimizer
 
         print("Embedding extractor training complete.")
+
+    def decode_masked_output(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor
+    ):
+        """
+        :param input_ids:
+        :param attention_mask:
+        :return:
+        """
+        decoded_batch = []
+        for batch_idx in range(input_ids.shape[0]):
+            unmasked_tokens = []
+            for token in input_ids[batch_idx]:
+                if token.item() != self.tokenizer.pad_token_id:
+                    unmasked_tokens.append(token.item())
+
+            decoded_tokens = self.dataset.tokenizer.decode(unmasked_tokens)
+            decoded_batch.append(decoded_tokens)
+
+        return decoded_batch
+
+    def compute_accuracy(
+        self, logits: torch.Tensor,
+        targets: torch.Tensor,
+        original_mask: torch.Tensor
+    ):
+        """
+          Computes  accuracy for either sequence classification or generation.
+        """
+        # YOUR CODE HERE
+        if logits.dim() == 2:
+            y = torch.argmax(logits, dim=-1) == targets
+            y = y.type(torch.float)
+            return torch.mean(y).item()
+        elif logits.dim() == 3:
+            shifted_step_logits = logits[..., :-1, :].contiguous()
+            shift_step_labels = targets[..., 1:].contiguous()
+
+            masked_logits = shifted_step_logits.eq(-100)
+            logits_inf = shifted_step_logits.masked_fill_(masked_logits, float("-Inf"))
+            arg_maxed_idx = torch.argmax(logits_inf, dim=-1)
+
+            r = shift_step_labels == arg_maxed_idx
+            r = r.type(torch.float)
+            return r.mean().item()
+        else:
+            raise ValueError(
+                f'Logits should either be 2-dim (for classification) '
+                f'or 3-dim (for generation); got {logits.dim()}')
+
+    def test_inference(self):
+        """
+        :return:
+        """
+        train_data, eval_data = self.split_dataset()
+        sampler = self.dataset_sampler()
+
+        eval_dataloader = DataLoader(
+            eval_data,
+            batch_size=self.batch_size,
+            sampler=sampler,
+            num_workers=self._num_workers,
+            shuffle=False,
+            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)
+
+        self.model.eval()
+        total_loss = 0
+        correct_predictions = 0
+        total_predictions = 0
+        total_predictions_no_pad = 0
+
+        start_time = time.time()
+
+        with torch.no_grad():
+            for i, batch in enumerate(eval_dataloader):
+                target_ids = batch["input_ids"][:, 1:].clone().detach()
+                mask = (batch["input_ids"] == self.tokenizer.pad_token_id)
+                mask = mask.to(self.device)
+                target_ids = target_ids.to(self.device)
+
+                target_ids = target_ids.masked_fill(mask[:, 1:], -100)
+                original_mask = batch['attention_mask']
+                shifted_input = batch['input_ids'][:, :-1].to(self.device)
+                shifter_mask = batch['attention_mask'][:, :-1].to(self.device)
+                target_ids = target_ids.to(self.device)
+
+                batch_inputs = {
+                    'input_ids': shifted_input,
+                    'attention_mask': shifter_mask,
+                }
+
+                outputs = self.model(**batch_inputs)
+                compute_accuracy = self.compute_accuracy(
+                    outputs.logits, target_ids, original_mask
+                )
+                correct_predictions += compute_accuracy * batch_inputs['input_ids'].size(0)
+                total_predictions += batch_inputs['input_ids'].size(0)
+
+                non_pad_tokens = target_ids.numel() - target_ids.eq(-100).sum().item()
+                total_predictions_no_pad += non_pad_tokens
+
+                # perplexity
+                logits = outputs.logits
+                logits = logits.to(self.device)
+                loss = F.cross_entropy(logits.view(-1, logits.size(-1)),
+                                       target_ids.view(-1).to(self.device),
+                                       ignore_index=-100)
+                total_loss += loss.item() * target_ids.numel()
+
+        end_time = time.time()
+        time_taken = end_time - start_time
+
+        accuracy = correct_predictions / total_predictions * 100.0
+        perplexity = torch.exp(total_loss / torch.tensor(total_predictions_no_pad)).item()
+        print(f"Accuracy: {accuracy:.2f}%")
+        print(f"Perplexity: {perplexity:.2f}")
+        print(f"Time taken: {time_taken:.2f} seconds")
+        return accuracy, perplexity

@@ -20,11 +20,11 @@ import argparse
 from typing import Optional
 
 from igc.ds.redfish_dataset import JSONDataset
-from .igc_base_module import IgcBaseModule
+from .igc_base_module import IgcModule
 from .igc_metric_logger import MetricLogger
 
 
-class RlBaseModule(IgcBaseModule):
+class RlBaseModule(IgcModule):
     """
     """
 

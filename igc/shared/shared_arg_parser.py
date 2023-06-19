@@ -126,7 +126,7 @@ def add_redfish_group(parser):
         "--live", action='store_true',
         default=False, help="Enable live mode. All request will be send to redfish host.")
     redfish_group.add_argument(
-        "--live-test", action='store_true', default=False,
+        "--live_test", action='store_true', default=False,
         help="will execute couple of test before we start RL trainer.")
     redfish_group.add_argument(
         "--redfish-ip", type=str, default="https://10.252.252.209",
@@ -408,7 +408,8 @@ def add_trainer_group(parser):
         "--max_steps",
         type=int,
         default=-1,
-        help="If set to a positive number, the total number of training steps to perform."
+        help="If set to a positive number, the total "
+             "number of training steps to perform."
     )
 
     # this mainly for debug model to overfit on a batch.
@@ -547,7 +548,7 @@ def add_checkpoint_group(parser):
     :param parser:
     :return:
     """
-    group = parser.add_argument_group('Checkpoint')
+    group = parser.add_argument_group('Checkpoint and Saving')
     group.add_argument("--save_strategy",
                        type=str, default="epoch",
                        choices=['no', 'epoch', 'steps'],
@@ -630,7 +631,8 @@ def add_dataset_dataloader(parser):
     group.add_argument(
         "--do_consistency_check",
         type=bool, default=False,
-        help="Whether we perform dataset consistency check post build or during a load procedure.")
+        help="Whether we perform dataset consistency check, "
+             "post dataset build or during a load procedure.")
 
     return parser
 

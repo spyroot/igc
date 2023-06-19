@@ -17,7 +17,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from igc.ds.redfish_dataset import JSONDataset
 from igc.ds.redfish_masked_dataset import MaskedJSONDataset
-from igc.modules.base.igc_llm_base_module import LlmBaseModule
+from igc.modules.base.igc_llm_base_module import LlmModule
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.modules.igc_train_auto_state_encoder import AutoencoderTrainer
 from igc.modules.llm_train_goal_extract import GoalExtractorTrainer
@@ -81,7 +81,7 @@ class IgcLanguageModule:
         self.logger.add(sys.stdout, level=self._log_level)
 
     def load_finetuned_llm(
-            self, use_pretrained_only: Optional[bool] = False
+        self, use_pretrained_only: Optional[bool] = False
     ):
 
         """Load either pre-trained model only or fine-tuned llm.
@@ -139,14 +139,18 @@ class IgcLanguageModule:
 
     def load_finetuned_state_encoder(self, path: str = None):
         """
+        Load fine tuned state encoder.
+        
         :return:
         """
+
         _model = None
         self.logger.info("Loading state encoder fined tuned state.")
-        modules = self.load(
+
+        modules = IgcLanguageModule.load(
             self._spec if path is None else path,
-            module_name="state_encoder",
-            device=self._spec.device
+            device=self._spec.device,
+            module_names=["state_encoder"],
         )
         module = modules["state_encoder"]
         _model = module.model
@@ -228,25 +232,29 @@ class IgcLanguageModule:
 
     @staticmethod
     def make_base_model(
-            spec: Union[str, argparse.Namespace]
+        spec: Union[str, argparse.Namespace]
     ) -> Tuple[Optional[PreTrainedModel], Optional[PreTrainedTokenizer]]:
         """Create base llm model with igc tokenizer.
         :param spec: path or spec
         :return: pretrained model and tokenizer
         """
         model, _ = from_pretrained_default(
-            spec, only_model=True, only_tokenizer=False, device_map=spec.device)
+            spec, only_model=True,
+            only_tokenizer=False,
+            device_map=spec.device
+        )
         tokenizer = load_igc_tokenizer()
+        model.resize_token_embeddings(len(tokenizer))
         return model, tokenizer
 
     @staticmethod
     def make_model(
-            spec: argparse.Namespace,
-            module_name: str,
-            base_model: None,
-            base_tokenizer,
-            device=None,
-    ) -> Optional[LlmBaseModule]:
+        spec: argparse.Namespace,
+        module_name: str,
+        base_model: None,
+        base_tokenizer,
+        device=None,
+    ) -> Optional[LlmModule]:
         """
         Create an igc module based on the module name.
 
@@ -257,7 +265,7 @@ class IgcLanguageModule:
         :param base_tokenizer:  base llm tokenizer
         :return:
         """
-        return LlmBaseModule(
+        return LlmModule(
             module_name=module_name,
             spec=spec,
             llm_model=base_model,
@@ -282,56 +290,53 @@ class IgcLanguageModule:
 
     @staticmethod
     def load(
-            spec: argparse.Namespace,
-            device: torch.device = "cpu",
-            module_name: Union[str, List[str]] = None,
-    ) -> Dict[str, LlmBaseModule]:
+        spec: argparse.Namespace,
+        device: torch.device = "cpu",
+        module_names: Union[str, List[str]] = None,
+    ) -> Dict[str, LlmModule]:
         """
 
-        Load the all llm models embedding model for inference.
-        i.e. agent will use this as encoder
+        Load all igc llm modules.
 
         :param spec: specs for modules
-        :param module_name: The name or list of names of the specific modules to load, or None to load all modules.
+        :param module_names: The name or list of names of the specific modules to load, or None to load all modules.
         :param device: The device to load the model onto, defaults to "cpu".
         :return: The loaded model, tokenizer, and the last epoch from the checkpoint.
         """
 
         base_model, base_tokenizer = IgcLanguageModule.make_base_model(spec)
+        if module_names is None:
+            raise ValueError(
+                f"Invalid module_name: {module_names}. "
+                f"Must be one of {IgcLanguageModule.modules}")
+
+        if isinstance(module_names, str):
+            module_names = [module_names]
+
+        invalid_modules = set(module_names) - set(IgcLanguageModule.modules)
+        if invalid_modules:
+            raise ValueError(
+                f"Invalid module_name(s): {invalid_modules}. "
+                f"Must be one of {IgcLanguageModule.modules}")
 
         modules = {}
-        if module_name is not None:
-            if module_name not in IgcLanguageModule.modules:
-                raise ValueError(f"Invalid module_name: {module_name}. "
-                                 f"Must be one of {IgcLanguageModule.modules}")
-
+        for module_name in module_names:
+            print(f"Loading {module_name} module.")
             module = IgcLanguageModule.make_model(
                 spec, module_name, base_model, base_tokenizer
             )
+
             module.load(
-                module_name, module.model, spec,
-                device=device, is_inference=True,
-                optimizer=None, scheduler=None
+                module_name,
+                module.model,
+                specs=spec,
+                is_inference=True,
+                optimizer=None,
+                scheduler=None,
+                map_location=device
             )
 
             modules[module_name] = module
             modules[module_name].set_tokenizer(base_tokenizer)
-
-        else:
-            for model_name in IgcLanguageModule.modules:
-                module = IgcLanguageModule.make_model(
-                    spec, model_name, base_model, base_tokenizer
-                )
-                module.load(
-                    model_name,
-                    module.model,
-                    spec,
-                    device=device,
-                    is_inference=True,
-                    optimizer=None,
-                    scheduler=None
-                )
-                modules[model_name] = module
-                modules[model_name].set_tokenizer(base_tokenizer)
 
         return modules

@@ -24,7 +24,7 @@ import re
 
 import torch
 
-from igc.modules.base.igc_llm_base_module import LlmBaseModule
+from igc.modules.base.igc_llm_base_module import LlmModule
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.shared.shared_torch_builder import TorchBuilder
 from igc.rest_action import RestActionSpace, ActionWithoutParam
@@ -35,7 +35,7 @@ from igc.ds.redfish_dataset import JSONDataset
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
 
-class GoalExtractorTrainer(LlmBaseModule):
+class GoalExtractorTrainer(LlmModule):
     """
     """
     def __init__(self,

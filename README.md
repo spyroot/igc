@@ -195,13 +195,13 @@ but it very hard to fit even in 4 GPU system with 24Gb memory
 * Training state encoder
 
 ```bash
-python trainer.py --train llm --num_train_epochs 1000 \
+python igc_main.py --train llm --num_train_epochs 1000 \
 --llm latent --llm_log_level info --log_level info --device cuda:1
 ```
 
 mac mps
 ```bash
-python trainer.py --train llm --num_train_epochs 1000 \
+python igc_main.py --train llm --num_train_epochs 1000 \
 --llm latent --llm_log_level info --log_level info --device mps
 ```
 

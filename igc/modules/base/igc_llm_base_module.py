@@ -28,7 +28,7 @@ import torch
 from rouge_score import rouge_scorer
 
 from igc.ds.redfish_dataset import JSONDataset
-from .igc_base_module import IgcBaseModule
+from .igc_base_module import IgcModule
 from .igc_llm_metrics_type import MetricType
 from .igc_metric_logger import MetricLogger
 from sklearn.metrics import f1_score
@@ -41,7 +41,7 @@ from ..shared.llm_shared import (
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
 
-class LlmBaseModule(IgcBaseModule):
+class LlmModule(IgcModule):
     """
     """
 
@@ -91,6 +91,7 @@ class LlmBaseModule(IgcBaseModule):
         """
         Get the directory path for saving/loading the fine-tuned model.
         This huggingface format.
+
         :return: The directory path.
         """
         return f"{self.module_checkpoint_dir}/fine_tuned"
@@ -100,11 +101,13 @@ class LlmBaseModule(IgcBaseModule):
         Save the fine-tuned model and tokenizer. This huggingface format.
         :return: None
         """
-        if self.is_rank_zero():
-            fine_tuned = self.finetuned_dir()
-            if not os.path.exists(fine_tuned):
-                os.makedirs(fine_tuned)
-            save_pretrained_default(fine_tuned, self.model, self.tokenizer)
+        if not self.is_rank_zero():
+            return
+
+        fine_tuned = self.finetuned_dir()
+        if not os.path.exists(fine_tuned):
+            os.makedirs(fine_tuned)
+        save_pretrained_default(fine_tuned, self.model, self.tokenizer)
 
     def load_finetuned(self, device_map="auto"):
         """
@@ -202,11 +205,11 @@ class LlmBaseModule(IgcBaseModule):
 
     @staticmethod
     def sentiment_accuracy_metric(predictions: List[str], targets: List[str]) -> float:
-        return LlmBaseModule.accuracy_metric(predictions, targets)
+        return LlmModule.accuracy_metric(predictions, targets)
 
     @staticmethod
     def intent_accuracy_metric(predictions: List[str], targets: List[str]) -> float:
-        return LlmBaseModule.accuracy_metric(predictions, targets)
+        return LlmModule.accuracy_metric(predictions, targets)
 
     @staticmethod
     def accuracy_metric(predictions: List[str], targets: List[str]) -> float:
@@ -246,26 +249,26 @@ class LlmBaseModule(IgcBaseModule):
 
         if prompt_type == PromptType.SENTIMENT:
             if metric == MetricType.F1_SCORE:
-                return LlmBaseModule.compute_f1_score(predictions, targets)
+                return LlmModule.compute_f1_score(predictions, targets)
             elif metric == MetricType.ROUGE:
-                return LlmBaseModule.compute_rouge_metric(predictions, targets)
+                return LlmModule.compute_rouge_metric(predictions, targets)
             else:
-                return LlmBaseModule.sentiment_accuracy_metric(predictions, targets)
+                return LlmModule.sentiment_accuracy_metric(predictions, targets)
 
         if prompt_type == PromptType.INTENT:
             if metric == MetricType.F1_SCORE:
-                return LlmBaseModule.compute_f1_score(predictions, targets)
+                return LlmModule.compute_f1_score(predictions, targets)
             elif metric == MetricType.ROUGE:
-                return LlmBaseModule.compute_rouge_metric(predictions, targets)
+                return LlmModule.compute_rouge_metric(predictions, targets)
             else:
-                return LlmBaseModule.intent_accuracy_metric(predictions, targets)
+                return LlmModule.intent_accuracy_metric(predictions, targets)
 
         if metric == MetricType.ROUGE:
-            return LlmBaseModule.compute_rouge_metric(predictions, targets)
+            return LlmModule.compute_rouge_metric(predictions, targets)
         elif metric == MetricType.F1_SCORE:
-            return LlmBaseModule.compute_f1_score(predictions, targets)
+            return LlmModule.compute_f1_score(predictions, targets)
         elif metric == MetricType.EXACT_MATCH:
-            exact = LlmBaseModule.compute_exact_match(predictions, targets)
+            exact = LlmModule.compute_exact_match(predictions, targets)
             # in all case if we have exact match we return it
             if exact == 1.0:
                 return exact
@@ -273,21 +276,21 @@ class LlmBaseModule(IgcBaseModule):
             if prompt_type == PromptType.EXACT_MATCH:
                 return exact
             if prompt_type == PromptType.SUMMARY:
-                return LlmBaseModule.compute_exact_match(predictions, targets)
+                return LlmModule.compute_exact_match(predictions, targets)
             elif prompt_type == PromptType.QUESTION:
                 default_prefix = "Q:"
                 if prefix_to_remove is None:
                     prefix_to_remove = default_prefix
-                normalized = [LlmBaseModule._normalize(p, prefix_to_remove) for p in predictions]
-                return sum([LlmBaseModule._contains(n, t) for n, t in zip(normalized, targets)]) / len(normalized)
+                normalized = [LlmModule._normalize(p, prefix_to_remove) for p in predictions]
+                return sum([LlmModule._contains(n, t) for n, t in zip(normalized, targets)]) / len(normalized)
             elif prompt_type == PromptType.TLDR:
                 default_prefix = "TLDR"
                 if prefix_to_remove is None:
                     prefix_to_remove = default_prefix
-                normalized = [LlmBaseModule._normalize(p, prefix_to_remove) for p in predictions]
-                s = sum([LlmBaseModule._contains(n, t) for n, t in zip(normalized, targets)]) / len(normalized)
+                normalized = [LlmModule._normalize(p, prefix_to_remove) for p in predictions]
+                s = sum([LlmModule._contains(n, t) for n, t in zip(normalized, targets)]) / len(normalized)
                 print("S", s)
-                return sum([LlmBaseModule._contains(n, t) for n, t in zip(normalized, targets)]) / len(normalized)
+                return sum([LlmModule._contains(n, t) for n, t in zip(normalized, targets)]) / len(normalized)
             elif prompt_type == PromptType.CUSTOM:
                 if callback is not None:
                     return callback(predictions, targets)

@@ -7,13 +7,16 @@ Author:Mus mbayramo@stanford.edu
 """
 import argparse
 import os
+from typing import Optional, Union, List, Dict
 
 import torch
 
-from .base.igc_base_module import IgcBaseModule
+from .base.igc_base_module import IgcModule
+from .base.igc_llm_base_module import LlmModule
 from .base.igc_metric_logger import MetricLogger
 from igc.modules.llm.igc_llm_module import IgcLanguageModule
 from .igc_rl_module import IgcRlModule
+from .llm_train_state_encoder import LlmEmbeddingsTrainer
 from .shared.llm_shared import (
     from_pretrained_default,
     load_pretrained_default,
@@ -106,29 +109,25 @@ class IgcMain:
                 rl_module = IgcRlModule(self._specs, self.metric_logger, self.dataset)
                 rl_module.train()
 
-    def load(self, specs: argparse.Namespace, module_name: str, device: torch.device = "cpu"):
+    def load(
+        self,
+        specs: argparse.Namespace,
+        module_names: Optional[Union[str, List[str]]] = None,
+        device: torch.device = "cpu"
+    ) -> Dict[str, Union[LlmModule, IgcModule]]:
         """
 
         Load a module.
 
+        :param module_names: 
         :param device:
         :param specs:
-        :param module_name:
+        :param module_names:
         :return:
         """
-        model, tokenizer = self._from_pretrained_fn(
-            self._specs, only_tokenizer=False, only_model=True)
 
-        llm_module = IgcLanguageModule(
-            self._specs,
-            metric_logger=self.metric_logger,
-            ds=self.dataset,
-            from_pretrained=self._from_pretrained_fn)
-
-        modules = llm_module.load(
-            specs, device=device, module_name=module_name
-        )
-
+        modules = IgcLanguageModule.load(specs, device=device, module_names=module_names)
+        # IgcRlModule.load(specs, device=device, module_names=module_names)
         return modules
 
     def run(self):
@@ -144,10 +143,22 @@ class IgcMain:
         # copy last checkpoint as last model with opt etc. so we can use it.
         if self._specs.copy_llm:
             model, _ = from_pretrained_default(self._specs, only_model=True)
+            model.to(torch.device("cpu"))
             model.resize_token_embeddings(len(self._dataset.tokenizer))
             model = model.to_bettertransformer()
-            model, epoch, model_path = IgcBaseModule.copy_checkpoint(self._specs, "state_encoder", model)
+            model, epoch, model_path = IgcModule.copy_checkpoint(self._specs, "state_encoder", model)
             print("Saved model to checkpoint file: ", model_path)
+        elif self._specs.test_llm:
+            modules = self.load(self._specs, "state_encoder")
+            llm_trainer = LlmEmbeddingsTrainer(
+                "llm_trainer", self._specs,
+                llm_model=modules["state_encoder"].model,
+                llm_tokenizer=self.dataset.tokenizer,
+                dataset=self.dataset,
+                metric_logger=self.metric_logger,
+                is_inference=True
+            )
+            llm_trainer.test_inference()
 
         else:
             self.train()

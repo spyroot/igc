@@ -700,7 +700,7 @@ class JSONDataset(
         """
         # if tar file present unpack other create new dataset.
         if os.path.exists(self._dataset_tarball_name) and not glob.glob(
-                os.path.join(self._default_raw_dir, '*')):
+            os.path.join(self._default_raw_dir, '*')):
             self.logger.info(
                 f"Found tarball unpack {self._dataset_tarball_name} "
                 f"files to {self._default_raw_dir}")
@@ -708,7 +708,7 @@ class JSONDataset(
 
         # if tarball of all api responds present, unpack.
         if os.path.exists(self._dataset_json_tarball_name) and not glob.glob(
-                os.path.join(self._default_original_dir, '*')):
+            os.path.join(self._default_original_dir, '*')):
             self.logger.info(
                 f"Found tarball unpack {self._dataset_json_tarball_name} "
                 f"files to {self._default_original_dir}")
@@ -716,7 +716,7 @@ class JSONDataset(
 
         # if tarball of tokenizer present, unpack.
         if os.path.exists(self._dataset_tokenizer_tarball_name) and not glob.glob(os.path.join(
-                self.tokenizer_dir(), '*')):
+            self.tokenizer_dir(), '*')):
             self.logger.info(
                 f"Found tarball unpack {self._dataset_tokenizer_tarball_name} "
                 f"files to {self._default_original_dir}")
@@ -893,9 +893,9 @@ class JSONDataset(
         return converted_name
 
     def create_chunks(
-            self,
-            input_ids: torch.Tensor,
-            attention_mask: torch.Tensor
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor
     ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
         """
 
@@ -911,27 +911,31 @@ class JSONDataset(
         chunks = []
         num_tokens = input_ids.size(1)
 
+        # no need pad
         if num_tokens <= self._max_len:
             chunks.append((input_ids, attention_mask))
             return chunks
 
+        # pad with offset - 1
+        max_len = self._max_len
+
         while idx < num_tokens:
-            if idx + self._max_len < num_tokens:
-                chunk_input_ids = input_ids[:, idx:idx + self._max_len]
-                chunk_attention_mask = attention_mask[:, idx:idx + self._max_len]
+            if idx + max_len < num_tokens:
+                chunk_input_ids = input_ids[:, idx:idx + max_len]
+                chunk_attention_mask = attention_mask[:, idx:idx + max_len]
             else:
                 chunk_input_ids = input_ids[:, idx:]
                 chunk_attention_mask = attention_mask[:, idx:]
 
-            new_chunk_size = self._max_len - chunk_attention_mask.size(1)
+            new_chunk_size = max_len - chunk_attention_mask.size(1)
             padded_input_ids = torch.nn.functional.pad(
-                chunk_input_ids, (0, self._max_len - chunk_input_ids.size(1)), value=self.tokenizer.pad_token_id)
+                chunk_input_ids, (0, max_len - chunk_input_ids.size(1)), value=self.tokenizer.pad_token_id)
 
             padded_attention_mask = torch.nn.functional.pad(
-                chunk_attention_mask, (0, self._max_len - chunk_attention_mask.size(1)))
+                chunk_attention_mask, (0, max_len - chunk_attention_mask.size(1)))
 
             chunks.append((padded_input_ids, padded_attention_mask))
-            idx = idx + self._max_len - self._overlap
+            idx = idx + max_len - self._overlap
             num_tokens -= new_chunk_size
 
         return chunks
@@ -1009,10 +1013,10 @@ class JSONDataset(
 
     @staticmethod
     def mask_specific_key(
-            json_data,
-            target_key: str,
-            tokenizer=None,
-            debug: Optional[bool] = False
+        json_data,
+        target_key: str,
+        tokenizer=None,
+        debug: Optional[bool] = False
     ) -> torch.Tensor:
         """
         Masks specific key in json structure.
@@ -1057,11 +1061,11 @@ class JSONDataset(
 
     @staticmethod
     def mask_json_key_and_value(
-            encoding,
-            target_key,
-            tokenizer,
-            debug=False,
-            return_original=False,
+        encoding,
+        target_key,
+        tokenizer,
+        debug=False,
+        return_original=False,
     ) -> torch.Tensor:
         """Mask specific key and value in json structure,
          technically will work in other cases.
@@ -1110,10 +1114,10 @@ class JSONDataset(
 
     @staticmethod
     def mask_specific_key_and_value(
-            json_data,
-            target_key,
-            tokenizer=None,
-            debug=False
+        json_data,
+        target_key,
+        tokenizer=None,
+        debug=False
     ):
         """
         Mask specific key and value in json structure,
@@ -1171,10 +1175,10 @@ class JSONDataset(
         return attention_mask
 
     def _process_and_mask_json_file(
-            self,
-            json_file_path: str,
-            json_file_name: str,
-            mask_target_key: str
+        self,
+        json_file_path: str,
+        json_file_name: str,
+        mask_target_key: str
     ) -> None:
         """
 
@@ -1207,6 +1211,12 @@ class JSONDataset(
             chunks = self.create_chunks(input_ids, attention_mask)
             # for each chunk add it as a separate data point
             for i, chunk_tuple in enumerate(chunks):
+
+                if i == len(chunks) - 1:
+                    last_token_pad = torch.full_like(padded_chunk[-1:], self.tokenizer.pad_token_id)
+                    padded_chunk = torch.cat((padded_chunk[:-1], last_token_pad))
+                    padded_mask = torch.cat((padded_mask[:-1], padded_mask[-1:]))
+
                 padded_chunk, padded_mask = chunk_tuple
                 padded_chunk = padded_chunk.squeeze(dim=0)
                 padded_mask = padded_mask.squeeze(dim=0)
@@ -1365,8 +1375,8 @@ class JSONDataset(
         return self._rest_api_to_method.get(action, "Unknown")
 
     def action_to_one_hot(
-            self,
-            rest_api: str
+        self,
+        rest_api: str
     ) -> Union[np.ndarray, torch.Tensor]:
 
         """Must take a string and return one hot vector either as tensor or ndarray
@@ -1385,8 +1395,8 @@ class JSONDataset(
         return one_hot_tensor
 
     def one_hot_vector_to_action(
-            self,
-            one_hot_vector: Union[np.ndarray, torch.Tensor]
+        self,
+        one_hot_vector: Union[np.ndarray, torch.Tensor]
     ) -> str:
         """
         Takes a one-hot vector and returns the corresponding REST API.
@@ -1510,7 +1520,7 @@ class JSONDataset(
         return self._rest_api_to_method.get(rest_api, None)
 
     def sample_rest_api(
-            self
+        self
     ) -> Tuple[str, List[str], torch.Tensor]:
         """
         Randomly sample a REST API endpoint from the dataset
@@ -1527,7 +1537,7 @@ class JSONDataset(
         return rest_api, supported_method, self.action_to_one_hot(rest_api)
 
     def sample_batch_of_rest_api(
-            self, batch_size: int
+        self, batch_size: int
     ) -> Tuple[List[str], List[List[str]], torch.Tensor]:
         """
         Randomly sample REST API endpoints from the dataset
@@ -1552,8 +1562,8 @@ class JSONDataset(
         return rest_apis, supported_methods, torch.stack(one_hot_vectors)
 
     def sample_batch(
-            self,
-            batch_size: int
+        self,
+        batch_size: int
     ) -> Tuple[List[str], List[List[str]], torch.Tensor]:
         """
         Randomly sample REST API endpoints from the dataset

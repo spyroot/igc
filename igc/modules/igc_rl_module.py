@@ -33,7 +33,7 @@ class IgcRlModule(IgcBaseState):
         super().__init__(module_name, spec)
 
         if llm_model is None:
-            llm_model, _, last_epoch = IgcLanguageModule.load(spec, module_name="state_encoder")
+            llm_model, _, last_epoch = IgcLanguageModule.load(spec, module_names="state_encoder")
         else:
             llm_model = llm_model
 
