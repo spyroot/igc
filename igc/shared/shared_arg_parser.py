@@ -80,7 +80,7 @@ def add_optimizer_group(parser):
     optimizer_group.add_argument(
         "--llm_optimizer",
         type=str,
-        default="AdamW2",
+        default="AdamW",
         choices=TorchBuilder.get_supported_optimizers(),
         help="LLM Optimizer to use."
 
@@ -95,7 +95,7 @@ def add_optimizer_group(parser):
 
     optimizer_group.add_argument(
         "--llm_weight_decay",
-        type=float, default=0.0,
+        type=float, default=0.01,
         help="Weight decay to use."
     )
 
@@ -179,17 +179,31 @@ def add_scheduler_group(parser):
     """
     scheduler_group = parser.add_argument_group('Scheduler')
     scheduler_group.add_argument(
-        "--scheduler",
+        "--llm_scheduler",
         type=str,
-        default="StepLR",
+        default="OneCycleLR",
         choices=TorchBuilder.get_supported_schedulers(),
         help="Scheduler to use."
     )
+
     scheduler_group.add_argument(
         "--num_warmup_steps",
         type=int, default=0,
         help="Number of steps for the warmup in the lr scheduler."
     )
+
+    scheduler_group.add_argument(
+        "--base_lr",
+        type=int, default=0.01,
+        help="Initial learning rate which is the lower boundary in the cycle for each parameter group.."
+    )
+
+    scheduler_group.add_argument(
+        "--max_lr",
+        type=int, default=0.1,
+        help="Upper learning rate boundaries in the cycle for each parameter group. ."
+    )
+
     return parser
 
 

@@ -82,6 +82,7 @@ class LlmModule(IgcModule):
 
         if hasattr(llm_model, 'resize_token_embeddings'):
             llm_model.resize_token_embeddings(len(llm_tokenizer))
+            self.model.config.pad_token_id = self.model.config.eos_token_id
         else:
             warnings.warn("Model does not have the 'resize_token_embeddings' method.")
 

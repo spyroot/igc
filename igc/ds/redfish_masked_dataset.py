@@ -187,13 +187,16 @@ class MaskedJSONDataset(JSONDataset, ABC):
         ]
         self._cache = [None] * len(self._data["train_data"])
 
-    def enable_masking(self):
+    def enable_masking(
+        self,
+        mask_type: MaskingType = MaskingType.MASK_JSON_KV
+    ):
         """Enable masking,  for example we can pass
         one epoch masking and then another epoch unmasked.
         :return:
         """
         self._cache = [None] * len(self._data["train_data"])
-        self._mask_type = MaskingType.MASK_JSON_KV
+        self._mask_type = mask_type
 
     def disable_masking(self):
         """Disable masking.
@@ -213,7 +216,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
         """
         Mask the odata.id value in the JSON dataset.
         """
-        self.enable_masking()
+        self.enable_masking(mask_type=MaskingType.MASK_JSON_KV)
         self._current_token_id_mask = [self._masking_option[MaskingOption.ODATA_ID]]
 
     def mask_targets(self):
@@ -251,9 +254,8 @@ class MaskedJSONDataset(JSONDataset, ABC):
         Mask the array in the JSON dataset.
         :return:
         """
-        self.enable_masking()
         if is_enabled:
-            self._mask_type = MaskingType.MASK_NEW_TOKENS
+            self.enable_masking(MaskingType.MASK_NEW_TOKENS)
         else:
             self._mask_type = MaskingType.NO_MASK
 
@@ -262,9 +264,8 @@ class MaskedJSONDataset(JSONDataset, ABC):
         Mask the array in the JSON dataset.
         :return:
         """
-        self.enable_masking()
         if is_enabled:
-            self._mask_type = MaskingType.MASK_SECTION
+            self.enable_masking(mask_type=MaskingType.MASK_SECTION)
         else:
             self._mask_type = MaskingType.NO_MASK
 
@@ -426,6 +427,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
         Shapes attention  [1, x]
         Shapes input_idx [1, x]
 
+        :param target_token:
         :param attention_mask:
         :param input_ids:
         :param start_token: The start token of the section
@@ -447,9 +449,6 @@ class MaskedJSONDataset(JSONDataset, ABC):
 
         if isinstance(end_token, int):
             end_token = [end_token]
-
-        print("Start token:", start_token)
-        print("End token:", end_token)
 
         start_len = len(start_token)
         end_len = len(end_token)
@@ -507,6 +506,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
         old_vocab_size = self.tokenizer.vocab_size
 
         attention_mask = attention_mask.clone()
+
         if attention_mask.ndim == 1:
             attention_mask = attention_mask.unsqueeze(0)
         attention_mask[:, :] = 0
@@ -707,8 +707,13 @@ class MaskedJSONDataset(JSONDataset, ABC):
         if self._mask_type == MaskingType.MASK_NEW_TOKENS:
             data["attention_mask"] = self.mask_all_new_tokens(input_ids, new_mask)
         elif self._mask_type == MaskingType.MASK_SECTION:
-            data["attention_mask"] = self.mask_tensor_ids_json_section(
-                input_ids, new_mask, self._redfish_actions, self._object_beg_tok_id, self._object_end_tok_id)
+            new_mask = self.mask_tensor_ids_json_section(
+                input_ids, new_mask,
+                self._redfish_actions,
+                self._object_beg_tok_id,
+                self._object_end_tok_id
+            )
+            data["attention_mask"] = new_mask
         else:
             for i, (token, end_token) in enumerate(self._current_token_id_mask, start=1):
                 new_mask = self.mask_tensor_ids_json_kv_span(
@@ -727,6 +732,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
         if input_ids.ndim == 2:
             data["attention_mask"] = data["attention_mask"].squeeze(0)
             data["input_ids"] = data["input_ids"].squeeze(0)
+
 
         self._cache[idx] = data
         return data

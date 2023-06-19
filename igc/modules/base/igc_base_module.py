@@ -601,9 +601,6 @@ class IgcModule(IgcBaseState):
             map_to = map_location
 
         module_dir, experiment_dir = IgcModule.checkpoint_dir(specs, module_name)
-        print(module_dir)
-        print(experiment_dir)
-
         last_checkpoint_file = IgcModule.last_checkpoint(module_dir)
         last_module_file = IgcModule.model_file(experiment_dir, module_name)
 

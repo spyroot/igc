@@ -47,7 +47,7 @@ def shared_main(
         run_name = f"{args.model_type}_" \
                    f"{args.per_device_train_batch_size}_" \
                    f"{args.llm_optimizer}_" \
-                   f"{args.scheduler}_lr_" \
+                   f"{args.llm_scheduler}_lr_" \
                    f"{args.llm_learning_rate}"
 
         package_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

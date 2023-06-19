@@ -62,6 +62,18 @@ class TorchBuilder:
         return relevant_args
 
     @staticmethod
+    def get_param_for_func(func, args_namespace):
+        """Given a function and an argument namespace,
+        this function returns a dictionary with all arguments
+        that are accepted by the function.
+        """
+        # we need filter self from function args.
+        # i.e ['self', 'params', 'lr', 'betas', 'eps', 'weight_decay', 'correct_bias', 'no_deprecation_warning']
+        func_args = inspect.signature(func).parameters.keys()
+        relevant_args = {k: v for k, v in args_namespace.items() if k in func_args}
+        return relevant_args
+
+    @staticmethod
     def get_activation_function(activation_name: str) -> Callable:
         """
         Take name of activation function and return the
@@ -77,10 +89,10 @@ class TorchBuilder:
 
     @staticmethod
     def create_optimizer(
-            optimizer: str, model: Module,
-            lr: Optional[float] = 0.001,
-            weight_decay: Optional[float] = 0.0,
-            **kwargs: Any
+        optimizer: str, model: Module,
+        lr: Optional[float] = 0.001,
+        weight_decay: Optional[float] = 0.0,
+        **kwargs: Any
     ) -> Optimizer:
         """Create optimizer.
 
@@ -146,33 +158,38 @@ class TorchBuilder:
     @staticmethod
     def create_scheduler(scheduler: str, optimizer: Optimizer, **kwargs: Any):
         """Create scheduler for the optimizer
+
         :param scheduler: Scheduler to use
         :param optimizer: Optimizer for which the scheduler is created
         :param kwargs: Additional arguments for specific schedulers
         :return: Instance of the scheduler
         """
-        scheduler.lower()
 
+        shed_class = getattr(torch.optim.lr_scheduler, scheduler, None)
+        scheduler_args = TorchBuilder.get_param_for_func(shed_class.__init__, kwargs)
+        scheduler_args = {k: v for k, v in scheduler_args.items() if v is not None}
+
+        scheduler = scheduler.lower()
         if scheduler == 'LambdaLR'.lower():
-            return torch.optim.lr_scheduler.LambdaLR(optimizer, **kwargs)
+            return torch.optim.lr_scheduler.LambdaLR(optimizer, **scheduler_args)
         elif scheduler == 'MultiplicativeLR'.lower():
-            return torch.optim.lr_scheduler.MultiplicativeLR(optimizer, **kwargs)
+            return torch.optim.lr_scheduler.MultiplicativeLR(optimizer, **scheduler_args)
         elif scheduler == 'StepLR'.lower():
-            return torch.optim.lr_scheduler.StepLR(optimizer, **kwargs)
+            return torch.optim.lr_scheduler.StepLR(optimizer, **scheduler_args)
         elif scheduler == 'MultiStepLR'.lower():
-            return torch.optim.lr_scheduler.MultiStepLR(optimizer, **kwargs)
+            return torch.optim.lr_scheduler.MultiStepLR(optimizer, **scheduler_args)
         elif scheduler == 'ExponentialLR'.lower():
-            return torch.optim.lr_scheduler.ExponentialLR(optimizer, **kwargs)
+            return torch.optim.lr_scheduler.ExponentialLR(optimizer, **scheduler_args)
         elif scheduler == 'CosineAnnealingLR'.lower():
-            return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, **kwargs)
+            return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, **scheduler_args)
         elif scheduler == 'ReduceLROnPlateau'.lower():
-            return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, **kwargs)
+            return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, **scheduler_args)
         elif scheduler == 'CyclicLR'.lower():
-            return torch.optim.lr_scheduler.CyclicLR(optimizer, **kwargs)
+            return torch.optim.lr_scheduler.CyclicLR(optimizer, **scheduler_args)
         elif scheduler == 'OneCycleLR'.lower():
-            return torch.optim.lr_scheduler.OneCycleLR(optimizer, **kwargs)
+            return torch.optim.lr_scheduler.OneCycleLR(optimizer, **scheduler_args)
         elif scheduler == 'CosineAnnealingWarmRestarts'.lower():
-            return torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, **kwargs)
+            return torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, **scheduler_args)
         else:
             raise ValueError(f"Scheduler '{scheduler}' not recognized")
 
@@ -212,12 +229,12 @@ class TorchBuilder:
 
     @staticmethod
     def build_bottleneck_mlp(
-            input_size: int,
-            output_size: int,
-            hidden_dims: List[int],
-            activation: Activation = 'tanh',
-            output_activation: Activation = 'identity',
-            dtype: Optional[torch.dtype] = torch.float32
+        input_size: int,
+        output_size: int,
+        hidden_dims: List[int],
+        activation: Activation = 'tanh',
+        output_activation: Activation = 'identity',
+        dtype: Optional[torch.dtype] = torch.float32
     ) -> nn.Module:
         """
         Build a multi-layer bottleneck perceptron (MLP)
@@ -249,13 +266,13 @@ class TorchBuilder:
 
     @staticmethod
     def build_mlp(
-            input_size: int,
-            output_size: int,
-            n_layers: int,
-            size: int,
-            activation: Activation = 'tanh',
-            output_activation: Activation = 'identity',
-            dtype: Optional[torch.dtype] = torch.float32) -> nn.Module:
+        input_size: int,
+        output_size: int,
+        n_layers: int,
+        size: int,
+        activation: Activation = 'tanh',
+        output_activation: Activation = 'identity',
+        dtype: Optional[torch.dtype] = torch.float32) -> nn.Module:
         """
        Build a multi-layer perceptron (MLP) with the specified architecture.
 

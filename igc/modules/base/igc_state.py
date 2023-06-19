@@ -12,6 +12,7 @@ from pathlib import Path
 
 import loguru
 import torch
+import torch.distributed as dist
 
 from igc.shared.shared_torch_utils import get_device
 from ...shared.shared_accelerator import build_accelerator
@@ -108,6 +109,20 @@ class IgcBaseState:
         :return:
         """
         return self.rank == -1 or self.rank == 0
+
+    def is_last_worker(self):
+        """
+
+        :return:
+        """
+        if self.rank == -1:
+            return True
+
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+
+        is_last_worker = rank == (world_size - 1)
+        return is_last_worker
 
     def log_memory_usage(self):
         """

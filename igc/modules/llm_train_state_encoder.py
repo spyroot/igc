@@ -72,6 +72,7 @@ class LlmEmbeddingsTrainer(LlmModule):
 
         self._batch_log = 10
         self._eval_freq = 10
+        self._num_mask_passed = 10  # number of mask passes before we switch it off
         self._masked_freq = spec.llm_mask_freq
 
         self._eval_freq = 8
@@ -172,7 +173,7 @@ class LlmEmbeddingsTrainer(LlmModule):
 
         with torch.no_grad():
             for i, batch in enumerate(validation_dataset):
-                batch_size = batch_inputs['input_ids'].size(0)
+                batch_size = batch['input_ids'].size(0)
                 target_ids = batch["input_ids"][:, 1:].clone().detach()
                 mask = (batch["input_ids"] == self.tokenizer.pad_token_id)
                 mask = mask.to(self.device)
@@ -222,31 +223,46 @@ class LlmEmbeddingsTrainer(LlmModule):
         :return:
         """
         if isinstance(mask_type, MaskingType):
+            print("Got mask type")
             if mask_type == MaskingType.MASK_SECTION:
+                print("Got mask type MASK_SECTION")
                 dataset.mask_section(True)
-            if mask_type == MaskingType.MASK_NEW_TOKENS:
-                dataset.mask_new_tokens(is_enabled=True)
-            if mask_type == MaskingType.MASK_JSON_KV:
-                dataset.enable_masking()
-            if mask_type == MaskingType.NO_MASK:
+            elif mask_type == MaskingType.MASK_NEW_TOKENS:
+                print("Got mask type MASK_NEW_TOKENS")
+                dataset.mask_new_tokens(True)
+            elif mask_type == MaskingType.MASK_JSON_KV:
+                print("Got mask type MASK_JSON_KV")
+                dataset.enable_masking(mask_type=MaskingType.MASK_JSON_KV)
+            elif mask_type == MaskingType.NO_MASK:
                 dataset.disable_masking()
+            else:
+                raise ValueError("Unknown masking type")
+            return
 
         if isinstance(mask_type, MaskingOption):
             if mask_type == MaskingOption.TARGET:
                 dataset.mask_targets()
+                print("Got MaskingOption type TARGET")
             elif mask_type == MaskingOption.ALLOWED_VALUE:
+                print("Got MaskingOption type ALLOWED_VALUE")
                 dataset.mask_allowed_value()
             elif mask_type == MaskingOption.ODATA_ID:
+                print("Got MaskingOption type ODATA_ID")
                 dataset.mask_odata_id()
             elif mask_type == MaskingOption.TARGET_KEY:
+                print("Got MaskingOption type TARGET_KEY")
                 dataset.mask_targets_key()
             elif mask_type == MaskingOption.JSON_OBJECT:
+                print("Got MaskingOption type JSON_OBJECT")
                 dataset.mask_objects()
             elif mask_type == MaskingOption.JSON_ARRAY:
+                print("Got MaskingOption type JSON_ARRAY")
                 dataset.mask_arrays()
             elif mask_type == MaskingOption.MASK_API_PREFIX:
+                print("Got MaskingOption type MASK_API_PREFIX")
                 dataset.mask_api_prefix()
             elif mask_type == MaskingOption.MASK_NEW_TOKENS:
+                print("Got MaskingOption type MASK_NEW_TOKENS")
                 dataset.mask_new_tokens(is_enabled=True)
             else:
                 raise ValueError("Unknown masking type")
@@ -266,6 +282,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         :return:
         """
         self.model.resize_token_embeddings(len(self.dataset.tokenizer))
+
         self.logger.info(
             f"Rank {self.rank} starting train, device {self.device}")
 
@@ -303,6 +320,15 @@ class LlmEmbeddingsTrainer(LlmModule):
             drop_last=True,
             collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)
 
+        self._trainer_args.epochs = self.num_epochs - last_epoch
+        self._trainer_args.steps_per_epoch = len(train_dataloader)
+
+        self.scheduler = TorchBuilder.create_scheduler(
+            self._trainer_args.llm_scheduler,
+            optimizer=self.optimizer,
+            **vars(self._trainer_args)
+        )
+
         if self.is_accelerator:
             self.model, self.optimizer, train_dataloader, eval_dataloader = self.accelerator.prepare(
                 [self.model, self.optimizer, train_dataloader, eval_dataloader],
@@ -324,24 +350,25 @@ class LlmEmbeddingsTrainer(LlmModule):
                   f"batch stats freq: {batch_log_frequency}.")
 
         current_method_idx = 0
+        current_mask_method_counter = 0
         for epoch in range(last_epoch, self.num_epochs):
             total_loss = 0.0
             num_batches = 0
 
             batch_losses = np.zeros(total_batches)
             for i, batch in enumerate(train_dataloader):
-                if (epoch + 1) % self._masked_freq == 0:
-                    # switch to masking
+                if (epoch + 1) % self._masked_freq == 0 and current_mask_method_counter == 0:
+                    # switch to masking pass
                     current_method = mask_type[current_method_idx]
                     self.enable_masking_method(self.dataset, current_method)
                     current_method_idx = (current_method_idx + 1) % len(mask_type)
-                    # mask based on mask type
-                    mask = (batch['attention_mask'] == 0)
-                    batch["input_ids"] = batch["input_ids"].masked_fill(mask, -100)
                 else:
-                    self.dataset.disable_masking()
+                    # reset back
+                    if current_mask_method_counter == self._num_mask_passed:
+                        self.dataset.disable_masking()
+                        current_mask_method_counter = 0
+                        self.dataset.disable_masking()
 
-                # mask pad
                 target_ids = batch["input_ids"][:, 1:].clone().detach()
                 mask = (batch["input_ids"] == self.tokenizer.pad_token_id)
                 target_ids = target_ids.masked_fill(mask[:, 1:], -100)
@@ -349,9 +376,9 @@ class LlmEmbeddingsTrainer(LlmModule):
                 batch['input_ids'] = batch['input_ids'][:, :-1]
                 batch['attention_mask'] = batch['attention_mask'][:, :-1]
 
-                input_ids = batch['input_ids'].to(self.device)
-                masks = batch['attention_mask'].to(self.device)
-                target_ids = target_ids.to(self.device)
+                input_ids = batch['input_ids'].to(self.device, non_blocking=True)
+                masks = batch['attention_mask'].to(self.device, non_blocking=True)
+                target_ids = target_ids.to(self.device, non_blocking=True)
 
                 batch_inputs = {
                     'input_ids': input_ids,
@@ -368,9 +395,12 @@ class LlmEmbeddingsTrainer(LlmModule):
                 else:
                     loss.backward()
                 self.optimizer.step()
+                if self.is_last_worker():
+                    self.scheduler.step()
 
                 batch_losses[num_batches] = loss.item()
                 total_loss += loss.item()
+                torch.cuda.empty_cache()
                 #
                 if self.is_quantize:
                     self.model.apply(torch.quantization.propagate_qconfig_)
@@ -392,6 +422,7 @@ class LlmEmbeddingsTrainer(LlmModule):
                 #         self.metric_logger.log_metric("llm_emb_perplexity", perplexity, epoch)
 
                 num_batches += 1
+                current_mask_method_counter += 1
 
             # validation on epoch or freq
             if self.on_epoch_eval or ((epoch + 1) % self._eval_freq == 0):
@@ -436,9 +467,9 @@ class LlmEmbeddingsTrainer(LlmModule):
         :return:
         """
         masking_methods = [
-            MaskingOption.TARGET,
+            # MaskingOption.TARGET,
             MaskingOption.ODATA_ID,
-            MaskingType.MASK_SECTION
+            # MaskingType.MASK_SECTION
         ]
 
         self._train(
@@ -476,9 +507,13 @@ class LlmEmbeddingsTrainer(LlmModule):
         original_mask: torch.Tensor
     ):
         """
-          Computes  accuracy for either sequence classification or generation.
+        Computes  accuracy for either sequence classification or generation.
+
+        :param logits:
+        :param targets:
+        :param original_mask:
+        :return:
         """
-        # YOUR CODE HERE
         if logits.dim() == 2:
             y = torch.argmax(logits, dim=-1) == targets
             y = y.type(torch.float)
@@ -486,11 +521,9 @@ class LlmEmbeddingsTrainer(LlmModule):
         elif logits.dim() == 3:
             shifted_step_logits = logits[..., :-1, :].contiguous()
             shift_step_labels = targets[..., 1:].contiguous()
-
             masked_logits = shifted_step_logits.eq(-100)
             logits_inf = shifted_step_logits.masked_fill_(masked_logits, float("-Inf"))
             arg_maxed_idx = torch.argmax(logits_inf, dim=-1)
-
             r = shift_step_labels == arg_maxed_idx
             r = r.type(torch.float)
             return r.mean().item()
