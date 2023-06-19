@@ -8,7 +8,7 @@ Author: Mus mbayramo@stanford.edu
 import itertools
 import json
 import time
-from typing import List
+from typing import List, Optional
 
 import torch
 from torch.utils.data import DataLoader
@@ -29,9 +29,13 @@ def custom_collate_fn(samples):
 
 
 def decode_masked_output(
-    dataset, input_ids: torch.Tensor, attention_mask: torch.Tensor):
+    dataset,
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    dont_mask: Optional[bool] = False,
+):
     """
-
+    :param dont_mask:
     :param dataset:
     :param input_ids:
     :param attention_mask:
@@ -39,11 +43,12 @@ def decode_masked_output(
     """
     unmasked_tokens = []
     for i, attention in enumerate(attention_mask[0]):
-        if attention.item() == 1:
+        if attention.item() == 1 or dont_mask is True:
             unmasked_tokens.append(input_ids[0, i].item())
 
     decoded_tokens = dataset.tokenizer.decode(unmasked_tokens)
     print("Decoded Tokens:", decoded_tokens)
+    print("-------------------------------------")
 
 
 def decode_masked_output_to_string(
@@ -168,10 +173,9 @@ def masking_test_from_dataset_from_id(ids: List[int], masks_types, decoder=False
             decode_masked_output(dataset, input_ids, attention_mask)
 
 
-def mask_all_test_from_dataset_from_id(ids: List[int], masks_types, decoder=False):
+def mask_all_test_from_dataset_from_id(ids: List[int], decoder=False):
     """
     :param ids:
-    :param masks_types:
     :param decoder:
     :return:
     """
@@ -313,6 +317,11 @@ def mask_all_over_dataset(cmd, mask_type):
 
 
 def test_read_from_file_and_mask(cmd):
+    """
+
+    :param cmd:
+    :return:
+    """
     file_path1 = "datasets/orig/10.252.252.209/_redfish_v1_AccountService.json"
     file_path2 = "datasets/orig/10.252.252.209/_redfish_v1_AccountService_Accounts.json"
     file_path3 = "datasets/orig/10.252.252.209/_redfish_v1_Systems_System.Embedded.1_SecureBoot.json"
@@ -335,6 +344,96 @@ def test_read_from_file_and_mask(cmd):
     # print(f"Starting checking masking actions {file_path3}")
     # # values
     # masking_from_json_file_test(cmd, file_path3, ": ", end_tok=["\","])
+
+
+def mask_and_create_input_tensor(cmd, mask_type, input_id):
+    """
+    :return:
+    """
+    dataset = MaskedJSONDataset(
+        "datasets",
+        verbose=True,
+        do_consistency_check=False
+    )
+
+    torch.set_printoptions(threshold=5000)
+    if mask_type == MaskingOption.TARGET:
+        dataset.mask_targets()
+    elif mask_type == MaskingOption.ODATA_ID:
+        dataset.mask_odata_id()
+    else:
+        raise ValueError("Unknown")
+
+    data = dataset[input_id]
+    input_id = data["input_ids"]
+    attention_mask = data["attention_mask"]
+    mask = (attention_mask == 0)
+    mask_input_ids = input_id.masked_fill(mask, -100)
+    decoded_text = dataset.tokenizer.decode(input_id)
+    input_id = input_id.unsqueeze(0)
+    attention_mask = attention_mask.unsqueeze(0)
+    print("Un masked decoded")
+    decode_masked_output(dataset, input_id, attention_mask, dont_mask=True)
+    print("Masked decoded", input_id.shape)
+    decode_masked_output(dataset, input_id, attention_mask)
+
+
+def mask_and_create_input_tensor_dataloader(mask_type):
+    """
+    :return:
+    """
+    dataset = MaskedJSONDataset(
+        "datasets",
+        verbose=True,
+        do_consistency_check=False
+    )
+
+    torch.set_printoptions(threshold=5000)
+    print("######## Start mask_all_over_dataset:  ")
+    print("# Data from a dataset: ")
+    print("dataset size:", len(dataset))
+
+    if mask_type == MaskingOption.TARGET:
+        dataset.mask_targets()
+    elif mask_type == MaskingOption.ODATA_ID:
+        dataset.mask_odata_id()
+    else:
+        raise ValueError("Unknown")
+
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    for idx, data in enumerate(dataloader):
+        input_ids = data["input_ids"]
+        attention_mask = data["attention_mask"]
+        # print("Original", decode_masked_output(dataset, input_ids, attention_mask, all=True))
+        print("idx", idx)
+        decode_masked_output(dataset, input_ids, attention_mask)
+
+
+def mask_section(input_id):
+    """
+    :return:
+    """
+    dataset = MaskedJSONDataset(
+        "datasets",
+        verbose=True,
+        do_consistency_check=False
+    )
+
+    torch.set_printoptions(threshold=5000)
+    dataset.mask_section(True)
+
+    data = dataset[input_id]
+    input_id = data["input_ids"]
+    attention_mask = data["attention_mask"]
+    mask = (attention_mask == 0)
+    mask_input_ids = input_id.masked_fill(mask, -100)
+    decoded_text = dataset.tokenizer.decode(input_id)
+    input_id = input_id.unsqueeze(0)
+    attention_mask = attention_mask.unsqueeze(0)
+    print("Un masked decoded")
+    decode_masked_output(dataset, input_id, attention_mask, dont_mask=True)
+    print("Masked decoded", input_id.shape)
+    decode_masked_output(dataset, input_id, attention_mask)
 
 
 def main(cmd):
@@ -371,12 +470,18 @@ def main(cmd):
 
     print("\n\n")
     print("Starting checking odata masking from mask_all_test_from_dataset_from_id")
-    mask_all_test_from_dataset_from_id(ids=id_list, masks_types=masks_type)
+    # mask_all_test_from_dataset_from_id(ids=id_list, masks_types=masks_type)
+    #
+    # print("\n\n")
+    # print("Starting pass over entire dataset")
+    # for mask_type in masks_type:
+    #     mask_all_over_dataset(cmd, mask_type)
 
-    print("\n\n")
-    print("Starting pass over entire dataset")
-    for mask_type in masks_type:
-        mask_all_over_dataset(cmd, mask_type)
+    mask_and_create_input_tensor(cmd, MaskingOption.ODATA_ID, 18588)
+    mask_and_create_input_tensor(cmd, MaskingOption.TARGET, 9669)
+    mask_section(9669)
+
+    # mask_and_create_input_tensor_dataloader(MaskingOption.ODATA_ID)
 
 
 if __name__ == '__main__':

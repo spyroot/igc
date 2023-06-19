@@ -50,6 +50,16 @@ class MaskingOption(Enum):
     KEY_VALUE_PAIR = auto()
     MASK_API_PREFIX = auto()
     MASK_NEW_TOKENS = auto()
+    Actions = auto()
+
+
+class MaskingType(Enum):
+    """
+    """
+    NO_MASK = auto()
+    MASK_SECTION = auto()
+    MASK_NEW_TOKENS = auto()
+    MASK_JSON_KV = auto()
 
 
 class MaskedJSONDataset(JSONDataset, ABC):
@@ -105,8 +115,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
             raw_json_directory_path=raw_json_directory_path,
         )
 
-        self._mask_new_tokens = False
-        self._dont_mask = True
+        self._mask_type = MaskingType.NO_MASK
 
         # tokens we use for masking
         special_tokens = self.get_special_tokens()
@@ -120,6 +129,9 @@ class MaskedJSONDataset(JSONDataset, ABC):
         redfish_target = special_tokens["target"].tolist()
         redfish_target = [value for sublist in redfish_target for value in sublist]
 
+        redfish_actions = special_tokens["Actions"].tolist()
+        self._redfish_actions = [value for sublist in redfish_actions for value in sublist]
+
         redfish_target_key = special_tokens["\"target\""]
         if isinstance(redfish_target_key, int):
             redfish_target_key = [redfish_target_key]
@@ -129,19 +141,23 @@ class MaskedJSONDataset(JSONDataset, ABC):
         array_begin = special_tokens["["].item()
         array_end = special_tokens["]"].item()
         array_end_coma = special_tokens["],"].tolist()
-        object_begging = special_tokens["{"].item()
-        object_end = special_tokens["}"].item()
+        self._object_beg_tok_id = special_tokens["{"].item()
+        self._object_end_tok_id = special_tokens["}"].item()
         value_terminate = special_tokens["\""].item()
-        comma = special_tokens[","].item()
+        self._va_term_comma_tok_id = self.tokenizer("\",")
+        self._comma_token_id = [special_tokens[","].item()]
+        self._at_token_id = self.tokenizer.encode("@")
 
         # self._object_close = [[object_end],
         #                       [object_end, comma],
         #                       [value_terminate, object_end],
         #                       [value_terminate, object_end, comma]]
 
-        self._object_close = [[object_end],
-                              [value_terminate, object_end],
-                              [value_terminate, object_end, comma]]
+        self._object_close = [
+            [self._object_end_tok_id],
+            # [value_terminate, object_end],
+            # [value_terminate, object_end, comma]
+        ]
 
         # self._object_close = [[object_end],
         #                       [object_end, comma]]
@@ -159,7 +175,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
             MaskingOption.ALLOWED_VALUE: (redfish_allow, self._array_close),
             MaskingOption.TARGET: (redfish_target, self._object_close),
             MaskingOption.TARGET_KEY: (redfish_target_key, self._object_close),
-            MaskingOption.JSON_OBJECT: ([object_begging], [[object_end]]),
+            MaskingOption.JSON_OBJECT: ([self._object_beg_tok_id], [[self._object_end_tok_id]]),
             MaskingOption.JSON_ARRAY: ([array_begin], [[array_end]]),
             # MaskingOption.KEY_VALUE_PAIR: ([array_begin], [[array_end]]),
             MaskingOption.MASK_API_PREFIX: ([api_prefix_ids], [[self._object_close]])
@@ -176,36 +192,42 @@ class MaskedJSONDataset(JSONDataset, ABC):
         one epoch masking and then another epoch unmasked.
         :return:
         """
-        self._dont_mask = False
+        self._cache = [None] * len(self._data["train_data"])
+        self._mask_type = MaskingType.MASK_JSON_KV
 
     def disable_masking(self):
         """Disable masking.
         :return:
         """
-        self._dont_mask = True
+        self._cache = [None] * len(self._data["train_data"])
+        self._mask_type = MaskingType.NO_MASK
 
     def mask_allowed_value(self):
         """
         Mask the allowed value in the JSON dataset.
         """
+        self.enable_masking()
         self._current_token_id_mask = [self._masking_option[MaskingOption.ALLOWED_VALUE]]
 
     def mask_odata_id(self):
         """
         Mask the odata.id value in the JSON dataset.
         """
+        self.enable_masking()
         self._current_token_id_mask = [self._masking_option[MaskingOption.ODATA_ID]]
 
     def mask_targets(self):
         """
         Mask the target value in the JSON dataset.
         """
+        self.enable_masking()
         self._current_token_id_mask = [self._masking_option[MaskingOption.TARGET]]
 
     def mask_targets_key(self):
         """
         Mask the target key in the JSON dataset.
         """
+        self.enable_masking()
         self._current_token_id_mask = [self._masking_option[MaskingOption.TARGET_KEY]]
 
     def mask_objects(self):
@@ -213,6 +235,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
         Mask the object scope in the JSON dataset.
         :return:
         """
+        self.enable_masking()
         self._current_token_id_mask = [self._masking_option[MaskingOption.JSON_OBJECT]]
 
     def mask_arrays(self):
@@ -220,6 +243,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
         Mask the array in the JSON dataset.
         :return:
         """
+        self.enable_masking()
         self._current_token_id_mask = [self._masking_option[MaskingOption.JSON_ARRAY]]
 
     def mask_new_tokens(self, is_enabled: bool):
@@ -227,11 +251,25 @@ class MaskedJSONDataset(JSONDataset, ABC):
         Mask the array in the JSON dataset.
         :return:
         """
-        del self._cache
-        self._cache = [None] * len(self._data["train_data"])
-        self._mask_new_tokens = is_enabled
+        self.enable_masking()
+        if is_enabled:
+            self._mask_type = MaskingType.MASK_NEW_TOKENS
+        else:
+            self._mask_type = MaskingType.NO_MASK
+
+    def mask_section(self, is_enabled: bool):
+        """
+        Mask the array in the JSON dataset.
+        :return:
+        """
+        self.enable_masking()
+        if is_enabled:
+            self._mask_type = MaskingType.MASK_SECTION
+        else:
+            self._mask_type = MaskingType.NO_MASK
 
     def mask_api_prefix(self):
+        self.enable_masking()
         self._current_token_id_mask = [self._masking_option[MaskingOption.MASK_API_PREFIX]]
 
     @staticmethod
@@ -302,6 +340,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
         attention_mask: torch.Tensor,
         target_ids: Union[int, List[int]],
         end_toks_ids: Union[int, List[int], List[List[int]]] = 92,
+        reset_token_ids: Union[int, List[int]] = 0,
         return_original: bool = False,
     ) -> torch.Tensor:
 
@@ -319,6 +358,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
             attention_mask = mask_specific_key_and_value(json_lines,
             target_key, tokenizer=tokenizer, debug=True)
 
+        :param reset_token_ids:
         :param attention_mask:
         :param input_ids:
         :param return_original: Boolean indicating whether to return the original attention mask
@@ -338,27 +378,103 @@ class MaskedJSONDataset(JSONDataset, ABC):
         if isinstance(target_ids, int):
             target_ids = [target_ids]
 
+        if isinstance(reset_token_ids, int):
+            reset_token_ids = [reset_token_ids]
+
+        print("reset_token_ids", reset_token_ids)
+
         end_toks_lens = [len(end_toks) for end_toks in end_toks_ids]
         target_len = len(target_ids)
 
         for i in range(input_ids.shape[1] - target_len + 1):
             if input_ids[0, i:i + target_len].tolist() == target_ids:
-                attention_mask[0, i:i + target_len] = 1
-                j = i + target_len
-
-                found_end_toks = False
-                while j < input_ids.shape[1]:
-                    current_token = input_ids[0, j:j + max(end_toks_lens)].tolist()
-                    if any(current_token[-len(et):] == et for et in end_toks_ids):
-                        attention_mask[0, j:j + max(end_toks_lens)] = 1
-                        found_end_toks = True
+                token_size = 0
+                old_i = i
+                i = i + target_len
+                while i < input_ids.shape[1]:
+                    current_token = input_ids[0, i:i + max(end_toks_lens)].tolist()
+                    if any(current_token == reset_token_id for reset_token_id in reset_token_ids):
                         break
-                    attention_mask[0, j] = 1
-                    j += 1
+                    if any(current_token[-len(et):] == et for et in end_toks_ids):
+                        token_size = i + max(end_toks_lens)
+                        break
                     i += 1
 
-                if not found_end_toks:
-                    attention_mask[0, i + target_len:] = 0
+                if token_size > 0:
+                    attention_mask[0, old_i:token_size] = 1
+                    i += token_size
+
+        if return_original:
+            if attention_mask.sum() == 0:
+                attention_mask[:, :] = 1
+
+        return attention_mask
+
+    @staticmethod
+    def mask_tensor_ids_json_section(
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        target_token: Union[int, List[int]],
+        start_token: Union[int, List[int]],
+        end_token: Union[int, List[int]],
+        return_original: bool = False,
+    ) -> torch.Tensor:
+
+        """
+        Mask capture section
+
+        Shapes attention  [1, x]
+        Shapes input_idx [1, x]
+
+        :param attention_mask:
+        :param input_ids:
+        :param start_token: The start token of the section
+        :param end_token: The end token of the section
+        :param return_original: Boolean indicating whether to return the original attention mask
+                                if the section is not found
+        :return: The computed new attention mask
+        """
+        attention_mask = attention_mask.clone()
+        if attention_mask.ndim == 1:
+            attention_mask = attention_mask.unsqueeze(0)
+        attention_mask[:, :] = 0
+
+        if isinstance(target_token, int):
+            target_token = [target_token]
+
+        if isinstance(start_token, int):
+            start_token = [start_token]
+
+        if isinstance(end_token, int):
+            end_token = [end_token]
+
+        print("Start token:", start_token)
+        print("End token:", end_token)
+
+        start_len = len(start_token)
+        end_len = len(end_token)
+
+        open_token = 0
+        for i in range(input_ids.shape[1] - start_len + 1):
+            if input_ids[0, i:i + start_len].tolist() == target_token:
+                token_size = 0
+                old_i = i
+                i = i + start_len
+                open_token = 1  # opening token
+                while i < input_ids.shape[1]:
+                    current_token = input_ids[0, i:i + end_len].tolist()
+                    if current_token == start_token:
+                        open_token += 1
+                    if current_token == end_token:
+                        open_token -= 1
+                    if open_token == 0:
+                        token_size = i + end_len
+                        break
+                    i += 1
+
+                if token_size > 0:
+                    attention_mask[0, old_i:token_size] = 1
+                    i += token_size
 
         if return_original:
             if attention_mask.sum() == 0:
@@ -578,7 +694,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
         input_ids = data['input_ids']
         attention_mask = data['attention_mask']
 
-        if self._dont_mask:
+        if self._mask_type == MaskingType.NO_MASK:
             data['file_idx'] = torch.tensor(idx)
             self._cache[idx] = data
             return data
@@ -588,12 +704,17 @@ class MaskedJSONDataset(JSONDataset, ABC):
             attention_mask = attention_mask.unsqueeze(0)
 
         new_mask = attention_mask
-        if self._mask_new_tokens:
+        if self._mask_type == MaskingType.MASK_NEW_TOKENS:
             data["attention_mask"] = self.mask_all_new_tokens(input_ids, new_mask)
+        elif self._mask_type == MaskingType.MASK_SECTION:
+            data["attention_mask"] = self.mask_tensor_ids_json_section(
+                input_ids, new_mask, self._redfish_actions, self._object_beg_tok_id, self._object_end_tok_id)
         else:
             for i, (token, end_token) in enumerate(self._current_token_id_mask, start=1):
                 new_mask = self.mask_tensor_ids_json_kv_span(
-                    input_ids, new_mask, target_ids=token, end_toks_ids=end_token
+                    input_ids, new_mask, target_ids=token,
+                    end_toks_ids=end_token,
+                    reset_token_ids=[self._comma_token_id, self._at_token_id, self._object_beg_tok_id]
                 ).squeeze(0)
 
                 # Apply the masked attention mask for each iteration

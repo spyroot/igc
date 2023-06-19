@@ -379,6 +379,11 @@ def add_trainer_group(parser):
              "(A model we use for state encoder, goal encoder, "
              "goal and parameter encoder.)"
     )
+    parser.add_argument(
+        "--llm_mask_freq",
+        type=int, default=5,
+        help="How frequent we change mask for llm model."
+    )
 
     parser.add_argument(
         "--rl",
