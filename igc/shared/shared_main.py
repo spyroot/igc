@@ -17,7 +17,10 @@ def shared_main(
 
     :return:
     """
+
     args, parser_groups = shared_arg_parser()
+    args.local_rank = int(os.environ.get('LOCAL_RANK', -1))
+
     if args.local_rank == -1:
         if args.device is None:
             args.device = get_device()

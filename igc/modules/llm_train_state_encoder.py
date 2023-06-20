@@ -323,7 +323,6 @@ class LlmEmbeddingsTrainer(LlmModule):
                          f"to device {self.device}, "
                          f"using accelerate: {self.is_accelerator}")
 
-
         #     self.model.to(self.device)
         #
         # if not self.is_accelerator:
