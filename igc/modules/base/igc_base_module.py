@@ -6,39 +6,52 @@ for all trainers.
 Author:Mus mbayramo@stanford.edu
 """
 import argparse
+import json
 import os
+import shutil
+import urllib
 import warnings
 from collections import namedtuple
 from pathlib import Path
-from typing import Optional, Any, Union
+from typing import Optional, Any, Union, Dict
+from urllib.error import URLError
 
+import pkg_resources
 import torch
 from torch.utils.data import random_split, Subset
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from .igc_metric_logger import MetricLogger
-from .igc_specs import make_default_spec
 from .igc_state import IgcBaseState
-from .igc_tokenize_state import GenericTokenizeState
+from ...ds import ds_utils as igc_util
+from .igc_specs import make_default_spec
+from .igc_metric_logger import MetricLogger
 from ...ds.redfish_dataset import JSONDataset
+from .igc_tokenize_state import GenericTokenizeState
+from ...modules.base.igc_abstract_logger import AbstractLogger
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
+
+
+class DownloadModuleError(Exception):
+    """Base class for module download """
+    pass
 
 
 class IgcModule(IgcBaseState):
     """
     This Base igc module, it encapsulates shared logic for all trainers.
     """
+    logger = AbstractLogger.create_logger()
 
     def __init__(
-        self,
-        module_name: str,
-        spec: argparse.Namespace,
-        llm_model, llm_tokenizer,
-        ds: Optional[JSONDataset] = None,
-        metric_logger: Optional[MetricLogger] = None,
-        is_inference: Optional[bool] = False,
-        device=None
+            self,
+            module_name: str,
+            spec: argparse.Namespace,
+            llm_model, llm_tokenizer,
+            ds: Optional[JSONDataset] = None,
+            metric_logger: Optional[MetricLogger] = None,
+            is_inference: Optional[bool] = False,
+            device=None
     ):
         """
 
@@ -241,9 +254,9 @@ class IgcModule(IgcBaseState):
         return random_split(self.dataset, [train_size, eval_size])
 
     def split_slice_dataset(
-        self,
-        train_ratio: float = 0.8,
-        sample_ratio: float = 0.01
+            self,
+            train_ratio: float = 0.8,
+            sample_ratio: float = 0.01
     ) -> list[Subset[Any]]:
         """
         Split a subset of the dataset and specify the amount of sample used.
@@ -377,9 +390,9 @@ class IgcModule(IgcBaseState):
 
     @staticmethod
     def copy_checkpoint(
-        specs: Union[str, argparse.Namespace],
-        module_name: str,
-        pre_trained: PreTrainedModel,
+            specs: Union[str, argparse.Namespace],
+            module_name: str,
+            pre_trained: PreTrainedModel,
     ) -> tuple[Union[None, PreTrainedModel], int, str]:
         """
         Copy last checkpoint to last saved model to model dir and return
@@ -479,10 +492,10 @@ class IgcModule(IgcBaseState):
         self._is_trained = checkpoint['is_trained']
 
     def save_checkpoint(
-        self,
-        checkpoint_dir,
-        epoch: int,
-        num_check_points_to_keep: Optional[int] = 3,
+            self,
+            checkpoint_dir,
+            epoch: int,
+            num_check_points_to_keep: Optional[int] = 3,
     ):
         """
         Save model checkpoint.
@@ -507,9 +520,9 @@ class IgcModule(IgcBaseState):
         self.logger.info(f"Rank: {self.rank} {self.module_name} checkpoint saved to {checkpoint_file}.")
 
     def load_checkpoint(
-        self, checkpoint_dir: str,
-        resuming="True",
-        map_location=None
+            self, checkpoint_dir: str,
+            resuming="True",
+            map_location=None
     ) -> int:
         """
         Load model checkpoint for resuming training.
@@ -574,13 +587,13 @@ class IgcModule(IgcBaseState):
 
     @staticmethod
     def load(
-        module_name: str,
-        model: torch.nn.Module,
-        specs: Union[str, argparse.Namespace],
-        is_inference: bool = True,
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
-        map_location=None,
+            module_name: str,
+            model: torch.nn.Module,
+            specs: Union[str, argparse.Namespace],
+            is_inference: bool = True,
+            optimizer: Optional[torch.optim.Optimizer] = None,
+            scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
+            map_location=None,
     ) -> tuple[Optional[int], bool]:
         """
         Load model from checkpoint for inference.
@@ -699,3 +712,315 @@ class IgcModule(IgcBaseState):
                 self.logger.info(f"CUDA utilization:", torch.cuda.utilization())
             if hasattr(torch.cuda, 'memory_summary'):
                 torch.cuda.memory_summary()
+
+    @staticmethod
+    def read_model_specs(
+            default_model_file: str = "../datasets/models.json"
+    ):
+        """Read model specs file.
+
+        :return:  The model specs data and root dir where the modules need to be saved
+        """
+
+        dataset_path = pkg_resources.resource_filename(
+            "igc", default_model_file)
+
+        if not os.path.isfile(dataset_path):
+            raise FileNotFoundError(
+                f"The model specs file '{dataset_path}' does not exist.")
+
+        try:
+            with open(dataset_path, "r") as file:
+                models_data = json.load(file)
+
+        except Exception as e:
+            raise ValueError(
+                f"Failed to parse the model specs file '{dataset_path}': {str(e)}")
+
+        required_keys = ["mirrors"]
+        for key in required_keys:
+            if key not in models_data or not isinstance(models_data[key], dict):
+                raise ValueError(
+                    f"Invalid model specs file. '{key}' key is missing or not a dictionary.")
+
+        for mirror_url, mirror_entries in models_data["mirrors"].items():
+            if not isinstance(mirror_entries, list):
+                raise ValueError(
+                    f"Invalid model specs file. Mirror entries for '{mirror_url}' is not a list.")
+
+            mandatory_keys = ["spec", "files", "local_file"]
+
+            for entry in mirror_entries:
+                if not isinstance(entry, dict):
+                    raise ValueError(
+                        f"Invalid model specs file. "
+                        f"Mirror entry for '{mirror_url}' is not a dictionary.")
+
+        return models_data, os.path.abspath(os.path.dirname(dataset_path))
+
+    @staticmethod
+    def _download_module(
+            url: str,
+            path: str,
+            filename: Optional[str] = None,
+            checksum: Optional[str] = None,
+            overwrite: Optional[bool] = False,
+            retry: int = 5,
+            is_strict=False
+    ) -> tuple[bool, str]:
+        """
+        Download igc module file from url and store in default location.
+        Each module is under datasets/modules.
+
+        Method will create all directory.
+
+        :param overwrite: if we need overwrite, no checksum check.
+        :param is_strict: if we couldn't find any raise exception otherwise it just warnings.
+        :param path: where want to save a file.
+        :param url: link to a file.
+        :param filename:  Name to save the file under. If None, use the basename of the URL.
+        :param checksum:  Checksum of the download. If None, or empty string will not do check.
+        :param retry: num retry
+        :return:
+        """
+        logger = AbstractLogger.create_logger()
+        logger.info("Downloading module...")
+
+        if not isinstance(url, str):
+            raise DownloadModuleError(f"The 'url' argument must "
+                                      f"be a string, not {type(url).__name__}.")
+
+        if not isinstance(path, str):
+            raise DownloadModuleError(f"The 'path' argument must "
+                                      f"be a string, not {type(path).__name__}.")
+
+        if filename is not None and not isinstance(filename, str):
+            raise DownloadModuleError(f"The 'filename' argument must "
+                                      f"be a string or None, not {type(filename).__name__}.")
+
+        if checksum is not None and not isinstance(checksum, str):
+            raise DownloadModuleError(f"The 'checksum' argument must "
+                                      f"be a string or None, not {type(checksum).__name__}.")
+
+        if not isinstance(overwrite, bool):
+            raise DownloadModuleError(f"The 'overwrite' argument must "
+                                      f"be a boolean, not {type(overwrite).__name__}.")
+
+        if not isinstance(retry, int):
+            raise DownloadModuleError(f"The 'retry' argument must "
+                                      f"be an integer, not {type(retry).__name__}.")
+
+        if not isinstance(is_strict, bool):
+            raise DownloadModuleError(f"The 'is_strict' argument must "
+                                      f"be a boolean, not {type(is_strict).__name__}.")
+
+        root_dir = Path(path).expanduser()
+        if Path(root_dir).is_dir():
+            logger.debug("Creating directory structure.".format(str(root_dir)))
+            os.makedirs(root_dir, exist_ok=True)
+
+        if not filename:
+            filename = os.path.basename(url)
+
+        full_path = root_dir / filename
+        full_path = full_path.resolve()
+
+        # check if file is already present locally
+        if not overwrite:
+            # we check checksum if needed.
+            if checksum is not None and len(checksum) > 0 and full_path.exists():
+                # check integrity
+                if not igc_util.check_integrity(str(full_path), checksum):
+                    warnings.warn(f"Checksum mismatched for a file: {str(full_path)}")
+                    return False, ""
+                else:
+                    return True, str(full_path)
+            else:
+                if full_path.exists():
+                    hash_checksum = igc_util.md5_checksum(str(full_path))
+                    warnings.warn("File already exists. hash {}".format(hash_checksum))
+                    return full_path.exists(), str(full_path)
+                else:
+                    logger.debug("File not not found {}".format(str(full_path)))
+
+        logger.debug("Making http head request {}".format(url))
+        final_url = igc_util.do_http_head(url, max_redirect=retry)
+        try:
+            logger.info(
+                f"Fetching {url} location {full_path}."
+            )
+            igc_util.fetch_content(final_url, str(full_path))
+
+        except (urllib.error.URLError, OSError) as e:
+            warnings.warn("Failed to fetch".format(final_url))
+            if is_strict:
+                raise e
+
+        # check integrity of downloaded file
+        if checksum is not None and full_path.exists():
+            if not igc_util.check_integrity(str(full_path), checksum):
+                warnings.warn(f"Checksum {checksum} mismatch.")
+                return False, ""
+
+        logger.info(f"Dataset exists {full_path.exists()} and path {str(full_path)}")
+        return full_path.exists(), str(full_path)
+
+    @staticmethod
+    def download_module(
+            mirror_url: str,
+            module_dir: str,
+            module_filename: str,
+            checksum: str = None,
+            is_overwrite: Optional[bool] = False,
+    ):
+        """
+        Download a module file from the specified mirror URL.
+
+        :param module_dir: a directory where we want to save a file.
+        :param mirror_url: The URL of the mirror from which to download the file.
+        :param module_filename: The name of the file to be downloaded.
+        :param checksum: Optional. The checksum value for the file. If provided,
+                         the downloaded file's checksum will be
+                         verified against this value.
+
+        :param is_overwrite:  overwrite existing file.
+        :return: True if the file is downloaded successfully, False otherwise.
+        """
+
+        logger = IgcModule.logger
+        _dataset_file = []
+
+        if not isinstance(mirror_url, str):
+            raise DownloadModuleError(
+                f"mirror_url should be a string, received {type(mirror_url)}")
+        if not isinstance(module_filename, str):
+            raise DownloadModuleError(
+                f"_filename should be a string, received {type(module_filename)}")
+        if checksum is not None and not isinstance(checksum, str):
+            raise DownloadModuleError(
+                f"checksum should be a string or None, received {type(checksum)}")
+
+        try:
+            logger.debug(f"Downloading from mirror: {mirror_url} file: {module_filename}")
+            if checksum is not None:
+                logger.debug(f"Using checksum: {checksum}")
+            else:
+                logger.debug(f"No md5 checksum provided.")
+
+            if checksum is not None:
+                if igc_util.check_integrity(f"{module_dir}/{module_filename}", md5=checksum):
+                    return True
+
+            _is_downloaded_done, file_path = IgcModule._download_module(
+                url=mirror_url,
+                path=module_dir,
+                filename=module_filename,
+                checksum=checksum,
+                overwrite=is_overwrite
+            )
+            _dataset_file.append(file_path)
+            if _is_downloaded_done:
+                logger.debug("All file in the system: {}".format(file_path))
+                return True
+
+        except URLError as e:
+            logger.debug(
+                "Failed to download {} {}. "
+                "Moving to the next mirror.".format(mirror_url, module_filename))
+            logger.error(e)
+
+        return False
+
+    @staticmethod
+    def download_modules(mirrors: Union[str, Dict]):
+        """
+        Download multiple module files from the specified mirror URLs.
+        Either single string or dictionary of mirror URLs can be provided.
+
+        :return:
+        """
+        # If mirrors is a string,  single mirror URL
+        if isinstance(mirrors, str):
+            mirrors = {mirrors: None}
+        elif isinstance(mirrors, dict):
+            pass
+        else:
+            raise DownloadModuleError(
+                f"mirrors should be a string "
+                f"or a dictionary, received {type(mirrors).__name__}.")
+
+        logger = IgcModule.logger
+        logger.info("Downloading module files...")
+
+        all_files_downloaded = True
+
+        for mirror_url, files in mirrors.items():
+            if isinstance(files, str):
+                # If files is a string, assume it's a single file without a specified local path
+                files = {files: None}
+            elif not isinstance(files, dict) and files is not None:
+                raise DownloadModuleError(
+                    f"The files for mirror URL {mirror_url} should be a string or a dictionary, "
+                    f"received {type(files).__name__}.")
+
+            logger.debug(f"Downloading from mirror: {mirror_url}")
+
+            for remote_file, local_file in files.items():
+                if isinstance(local_file, str) and local_file:
+                    local_path = local_file
+                elif local_file is None:
+                    local_path = None
+                else:
+                    raise DownloadModuleError(
+                        f"The local file path for {remote_file} should be a string or None, "
+                        f"received {type(local_file).__name__}.")
+
+                logger.debug(f"Downloading file: {remote_file}")
+                download_result = IgcModule.download_module(
+                    mirror_url, remote_file, is_overwrite=True
+                )
+
+                if download_result:
+                    logger.info(f"Downloaded file: {remote_file}")
+                    if local_path is not None:
+                        shutil.move(download_result[1], local_path)
+                        logger.info(f"Moved file to: {local_path}")
+                else:
+                    logger.error(f"Failed to download file: {remote_file}")
+                    all_files_downloaded = False
+
+        return all_files_downloaded
+
+    @staticmethod
+    def download():
+        """
+        :return:
+        """
+        models_data, package_root_dir = IgcModule.read_model_specs()
+        logger = IgcModule.logger
+        logger.info(f"Downloading module to {package_root_dir}")
+
+        for mirror, mirror_entries in models_data["mirrors"].items():
+            module_remote_files = [mirror_entry[k] for mirror_entry in mirror_entries
+                                   for k in mirror_entry if k == "files"][0]
+            module_local_files = [mirror_entry[k] for mirror_entry in mirror_entries
+                                  for k in mirror_entry if k == "local_file"][0]
+
+            module_local_dirs = [os.path.join(package_root_dir, os.path.dirname(file))
+                                 for file in module_local_files]
+            module_local_files = [os.path.join(package_root_dir, file)
+                                  for file in module_local_files]
+
+            _download_result = []
+            for url, module_dir, module_file in zip(
+                    module_remote_files, module_local_dirs, module_local_files):
+                logger.info(f"Downloading module from {url} to {module_file}")
+                os.makedirs(module_dir, exist_ok=True)
+                download_result = IgcModule.download_module(
+                    url, module_dir, module_file, is_overwrite=True
+                )
+                _download_result.append(download_result)
+            if all(_download_result):
+                break
+
+

@@ -8,30 +8,21 @@ Author:Mus mbayramo@stanford.edu
 import argparse
 import sys
 import warnings
-from enum import auto, Enum
 from typing import Optional, Dict, Union, List, Tuple
 
 import loguru
 import torch
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from igc.ds.redfish_dataset import JSONDataset
-from igc.ds.redfish_masked_dataset import MaskedJSONDataset
-from igc.modules.base.igc_llm_base_module import LlmModule
-from igc.modules.base.igc_metric_logger import MetricLogger
-from igc.modules.igc_train_auto_state_encoder import AutoencoderTrainer
-from igc.modules.llm_train_goal_extract import GoalExtractorTrainer
-from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
-from igc.modules.shared.llm_shared import from_pretrained_default, load_igc_tokenizer
-
-
-class ModelType(Enum):
-    """
-
-    """
-    PRETRAINED = auto()
-    FINETUNED = auto()
-    UNTRAINED = auto()
+from ...ds.redfish_dataset import JSONDataset
+from ...ds.redfish_masked_dataset import MaskedJSONDataset
+from ...modules.base.igc_llm_base_module import LlmModule
+from ...modules.base.igc_metric_logger import MetricLogger
+from ...modules.igc_train_auto_state_encoder import AutoencoderTrainer
+from ...modules.llm_train_goal_extract import GoalExtractorTrainer
+from ...modules.llm_train_state_encoder import LlmEmbeddingsTrainer
+from ...modules.shared.llm_shared import from_pretrained_default, load_igc_tokenizer
+from ...shared.modules_typing import ModelType, IgcModuleType
 
 
 class IgcLanguageModule:
@@ -234,7 +225,9 @@ class IgcLanguageModule:
     def make_base_model(
         spec: Union[str, argparse.Namespace]
     ) -> Tuple[Optional[PreTrainedModel], Optional[PreTrainedTokenizer]]:
-        """Create base llm model with igc tokenizer.
+        """
+        Create base llm model with igc tokenizer.
+
         :param spec: path or spec
         :return: pretrained model and tokenizer
         """
@@ -245,6 +238,7 @@ class IgcLanguageModule:
         )
         tokenizer = load_igc_tokenizer()
         model.resize_token_embeddings(len(tokenizer))
+        model.config.pad_token_id = model.config.eos_token_id
         return model, tokenizer
 
     @staticmethod
@@ -292,14 +286,15 @@ class IgcLanguageModule:
     def load(
         spec: argparse.Namespace,
         device: torch.device = "cpu",
-        module_names: Union[str, List[str]] = None,
+        module_names: Union[str, List[str], IgcModuleType] = None,
     ) -> Dict[str, LlmModule]:
         """
 
         Load all igc llm modules.
 
         :param spec: specs for modules
-        :param module_names: The name or list of names of the specific modules to load, or None to load all modules.
+        :param module_names: The name or list of names of the specific modules to load,
+                             or None to load all modules.
         :param device: The device to load the model onto, defaults to "cpu".
         :return: The loaded model, tokenizer, and the last epoch from the checkpoint.
         """

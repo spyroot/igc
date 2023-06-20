@@ -6,9 +6,10 @@ import unittest
 
 from igc.ds.redfish_dataset import JSONDataset
 from igc.envs.rest_gym_env import RestApiEnv, HttpMethod
-from igc.modules.llm_module import IgcLllModule
+from igc.modules.llm.igc_llm_module import IgcLanguageModule
 from igc.shared.shared_main import shared_main
 from .test_utils import register_reset_goal
+from igc.modules.base.igc_llm_base_module import LlmModule
 
 
 class TestRestApiEnv(unittest.TestCase):
@@ -62,7 +63,7 @@ class TestRestApiEnv(unittest.TestCase):
         for method_str in one_hot_method_out_string:
             self.assertEqual(method_str, expected_method)
 
-    def test_extract_action_method(self):
+    def test_extract_action_and_method(self):
         """
         Test the extract_action_method method of RestApiEnv.
         """
@@ -83,11 +84,10 @@ class TestRestApiEnv(unittest.TestCase):
         """
         args = shared_main()
         package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        model, tokenizer, last_epoch = IgcLanguageModule.load(
+            args, only_tokenizer=False)
 
-        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
-        json_directory_path = os.path.expanduser(args.raw_data_dir)
         dataset = JSONDataset(
-            raw_json_directory_path=json_directory_path,
             dataset_dir=f"{package_dir}/datasets",
             verbose=True, tokenizer=tokenizer)
 
@@ -106,7 +106,7 @@ class TestRestApiEnv(unittest.TestCase):
         """
         args = shared_main()
         package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+        model, tokenizer, last_epoch = LlmModule.load_llm_embeddings_model(args, only_tokenizer=False)
         json_directory_path = os.path.expanduser(args.raw_data_dir)
         dataset = JSONDataset(
             raw_json_directory_path=json_directory_path,

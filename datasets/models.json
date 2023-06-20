@@ -1,0 +1,42 @@
+{
+  "mirrors": {
+    "192.168.254.78": [
+      {
+        "spec": "http://192.168.254.78/datasets/models.json"
+      },
+      {
+        "files": [
+          "http://192.168.254.78/igc/modules/finetuned/state_encoder/state_encoder_epoch_0.pt",
+          "http://192.168.254.78/igc/modules/finetuned/state_encoder/state_encoder_epoch_1.pt",
+          "http://192.168.254.78/igc/modules/finetuned/state_encoder/state_encoder_epoch_2.pt"
+        ]
+      },
+      {
+        "local_file": [
+          "modules/finetuned/state_encoder/state_encoder_epoch_0.ptr",
+          "modules/finetuned/state_encoder/state_encoder_epoch_1.ptr",
+          "modules/finetuned/state_encoder/state_encoder_epoch_2.ptr"
+        ]
+      }
+    ],
+    "35.202.223.94": [
+      {
+        "spec": "http://35.202.223.94/datasets/models.json"
+      },
+      {
+        "files": [
+          "http://35.202.223.94/datasets/modules/finetuned/state_encoder/state_encoder_epoch_0.pt",
+          "http://35.202.223.94/datasets/modules/finetuned/state_encoder/state_encoder_epoch_1.pt",
+          "http://35.202.223.94/datasets/modules/finetuned/state_encoder/state_encoder_epoch_2.pt"
+        ]
+      },
+      {
+        "local_file": [
+          "modules/finetuned/state_encoder/state_encoder_epoch_0.ptr",
+          "modules/finetuned/state_encoder/state_encoder_epoch_1.ptr",
+          "modules/finetuned/state_encoder/state_encoder_epoch_2.ptr"
+        ]
+      }
+    ]
+  }
+}

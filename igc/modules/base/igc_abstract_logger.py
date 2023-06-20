@@ -15,6 +15,9 @@ import loguru
 
 
 class AbstractLogger:
+    """
+    This class abstract logging facility used in IGC
+    """
     _is_log_to_file = False
 
     def __init__(self, module_name: str = None):
@@ -55,7 +58,8 @@ class AbstractLogger:
     @staticmethod
     def create_logger(
         module_name: str = None,
-        level: str = "INFO") -> loguru.logger:
+        level: str = "INFO"
+    ) -> loguru.logger:
         """
         Creates a logger instance for the specified module.
 

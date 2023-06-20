@@ -161,7 +161,7 @@ def create_tar_gz(directory_path: str, output_file: str) -> Tuple[str, str]:
                 file_path = os.path.join(root, file)
                 _logger.debug("Adding file to tar file: ", file_path)
                 tar.add(file_path, arcname=os.path.relpath(file_path, directory_path))
-    
+
     with open(tar_file, "rb") as f_in, gzip.open(output_file, "wb") as f_out:
         _logger.debug(f"Write gzip {output_file}")
         f_out.writelines(f_in)
@@ -179,9 +179,9 @@ def create_tar_gz(directory_path: str, output_file: str) -> Tuple[str, str]:
 
 
 def do_http_head(
-    url: str,
-    max_redirect: int = 5,
-    max_timeout: int = 10
+        url: str,
+        max_redirect: int = 5,
+        max_timeout: int = 10
 ) -> str:
     """
     Perform an HTTP HEAD request to retrieve the final URL after following redirects.
@@ -239,16 +239,19 @@ def fetch_content(url: str, filename: str, chunk_size: int = 1024 * 32) -> None:
         get_chunk(iter(lambda: resp.read(chunk_size), b""), filename, length=resp.length)
 
 
-def download_dataset(url: str,
-                     path: str,
-                     filename: Optional[str] = None,
-                     checksum: Optional[str] = None,
-                     overwrite: Optional[bool] = False,
-                     retry: int = 5,
-                     is_strict=False) -> tuple[bool, str]:
-    """Download a file from url and
+def download_dataset(
+        url: str,
+        path: str,
+        filename: Optional[str] = None,
+        checksum: Optional[str] = None,
+        overwrite: Optional[bool] = False,
+        retry: int = 5,
+        is_strict=False) -> tuple[bool, str]:
+    """
+    Download a file from url and
+
     :param overwrite: if we need overwrite, no checksum check.
-    :param is_strict:  if we couldn't find any raise exception otherwise it just warnings.
+    :param is_strict: if we couldn't find any raise exception otherwise it just warnings.
     :param path: where want to save a file.
     :param url: link to a file.
     :param filename:  Name to save the file under. If None, use the basename of the URL.

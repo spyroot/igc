@@ -43,17 +43,19 @@ BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
 class LlmModule(IgcModule):
     """
+    This base LLM Module share between different part IGC.
     """
 
-    def __init__(self,
-                 module_name: str,
-                 spec: argparse.Namespace,
-                 llm_model,
-                 llm_tokenizer,
-                 ds: Optional[JSONDataset] = None,
-                 metric_logger: Optional[MetricLogger] = None,
-                 is_inference: Optional[bool] = False,
-                 device=None):
+    def __init__(
+            self,
+            module_name: str,
+            spec: argparse.Namespace,
+            llm_model,
+            llm_tokenizer,
+            ds: Optional[JSONDataset] = None,
+            metric_logger: Optional[MetricLogger] = None,
+            is_inference: Optional[bool] = False,
+            device=None):
         """
         Base LLM module, shared by all LLM submodules.
 
@@ -74,7 +76,8 @@ class LlmModule(IgcModule):
             ds=ds,
             metric_logger=metric_logger,
             is_inference=is_inference,
-            device=device)
+            device=device
+        )
 
         self._log_level = spec.llm_log_level.upper()
         if self.metric_logger is not None:
@@ -123,9 +126,9 @@ class LlmModule(IgcModule):
 
     @staticmethod
     def compute_rouge_metric(
-        predictions: List[str],
-        targets: List[str],
-        default_rouge: str = 'rouge1') -> float:
+            predictions: List[str],
+            targets: List[str],
+            default_rouge: str = 'rouge1') -> float:
         """
         Compute_rouge_metric
         
@@ -135,14 +138,16 @@ class LlmModule(IgcModule):
         :return: 
         """
         scorer = rouge_scorer.RougeScorer([default_rouge], use_stemmer=True)
-
         scores = [scorer.score(p, t)[default_rouge].fmeasure
                   for p, t in zip(predictions, targets)]
 
         return sum(scores) / len(scores)
 
     @staticmethod
-    def compute_exact_match(predictions: List[Union[str, int]], targets: List[Union[str, int]]) -> float:
+    def compute_exact_match(
+            predictions: List[Union[str, int]],
+            targets: List[Union[str, int]]
+    ) -> float:
         """
         Compute exact match score.
 
@@ -152,13 +157,18 @@ class LlmModule(IgcModule):
         """
         if isinstance(targets[0], str):
             return sum(
-                [p.strip() == t.strip() for p, t in zip(predictions, targets)]) / len(predictions)
+                [p.strip() == t.strip() for p, t
+                 in zip(predictions, targets)]) / len(predictions)
         else:
             return sum(
-                [p == t for p, t in zip(predictions, targets)]) / len(predictions)
+                [p == t for p, t
+                 in zip(predictions, targets)]) / len(predictions)
 
     @staticmethod
-    def compute_f1_score(predictions: List[str], targets: List[str]) -> float:
+    def compute_f1_score(
+            predictions: List[str],
+            targets: List[str]
+    ) -> float:
         """
         Compute the F1 score.
 
@@ -228,12 +238,12 @@ class LlmModule(IgcModule):
 
     @staticmethod
     def performance_metric(
-        predictions: List[str],
-        targets: List[str],
-        metric: Union[str, MetricType],
-        prompt_type: Optional[PromptType] = None,
-        callback: Optional[Callable] = None,
-        prefix_to_remove=None) -> float:
+            predictions: List[str],
+            targets: List[str],
+            metric: Union[str, MetricType],
+            prompt_type: Optional[PromptType] = None,
+            callback: Optional[Callable] = None,
+            prefix_to_remove=None) -> float:
         """
         Compute the performance metric between predictions and targets.
 
