@@ -52,19 +52,18 @@ class IgcBaseState:
         self.is_accelerator = False
         if device is not None:
             self.device = torch.device(device)
-            print(f"Using device {self.device}")
+
+        if spec.use_accelerator:
+            self.accelerator = build_accelerator(spec)
+            self.is_accelerator = True
+            # let accelerator choose device.
+            self.device = self.accelerator.device
+            self.logger.info(f"Rank {self.rank}, Running accelerator , accelerate selected device {self.device}")
+        elif hasattr(spec, "device"):
+            self.device = spec.device
         else:
-            if "use_accelerator" in spec and spec.use_accelerator:
-                self.accelerator = build_accelerator(spec)
-                self.is_accelerator = True
-                # let accelerator choose device.
-                self.device = self.accelerator.device
-                self.logger.info(f"Running accelerator device {device}")
-            elif hasattr(spec, "device"):
-                self.device = spec.device
-            else:
-                # if we are not using accelerator, we need to set device
-                self.device = get_device(self.rank) if device is None else device
+            # if we are not using accelerator, we need to set device
+            self.device = get_device(self.rank) if device is None else device
 
         self.scheduler = None
 

@@ -39,6 +39,7 @@ class LlmEmbeddingsTrainer(LlmModule):
     Large language model trainer. Its main job train a language
     model for fine-tuning a latent representation
     """
+
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
@@ -118,8 +119,8 @@ class LlmEmbeddingsTrainer(LlmModule):
             ]
 
         # what method we're using for masking. i.e. we can stack
-        self._current_mask_method_counter = None
-        self._current_mask_method_idx = None
+        self._current_mask_method_counter = 0
+        self._current_mask_method_idx = 0
         self._masking_method_dispatcher = LlmEmbeddingsTrainer.create_masking_method(dataset)
 
     def get_model(self) -> PreTrainedModel:
@@ -258,7 +259,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         return masking_methods
 
     def enable_masking_method(
-            self, mask_type: Union[MaskingOption, MaskingType]):
+        self, mask_type: Union[MaskingOption, MaskingType]):
         """
         Receive mask enum and dispatch to its callback.
         :param mask_type:
@@ -271,8 +272,8 @@ class LlmEmbeddingsTrainer(LlmModule):
             raise ValueError("Unknown masking type")
 
     def swap_masking_method(
-            self, epoch: int,
-            mask_type: List[Union[MaskingOption, MaskingType]] = None
+        self, epoch: int,
+        mask_type: List[Union[MaskingOption, MaskingType]] = None
     ):
         """
         Switch to masking method to next masking method after every epoch freq
@@ -300,8 +301,8 @@ class LlmEmbeddingsTrainer(LlmModule):
                 self.dataset.disable_masking()
 
     def _train(
-            self,
-            mask_type: List[Union[MaskingOption, MaskingType]] = None
+        self,
+        mask_type: List[Union[MaskingOption, MaskingType]] = None
     ):
         """Train LLM model to map high level goal to redfish actions.
 
@@ -319,7 +320,9 @@ class LlmEmbeddingsTrainer(LlmModule):
                          f"to device {self.device}, "
                          f"using accelerate: {self.is_accelerator}")
 
-        self.model.to(self.device)
+        if not self.is_accelerator:
+            self.model.to(self.device)
+
         if self.is_accelerator:
             last_epoch = self.load_checkpoint(
                 self._module_checkpoint_dir, map_location="cpu") if self._module_checkpoint_dir is not None else 0
@@ -328,6 +331,7 @@ class LlmEmbeddingsTrainer(LlmModule):
                 self._module_checkpoint_dir, map_location=self.device) if self._module_checkpoint_dir is not None else 0
 
         self.model.train()
+
         train_dataset, eval_dataset = self.split_dataset()
         sampler = self.dataset_sampler()
 
@@ -340,6 +344,7 @@ class LlmEmbeddingsTrainer(LlmModule):
             sampler=sampler,
             num_workers=self._num_workers,
             shuffle=self._is_shuffle,
+            pin_memory=False,
             collate_fn=LlmEmbeddingsTrainer.custom_collate_fn
         )
 
@@ -350,7 +355,8 @@ class LlmEmbeddingsTrainer(LlmModule):
             num_workers=self._num_workers,
             shuffle=False,
             drop_last=True,
-            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn
+            pin_memory=False,
+            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn,
         )
 
         self._trainer_args.epochs = self.num_epochs - last_epoch
@@ -363,8 +369,12 @@ class LlmEmbeddingsTrainer(LlmModule):
         )
 
         if self.is_accelerator:
-            self.model, self.optimizer, train_dataloader, eval_dataloader = self.accelerator.prepare(
-                [self.model, self.optimizer, train_dataloader, eval_dataloader],
+            # self.model, self.optimizer, train_dataloader, eval_dataloader = self.accelerator.prepare(
+            #     [self.model, self.optimizer, train_dataloader, eval_dataloader],
+            #     device_placement=[True])
+
+            self.model, self.optimizer, self.scheduler = self.accelerator.prepare(
+                [self.model, self.optimizer, self.scheduler],
                 device_placement=[True])
 
         if self.is_quantize:
@@ -416,10 +426,13 @@ class LlmEmbeddingsTrainer(LlmModule):
                     self.accelerator.backward(loss)
                 else:
                     loss.backward()
+
                 self.optimizer.step()
 
                 if self.is_last_worker():
                     self.scheduler.step()
+                    current_lr = self.optimizer.param_groups[0]['lr']
+                    self.metric_logger.log_metric("learning_rate", current_lr, epoch)
 
                 batch_losses[num_batches] = loss.item()
                 total_loss += loss.item()
@@ -492,9 +505,9 @@ class LlmEmbeddingsTrainer(LlmModule):
         )
 
     def decode_masked_output(
-            self,
-            input_ids: torch.Tensor,
-            attention_mask: torch.Tensor
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor
     ):
         """
         :param input_ids:
@@ -515,9 +528,9 @@ class LlmEmbeddingsTrainer(LlmModule):
 
     @staticmethod
     def compute_accuracy(
-            logits: torch.Tensor,
-            targets: torch.Tensor,
-            original_mask: torch.Tensor
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+        original_mask: torch.Tensor
     ):
         """
         Computes  accuracy for either sequence classification or generation.

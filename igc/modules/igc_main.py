@@ -66,7 +66,6 @@ class IgcMain:
     @property
     def metric_logger(self):
         """
-
         :return:
         """
         if self._metric_logger is None:
@@ -76,6 +75,10 @@ class IgcMain:
 
     @property
     def dataset(self):
+        """
+
+        :return:
+        """
         if self._dataset is None:
             self._dataset = MaskedJSONDataset(
                 self._dataset_dir,
