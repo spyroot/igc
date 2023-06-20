@@ -1,4 +1,5 @@
 import argparse
+import os
 from typing import Optional
 
 import deepspeed
@@ -795,7 +796,8 @@ def shared_arg_parser(
     )
 
     args = parser.parse_args()
-    args.device = get_device() if args.device == "auto" else args.device
+    args.device = get_device(rank=int(os.environ.get('LOCAL_RANK', -1))) \
+        if args.device == "auto" else args.device
 
     if is_accelerate_arg_parser:
         try:
