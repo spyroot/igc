@@ -615,7 +615,7 @@ class IgcModule(IgcBaseState):
 
         if checkpoint_file:
             self.logger.info(f"Found latest checkpoint, loading {checkpoint_file}.")
-            checkpoint = torch.load(checkpoint_file, map_location=map_to)
+            checkpoint = torch.load(checkpoint_file)
 
             required_keys = ['model_state_dict', 'epoch']
             if resuming:
