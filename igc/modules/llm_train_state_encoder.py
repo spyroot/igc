@@ -338,13 +338,12 @@ class LlmEmbeddingsTrainer(LlmModule):
             last_epoch = self.load_checkpoint(
                 self._module_checkpoint_dir, map_location=self.device) if self._module_checkpoint_dir is not None else 0
 
-        self.model.to(self.device)
         self.model.train()
         self.logger.info(f"Uploading model from {self.model.device} "
                          f"to device {self.device}, "
                          f"using accelerate: {self.is_accelerator}")
 
-        print(self.model.device)
+        print("Model device", self.model.device)
         train_dataset, eval_dataset = self.split_dataset()
         sampler = self.dataset_sampler()
 
@@ -382,9 +381,10 @@ class LlmEmbeddingsTrainer(LlmModule):
         )
 
         if self.is_accelerator:
-            self.accelerator.print()
             self.model, self.optimizer, self.scheduler, train_dataloader, eval_dataloader = self.accelerator.prepare(
                 self.model, self.optimizer, self.scheduler, train_dataloader, eval_dataloader)
+
+        self.model.to(self.device)
 
         if self.is_quantize:
             self.model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
