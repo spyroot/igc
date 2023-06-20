@@ -419,9 +419,9 @@ class LlmEmbeddingsTrainer(LlmModule):
                 batch['input_ids'] = batch['input_ids'][:, :-1]
                 batch['attention_mask'] = batch['attention_mask'][:, :-1]
 
-                input_ids = batch['input_ids'].to(self.device, non_blocking=True)
-                masks = batch['attention_mask'].to(self.device, non_blocking=True)
-                target_ids = target_ids.to(self.device, non_blocking=True)
+                input_ids = batch['input_ids'].to(self.device)
+                masks = batch['attention_mask'].to(self.device)
+                target_ids = target_ids.to(self.device)
 
                 batch_inputs = {
                     'input_ids': input_ids,
