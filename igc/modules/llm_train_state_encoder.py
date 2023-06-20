@@ -535,6 +535,9 @@ class LlmEmbeddingsTrainer(LlmModule):
 
     def test_inference(self):
         """
+          Does inference pass for entire dataset used for validation
+          and report all metrics.
+
         :return:
         """
         train_data, eval_data = self.split_dataset()
@@ -597,7 +600,9 @@ class LlmEmbeddingsTrainer(LlmModule):
 
         accuracy = correct_predictions / total_predictions * 100.0
         perplexity = torch.exp(total_loss / torch.tensor(total_predictions_no_pad)).item()
+
         print(f"Accuracy: {accuracy:.2f}%")
         print(f"Perplexity: {perplexity:.2f}")
         print(f"Time taken: {time_taken:.2f} seconds")
+
         return accuracy, perplexity

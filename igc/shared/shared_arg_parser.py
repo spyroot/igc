@@ -414,7 +414,7 @@ def add_trainer_group(parser):
              " the validation set for a particular model and strategy."
     )
 
-    # do we use gradient norm or not.
+    # do we use gradient norm or not?
     parser.add_argument(
         "--max_grad_norm",
         type=float,
@@ -674,7 +674,8 @@ def add_reporting_group(parser):
 def shared_arg_parser(
     is_deepspeed_arg_parser: Optional[bool] = False,
     is_accelerate_arg_parser: Optional[bool] = False,
-    is_fairscale_arg_parser: Optional[bool] = False):
+    is_fairscale_arg_parser: Optional[bool] = False
+):
     """
 
     :param is_deepspeed_arg_parser:
