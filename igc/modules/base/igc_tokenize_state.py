@@ -1,8 +1,17 @@
+"""
+This re-present a tokenizer state.
+i.e pad , eos etc tokens.
+
+Author:Mus mbayramo@stanford.edu
+"""
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class GenericTokenizeState:
+    """
+
+    """
     pad_token: str
     pad_token_id: int
     eos_token: str

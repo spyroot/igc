@@ -5,19 +5,23 @@ Author:Mus mbayramo@stanford.edu
 """
 import argparse
 import os
+import pkgutil
 from typing import Optional, Union, Dict, Tuple
-from transformers import (GPT2LMHeadModel,
-                          GPT2Tokenizer,
-                          PreTrainedModel,
-                          PreTrainedTokenizer)
+
+from transformers import (
+    GPT2LMHeadModel,
+    GPT2Tokenizer,
+    PreTrainedModel,
+    PreTrainedTokenizer
+)
 
 
 def from_pretrained_default(
-    args: Union[str, argparse.Namespace],
-    only_tokenizer: bool = False,
-    only_model: bool = False,
-    add_padding: bool = True,
-    device_map: Union[str, Dict[str, str]] = "auto"
+        args: Union[str, argparse.Namespace],
+        only_tokenizer: bool = False,
+        only_model: bool = False,
+        add_padding: bool = True,
+        device_map: Union[str, Dict[str, str]] = "auto"
 ) -> Tuple[Optional[PreTrainedModel], Optional[PreTrainedTokenizer]]:
     """
     This is default callback used to load default model that we fine tune.
@@ -56,18 +60,59 @@ def from_pretrained_default(
             tokenizer.pad_token = tokenizer.eos_token
             tokenizer.pad_token_id = tokenizer.eos_token_id
 
+    if add_padding:
+        model.config.pad_token_id = tokenizer.eos_token_id
+        model.config.pad_token = tokenizer.eos_token
+
     return model, tokenizer
 
 
-def load_igc_tokenizer(tokenizer_dir: str = None) -> PreTrainedTokenizer:
+def igc_base_dir():
+    """
+    Return the default igc directory based on where igc package
+    installed.
+    :return:
+    """
+    resource_module = pkgutil.resolve_name("igc")
+    base_dir = os.path.dirname(resource_module.__file__)
+    parent_dir = os.path.dirname(base_dir)
+    return parent_dir
+
+
+def igc_default_dataset_dir():
+    """
+    Return the default dataset directory based on where igc package
+    installed.
+    :return:
+    """
+    igc_base = igc_base_dir()
+    datasets_dir = os.path.join(igc_base, "datasets")
+    return datasets_dir
+
+
+def igc_default_tokenizer_dir():
+    """
+    Return the default tokenizer directory based on where igc package
+    installed.
+    :return:
+    """
+    igc_ds_base = igc_default_dataset_dir()
+    tok_dir = os.path.join(igc_ds_base, "tokenizer")
+    return tok_dir
+
+
+def load_igc_tokenizer(
+        tokenizer_dir: str = None
+) -> PreTrainedTokenizer:
     """
     Load the tokenizer from the specified directory and return it.
 
     :param tokenizer_dir: The directory path where the tokenizer is located.
     :return: The loaded tokenizer.
     """
+
     if tokenizer_dir is None:
-        tok_dir = f"datasets/tokenizer"
+        tok_dir = igc_default_tokenizer_dir()
     else:
         tok_dir = tokenizer_dir
 
@@ -81,36 +126,44 @@ def load_igc_tokenizer(tokenizer_dir: str = None) -> PreTrainedTokenizer:
 
 
 def save_pretrained_default(
-    huggingface_dir,
-    model: GPT2Tokenizer,
-    gpt_tokenizer: GPT2Tokenizer,
-    only_tokenizer=False
+        huggingface_dir,
+        model: GPT2Tokenizer,
+        tokenizer: GPT2Tokenizer,
+        only_tokenizer=False
 ):
     """
       Save the default GPT2 model and tokenizer.
 
     :param huggingface_dir:  we keep it separate
     :param model: fine-tuned model
-    :param gpt_tokenizer: tokenizer
+    :param tokenizer: tokenizer
     :param only_tokenizer:  will save only tokenizer
     :return:
     """
 
     try:
         if only_tokenizer:
-            gpt_tokenizer.save_pretrained(huggingface_dir)
+            tokenizer.save_pretrained(huggingface_dir)
+            tokenizer.pad_token_id = tokenizer.eos_token_id
         else:
+            tokenizer.pad_token = tokenizer.eos_token
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+            model.config.pad_token_id = tokenizer.eos_token_id
+            model.config.pad_token = tokenizer.eos_token
+
             model.save_pretrained(huggingface_dir)
-            gpt_tokenizer.save_pretrained(huggingface_dir)
+            tokenizer.save_pretrained(huggingface_dir)
         return True
-    except:
-        return False
+    except Exception as e:
+        print(f"Error while saving pretrained default: {str(e)}")
+
+    return False
 
 
 def load_pretrained_default(
-    args: argparse.Namespace,
-    path_to_model: str,
-    device_map="auto"
+        args: argparse.Namespace,
+        path_to_model: str,
+        device_map="auto"
 ) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
     """
       Load fine-tuned model, the default GPT2 model and tokenizer.
@@ -123,18 +176,23 @@ def load_pretrained_default(
 
     tokenizer = GPT2Tokenizer.from_pretrained(
         path_to_model,
-        cache_dir=args.llm_cache_dir if hasattr(args, "llm_cache_dir") else None,
+        cache_dir=args.llm_cache_dir
+        if hasattr(args, "llm_cache_dir") else None,
     )
 
     model_args = {
         "ignore_mismatched_sizes":
-            args.llm_ignore_mismatched_sizes if hasattr(args, "llm_ignore_mismatched_sizes") else False,
+            args.llm_ignore_mismatched_sizes if
+            hasattr(args, "llm_ignore_mismatched_sizes") else False,
         "output_loading_info":
-            args.llm_output_loading_info if hasattr(args, "llm_output_loading_info") else False,
+            args.llm_output_loading_info
+            if hasattr(args, "llm_output_loading_info") else False,
         "_fast_init":
-            args.llm_fast_init if hasattr(args, "llm_fast_init") else True,
+            args.llm_fast_init
+            if hasattr(args, "llm_fast_init") else True,
         "torch_dtype":
-            args.llm_torch_dtype if hasattr(args, "llm_torch_dtype") else None,
+            args.llm_torch_dtype
+            if hasattr(args, "llm_torch_dtype") else None,
         "device_map":
             device_map,
     }

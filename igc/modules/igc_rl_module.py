@@ -1,3 +1,8 @@
+"""
+This rl igc base module.
+Author:Mus mbayramo@stanford.edu
+"""
+
 import argparse
 import logging
 import os

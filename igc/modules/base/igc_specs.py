@@ -8,14 +8,14 @@ import torch
 
 def make_default_optimizer_spec(cmd):
     """
+    Default optimizer args
 
     :param cmd:
     :return:
     """
     default_args = {
-        # optimizer, gradient_checkpointing
-        "gradient_checkpointing": cmd.gradient_checkpointing,
-        "gradient_accumulation_steps": cmd.gradient_accumulation_steps,
+        "gradient_checkpointing": getattr(cmd, "gradient_checkpointing", False),
+        "gradient_accumulation_steps": getattr(cmd, "gradient_accumulation_steps", 8),
     }
     return default_args
 

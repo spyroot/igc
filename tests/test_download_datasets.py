@@ -1,10 +1,8 @@
 import os
-import tarfile
 import tempfile
 import unittest
 
-from igc.ds.ds_utils import create_tar_gz, md5_checksum, unpack_tar_gz
-from igc.ds.test_dataset import TestDataset
+from igc.ds.ds_utils import create_tar_gz, unpack_tar_gz
 
 
 class TestDownloadableDataset(unittest.TestCase):

@@ -1,3 +1,4 @@
+import enum
 from enum import auto, Enum
 
 
@@ -18,3 +19,9 @@ class IgcModuleType(Enum):
     STATE_ENCODER = "state_encoder"
     STATE_AUTOENCODER = "state_autoencoder"
     PARAMETER_EXTRACTOR = "parameter_extractor"
+
+
+class SaveStrategy(enum.Enum):
+    NO = 'no'
+    EPOCH = 'epoch'
+    STEPS = 'steps'

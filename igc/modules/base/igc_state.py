@@ -8,6 +8,8 @@ Author:Mus mbayramo@stanford.edu
 import argparse
 import os
 import sys
+import tempfile
+import warnings
 from pathlib import Path
 
 import loguru
@@ -84,19 +86,33 @@ class IgcBaseState:
 
         :param module_name: The name of the module.
         """
-        logs_dir = self._trainer_args.log_dir or "logs"
-        os.makedirs(logs_dir, exist_ok=True)
+        logs_dir = getattr(self._trainer_args, "log_dir", None)
+        if not logs_dir:
+            warnings.warn("log_dir is not provided. "
+                          "Using a temporary directory as a fallback.")
+            logs_dir = tempfile.mkdtemp()
+        else:
+            os.makedirs(logs_dir, exist_ok=True)
 
         self._log_file = os.path.join(logs_dir, f"{module_name}.log")
-        self._log_level = self._trainer_args.log_level.upper()
+        self._log_level = getattr(
+            self._trainer_args, "log_level", "ERROR"
+        )
+        if self._log_level:
+            self._log_level = self._log_level.upper()
+
         self.logger = loguru.logger.bind(module_name=module_name)
         self.logger.remove()
 
-        if self._trainer_args.log_to_file:
-            log_file = os.path.join(logs_dir, f"{module_name}.log")
-            self.logger.add(log_file, level=self._log_level)
-        else:
+        log_to_file = getattr(self._trainer_args, "log_to_file", None)
+        if not log_to_file:
             self.logger.add(sys.stdout, level=self._log_level)
+        else:
+            if self._trainer_args.log_to_file:
+                log_file = os.path.join(logs_dir, f"{module_name}.log")
+                self.logger.add(log_file, level=self._log_level)
+            else:
+                self.logger.add(sys.stdout, level=self._log_level)
 
     def is_distributed(self):
         """

@@ -4,6 +4,8 @@ we serialize all metrics.
 
 Author:Mus mbayramo@stanford.edu
 """
+import tempfile
+import warnings
 from abc import abstractmethod, ABC
 from pathlib import Path
 from typing import Optional
@@ -13,7 +15,6 @@ class BaseLogger(ABC):
     @abstractmethod
     def log_scalar(self, tag: str, value: float, step: int):
         """
-
         :param tag:
         :param value:
         :param step:
@@ -107,7 +108,6 @@ class ClearMLLogger(BaseLogger):
 
     def log_scalar(self, tag: str, value: float, step: int):
         """
-
         :param tag:
         :param value:
         :param step:
@@ -117,13 +117,21 @@ class ClearMLLogger(BaseLogger):
 
 
 def create_logger(report_to: str, **kwargs: Optional[str]):
+    """
+    Create logger
+
+    :param report_to:
+    :param kwargs:
+    :return:
+    """
     try:
-        common_args = {key: kwargs[key] for key in ["api_key", "project_name", "workspace",
-                                                    "tracking_uri", "run_name",
-                                                    "project_qualified_name",
-                                                    "project", "entity",
-                                                    "task_name"]
-                       if key in kwargs}
+        common_args = {key: kwargs[key] for key in [
+            "api_key", "project_name", "workspace",
+            "tracking_uri", "run_name",
+            "project_qualified_name",
+            "project", "entity",
+            "task_name"
+        ] if key in kwargs}
 
         if report_to == 'comet_ml':
             return CometMLLogger(**common_args)
@@ -132,7 +140,11 @@ def create_logger(report_to: str, **kwargs: Optional[str]):
         elif report_to == 'neptune':
             return NeptuneLogger(**common_args)
         elif report_to == 'tensorboard':
-            return TensorBoardLogger(output_dir=kwargs["output_dir"])
+            output_dir = kwargs.get("output_dir")
+            if output_dir is None:
+                warnings.warn("output_dir is not provided. Using a temporary directory as a fallback.")
+                output_dir = tempfile.mkdtemp()
+            return TensorBoardLogger(output_dir=output_dir)
         elif report_to == 'wandb':
             return WandbLogger(**common_args)
         elif report_to == 'clearml':

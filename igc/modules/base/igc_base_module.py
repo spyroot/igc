@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import shutil
+import tempfile
 import urllib
 import warnings
 from collections import namedtuple
@@ -18,7 +19,7 @@ from urllib.error import URLError
 
 import pkg_resources
 import torch
-from torch.utils.data import random_split, Subset
+from torch.utils.data import random_split, Subset, Dataset
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from .igc_state import IgcBaseState
@@ -28,6 +29,7 @@ from .igc_metric_logger import MetricLogger
 from ...ds.redfish_dataset import JSONDataset
 from .igc_tokenize_state import GenericTokenizeState
 from ...modules.base.igc_abstract_logger import AbstractLogger
+from ...shared.modules_typing import SaveStrategy
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
@@ -48,7 +50,7 @@ class IgcModule(IgcBaseState):
             module_name: str,
             spec: argparse.Namespace,
             llm_model, llm_tokenizer,
-            ds: Optional[JSONDataset] = None,
+            ds: Optional[Union[JSONDataset, Dataset]] = None,
             metric_logger: Optional[MetricLogger] = None,
             is_inference: Optional[bool] = False,
             device=None
@@ -84,7 +86,7 @@ class IgcModule(IgcBaseState):
                 f"llm_tokenizer should be an instance of PreTrainedTokenizer, "
                 f"received {type(llm_tokenizer).__name__}.")
 
-        if ds is not None and not isinstance(ds, JSONDataset):
+        if ds is not None and not isinstance(ds, (JSONDataset, Dataset)):
             raise TypeError(f"ds should be an instance of JSONDataset or None, "
                             f"received {type(ds).__name__}.")
 
@@ -142,25 +144,25 @@ class IgcModule(IgcBaseState):
         self.metric_logger = metric_logger
 
         self._trainer_args = spec
-        self._batch_log = 10
-        self._default_lr = 1e-5
+        self._batch_log = getattr(spec, "batch_log", 10)
+        self._default_lr = getattr(spec, "default_lr", 1e-5)
         self._overfit = spec.overfit
 
         self.optimizer = None
-        self._num_workers = spec.num_workers
+        self._num_workers = getattr(spec, "num_workers", 1)
 
         # model saving
-        self.save_strategy = spec.save_strategy
-        self.checkpoint_dir = self._prepare_checkpoint_dir()
-        self.module_checkpoint_dir = f"{self.checkpoint_dir}/{module_name}"
-        os.makedirs(self.module_checkpoint_dir, exist_ok=True)
+        self._save_strategy = getattr(spec, "save_strategy", SaveStrategy.EPOCH)
+        self._checkpoint_dir = self._prepare_checkpoint_dir()
+        self._module_checkpoint_dir = f"{self._checkpoint_dir}/{module_name}"
+        os.makedirs(self._module_checkpoint_dir, exist_ok=True)
 
         # update specs and add all defaults
         self._trainer_specs = make_default_spec(self._trainer_args)
 
         # configure logger
         self._configure_metric_logger(module_name)
-        self.logger.info(f"Model {self.module_name} saving dir {self.module_checkpoint_dir}")
+        self.logger.info(f"Model {self.module_name} saving dir {self._module_checkpoint_dir}")
         self._debug_info()
 
     def set_tokenizer(self, tokenizer: PreTrainedTokenizer):
@@ -175,9 +177,11 @@ class IgcModule(IgcBaseState):
         self.update_tokenizer_settings(self.tokenizer)
 
     def update_tokenizer_settings(self, llm_tokenizer: PreTrainedTokenizer):
-        """Update tokenize state
-        :param llm_tokenizer:
-        :return:
+        """
+        Update tokenize state
+
+        :param llm_tokenizer:  pre-trained tokenizer
+        :return: nothing
         """
         self._tokenize_state = GenericTokenizeState(
             pad_token=llm_tokenizer.pad_token,
@@ -187,6 +191,11 @@ class IgcModule(IgcBaseState):
             model_pad_token_id=self.model.config.pad_token_id,
             model_eos_token_id=self.model.config.eos_token_id
         )
+
+        self.model.config.eos_token = llm_tokenizer.eos_token
+        self.model.config.pad_token = llm_tokenizer.pad_token
+        self.model.config.pad_token_id = llm_tokenizer.pad_token_id
+        self.model.config.eos_token_id = llm_tokenizer.eos_token_id
 
     def _debug_info(self):
         """
@@ -201,7 +210,7 @@ class IgcModule(IgcBaseState):
         self.logger.debug(f"  - pad_token: {self._tokenize_state}")
         self.logger.debug(f"  - num_epochs: {self.num_epochs}")
         self.logger.debug(f"  - batch_size: {self.batch_size}")
-        self.logger.debug(f"  - checkpoint_dir: {self.module_checkpoint_dir}")
+        self.logger.debug(f"  - checkpoint_dir: {self._module_checkpoint_dir}")
         self.logger.debug(f"  - rank: {self.rank}")
 
     def _prepare_checkpoint_dir(self):
@@ -210,6 +219,15 @@ class IgcModule(IgcBaseState):
 
         :return:
         """
+        output_dir = getattr(self._trainer_args, "output_dir", None)
+        if output_dir:
+            checkpoint_path_dir = Path(output_dir).resolve()
+            self._trainer_args.output_dir = str(checkpoint_path_dir)
+        else:
+            warnings.warn("output_dir is not provided. Using a temporary directory as a fallback.")
+            checkpoint_path_dir = Path(tempfile.mkdtemp())
+            self._trainer_args.output_dir = str(checkpoint_path_dir)
+
         checkpoint_path_dir = Path(self._trainer_args.output_dir)
         checkpoint_path_dir = checkpoint_path_dir.resolve()
         if not checkpoint_path_dir.is_dir():
@@ -671,6 +689,7 @@ class IgcModule(IgcBaseState):
 
     def is_trained(self) -> bool:
         """
+
         Check if the model has been trained,
         this flag post model train procedure.
 
@@ -934,6 +953,7 @@ class IgcModule(IgcBaseState):
     @staticmethod
     def download_modules(mirrors: Union[str, Dict]):
         """
+
         Download multiple module files from the specified mirror URLs.
         Either single string or dictionary of mirror URLs can be provided.
 
@@ -1016,10 +1036,17 @@ class IgcModule(IgcBaseState):
                     module_remote_files, module_local_dirs, module_local_files):
                 logger.info(f"Downloading module from {url} to {module_file}")
                 os.makedirs(module_dir, exist_ok=True)
-                download_result = IgcModule.download_module(
-                    url, module_dir, module_file, is_overwrite=True
-                )
-                _download_result.append(download_result)
+                if os.path.exists(module_file):
+                    logger.info(f"File {module_file} is already present. Skipping download.")
+                    _download_result.append(True)
+                else:
+                    logger.info(f"Downloading module from {url} to {module_file}")
+                    os.makedirs(module_dir, exist_ok=True)
+                    download_result = IgcModule.download_module(
+                        url, module_dir, module_file, is_overwrite=True
+                    )
+                    _download_result.append(download_result)
+
             if all(_download_result):
                 break
 

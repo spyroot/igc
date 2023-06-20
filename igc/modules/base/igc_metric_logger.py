@@ -3,9 +3,8 @@ Shared class for logging metrics to console and file.
 Author:Mus mbayramo@stanford.edu
 """
 from typing import Optional
-
 import loguru
-from igc.modules.base.metric_factory import create_logger
+from ...modules.base.metric_factory import create_logger
 
 
 class MetricLogger:
@@ -14,6 +13,9 @@ class MetricLogger:
         :param report_to:
         :param kwargs:
         """
+        if not report_to:
+            raise ValueError("report_to argument is required and cannot be empty.")
+
         self.logger = create_logger(report_to, **kwargs)
         self._file_terminal_logger = loguru.logger
         self._file_terminal_log_level = loguru.logger.level
@@ -30,6 +32,7 @@ class MetricLogger:
 
     def set_logger(self, logger):
         """
+
         Set the logger for logging to console or file.
 
         :param logger: The logger object to use.
@@ -38,6 +41,7 @@ class MetricLogger:
 
     def set_log_level(self, log_level):
         """
+
         Set the log level for the MetricLogger.
 
         :param log_level: The log level to use.

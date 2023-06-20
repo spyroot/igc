@@ -6,6 +6,8 @@ logs*/
 backup*/
 datasets/orig/*
 datasets/raw/*
+datasets/original/*
+datasets/modules/*
 # C extensions
 *.so
 .idea

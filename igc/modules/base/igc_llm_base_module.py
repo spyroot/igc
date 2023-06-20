@@ -98,7 +98,7 @@ class LlmModule(IgcModule):
 
         :return: The directory path.
         """
-        return f"{self.module_checkpoint_dir}/fine_tuned"
+        return f"{self._module_checkpoint_dir}/fine_tuned"
 
     def save_finetuned(self):
         """

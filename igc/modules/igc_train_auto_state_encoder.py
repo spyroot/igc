@@ -181,8 +181,8 @@ class AutoencoderTrainer(IgcModule):
         self.logger.info(
             f"Rank {self.rank} starting train, device {self.device}")
 
-        if self.module_checkpoint_dir is not None:
-            last_epoch = self.load_checkpoint(self.module_checkpoint_dir)
+        if self._module_checkpoint_dir is not None:
+            last_epoch = self.load_checkpoint(self._module_checkpoint_dir)
         else:
             last_epoch = 0
 
@@ -246,6 +246,6 @@ class AutoencoderTrainer(IgcModule):
 
             # save best checkpoint
             if self.is_rank_zero() and epoch % 20 == 0:
-                self.save_checkpoint(self.module_checkpoint_dir, epoch + 1)
+                self.save_checkpoint(self._module_checkpoint_dir, epoch + 1)
 
-        self.save_model(self.module_checkpoint_dir)
+        self.save_model(self._module_checkpoint_dir)
