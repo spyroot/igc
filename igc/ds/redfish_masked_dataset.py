@@ -52,6 +52,32 @@ class MaskingOption(Enum):
     MASK_NEW_TOKENS = auto()
     Actions = auto()
 
+    def __hash__(self):
+        return hash((self.value, type(self)))
+
+    @classmethod
+    def to_string(cls, option):
+        """
+        Convert an MaskingOption Enum object to its string representation.
+
+        :param option: The Enum object.
+        :return: The string representation of the Enum object.
+        """
+        return option.name.lower()
+
+    @classmethod
+    def from_string(cls, option_str):
+        """
+        Convert a string representation to the corresponding Enum object.
+
+        :param option_str: The string representation of the Enum object.
+        :return: The Enum object corresponding to the string representation.
+        """
+        try:
+            return cls[option_str.upper()]
+        except KeyError:
+            raise ValueError(f"No matching option for string: {option_str}")
+
 
 class MaskingType(Enum):
     """
@@ -60,6 +86,32 @@ class MaskingType(Enum):
     MASK_SECTION = auto()
     MASK_NEW_TOKENS = auto()
     MASK_JSON_KV = auto()
+
+    def __hash__(self):
+        return hash((self.value, type(self)))
+
+    @classmethod
+    def to_string(cls, option):
+        """
+        Convert an MaskingType Enum object to its string representation.
+
+        :param option: The Enum object.
+        :return: The string representation of the Enum object.
+        """
+        return option.name.lower()
+
+    @classmethod
+    def from_string(cls, type_str):
+        """
+        Convert a string representation to the corresponding Enum object.
+
+        :param type_str: The string representation of the Enum object.
+        :return: The Enum object corresponding to the string representation.
+        """
+        try:
+            return cls[type_str.upper()]
+        except KeyError:
+            raise ValueError(f"No matching type for string: {type_str}")
 
 
 class MaskedJSONDataset(JSONDataset, ABC):
@@ -181,15 +233,15 @@ class MaskedJSONDataset(JSONDataset, ABC):
             MaskingOption.MASK_API_PREFIX: ([api_prefix_ids], [[self._object_close]])
         }
 
-        # current mask
+        # current method
         self._current_token_id_mask = [
             self._masking_option[MaskingOption.ODATA_ID],
         ]
         self._cache = [None] * len(self._data["train_data"])
 
     def enable_masking(
-        self,
-        mask_type: MaskingType = MaskingType.MASK_JSON_KV
+            self,
+            mask_type: MaskingType = MaskingType.MASK_JSON_KV
     ):
         """Enable masking,  for example we can pass
         one epoch masking and then another epoch unmasked.
@@ -249,7 +301,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
         self.enable_masking()
         self._current_token_id_mask = [self._masking_option[MaskingOption.JSON_ARRAY]]
 
-    def mask_new_tokens(self, is_enabled: bool):
+    def mask_new_tokens(self, is_enabled: Optional[bool] = True):
         """
         Mask the array in the JSON dataset.
         :return:
@@ -259,7 +311,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
         else:
             self._mask_type = MaskingType.NO_MASK
 
-    def mask_section(self, is_enabled: bool):
+    def mask_section(self, is_enabled: Optional[bool] = True):
         """
         Mask the array in the JSON dataset.
         :return:
@@ -270,16 +322,20 @@ class MaskedJSONDataset(JSONDataset, ABC):
             self._mask_type = MaskingType.NO_MASK
 
     def mask_api_prefix(self):
+        """
+
+        :return:
+        """
         self.enable_masking()
         self._current_token_id_mask = [self._masking_option[MaskingOption.MASK_API_PREFIX]]
 
     @staticmethod
     def mask_json_kv_span(
-        data: Dict[str, torch.Tensor],
-        tokenizer: PreTrainedTokenizer,
-        target_key: Union[str],
-        end_toks: Union[str, List[Union[str]]] = "\"},",
-        return_original: bool = False,
+            data: Dict[str, torch.Tensor],
+            tokenizer: PreTrainedTokenizer,
+            target_key: Union[str],
+            end_toks: Union[str, List[Union[str]]] = "\"},",
+            return_original: bool = False,
     ) -> torch.Tensor:
 
         """
@@ -314,12 +370,12 @@ class MaskedJSONDataset(JSONDataset, ABC):
         )
 
     def apply_mask_tensor_json_kv_span(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        target_key: Union[str],
-        end_toks: Union[str, List[Union[str]]] = "\"},",
-        return_original: bool = False,
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            target_key: Union[str],
+            end_toks: Union[str, List[Union[str]]] = "\"},",
+            return_original: bool = False,
     ) -> torch.Tensor:
         """
         See below
@@ -337,12 +393,12 @@ class MaskedJSONDataset(JSONDataset, ABC):
 
     @staticmethod
     def mask_tensor_ids_json_kv_span(
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        target_ids: Union[int, List[int]],
-        end_toks_ids: Union[int, List[int], List[List[int]]] = 92,
-        reset_token_ids: Union[int, List[int]] = 0,
-        return_original: bool = False,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            target_ids: Union[int, List[int]],
+            end_toks_ids: Union[int, List[int], List[List[int]]] = 92,
+            reset_token_ids: Union[int, List[int]] = 0,
+            return_original: bool = False,
     ) -> torch.Tensor:
 
         """
@@ -413,12 +469,12 @@ class MaskedJSONDataset(JSONDataset, ABC):
 
     @staticmethod
     def mask_tensor_ids_json_section(
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        target_token: Union[int, List[int]],
-        start_token: Union[int, List[int]],
-        end_token: Union[int, List[int]],
-        return_original: bool = False,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            target_token: Union[int, List[int]],
+            start_token: Union[int, List[int]],
+            end_token: Union[int, List[int]],
+            return_original: bool = False,
     ) -> torch.Tensor:
 
         """
@@ -482,9 +538,9 @@ class MaskedJSONDataset(JSONDataset, ABC):
         return attention_mask
 
     def mask_all_new_tokens(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor
     ) -> torch.Tensor:
         """
         Compute a mask that sets 1 for all positions in the
@@ -518,11 +574,11 @@ class MaskedJSONDataset(JSONDataset, ABC):
 
     @staticmethod
     def tensor_masking_span(
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        target_ids: Union[int, List[int]],
-        end_toks_ids: Union[int, List[int], List[List[int]]] = 92,
-        return_original: bool = False,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            target_ids: Union[int, List[int]],
+            end_toks_ids: Union[int, List[int], List[List[int]]] = 92,
+            return_original: bool = False,
     ) -> torch.Tensor:
 
         """
@@ -598,12 +654,12 @@ class MaskedJSONDataset(JSONDataset, ABC):
 
     @staticmethod
     def mask_tensor_json_kv_span(
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        tokenizer: PreTrainedTokenizer,
-        target_key: Union[str],
-        end_toks: Union[str, List[Union[str]]] = "\"},",
-        return_original: bool = False,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            tokenizer: PreTrainedTokenizer,
+            target_key: Union[str],
+            end_toks: Union[str, List[Union[str]]] = "\"},",
+            return_original: bool = False,
     ) -> torch.Tensor:
 
         """
@@ -732,7 +788,6 @@ class MaskedJSONDataset(JSONDataset, ABC):
         if input_ids.ndim == 2:
             data["attention_mask"] = data["attention_mask"].squeeze(0)
             data["input_ids"] = data["input_ids"].squeeze(0)
-
 
         self._cache[idx] = data
         return data

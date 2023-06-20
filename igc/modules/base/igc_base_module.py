@@ -166,6 +166,14 @@ class IgcModule(IgcBaseState):
         self.logger.info(f"Model {self.module_name} saving dir {self._module_checkpoint_dir}")
         self._debug_info()
 
+    @property
+    def trainer_specs(self):
+        """
+        Return trainer specs
+        :return:
+        """
+        return self._trainer_specs
+
     def set_tokenizer(self, tokenizer: PreTrainedTokenizer):
         """Update tokenizer
         :param tokenizer:

@@ -17,8 +17,8 @@ Parameters just passed to agent. i.e. we don't train on parameters.
 Author:Mus mbayramo@stanford.edu
 """
 import argparse
-from typing import Optional, Tuple, Union, List
 import time
+from typing import Optional, Tuple, Union, List
 
 import numpy as np
 import torch
@@ -36,8 +36,9 @@ from igc.shared.shared_torch_builder import TorchBuilder
 
 class LlmEmbeddingsTrainer(LlmModule):
     """
+    Large language model trainer. Its main job train a language
+    model for fine-tuning a latent representation
     """
-
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
@@ -48,9 +49,10 @@ class LlmEmbeddingsTrainer(LlmModule):
                  is_inference=False,
                  device=None):
         """
+        Note that tokenizer must IGC since we extend it to support masking , JSON etc
+
         :param llm_model:
         :param llm_tokenizer:
-
         :param spec: specs for llm trainer
         :param dataset: Union[JSONDataset, MaskedJSONDataset].
         :param metric_logger:  a metric logger used to log training progress
@@ -99,6 +101,26 @@ class LlmEmbeddingsTrainer(LlmModule):
             f"dataset size {len(self.dataset)} "
             f"is overfit {self._overfit} "
         )
+
+        if spec.masking_type == MaskingType.NO_MASK:
+            self.masking_methods = [
+                spec.masking_type
+            ]
+
+        if spec.masking_type == MaskingType.MASK_SECTION or MaskingType.MASK_NEW_TOKENS:
+            self.masking_methods = [
+                spec.masking_type
+            ]
+
+        if spec.masking_type == MaskingType.MASK_JSON_KV:
+            self.masking_methods = [
+                spec.masking_option
+            ]
+
+        # what method we're using for masking. i.e. we can stack
+        self._current_mask_method_counter = None
+        self._current_mask_method_idx = None
+        self._masking_method_dispatcher = LlmEmbeddingsTrainer.create_masking_method(dataset)
 
     def get_model(self) -> PreTrainedModel:
         """Return module model.
@@ -213,72 +235,76 @@ class LlmEmbeddingsTrainer(LlmModule):
         return self.rank == -1 or self.rank == 0
 
     @staticmethod
-    def enable_masking_method(
-        dataset,
-        mask_type: Union[MaskingOption, MaskingType]
-    ):
+    def create_masking_method(dataset: MaskedJSONDataset):
         """
-        :param dataset:
-        :param mask_type:
+        Return dict that store all callable masking methods.
         :return:
         """
-        if isinstance(mask_type, MaskingType):
-            print("Got mask type")
-            if mask_type == MaskingType.MASK_SECTION:
-                print("Got mask type MASK_SECTION")
-                dataset.mask_section(True)
-            elif mask_type == MaskingType.MASK_NEW_TOKENS:
-                print("Got mask type MASK_NEW_TOKENS")
-                dataset.mask_new_tokens(True)
-            elif mask_type == MaskingType.MASK_JSON_KV:
-                print("Got mask type MASK_JSON_KV")
-                dataset.enable_masking(mask_type=MaskingType.MASK_JSON_KV)
-            elif mask_type == MaskingType.NO_MASK:
-                dataset.disable_masking()
-            else:
-                raise ValueError("Unknown masking type")
-            return
+        masking_methods = {
+            MaskingType.MASK_SECTION: dataset.mask_section,
+            MaskingType.MASK_NEW_TOKENS: dataset.mask_new_tokens,
+            MaskingType.MASK_JSON_KV: dataset.enable_masking,
+            MaskingType.NO_MASK: dataset.disable_masking,
 
-        if isinstance(mask_type, MaskingOption):
-            if mask_type == MaskingOption.TARGET:
-                dataset.mask_targets()
-                print("Got MaskingOption type TARGET")
-            elif mask_type == MaskingOption.ALLOWED_VALUE:
-                print("Got MaskingOption type ALLOWED_VALUE")
-                dataset.mask_allowed_value()
-            elif mask_type == MaskingOption.ODATA_ID:
-                print("Got MaskingOption type ODATA_ID")
-                dataset.mask_odata_id()
-            elif mask_type == MaskingOption.TARGET_KEY:
-                print("Got MaskingOption type TARGET_KEY")
-                dataset.mask_targets_key()
-            elif mask_type == MaskingOption.JSON_OBJECT:
-                print("Got MaskingOption type JSON_OBJECT")
-                dataset.mask_objects()
-            elif mask_type == MaskingOption.JSON_ARRAY:
-                print("Got MaskingOption type JSON_ARRAY")
-                dataset.mask_arrays()
-            elif mask_type == MaskingOption.MASK_API_PREFIX:
-                print("Got MaskingOption type MASK_API_PREFIX")
-                dataset.mask_api_prefix()
-            elif mask_type == MaskingOption.MASK_NEW_TOKENS:
-                print("Got MaskingOption type MASK_NEW_TOKENS")
-                dataset.mask_new_tokens(is_enabled=True)
-            else:
-                raise ValueError("Unknown masking type")
+            # options
+            MaskingOption.TARGET: dataset.mask_targets,
+            MaskingOption.ALLOWED_VALUE: dataset.mask_allowed_value,
+            MaskingOption.ODATA_ID: dataset.mask_odata_id,
+            MaskingOption.TARGET_KEY: dataset.mask_targets_key,
+            MaskingOption.JSON_OBJECT: dataset.mask_objects,
+            MaskingOption.JSON_ARRAY: dataset.mask_arrays,
+            MaskingOption.MASK_API_PREFIX: dataset.mask_api_prefix,
+        }
+        return masking_methods
+
+    def enable_masking_method(
+            self, mask_type: Union[MaskingOption, MaskingType]):
+        """
+        Receive mask enum and dispatch to its callback.
+        :param mask_type:
+        """
+        if mask_type in self.masking_methods:
+            print(f"Got mask type {mask_type}")
+            callback = self.masking_methods[mask_type]
+            callback()
+        else:
+            raise ValueError("Unknown masking type")
+
+    def swap_masking_method(
+            self, epoch: int,
+            mask_type: List[Union[MaskingOption, MaskingType]] = None
+    ):
+        """
+        Switch to masking method to next masking method after every epoch freq
+        dictated by self._masked_freq.
+
+        For example if we have 2 masking method let say mask freq is 2
+        then we will switch to first method , on next epoch we will switch to off
+        on third epoch we will switch to second method.
+
+        So we cycle between methods.
+
+        :return:
+        """
+        if (epoch + 1) % self._masked_freq == 0 and self._current_mask_method_counter == 0:
+            # switch to masking pass, mask freq how fast i.e after epoch
+            # or after 10 epoch etc.
+            _current_method = mask_type[self._current_mask_method_idx]
+            self.enable_masking_method(_current_method)
+            self._current_mask_method_idx = (self._current_mask_method_idx + 1) % len(mask_type)
+        else:
+            # reset back
+            if self._current_mask_method_counter == self._num_mask_passed:
+                self.dataset.disable_masking()
+                self._current_mask_method_counter = 0
+                self.dataset.disable_masking()
 
     def _train(
-        self,
-        overfit: Optional[bool] = True,
-        is_full_mask=None,
-        mask_type: List[Union[MaskingOption, MaskingType]] = None
+            self,
+            mask_type: List[Union[MaskingOption, MaskingType]] = None
     ):
         """Train LLM model to map high level goal to redfish actions.
 
-        For example
-                "target": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
-        :param is_full_mask:
-        :param overfit:
         :return:
         """
 
@@ -310,7 +336,8 @@ class LlmEmbeddingsTrainer(LlmModule):
             sampler=sampler,
             num_workers=self._num_workers,
             shuffle=self._is_shuffle,
-            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)
+            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn
+        )
 
         eval_dataloader = DataLoader(
             eval_data,
@@ -319,7 +346,8 @@ class LlmEmbeddingsTrainer(LlmModule):
             num_workers=self._num_workers,
             shuffle=False,
             drop_last=True,
-            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)
+            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn
+        )
 
         self._trainer_args.epochs = self.num_epochs - last_epoch
         self._trainer_args.steps_per_epoch = len(train_dataloader)
@@ -350,26 +378,15 @@ class LlmEmbeddingsTrainer(LlmModule):
                   f"lr {self._lr} "
                   f"batch stats freq: {batch_log_frequency}.")
 
-        current_method_idx = 0
-        current_mask_method_counter = 0
         for epoch in range(last_epoch, self.num_epochs):
             total_loss = 0.0
             num_batches = 0
-
             batch_losses = np.zeros(total_batches)
-            for i, batch in enumerate(train_dataloader):
-                if (epoch + 1) % self._masked_freq == 0 and current_mask_method_counter == 0:
-                    # switch to masking pass
-                    current_method = mask_type[current_method_idx]
-                    self.enable_masking_method(self.dataset, current_method)
-                    current_method_idx = (current_method_idx + 1) % len(mask_type)
-                else:
-                    # reset back
-                    if current_mask_method_counter == self._num_mask_passed:
-                        self.dataset.disable_masking()
-                        current_mask_method_counter = 0
-                        self.dataset.disable_masking()
 
+            # swap mask and pass a batch
+            self.swap_masking_method(epoch, mask_type)
+
+            for i, batch in enumerate(train_dataloader):
                 target_ids = batch["input_ids"][:, 1:].clone().detach()
                 mask = (batch["input_ids"] == self.tokenizer.pad_token_id)
                 target_ids = target_ids.masked_fill(mask[:, 1:], -100)
@@ -424,7 +441,7 @@ class LlmEmbeddingsTrainer(LlmModule):
                 #         self.metric_logger.log_metric("llm_emb_perplexity", perplexity, epoch)
 
                 num_batches += 1
-                current_mask_method_counter += 1
+                self._current_mask_method_counter += 1
 
             # validation on epoch or freq
             if self.on_epoch_eval or ((epoch + 1) % self._eval_freq == 0):
@@ -461,28 +478,19 @@ class LlmEmbeddingsTrainer(LlmModule):
 
         print("Embedding extractor training complete.")
 
-    def train(self, overfit: Optional[bool] = True, is_full_mask=None):
+    def train(self):
         """Train loop for the fine running.
-        :param overfit:
-        :param is_full_mask:
         :return:
         """
-        masking_methods = [
-            # MaskingOption.TARGET,
-            MaskingOption.ODATA_ID,
-            # MaskingType.MASK_SECTION
-        ]
 
         self._train(
-            overfit=overfit,
-            is_full_mask=is_full_mask,
-            mask_type=masking_methods
+            mask_type=self.masking_methods
         )
 
     def decode_masked_output(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor
     ):
         """
         :param input_ids:
@@ -503,9 +511,9 @@ class LlmEmbeddingsTrainer(LlmModule):
 
     @staticmethod
     def compute_accuracy(
-        logits: torch.Tensor,
-        targets: torch.Tensor,
-        original_mask: torch.Tensor
+            logits: torch.Tensor,
+            targets: torch.Tensor,
+            original_mask: torch.Tensor
     ):
         """
         Computes  accuracy for either sequence classification or generation.

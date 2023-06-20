@@ -1,9 +1,17 @@
 import json
 import os
 import sys
+from enum import Enum
 
 from igc.modules.igc_main import IgcMain
 from igc.shared.shared_main import shared_main
+
+
+class EnumEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Enum):
+            return o.value
+        return super().default(o)
 
 
 def save_spec(cmd, parser_groups):
@@ -31,7 +39,7 @@ def save_spec(cmd, parser_groups):
     save_path = os.path.join(cmd.output_dir, "parameters.json")
     print(f"Saved model trainer in {save_path}")
     with open(save_path, "w") as f:
-        json.dump(params, f, indent=4)
+        json.dump(params, f, indent=4, cls=EnumEncoder)
 
 
 def main(cmd, parser_groups):

@@ -676,7 +676,7 @@ def add_dataset_dataloader(parser):
 
     group.add_argument(
         "--masking_type",
-        type=masking_type_type, choices=list(MaskingType), default=MaskingType.NO_MASK,
+        type=masking_type_type, choices=list(MaskingType), default=MaskingType.MASK_SECTION,
         help="The type of masking to apply to the dataset."
     )
 

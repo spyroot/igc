@@ -192,7 +192,6 @@ you probably can collapse this step during first phase and attach auto encoder a
 but it very hard to fit even in 4 GPU system with 24Gb memory
 
 
-
 # Instruction
 
 * Training state encoder
