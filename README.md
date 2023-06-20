@@ -34,6 +34,9 @@ pip install evaluate
 pip install rouge_score
 pip install scikit-learn
 pip install deepspeed
+pip install transformers 
+pip accelerate 
+pip optimum
 ```
 
 ## High level
@@ -212,34 +215,31 @@ python trainer.py --train llm --num_train_epochs 1000 \
 --llm encoder --llm_log_level info --log_level info
 ```
 
-``accelerate
-``
+## 
+Accelerate
+
+```bash
+echo '{
+  "compute_environment": "LOCAL_MACHINE",
+  "distributed_type": "MULTI_GPU",
+  "downcast_bf16": "no",
+  "gpu_ids": "all",
+  "machine_rank": 0,
+  "main_training_function": "main",
+  "mixed_precision": "no",
+  "num_machines": 1,
+  "num_processes": 2,
+  "rdzv_backend": "static",
+  "same_network": true,
+  "tpu_env": [],
+  "tpu_use_cluster": false,
+  "tpu_use_sudo": false,
+  "use_cpu": false
+}' > config.json
 ```
-accelerate launch --config_file /home/spyroot/.cache/huggingface/accelerate/default_config.yaml trainer.py
+
 ```
+accelerate launch --config_file ./config.yaml trainer.py
+```        
 
-MODEL_NAME=gpt2-xl
-PER_DEVICE_TRAIN_BATCH_SIZE=1
-HF_PATH=~/projects
-NEPOCHS=1
-NGPUS=2
-NNODES=1
-MAX_STEPS=50
-OUTPUT_DIR=./output_b${PER_DEVICE_TRAIN_BATCH_SIZE}_g${NGPUS}_$MAX_STEPS
-
-
-deepspeed --num_gpus=2 run_clm.py \
---deepspeed ../dsconfigs/ds_config_fp16_z2.json\
---model_name_or_path $MODEL_NAME \
---dataset_name wikitext \
---dataset_config_name wikitext-2-raw-v1 \
---do_train \
---fp16 \
---per_device_train_batch_size $PER_DEVICE_TRAIN_BATCH_SIZE \
---learning_rate 2e-5 \
---num_train_epochs $NEPOCHS \
---output_dir ${OUTPUT_DIR}_z2 \
---overwrite_output_dir \
---save_steps 0 \
---max_steps $MAX_STEPS \
---save_strategy "no"
+## Training RL agent

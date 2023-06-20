@@ -60,7 +60,7 @@ def from_pretrained_default(
             tokenizer.pad_token = tokenizer.eos_token
             tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    if add_padding:
+    if add_padding and model is not None and tokenizer is not None:
         model.config.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token = tokenizer.eos_token
 

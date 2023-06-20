@@ -13,7 +13,7 @@ import urllib
 import warnings
 from collections import namedtuple
 from pathlib import Path
-from typing import Optional, Any, Union, Dict
+from typing import Optional, Any, Union, Dict, List, Tuple, Callable, Set
 from urllib.error import URLError
 
 import pkg_resources
@@ -22,6 +22,7 @@ from torch.utils.data import random_split, Subset, Dataset
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from .igc_state import IgcBaseState
+from ..shared.llm_shared import from_pretrained_default
 from ...ds import ds_utils as igc_util
 from .igc_specs import make_default_spec
 from .igc_metric_logger import MetricLogger
@@ -413,31 +414,44 @@ class IgcModule(IgcBaseState):
             specs: Union[str, argparse.Namespace],
             module_name: str,
             pre_trained: PreTrainedModel,
-    ) -> tuple[Union[None, PreTrainedModel], int, str]:
+            checkpoint_file: str = None,
+            device: str = None
+    ) -> Tuple[Union[None, PreTrainedModel], int, str]:
         """
-        Copy last checkpoint to last saved model to model dir and return
+        Copy last checkpoint to last saved model to module dir and return
         a new pre-trained model with loaded state.
+
+        if checkpoint_file provided it will use that as source and create
+        final model.
 
         :param specs: specs that contains output_dir attribute
         :param module_name: llm module name
         :param pre_trained: pre-trained model where we load last state
+        :param checkpoint_file:  if checkpoint path provided it will use that.
+        :param device: pass device to load model
         :return: return pre-trained model, epoch and checkpoint file
         """
 
-        module_dir, experiment_dir = IgcModule.checkpoint_dir(specs, module_name)
-        checkpoint_file = IgcModule.last_checkpoint(module_dir)
-        last_model_path = IgcModule.model_file(experiment_dir, module_name)
+        if device is None:
+            device = torch.device("cpu")
 
         if checkpoint_file is None:
-            print(f"No checkpoint files found in dir {module_dir}")
-            return None, 0, last_model_path
+            module_dir, experiment_dir = IgcModule.checkpoint_dir(specs, module_name)
+            checkpoint_file = IgcModule.last_checkpoint(module_dir)
+            last_model_path = IgcModule.model_file(experiment_dir, module_name)
 
-        model = torch.load(checkpoint_file)
+            if checkpoint_file is None:
+                print(f"No checkpoint files found in dir {module_dir}")
+                return None, 0, last_model_path
+        else:
+            last_model_path = checkpoint_file
+
+        model = torch.load(checkpoint_file, map_location=device)
         required_keys = ['model_state_dict', 'epoch']
         missing_keys = [key for key in required_keys if key not in model]
         if missing_keys:
-            print(f"Checkpoint file {checkpoint_file} "
-                  f"is missing the following keys: {missing_keys}")
+            warnings.warn(f"Checkpoint file {checkpoint_file} is "
+                          f"missing the following keys: {missing_keys}")
             return None, 0, last_model_path
 
         if 'optimizer_state_dict' in model:
@@ -445,12 +459,13 @@ class IgcModule(IgcBaseState):
         if 'scheduler_state_dict' in model:
             model.pop('scheduler_state_dict', None)
 
-        if 'epoch' in model:
-            epoch = model['epoch']
-        else:
-            epoch = 0
+        epoch = model['epoch'] if 'epoch' in model else 0
+        try:
+            pre_trained.load_state_dict(model['model_state_dict'])
+        except RuntimeError as e:
+            warnings.warn(f"Error in loading the model state_dict: {e}")
+            return None, 0, last_model_path
 
-        pre_trained.load_state_dict(model['model_state_dict'])
         for param in pre_trained.parameters():
             param.requires_grad = False
 
@@ -976,10 +991,8 @@ class IgcModule(IgcBaseState):
     @staticmethod
     def download_modules(mirrors: Union[str, Dict]):
         """
-
         Download multiple module files from the specified mirror URLs.
         Either single string or dictionary of mirror URLs can be provided.
-
         :return:
         """
         # If mirrors is a string,  single mirror URL
@@ -1035,10 +1048,15 @@ class IgcModule(IgcBaseState):
         return all_files_downloaded
 
     @staticmethod
-    def download():
+    def download() -> Set[str]:
         """
-        :return:
+        Download the modules specified in the 'models.json'
+        file and save them to the appropriate locations for each model.
+
+        :return: A set of downloaded module files.
         """
+
+        module_files = set()
         models_data, package_root_dir = IgcModule.read_model_specs()
         logger = IgcModule.logger
         logger.info(f"Downloading module to {package_root_dir}")
@@ -1057,18 +1075,106 @@ class IgcModule(IgcBaseState):
             _download_result = []
             for url, module_dir, module_file in zip(
                     module_remote_files, module_local_dirs, module_local_files):
-                logger.info(f"Downloading module from {url} to {module_file}")
+                logger.debug(f"Downloading module from {url}")
+                logger.debug(f"Downloading module to {module_file}")
                 os.makedirs(module_dir, exist_ok=True)
                 if os.path.exists(module_file):
-                    logger.info(f"File {module_file} is already present. Skipping download.")
+                    logger.debug(f"File {module_file} is already present. Skipping download.")
                     _download_result.append(True)
+                    module_files.add(module_file)
                 else:
-                    logger.info(f"Downloading module from {url} to {module_file}")
+                    logger.debug(f"Downloading module from {url}")
+                    logger.debug(f"Downloading module to {module_file}")
                     os.makedirs(module_dir, exist_ok=True)
                     download_result = IgcModule.download_module(
                         url, module_dir, module_file, is_overwrite=True
                     )
                     _download_result.append(download_result)
+                    module_files.add(module_file)
 
             if all(_download_result):
                 break
+
+        return module_files
+
+    @staticmethod
+    def checkpoint_to_module(
+            spec: Union[str, argparse.Namespace],
+            module_name: str,
+            pre_trained_tokenizer: Optional[PreTrainedTokenizer] = None,
+            pre_trained_callback: Optional[Callable] = None,
+            device: Optional[Union[str, torch.device]] = None,
+    ) -> Tuple[Union[None, PreTrainedModel], int, str]:
+        """
+        Download all modules, if modules contains only checkpoints from last save.
+        Copy each checkpoint for a module and convert to final model file.
+
+        Note this is mainly required if you train on one host and another host
+        you want to consume fined tuned llm for downstream task.
+
+        :param spec: The specification of the model to download (e.g., model name or configuration file path).
+        :param module_name: The name of the module to download.
+        :param pre_trained_callback: Optional. A callback function to customize the loading of the pre-trained model.
+                    If not provided, a default callback will be used.
+        :param device:  a default device where we use the model.
+        :param pre_trained_tokenizer: a callback function to create a tokenizer.
+        :return: A tuple containing the pre-trained model, the epoch of the loaded checkpoint,
+                and the file path of the final model.
+        """
+
+        if not isinstance(spec, (str, argparse.Namespace)):
+            raise ValueError("The 'spec' argument must be a string or argparse.Namespace.")
+
+        if not isinstance(module_name, str):
+            raise ValueError("The 'module_name' argument must be a string.")
+
+        if pre_trained_callback is not None and not callable(pre_trained_callback):
+            raise ValueError("The 'pre_trained_callback' argument must be a callable or None.")
+
+        if device is None:
+            device = torch.device("cpu")
+
+        if pre_trained_callback is None:
+            pre_trained_callback = from_pretrained_default
+
+        pre_trained, _ = pre_trained_callback(
+            spec, only_model=True, only_tokenizer=False
+        )
+
+        if pre_trained_tokenizer is not None:
+            pre_trained.resize_token_embeddings(len(pre_trained_tokenizer))
+            pre_trained_tokenizer.pad_token = pre_trained_tokenizer.eos_token
+            pre_trained_tokenizer.pad_token_id = pre_trained_tokenizer.eos_token_id
+            pre_trained.config.pad_token_id = pre_trained_tokenizer.pad_token_id
+            pre_trained.config.eos_token_id = pre_trained_tokenizer.eos_token_id
+            pre_trained.config.pad_token = pre_trained_tokenizer.pad_token
+            pre_trained.config.eos_token = pre_trained_tokenizer.eos_token
+
+        print(pre_trained)
+
+        files = IgcModule.download()
+        if not files:
+            raise DownloadModuleError(
+                f"Failed to download module files for {module_name}.")
+
+        largest_epoch = 0
+        last_checkpoint_file = None
+        for checkpoint_file in files:
+            if module_name in checkpoint_file and os.path.exists(checkpoint_file):
+                checkpoint = torch.load(checkpoint_file, map_location=device)
+                epoch = checkpoint['epoch']
+                if epoch > largest_epoch:
+                    largest_epoch = epoch
+                    last_checkpoint_file = checkpoint_file
+                del checkpoint
+
+        if last_checkpoint_file is None:
+            raise ValueError("No last checkpoint file found.")
+
+        print("Using checkpoint file: ", last_checkpoint_file)
+
+        return IgcModule.copy_checkpoint(
+            spec, module_name,
+            pre_trained=pre_trained,
+            checkpoint_file=last_checkpoint_file
+        )
