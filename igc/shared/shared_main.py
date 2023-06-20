@@ -24,11 +24,13 @@ def shared_main(
     if args.local_rank == -1:
         if args.device is None:
             args.device = get_device()
+            torch.cuda.set_device(args.device)
     else:
         torch.cuda.set_device(args.local_rank)
         args.device = torch.device("cuda", args.local_rank)
         if is_deepspeed_dd_init:
             deepspeed.init_distributed()
+        torch.cuda.set_device(args.local_rank)
 
     if is_cuda_empty_cache:
         torch.cuda.empty_cache()
