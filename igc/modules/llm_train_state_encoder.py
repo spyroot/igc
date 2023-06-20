@@ -320,8 +320,12 @@ class LlmEmbeddingsTrainer(LlmModule):
                          f"using accelerate: {self.is_accelerator}")
 
         self.model.to(self.device)
-        last_epoch = self.load_checkpoint(
-            self._module_checkpoint_dir) if self._module_checkpoint_dir is not None else 0
+        if self.is_accelerator:
+            last_epoch = self.load_checkpoint(
+                self._module_checkpoint_dir, map_location="cpu") if self._module_checkpoint_dir is not None else 0
+        else:
+            last_epoch = self.load_checkpoint(
+                self._module_checkpoint_dir, map_location=self.device) if self._module_checkpoint_dir is not None else 0
 
         self.model.train()
         train_dataset, eval_dataset = self.split_dataset()
