@@ -29,6 +29,8 @@ def main(cmd):
         pre_trained_tokenizer=dataset.tokenizer
     )
 
+    print(path)
+
 
 if __name__ == '__main__':
     args, groups = shared_main()

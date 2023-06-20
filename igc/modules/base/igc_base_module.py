@@ -444,7 +444,8 @@ class IgcModule(IgcBaseState):
                 print(f"No checkpoint files found in dir {module_dir}")
                 return None, 0, last_model_path
         else:
-            last_model_path = checkpoint_file
+            experiment_dir = os.path.dirname(checkpoint_file)
+            last_model_path = IgcModule.model_file(experiment_dir, module_name)
 
         model = torch.load(checkpoint_file, map_location=device)
         required_keys = ['model_state_dict', 'epoch']
@@ -470,6 +471,8 @@ class IgcModule(IgcBaseState):
             param.requires_grad = False
 
         pre_trained.eval()
+        print(f"Saving model to {last_model_path}")
+
         torch.save(
             model, last_model_path
         )
@@ -1170,8 +1173,6 @@ class IgcModule(IgcBaseState):
 
         if last_checkpoint_file is None:
             raise ValueError("No last checkpoint file found.")
-
-        print("Using checkpoint file: ", last_checkpoint_file)
 
         return IgcModule.copy_checkpoint(
             spec, module_name,
