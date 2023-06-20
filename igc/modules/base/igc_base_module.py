@@ -471,11 +471,10 @@ class IgcModule(IgcBaseState):
             param.requires_grad = False
 
         pre_trained.eval()
-        print(f"Saving model to {last_model_path}")
-
         torch.save(
             model, last_model_path
         )
+
         return model, epoch, last_model_path
 
     def save_model(self, checkpoint_dir):
