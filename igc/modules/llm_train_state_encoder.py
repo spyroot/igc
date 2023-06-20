@@ -334,7 +334,7 @@ class LlmEmbeddingsTrainer(LlmModule):
 
         if self.is_accelerator:
             last_epoch = self.load_checkpoint(
-                self._module_checkpoint_dir, map_location=self.device) if self._module_checkpoint_dir is not None else 0
+                self._module_checkpoint_dir, map_location=None) if self._module_checkpoint_dir is not None else 0
         else:
             last_epoch = self.load_checkpoint(
                 self._module_checkpoint_dir, map_location=self.device) if self._module_checkpoint_dir is not None else 0
@@ -346,7 +346,6 @@ class LlmEmbeddingsTrainer(LlmModule):
                          f"using accelerate: {self.is_accelerator}")
 
         print(self.model.device)
-
         train_dataset, eval_dataset = self.split_dataset()
         sampler = self.dataset_sampler()
 
