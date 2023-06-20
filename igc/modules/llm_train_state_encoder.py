@@ -281,6 +281,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         :param overfit:
         :return:
         """
+
         self.model.resize_token_embeddings(len(self.dataset.tokenizer))
 
         self.logger.info(
@@ -461,8 +462,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         print("Embedding extractor training complete.")
 
     def train(self, overfit: Optional[bool] = True, is_full_mask=None):
-        """
-
+        """Train loop for the fine running.
         :param overfit:
         :param is_full_mask:
         :return:

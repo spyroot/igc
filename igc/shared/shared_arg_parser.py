@@ -6,6 +6,7 @@ import loguru
 from accelerate import Accelerator
 from .shared_torch_builder import TorchBuilder
 from .shared_torch_utils import get_device
+from ..ds.redfish_masked_dataset import MaskingOption, MaskingType
 
 
 def set_logger(spec):
@@ -618,9 +619,23 @@ def add_distribute_backends(parser):
     return parser
 
 
+def masking_option_type(option_str):
+    try:
+        return MaskingOption[option_str.upper()]
+    except KeyError:
+        raise argparse.ArgumentTypeError(f"Invalid masking option: {option_str}")
+
+
+def masking_type_type(type_str):
+    try:
+        return MaskingType[type_str.upper()]
+    except KeyError:
+        raise argparse.ArgumentTypeError(f"Invalid masking type: {type_str}")
+
+
 def add_dataset_dataloader(parser):
     """
-    Dataloader settings.
+    Dataset and dataloader settings.
 
     :param parser:
     :return:
@@ -653,6 +668,24 @@ def add_dataset_dataloader(parser):
         help="Whether we perform dataset consistency check, "
              "post dataset build or during a load procedure.")
 
+    group.add_argument(
+        "--masking_option",
+        type=masking_option_type, choices=list(MaskingOption), default=MaskingOption.ODATA_ID,
+        help="The masking option to apply to the dataset."
+    )
+
+    group.add_argument(
+        "--masking_type",
+        type=masking_type_type, choices=list(MaskingType), default=MaskingType.NO_MASK,
+        help="The type of masking to apply to the dataset."
+    )
+
+    group.add_argument(
+        "--do_random_masking",
+        action="store_true",
+        help="Whether to choose random masking option from on the dataset. Default is False."
+    )
+
     return parser
 
 
@@ -672,9 +705,9 @@ def add_reporting_group(parser):
 
 
 def shared_arg_parser(
-    is_deepspeed_arg_parser: Optional[bool] = False,
-    is_accelerate_arg_parser: Optional[bool] = False,
-    is_fairscale_arg_parser: Optional[bool] = False
+        is_deepspeed_arg_parser: Optional[bool] = False,
+        is_accelerate_arg_parser: Optional[bool] = False,
+        is_fairscale_arg_parser: Optional[bool] = False
 ):
     """
 
