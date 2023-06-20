@@ -446,6 +446,7 @@ class LlmEmbeddingsTrainer(LlmModule):
                 batch_losses[num_batches] = loss.item()
                 total_loss += loss.item()
                 torch.cuda.empty_cache()
+
                 #
                 if self.is_quantize:
                     self.model.apply(torch.quantization.propagate_qconfig_)

@@ -53,4 +53,5 @@ def main(cmd, parser_groups):
 
 if __name__ == '__main__':
     args, groups = shared_main()
+    print(f"Starting args.local_rank {args.local_rank}, device: {args.device}")
     main(args, groups)
