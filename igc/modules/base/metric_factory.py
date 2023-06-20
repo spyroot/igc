@@ -4,6 +4,7 @@ we serialize all metrics.
 
 Author:Mus mbayramo@stanford.edu
 """
+import os
 import tempfile
 import warnings
 from abc import abstractmethod, ABC
@@ -144,6 +145,8 @@ def create_logger(report_to: str, **kwargs: Optional[str]):
             if output_dir is None:
                 warnings.warn("output_dir is not provided. Using a temporary directory as a fallback.")
                 output_dir = tempfile.mkdtemp()
+            else:
+                os.makedirs(output_dir, exist_ok=True)
             return TensorBoardLogger(output_dir=output_dir)
         elif report_to == 'wandb':
             return WandbLogger(**common_args)

@@ -66,6 +66,8 @@ class IgcBaseState:
                 # if we are not using accelerator, we need to set device
                 self.device = get_device(self.rank) if device is None else device
 
+        self.scheduler = None
+
     def _prepare_checkpoint_dir(self):
         """
 

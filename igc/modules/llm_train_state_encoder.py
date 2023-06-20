@@ -395,6 +395,7 @@ class LlmEmbeddingsTrainer(LlmModule):
                 else:
                     loss.backward()
                 self.optimizer.step()
+
                 if self.is_last_worker():
                     self.scheduler.step()
 

@@ -1,7 +1,6 @@
 """
-This class is base module for all trainers
-inherit from this class.  It has basic functionality
-for all trainers.
+This class is base module for all trainers inherit from this class.
+It has basic functionality for all trainers.
 
 Author:Mus mbayramo@stanford.edu
 """
@@ -30,6 +29,7 @@ from ...ds.redfish_dataset import JSONDataset
 from .igc_tokenize_state import GenericTokenizeState
 from ...modules.base.igc_abstract_logger import AbstractLogger
 from ...shared.modules_typing import SaveStrategy
+from ...shared.shared_torch_utils import get_device
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
@@ -216,7 +216,6 @@ class IgcModule(IgcBaseState):
     def _prepare_checkpoint_dir(self):
         """
         Prepares the checkpoint directory.
-
         :return:
         """
         output_dir = getattr(self._trainer_args, "output_dir", None)
@@ -227,6 +226,7 @@ class IgcModule(IgcBaseState):
             warnings.warn("output_dir is not provided. Using a temporary directory as a fallback.")
             checkpoint_path_dir = Path(tempfile.mkdtemp())
             self._trainer_args.output_dir = str(checkpoint_path_dir)
+            os.makedirs(self._trainer_args.output_dir, exist_ok=True)
 
         checkpoint_path_dir = Path(self._trainer_args.output_dir)
         checkpoint_path_dir = checkpoint_path_dir.resolve()
@@ -245,7 +245,7 @@ class IgcModule(IgcBaseState):
             self.metric_logger.set_logger(self.logger)
             self.metric_logger.set_log_level(self._log_level)
 
-    def get_model(self):
+    def get_model(self) -> PreTrainedModel:
         """Return module model.
         :return:
         """
@@ -309,21 +309,23 @@ class IgcModule(IgcBaseState):
         return random_split(
             data, [train_size, eval_size])
 
+    @property
     def save_strategy(self):
         """
-
         :return:
         """
-        return
+        return self._save_strategy
 
-    def _model_file(self, checkpoint_dir: str) -> str:
+    def _model_file(self, checkpoint_dir: str = None) -> str:
         """
         :param checkpoint_dir:
         :return:
         """
+        if checkpoint_dir is None:
+            checkpoint_dir = self._checkpoint_dir
+
         if len(checkpoint_dir) == 0:
-            raise ValueError("Invalid checkpoint dir. "
-                             "Please specify a valid name.")
+            raise ValueError("Invalid checkpoint dir.Please specify a valid name.")
 
         if not os.path.isdir(checkpoint_dir):
             raise ValueError(f"Invalid checkpoint dir: {checkpoint_dir}. "
@@ -369,8 +371,8 @@ class IgcModule(IgcBaseState):
             return False
 
     @staticmethod
-    def last_checkpoint(module_checkpoint_dir):
-        """
+    def last_checkpoint(module_checkpoint_dir: str):
+        """Return last checkpoint file.
         :return:
         """
         checkpoint_file = None
@@ -440,7 +442,7 @@ class IgcModule(IgcBaseState):
 
         if 'optimizer_state_dict' in model:
             model.pop('optimizer_state_dict', None)
-        if 'optimizer_state_dict' in model:
+        if 'scheduler_state_dict' in model:
             model.pop('scheduler_state_dict', None)
 
         if 'epoch' in model:
@@ -502,44 +504,62 @@ class IgcModule(IgcBaseState):
         missing_keys = [key for key in required_keys if key not in checkpoint]
 
         if missing_keys:
-            self.logger.warning(f"Checkpoint file {model_file} "
-                                f"is missing the following keys: {missing_keys}")
+            self.logger.warning(
+                f"Checkpoint file {model_file} "
+                f"is missing the following keys: {missing_keys}")
             return False
 
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self._is_trained = checkpoint['is_trained']
+        return True
 
     def save_checkpoint(
             self,
             checkpoint_dir,
             epoch: int,
             num_check_points_to_keep: Optional[int] = 3,
-    ):
+    ) -> str:
         """
         Save model checkpoint.
 
         :param checkpoint_dir: a directory for checkpoint
         :param epoch: a checkpoint we are saving.
         :param num_check_points_to_keep:   number of checkpoints to keep.
-        :return:
+        :return:  return path where checkpoint saved
         """
 
         if self.rank > 0:
-            return
+            return ""
 
         epoch_mod = epoch % num_check_points_to_keep
         checkpoint_file = f"{checkpoint_dir}/{self.module_name}_epoch_{epoch_mod}.pt"
-        torch.save({
+
+        checkpoint = {
             'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
             'epoch': epoch,
             'is_trained': True,
-        }, checkpoint_file)
-        self.logger.info(f"Rank: {self.rank} {self.module_name} checkpoint saved to {checkpoint_file}.")
+        }
+
+        if self.optimizer is not None:
+            checkpoint['optimizer_state_dict'] = self.optimizer.state_dict()
+
+        if self.scheduler is not None:
+            if isinstance(self.scheduler, list):
+                checkpoint['scheduler_state_dicts'] = [
+                    scheduler.state_dict() for scheduler in self.scheduler]
+            else:
+                checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
+
+        torch.save(checkpoint, checkpoint_file)
+        self.logger.info(
+            f"Rank: {self.rank} {self.module_name} checkpoint saved to {checkpoint_file}.")
+
+        return checkpoint_file
 
     def load_checkpoint(
-            self, checkpoint_dir: str,
-            resuming="True",
+            self,
+            checkpoint_dir: str,
+            resuming: Optional[bool] = True,
             map_location=None
     ) -> int:
         """
@@ -551,27 +571,23 @@ class IgcModule(IgcBaseState):
         :return: Last saved epoch from the checkpoint.
         """
 
-        if map_location is None:
-            map_to = {'cuda:1': 'cuda:0'}
-        else:
-            map_to = map_location
+        map_to = {'cuda:1': 'cuda:0'} if map_location is None else map_location
+        get_device()
 
         # during re-resume we don't load model, we load from checkpoint
-        model_file = self._model_file(checkpoint_dir)
-        base_model_name = os.path.basename(self._model_file(checkpoint_dir))
+        if os.path.isfile(checkpoint_dir):
+            checkpoint_file = checkpoint_dir
+        else:
+            #
+            model_file = self._model_file(checkpoint_dir)
+            if not resuming:
+                if not os.path.exists(model_file):
+                    self.logger.info(f"Model file {model_file} not found.")
 
-        if not resuming:
-            if not os.path.exists(model_file):
-                self.logger.info(f"Model file {model_file} not found.")
+            self.logger.info(f"Searching for latest checkpoint.")
+            checkpoint_file = self.last_checkpoint(checkpoint_dir)
 
-        self.logger.info(f"Searching for latest checkpoint.")
-        checkpoint_files = [f for f in os.listdir(checkpoint_dir) if
-                            f.endswith('.pt') and f != base_model_name]
-        checkpoint_files = [os.path.join(checkpoint_dir, f) for f in checkpoint_files]
-        checkpoint_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
-
-        if checkpoint_files:
-            checkpoint_file = checkpoint_files[0]
+        if checkpoint_file:
             self.logger.info(f"Found latest checkpoint, loading {checkpoint_file}.")
             checkpoint = torch.load(checkpoint_file, map_location=map_to)
 
@@ -590,8 +606,15 @@ class IgcModule(IgcBaseState):
                 warnings.warn("Optional key is missing from the checkpoint file. ")
 
             self.model.load_state_dict(checkpoint['model_state_dict'])
+
             if resuming:
-                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                if 'optimizer_state_dict' in checkpoint:
+                    self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                if 'scheduler_state_dict' in checkpoint:
+                    self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                elif 'scheduler_state_dicts' in checkpoint:
+                    for idx, scheduler_state_dict in enumerate(checkpoint['scheduler_state_dicts']):
+                        self.scheduler[idx].load_state_dict(scheduler_state_dict)
 
             epoch = checkpoint['epoch']
             self.logger.info(
@@ -599,9 +622,9 @@ class IgcModule(IgcBaseState):
                 f"loading checkpoint loaded from "
                 f"{checkpoint_file}, epoch: {epoch}")
             return epoch
-        else:
-            self.logger.info(f"No checkpoint files found in dir {checkpoint_dir}")
-            return 0
+
+        self.logger.info(f"No checkpoint files found in dir {checkpoint_dir}")
+        return 0
 
     @staticmethod
     def load(
@@ -1049,5 +1072,3 @@ class IgcModule(IgcBaseState):
 
             if all(_download_result):
                 break
-
-
