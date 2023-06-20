@@ -105,7 +105,7 @@ class IgcLanguageModule:
             pretrained_model, t = self._from_pretrained_fn(
                 self._spec,
                 only_tokenizer=False,
-                device_map=self._spec.device
+                device_map=self._spec.device_map
             )
 
             llm_embeddings = LlmEmbeddingsTrainer(
@@ -234,7 +234,7 @@ class IgcLanguageModule:
         model, _ = from_pretrained_default(
             spec, only_model=True,
             only_tokenizer=False,
-            device_map=spec.device
+            device_map=spec.device_map
         )
         tokenizer = load_igc_tokenizer()
         model.resize_token_embeddings(len(tokenizer))

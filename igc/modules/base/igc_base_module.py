@@ -129,6 +129,7 @@ class IgcModule(IgcBaseState):
 
         # model param
         self.model = llm_model
+
         self.model.resize_token_embeddings(len(llm_tokenizer))
         self.tokenizer = llm_tokenizer
         self.module_name = module_name

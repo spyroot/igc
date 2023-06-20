@@ -21,7 +21,7 @@ def from_pretrained_default(
         only_tokenizer: bool = False,
         only_model: bool = False,
         add_padding: bool = True,
-        device_map: Union[str, Dict[str, str]] = "auto"
+        device_map: Union[str, Dict[str, str]] = "balanced"
 ) -> Tuple[Optional[PreTrainedModel], Optional[PreTrainedTokenizer]]:
     """
     This is default callback used to load default model that we fine tune.
@@ -35,7 +35,6 @@ def from_pretrained_default(
     """
     model = None
     tokenizer = None
-
     # it looks like hugging face doesn't like mps
     if device_map == "mps":
         device_map = "auto"

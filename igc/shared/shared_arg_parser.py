@@ -447,6 +447,14 @@ def add_trainer_group(parser):
         help="By default uses freq otherwise at the end of each epoch."
     )
 
+    parser.add_argument(
+        "--device_map",
+        type=str,
+        choices=["balanced", "auto"],
+        default="balanced",
+        help="By default uses freq otherwise at the end of each epoch."
+    )
+
     return parser
 
 

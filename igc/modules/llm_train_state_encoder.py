@@ -259,7 +259,8 @@ class LlmEmbeddingsTrainer(LlmModule):
         return masking_methods
 
     def enable_masking_method(
-        self, mask_type: Union[MaskingOption, MaskingType]):
+        self, mask_type: Union[MaskingOption, MaskingType]
+    ):
         """
         Receive mask enum and dispatch to its callback.
         :param mask_type:
@@ -309,7 +310,9 @@ class LlmEmbeddingsTrainer(LlmModule):
         :return:
         """
 
-        self.model.resize_token_embeddings(len(self.dataset.tokenizer))
+        self.model.resize_token_embeddings(
+            len(self.dataset.tokenizer)
+        )
 
         self.logger.info(
             f"Rank {self.rank} starting train, device {self.device}")
@@ -320,17 +323,29 @@ class LlmEmbeddingsTrainer(LlmModule):
                          f"to device {self.device}, "
                          f"using accelerate: {self.is_accelerator}")
 
-        if not self.is_accelerator:
-            self.model.to(self.device)
+
+        #     self.model.to(self.device)
+        #
+        # if not self.is_accelerator:
+        #     self.model.to(self.device)
+        # else:
+        #     self.model, self.optimizer, self.scheduler = self.accelerator.prepare(
+        #         self.model, self.optimizer, self.scheduler)
 
         if self.is_accelerator:
             last_epoch = self.load_checkpoint(
-                self._module_checkpoint_dir, map_location="cpu") if self._module_checkpoint_dir is not None else 0
+                self._module_checkpoint_dir, map_location=self.device) if self._module_checkpoint_dir is not None else 0
         else:
             last_epoch = self.load_checkpoint(
                 self._module_checkpoint_dir, map_location=self.device) if self._module_checkpoint_dir is not None else 0
 
+        self.model.to(self.device)
         self.model.train()
+        self.logger.info(f"Uploading model from {self.model.device} "
+                         f"to device {self.device}, "
+                         f"using accelerate: {self.is_accelerator}")
+
+        print(self.model.device)
 
         train_dataset, eval_dataset = self.split_dataset()
         sampler = self.dataset_sampler()
@@ -369,13 +384,9 @@ class LlmEmbeddingsTrainer(LlmModule):
         )
 
         if self.is_accelerator:
-            # self.model, self.optimizer, train_dataloader, eval_dataloader = self.accelerator.prepare(
-            #     [self.model, self.optimizer, train_dataloader, eval_dataloader],
-            #     device_placement=[True])
-
-            self.model, self.optimizer, self.scheduler = self.accelerator.prepare(
-                [self.model, self.optimizer, self.scheduler],
-                device_placement=[True])
+            self.accelerator.print()
+            self.model, self.optimizer, self.scheduler, train_dataloader, eval_dataloader = self.accelerator.prepare(
+                self.model, self.optimizer, self.scheduler, train_dataloader, eval_dataloader)
 
         if self.is_quantize:
             self.model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
