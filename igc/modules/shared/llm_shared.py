@@ -42,11 +42,11 @@ def from_pretrained_default(
     if not only_tokenizer:
         if isinstance(args, str):
             model = GPT2LMHeadModel.from_pretrained(
-                args, device_map=device_map
+                args
             )
         else:
             model = GPT2LMHeadModel.from_pretrained(
-                args.model_type, device_map=device_map
+                args.model_type
             )
 
     if not only_model:

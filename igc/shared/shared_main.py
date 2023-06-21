@@ -19,18 +19,17 @@ def shared_main(
     """
 
     args, parser_groups = shared_arg_parser()
-    args.local_rank = int(os.environ.get('LOCAL_RANK', -1))
-
-    if args.local_rank == -1:
-        if args.device is None:
-            args.device = get_device()
-            torch.cuda.set_device(args.device)
-    else:
-        torch.cuda.set_device(args.local_rank)
-        args.device = torch.device("cuda", args.local_rank)
-        if is_deepspeed_dd_init:
-            deepspeed.init_distributed()
-        torch.cuda.set_device(args.local_rank)
+    # args.local_rank = int(os.environ.get('LOCAL_RANK', -1))
+    #
+    # if args.local_rank == -1:
+    #     if args.device is None:
+    #         args.device = get_device()
+    #         # torch.cuda.set_device(args.device)
+    # else:
+    #     args.device = get_device(rank=args.local_rank)
+    #     if is_deepspeed_dd_init:
+    #         deepspeed.init_distributed()
+    #     # torch.cuda.set_device(args.local_rank)
 
     if is_cuda_empty_cache:
         torch.cuda.empty_cache()
@@ -44,7 +43,7 @@ def shared_main(
         else:
             raise TypeError("device_list_visibility should be a string.")
 
-        os.environ["CUDA_VISIBLE_DEVICES"] = device_list_visibility
+        # os.environ["CUDA_VISIBLE_DEVICES"] = device_list_visibility
 
     # create output directory if not provided
     if args.output_dir is None:

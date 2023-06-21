@@ -5,10 +5,10 @@ This separate trainer so we can test different blocks
 Author: Mus mbayramo@stanford.edu
 
 """
-from transformers import GPT2LMHeadModel
 from igc.ds.redfish_masked_dataset import MaskedJSONDataset
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
+from igc.modules.shared.llm_shared import from_pretrained_default
 from igc.shared.shared_main import shared_main
 
 
@@ -22,7 +22,7 @@ def main(cmd):
     )
 
     metric_logger = MetricLogger(cmd.metric_report, **vars(cmd))
-    model = GPT2LMHeadModel.from_pretrained("gpt2")
+    model, _ = from_pretrained_default("gpt2", only_model=True)
     model.resize_token_embeddings(len(dataset.tokenizer))
 
     latent_model = LlmEmbeddingsTrainer(
@@ -32,5 +32,5 @@ def main(cmd):
 
 
 if __name__ == '__main__':
-    args = shared_main()
+    args, _ = shared_main()
     main(args)

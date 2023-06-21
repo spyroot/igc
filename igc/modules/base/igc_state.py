@@ -51,21 +51,28 @@ class IgcBaseState:
 
         self.is_accelerator = False
         if device is not None:
-            self.device = torch.device(device)
+            self._device = torch.device(device)
 
         if spec.use_accelerator:
             self.accelerator = build_accelerator(spec)
             self.is_accelerator = True
             # let accelerator choose device.
-            self.device = self.accelerator.device
+            self._device = self.accelerator.device
             self.logger.info(f"Rank {self.rank}, Running accelerator , accelerate selected device {self.device}")
         elif hasattr(spec, "device"):
-            self.device = spec.device
+            self._device = spec.device
         else:
             # if we are not using accelerator, we need to set device
-            self.device = get_device(self.rank) if device is None else device
+            self._device = get_device(self.rank) if device is None else device
 
         self.scheduler = None
+
+    @property
+    def device(self):
+        if self.accelerator:
+            return self.accelerator.device
+        else:
+            return self._device
 
     def _prepare_checkpoint_dir(self):
         """
@@ -160,15 +167,15 @@ class IgcBaseState:
         Show information about the accelerator used.
         """
         if self.is_accelerator:
-            self.logger.info("Accelerator Configuration:")
-            self.logger.info(f"is main process: {self.accelerator.is_main_process}")
-            self.logger.info(f"Distributed Training: {self.accelerator.distributed_type}")
-            self.logger.info(f"Device Placement: {self.accelerator.device_placement}")
-            self.logger.info(f"Split Batches: {self.accelerator.split_batches}")
-            self.logger.info(f"Mixed Precision: {self.accelerator.mixed_precision}")
-            self.logger.info(f"Project Directory: {self.accelerator.project_dir}")
-            self.logger.info(f"Dispatch Batches: {self.accelerator.dispatch_batches}")
-            self.logger.info(f"Even Batches: {self.accelerator.even_batches}")
-            self.logger.info(f"RNG Types: {self.accelerator.rng_types}")
-            self.logger.info(f"Log With: {self.accelerator.log_with}")
-            self.logger.info(f"Step Scheduler with Optimizer: {self.accelerator.step_scheduler_with_optimizer}")
+            self.logger.debug("Accelerator Configuration:")
+            self.logger.debug(f"is main process: {self.accelerator.is_main_process}")
+            self.logger.debug(f"Distributed Training: {self.accelerator.distributed_type}")
+            self.logger.debug(f"Device Placement: {self.accelerator.device_placement}")
+            self.logger.debug(f"Split Batches: {self.accelerator.split_batches}")
+            self.logger.debug(f"Mixed Precision: {self.accelerator.mixed_precision}")
+            self.logger.debug(f"Project Directory: {self.accelerator.project_dir}")
+            self.logger.debug(f"Dispatch Batches: {self.accelerator.dispatch_batches}")
+            self.logger.debug(f"Even Batches: {self.accelerator.even_batches}")
+            self.logger.debug(f"RNG Types: {self.accelerator.rng_types}")
+            self.logger.debug(f"Log With: {self.accelerator.log_with}")
+            self.logger.debug(f"Step Scheduler with Optimizer: {self.accelerator.step_scheduler_with_optimizer}")

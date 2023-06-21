@@ -90,8 +90,8 @@ def add_optimizer_group(parser):
 
     optimizer_group.add_argument(
         "--llm_learning_rate",
-        type=float, default=1e-5,
-        # type=float, default=5e-5,
+        # type=float, default=1e-5,
+        type=float, default=5e-5,
         help="Initial learning rate (after the potential warmup period) to use.",
     )
 
@@ -796,16 +796,16 @@ def shared_arg_parser(
     )
 
     args = parser.parse_args()
-    args.device = get_device(rank=int(os.environ.get('LOCAL_RANK', -1))) \
-        if args.device == "auto" else args.device
+    # args.device = get_device(rank=int(os.environ.get('LOCAL_RANK', -1))) \
+    #     if args.device == "auto" else args.device
 
-    if is_accelerate_arg_parser:
-        try:
-            if args.use_accelerator:
-                accelerator = Accelerator()
-                parser = accelerator.inject_arguments(parser)
-        except ImportError:
-            pass
+    # if is_accelerate_arg_parser:
+    #     try:
+    #         if args.use_accelerator:
+    #             accelerator = Accelerator()
+    #             parser = accelerator.inject_arguments(parser)
+    #     except ImportError:
+    #         pass
 
     set_logger(args)
 

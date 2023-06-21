@@ -28,10 +28,16 @@ from torch.quantization import convert
 from torch.utils.data import DataLoader, RandomSampler
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from igc.ds.redfish_masked_dataset import MaskingOption, MaskedJSONDataset, MaskingType
+
 from igc.modules.base.igc_llm_base_module import LlmModule
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.shared.shared_torch_builder import TorchBuilder
+
+from igc.ds.redfish_masked_dataset import (
+    MaskingOption,
+    MaskedJSONDataset,
+    MaskingType
+)
 
 
 class LlmEmbeddingsTrainer(LlmModule):
@@ -74,11 +80,13 @@ class LlmEmbeddingsTrainer(LlmModule):
         self.batch_size = spec.per_device_train_batch_size
 
         self._batch_log = 10
-        self._eval_freq = 10
-        self._num_mask_passed = 10  # number of mask passes before we switch it off
+        # number of mask passes before we switch it off
+        self._num_mask_passed = 10
         self._masked_freq = spec.llm_mask_freq
 
-        self._eval_freq = 8
+        self._eval_freq = 16
+        self._save_freq = 16
+
         self._is_shuffle = True
         self._num_workers = spec.num_workers
         self._default_mask_token = "@odata.id"
@@ -323,31 +331,30 @@ class LlmEmbeddingsTrainer(LlmModule):
                          f"to device {self.device}, "
                          f"using accelerate: {self.is_accelerator}")
 
-        #     self.model.to(self.device)
-        #
-        # if not self.is_accelerator:
-        #     self.model.to(self.device)
-        # else:
-        #     self.model, self.optimizer, self.scheduler = self.accelerator.prepare(
-        #         self.model, self.optimizer, self.scheduler)
+        if not self.is_accelerator:
+            self.model.to(self.device)
 
         if self.is_accelerator:
             last_epoch = self.load_checkpoint(
-                self._module_checkpoint_dir, map_location=None) if self._module_checkpoint_dir is not None else 0
+                self._module_checkpoint_dir,
+                map_location=None) if self._module_checkpoint_dir is not None else 0
         else:
             last_epoch = self.load_checkpoint(
-                self._module_checkpoint_dir, map_location=self.device) if self._module_checkpoint_dir is not None else 0
+                self._module_checkpoint_dir,
+                map_location=self.device) if self._module_checkpoint_dir is not None else 0
 
-        self.model.train()
-        self.logger.info(f"Uploading model from {self.model.device} "
+        self.logger.info(f"Rank {self.rank}: "
+                         f"Uploading model from {self.model.device} "
                          f"to device {self.device}, "
                          f"using accelerate: {self.is_accelerator}")
 
-        print("Model device", self.model.device)
         train_dataset, eval_dataset = self.split_dataset()
         sampler = self.dataset_sampler()
 
-        self.logger.info(f"Creating dataloader {self.batch_size} num worker {self._num_workers}")
+        self.logger.info(f"Creating dataloader "
+                         f"{self.batch_size} "
+                         f"num worker {self._num_workers}")
+
         train_data, eval_data = self.split_dataset()
 
         train_dataloader = DataLoader(
@@ -374,6 +381,8 @@ class LlmEmbeddingsTrainer(LlmModule):
         self._trainer_args.epochs = self.num_epochs - last_epoch
         self._trainer_args.steps_per_epoch = len(train_dataloader)
 
+        self.model = self.model.to(self.device)
+
         self.scheduler = TorchBuilder.create_scheduler(
             self._trainer_args.llm_scheduler,
             optimizer=self.optimizer,
@@ -381,10 +390,9 @@ class LlmEmbeddingsTrainer(LlmModule):
         )
 
         if self.is_accelerator:
-            self.model, self.optimizer, self.scheduler, train_dataloader, eval_dataloader = self.accelerator.prepare(
-                self.model, self.optimizer, self.scheduler, train_dataloader, eval_dataloader)
-
-        self.model.to(self.device)
+            self.model, self.optimizer, train_dataloader, eval_dataloader, self.scheduler = self.accelerator.prepare(
+                self.model, self.optimizer, train_dataloader, eval_dataloader, self.scheduler
+            )
 
         if self.is_quantize:
             self.model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
@@ -402,6 +410,8 @@ class LlmEmbeddingsTrainer(LlmModule):
                   f"batch stats freq: {batch_log_frequency}.")
 
         for epoch in range(last_epoch, self.num_epochs):
+            self.model.train()
+
             total_loss = 0.0
             num_batches = 0
             batch_losses = np.zeros(total_batches)
@@ -460,13 +470,6 @@ class LlmEmbeddingsTrainer(LlmModule):
                           f"- Progress: {progress_percentage:.2f}% - Batch Loss mean: {batch_losses.mean():.4f}")
                     self.metric_logger.log_metric("llm_emb_batch_loss", batch_losses.mean(), epoch)
 
-                # # validation on epoch or freq
-                # if self.on_epoch_eval or ((epoch + 1) % 32 == 0):
-                #     validation_accuracy, perplexity = self.validate(eval_dataloader)
-                #     if self.is_rank_zero():
-                #         self.metric_logger.log_metric("llm_emb_accuracy", validation_accuracy, epoch)
-                #         self.metric_logger.log_metric("llm_emb_perplexity", perplexity, epoch)
-
                 num_batches += 1
                 self._current_mask_method_counter += 1
 
@@ -488,14 +491,24 @@ class LlmEmbeddingsTrainer(LlmModule):
 
             # save best checkpoint
             if self.is_rank_zero():
-                if validation_accuracy > self._best_validation_metric or (epoch + 1) % 10 == 0:
+                if validation_accuracy > self._best_validation_metric or (epoch + 1) % self._save_freq == 0:
                     self._best_validation_metric = validation_accuracy
                     if self._module_checkpoint_dir is not None:
-                        self.save_checkpoint(self._module_checkpoint_dir, epoch + 1)
+                        if self.is_accelerator:
+                            model = self.accelerator.unwrap_model(self.model)
+                            opt = self.accelerator.unwrap_model(self.optimizer)
+                            shed = self.accelerator.unwrap_model(self.scheduler)
+                            self.save_checkpoint(
+                                self._module_checkpoint_dir, epoch + 1, model=model,
+                                optimizer=opt, scheduler=shed
+                            )
+                        else:
+                            self.save_checkpoint(self._module_checkpoint_dir, epoch + 1)
 
         if self.is_quantize:
             self.model = convert(self.model)
 
+        self.model = self.accelerator.unwrap_model(self.model)
         self.save_model(self._module_checkpoint_dir)
         self.save_finetuned()
 

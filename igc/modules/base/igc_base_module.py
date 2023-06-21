@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional, Any, Union, Dict, List, Tuple, Callable, Set
 from urllib.error import URLError
 
+import accelerate
 import pkg_resources
 import torch
 from torch.utils.data import random_split, Subset, Dataset
@@ -47,14 +48,14 @@ class IgcModule(IgcBaseState):
     logger = AbstractLogger.create_logger()
 
     def __init__(
-            self,
-            module_name: str,
-            spec: argparse.Namespace,
-            llm_model, llm_tokenizer,
-            ds: Optional[Union[JSONDataset, Dataset]] = None,
-            metric_logger: Optional[MetricLogger] = None,
-            is_inference: Optional[bool] = False,
-            device=None
+        self,
+        module_name: str,
+        spec: argparse.Namespace,
+        llm_model, llm_tokenizer,
+        ds: Optional[Union[JSONDataset, Dataset]] = None,
+        metric_logger: Optional[MetricLogger] = None,
+        is_inference: Optional[bool] = False,
+        device=None
     ):
         """
 
@@ -129,7 +130,6 @@ class IgcModule(IgcBaseState):
 
         # model param
         self.model = llm_model
-
         self.model.resize_token_embeddings(len(llm_tokenizer))
         self.tokenizer = llm_tokenizer
         self.module_name = module_name
@@ -282,9 +282,9 @@ class IgcModule(IgcBaseState):
         return random_split(self.dataset, [train_size, eval_size])
 
     def split_slice_dataset(
-            self,
-            train_ratio: float = 0.8,
-            sample_ratio: float = 0.01
+        self,
+        train_ratio: float = 0.8,
+        sample_ratio: float = 0.01
     ) -> list[Subset[Any]]:
         """
         Split a subset of the dataset and specify the amount of sample used.
@@ -420,11 +420,11 @@ class IgcModule(IgcBaseState):
 
     @staticmethod
     def copy_checkpoint(
-            specs: Union[str, argparse.Namespace],
-            module_name: str,
-            pre_trained: PreTrainedModel,
-            checkpoint_file: str = None,
-            device: str = None
+        specs: Union[str, argparse.Namespace],
+        module_name: str,
+        pre_trained: PreTrainedModel,
+        checkpoint_file: str = None,
+        device: str = None
     ) -> Tuple[Union[None, PreTrainedModel], int, str]:
         """
         Copy last checkpoint to last saved model to module dir and return
@@ -540,14 +540,20 @@ class IgcModule(IgcBaseState):
         return True
 
     def save_checkpoint(
-            self,
-            checkpoint_dir,
-            epoch: int,
-            num_check_points_to_keep: Optional[int] = 3,
+        self,
+        checkpoint_dir,
+        epoch: int,
+        num_check_points_to_keep: Optional[int] = 3,
+        model: Optional[PreTrainedModel] = None,
+        optimizer=None,
+        scheduler=None,
     ) -> str:
         """
         Save model checkpoint.
 
+        :param scheduler:
+        :param optimizer:
+        :param model:
         :param checkpoint_dir: a directory for checkpoint
         :param epoch: a checkpoint we are saving.
         :param num_check_points_to_keep:   number of checkpoints to keep.
@@ -560,21 +566,25 @@ class IgcModule(IgcBaseState):
         epoch_mod = epoch % num_check_points_to_keep
         checkpoint_file = f"{checkpoint_dir}/{self.module_name}_epoch_{epoch_mod}.pt"
 
+        _model = model if model is not None else self.model
+        _shed = scheduler if scheduler is not None else self.scheduler
+        _optimizer = optimizer if optimizer is not None else self.optimizer
+
         checkpoint = {
-            'model_state_dict': self.model.state_dict(),
+            'model_state_dict': _model.state_dict(),
             'epoch': epoch,
             'is_trained': True,
         }
 
-        if self.optimizer is not None:
-            checkpoint['optimizer_state_dict'] = self.optimizer.state_dict()
+        if optimizer is not None:
+            checkpoint['optimizer_state_dict'] = _optimizer.state_dict()
 
-        if self.scheduler is not None:
+        if _shed is not None:
             if isinstance(self.scheduler, list):
                 checkpoint['scheduler_state_dicts'] = [
-                    scheduler.state_dict() for scheduler in self.scheduler]
+                    scheduler.state_dict() for scheduler in _shed]
             else:
-                checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
+                checkpoint['scheduler_state_dict'] = _shed.state_dict()
 
         torch.save(checkpoint, checkpoint_file)
         self.logger.info(
@@ -583,10 +593,10 @@ class IgcModule(IgcBaseState):
         return checkpoint_file
 
     def load_checkpoint(
-            self,
-            checkpoint_dir: str,
-            resuming: Optional[bool] = True,
-            map_location=None
+        self,
+        checkpoint_dir: str,
+        resuming: Optional[bool] = True,
+        map_location=None
     ) -> int:
         """
         Load model checkpoint for resuming training.
@@ -654,13 +664,13 @@ class IgcModule(IgcBaseState):
 
     @staticmethod
     def load(
-            module_name: str,
-            model: torch.nn.Module,
-            specs: Union[str, argparse.Namespace],
-            is_inference: bool = True,
-            optimizer: Optional[torch.optim.Optimizer] = None,
-            scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
-            map_location=None,
+        module_name: str,
+        model: torch.nn.Module,
+        specs: Union[str, argparse.Namespace],
+        is_inference: bool = True,
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
+        map_location=None,
     ) -> tuple[Optional[int], bool]:
         """
         Load model from checkpoint for inference.
@@ -783,7 +793,7 @@ class IgcModule(IgcBaseState):
 
     @staticmethod
     def read_model_specs(
-            default_model_file: str = "../datasets/models.json"
+        default_model_file: str = "../datasets/models.json"
     ):
         """Read model specs file.
 
@@ -828,13 +838,13 @@ class IgcModule(IgcBaseState):
 
     @staticmethod
     def _download_module(
-            url: str,
-            path: str,
-            filename: Optional[str] = None,
-            checksum: Optional[str] = None,
-            overwrite: Optional[bool] = False,
-            retry: int = 5,
-            is_strict=False
+        url: str,
+        path: str,
+        filename: Optional[str] = None,
+        checksum: Optional[str] = None,
+        overwrite: Optional[bool] = False,
+        retry: int = 5,
+        is_strict=False
     ) -> tuple[bool, str]:
         """
         Download igc module file from url and store in default location.
@@ -935,11 +945,11 @@ class IgcModule(IgcBaseState):
 
     @staticmethod
     def download_module(
-            mirror_url: str,
-            module_dir: str,
-            module_filename: str,
-            checksum: str = None,
-            is_overwrite: Optional[bool] = False,
+        mirror_url: str,
+        module_dir: str,
+        module_filename: str,
+        checksum: str = None,
+        is_overwrite: Optional[bool] = False,
     ):
         """
         Download a module file from the specified mirror URL.
@@ -1085,7 +1095,7 @@ class IgcModule(IgcBaseState):
 
             _download_result = []
             for url, module_dir, module_file in zip(
-                    module_remote_files, module_local_dirs, module_local_files):
+                module_remote_files, module_local_dirs, module_local_files):
                 logger.debug(f"Downloading module from {url}")
                 logger.debug(f"Downloading module to {module_file}")
                 os.makedirs(module_dir, exist_ok=True)
@@ -1110,11 +1120,11 @@ class IgcModule(IgcBaseState):
 
     @staticmethod
     def checkpoint_to_module(
-            spec: Union[str, argparse.Namespace],
-            module_name: str,
-            pre_trained_tokenizer: Optional[PreTrainedTokenizer] = None,
-            pre_trained_callback: Optional[Callable] = None,
-            device: Optional[Union[str, torch.device]] = None,
+        spec: Union[str, argparse.Namespace],
+        module_name: str,
+        pre_trained_tokenizer: Optional[PreTrainedTokenizer] = None,
+        pre_trained_callback: Optional[Callable] = None,
+        device: Optional[Union[str, torch.device]] = None,
     ) -> Tuple[Union[None, PreTrainedModel], int, str]:
         """
         Download all modules, if modules contains only checkpoints from last save.
