@@ -443,7 +443,13 @@ class LlmEmbeddingsTrainer(LlmModule):
 
             for i, batch in enumerate(train_dataloader):
 
-                target_ids = batch["input_ids"][:, 1:].clone().detach()
+                attention_mask = batch['attention_mask'].to(self.device)
+                mask_inverted = ~attention_mask.bool()
+
+                input_ids = batch["input_ids"].to(self.device)
+                input_ids = input_ids.masked_fill(mask_inverted == 1, -100).contiguous()
+
+                target_ids = input_ids[:, 1:].clone().detach()
                 mask = (batch["input_ids"] == self.tokenizer.pad_token_id)
                 target_ids = target_ids.masked_fill(mask[:, 1:], -100)
 
