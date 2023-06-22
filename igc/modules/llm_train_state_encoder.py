@@ -154,28 +154,6 @@ class LlmEmbeddingsTrainer(LlmModule):
         included_keys = ['input_ids', 'attention_mask']
         batch = {key: torch.stack([s[key] for s in samples]) for key in included_keys}
 
-        # attention_mask = batch['attention_mask']
-        # mask_inverted = ~attention_mask.bool()
-        # input_ids = batch["input_ids"]
-        #
-        # # print(f"mask_inverted shape {mask_inverted.shape}.")
-        # # print(f"input_ids shape {input_ids.shape}.")
-        # input_ids = input_ids.masked_fill(mask_inverted == 1, -100).contiguous()
-        # print(f"new input_ids shape {input_ids.shape}.")
-
-        # if torch.any(mask_inverted == 1):
-        #     print("elements were masked.")
-        #
-        # if torch.any(input_ids == -100):
-        #     print(f"Some elements were masked and set to -100. {input_ids.shape} attention mask {attention_mask.shape}")
-        # print("input ids shape", input_ids.shape)
-        # print(f"batch ids shape", batch["input_ids"].shape)
-        # print("attention_mask shape", attention_mask.shape)
-        #
-        # print("attention_mask dtype", attention_mask.dtype)
-        # print("batch intput dty[e", batch["input_ids"].dtype)
-        # print("input_ids dtype", input_ids.dtype)
-        # batch["input_ids"] = input_ids.contiguous()
         return batch
 
     @staticmethod
