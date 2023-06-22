@@ -238,7 +238,7 @@ echo '{
 ```
 
 ```bash
-accelerate launch --config_file ./config.yaml trainer.py igc_main.py --train llm --num_train_epochs 1000 \
+accelerate launch --config_file ./config.yaml trainer_state_encoder_only.py --train llm --num_train_epochs 1000 \
 --llm latent --llm_log_level info --log_level info
 ```        
 
