@@ -543,7 +543,7 @@ class IgcModule(IgcBaseState):
         checkpoint_dir,
         epoch: int,
         num_check_points_to_keep: Optional[int] = 3,
-        model: Optional[PreTrainedModel] = None,
+        model = None,
         optimizer=None,
         scheduler=None,
     ) -> str:

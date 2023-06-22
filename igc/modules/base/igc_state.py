@@ -68,8 +68,11 @@ class IgcBaseState:
             self.logger.info(f"Rank {self.rank}, Running on selected device {self.device}")
             # if we are not using accelerator, we need to set device
             self._device = get_device(self.rank) if device is None else device
+            raise
 
         self.scheduler = None
+
+
 
     @property
     def accelerator(self) -> Accelerator:

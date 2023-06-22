@@ -153,6 +153,29 @@ class LlmEmbeddingsTrainer(LlmModule):
         """
         included_keys = ['input_ids', 'attention_mask']
         batch = {key: torch.stack([s[key] for s in samples]) for key in included_keys}
+
+        # attention_mask = batch['attention_mask']
+        # mask_inverted = ~attention_mask.bool()
+        # input_ids = batch["input_ids"]
+        #
+        # # print(f"mask_inverted shape {mask_inverted.shape}.")
+        # # print(f"input_ids shape {input_ids.shape}.")
+        # input_ids = input_ids.masked_fill(mask_inverted == 1, -100).contiguous()
+        # print(f"new input_ids shape {input_ids.shape}.")
+
+        # if torch.any(mask_inverted == 1):
+        #     print("elements were masked.")
+        #
+        # if torch.any(input_ids == -100):
+        #     print(f"Some elements were masked and set to -100. {input_ids.shape} attention mask {attention_mask.shape}")
+        # print("input ids shape", input_ids.shape)
+        # print(f"batch ids shape", batch["input_ids"].shape)
+        # print("attention_mask shape", attention_mask.shape)
+        #
+        # print("attention_mask dtype", attention_mask.dtype)
+        # print("batch intput dty[e", batch["input_ids"].dtype)
+        # print("input_ids dtype", input_ids.dtype)
+        # batch["input_ids"] = input_ids.contiguous()
         return batch
 
     @staticmethod
@@ -266,7 +289,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         return masking_methods
 
     def enable_masking_method(
-            self, mask_type: Union[MaskingOption, MaskingType]
+        self, mask_type: Union[MaskingOption, MaskingType]
     ):
         """
         Receive mask enum and dispatch to its callback.
@@ -280,8 +303,8 @@ class LlmEmbeddingsTrainer(LlmModule):
             raise ValueError("Unknown masking type")
 
     def swap_masking_method(
-            self, epoch: int,
-            mask_type: List[Union[MaskingOption, MaskingType]] = None
+        self, epoch: int,
+        mask_type: List[Union[MaskingOption, MaskingType]] = None
     ):
         """
         Switch to masking method to next masking method after every epoch freq
@@ -309,8 +332,8 @@ class LlmEmbeddingsTrainer(LlmModule):
                 self.dataset.disable_masking()
 
     def _train(
-            self,
-            mask_type: List[Union[MaskingOption, MaskingType]] = None
+        self,
+        mask_type: List[Union[MaskingOption, MaskingType]] = None
     ):
         """Train LLM model to map high level goal to redfish actions.
 
@@ -420,9 +443,6 @@ class LlmEmbeddingsTrainer(LlmModule):
 
             for i, batch in enumerate(train_dataloader):
 
-                attention_mask = batch['attention_mask']
-                batch["input_ids"][~attention_mask.bool()] = -100
-
                 target_ids = batch["input_ids"][:, 1:].clone().detach()
                 mask = (batch["input_ids"] == self.tokenizer.pad_token_id)
                 target_ids = target_ids.masked_fill(mask[:, 1:], -100)
@@ -502,8 +522,11 @@ class LlmEmbeddingsTrainer(LlmModule):
                             opt = self.accelerator.unwrap_model(self.optimizer)
                             shed = self.accelerator.unwrap_model(self.scheduler)
                             self.save_checkpoint(
-                                self._module_checkpoint_dir, epoch + 1, model=model,
-                                optimizer=opt, scheduler=shed
+                                self._module_checkpoint_dir,
+                                epoch + 1,
+                                model=model,
+                                optimizer=opt,
+                                scheduler=shed
                             )
                         else:
                             self.save_checkpoint(self._module_checkpoint_dir, epoch + 1)
@@ -531,9 +554,9 @@ class LlmEmbeddingsTrainer(LlmModule):
         )
 
     def decode_masked_output(
-            self,
-            input_ids: torch.Tensor,
-            attention_mask: torch.Tensor
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor
     ):
         """
         :param input_ids:
@@ -554,7 +577,7 @@ class LlmEmbeddingsTrainer(LlmModule):
 
     @staticmethod
     def custom_loss(
-            logits: torch.tensor, targets: torch.tensor) -> torch.tensor:
+        logits: torch.tensor, targets: torch.tensor) -> torch.tensor:
         """
         """
         if logits.dim() == 2:
@@ -571,9 +594,9 @@ class LlmEmbeddingsTrainer(LlmModule):
 
     @staticmethod
     def compute_accuracy(
-            logits: torch.Tensor,
-            targets: torch.Tensor,
-            original_mask: torch.Tensor
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+        original_mask: torch.Tensor
     ):
         """
         Computes  accuracy for either sequence classification or generation.

@@ -19,12 +19,12 @@ def shared_main(
     """
 
     args, parser_groups = shared_arg_parser()
-    # args.local_rank = int(os.environ.get('LOCAL_RANK', -1))
-    #
-    # if args.local_rank == -1:
-    #     if args.device is None:
-    #         args.device = get_device()
-    #         # torch.cuda.set_device(args.device)
+    args.local_rank = int(os.environ.get('LOCAL_RANK', -1))
+
+    if args.local_rank == -1:
+        if args.device is None:
+            args.device = get_device()
+            # torch.cuda.set_device(args.device)
     # else:
     #     args.device = get_device(rank=args.local_rank)
     #     if is_deepspeed_dd_init:
