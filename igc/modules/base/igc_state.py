@@ -55,7 +55,7 @@ class IgcBaseState:
 
         self._accelerator = None
 
-        if spec.use_accelerator:
+        if hasattr(spec, 'use_accelerator') and spec.use_accelerator:
             self._accelerator = build_accelerator(spec)
             self.is_accelerator = True
             # let accelerator choose device.
@@ -64,6 +64,7 @@ class IgcBaseState:
         elif hasattr(spec, "device"):
             self._device = spec.device
         else:
+            self.logger.info(f"Rank {self.rank}, Running on selected device {self.device}")
             # if we are not using accelerator, we need to set device
             self._device = get_device(self.rank) if device is None else device
 
