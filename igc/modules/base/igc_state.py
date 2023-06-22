@@ -53,11 +53,13 @@ class IgcBaseState:
         if device is not None:
             self._device = torch.device(device)
 
+        self._accelerator = None
+
         if spec.use_accelerator:
-            self.accelerator = build_accelerator(spec)
+            self._accelerator = build_accelerator(spec)
             self.is_accelerator = True
             # let accelerator choose device.
-            self._device = self.accelerator.device
+            self._device = self._accelerator.device
             self.logger.info(f"Rank {self.rank}, Running accelerator , accelerate selected device {self.device}")
         elif hasattr(spec, "device"):
             self._device = spec.device
@@ -68,8 +70,15 @@ class IgcBaseState:
         self.scheduler = None
 
     @property
+    def accelerator(self):
+        return self.accelerator
+
+    @property
     def device(self):
-        if self.accelerator:
+        """Return ether cuda or cpu device or accelerator device.
+        :return:
+        """
+        if self._accelerator:
             return self.accelerator.device
         else:
             return self._device
