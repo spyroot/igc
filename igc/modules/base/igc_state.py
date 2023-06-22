@@ -15,6 +15,7 @@ from pathlib import Path
 import loguru
 import torch
 import torch.distributed as dist
+from accelerate import Accelerator
 
 from igc.shared.shared_torch_utils import get_device
 from ...shared.shared_accelerator import build_accelerator
@@ -71,8 +72,11 @@ class IgcBaseState:
         self.scheduler = None
 
     @property
-    def accelerator(self):
-        return self.accelerator
+    def accelerator(self) -> Accelerator:
+        """Return accelerator.
+        :return:
+        """
+        return self._accelerator
 
     @property
     def device(self):
