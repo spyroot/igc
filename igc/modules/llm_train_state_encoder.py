@@ -28,7 +28,6 @@ from torch.quantization import convert
 from torch.utils.data import DataLoader, RandomSampler
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-
 from igc.modules.base.igc_llm_base_module import LlmModule
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.shared.shared_torch_builder import TorchBuilder
@@ -267,7 +266,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         return masking_methods
 
     def enable_masking_method(
-        self, mask_type: Union[MaskingOption, MaskingType]
+            self, mask_type: Union[MaskingOption, MaskingType]
     ):
         """
         Receive mask enum and dispatch to its callback.
@@ -281,8 +280,8 @@ class LlmEmbeddingsTrainer(LlmModule):
             raise ValueError("Unknown masking type")
 
     def swap_masking_method(
-        self, epoch: int,
-        mask_type: List[Union[MaskingOption, MaskingType]] = None
+            self, epoch: int,
+            mask_type: List[Union[MaskingOption, MaskingType]] = None
     ):
         """
         Switch to masking method to next masking method after every epoch freq
@@ -310,8 +309,8 @@ class LlmEmbeddingsTrainer(LlmModule):
                 self.dataset.disable_masking()
 
     def _train(
-        self,
-        mask_type: List[Union[MaskingOption, MaskingType]] = None
+            self,
+            mask_type: List[Union[MaskingOption, MaskingType]] = None
     ):
         """Train LLM model to map high level goal to redfish actions.
 
@@ -420,6 +419,10 @@ class LlmEmbeddingsTrainer(LlmModule):
             self.swap_masking_method(epoch, mask_type)
 
             for i, batch in enumerate(train_dataloader):
+
+                attention_mask = batch['attention_mask']
+                batch["input_ids"][~attention_mask.bool()] = -100
+
                 target_ids = batch["input_ids"][:, 1:].clone().detach()
                 mask = (batch["input_ids"] == self.tokenizer.pad_token_id)
                 target_ids = target_ids.masked_fill(mask[:, 1:], -100)
@@ -528,9 +531,9 @@ class LlmEmbeddingsTrainer(LlmModule):
         )
 
     def decode_masked_output(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor
     ):
         """
         :param input_ids:
@@ -550,10 +553,27 @@ class LlmEmbeddingsTrainer(LlmModule):
         return decoded_batch
 
     @staticmethod
+    def custom_loss(
+            logits: torch.tensor, targets: torch.tensor) -> torch.tensor:
+        """
+        """
+        if logits.dim() == 2:
+            return F.cross_entropy(logits, targets, ignore_index=-100)
+        elif logits.dim() == 3:
+            shifted_step_logits = logits[..., :-1, :].contiguous()
+            shift_step_labels = targets[..., 1:].contiguous()
+            loss = F.cross_entropy(
+                shifted_step_logits.view(-1, shifted_step_logits.size(-1)),
+                shift_step_labels.view(-1).long(), ignore_index=-100)
+            return loss
+        else:
+            raise ValueError("Invalid shape")
+
+    @staticmethod
     def compute_accuracy(
-        logits: torch.Tensor,
-        targets: torch.Tensor,
-        original_mask: torch.Tensor
+            logits: torch.Tensor,
+            targets: torch.Tensor,
+            original_mask: torch.Tensor
     ):
         """
         Computes  accuracy for either sequence classification or generation.
@@ -577,9 +597,7 @@ class LlmEmbeddingsTrainer(LlmModule):
             r = r.type(torch.float)
             return r.mean().item()
         else:
-            raise ValueError(
-                f'Logits should either be 2-dim (for classification) '
-                f'or 3-dim (for generation); got {logits.dim()}')
+            raise ValueError("Invalid shape")
 
     def test_inference(self):
         """

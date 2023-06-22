@@ -17,15 +17,19 @@ Parameters just passed to agent. i.e. we don't train on parameters.
 Author:Mus mbayramo@stanford.edu
 """
 import argparse
+import copy
 import os
+import re
 import warnings
-from typing import List, Optional, Union, Callable
+from typing import List, Optional, Union, Callable, Iterator, Any, Dict
 from collections import namedtuple
 
 import evaluate
 import numpy as np
 import torch
 from rouge_score import rouge_scorer
+from torch import nn
+from torch.nn import Parameter
 
 from igc.ds.redfish_dataset import JSONDataset
 from .igc_base_module import IgcModule
@@ -34,6 +38,7 @@ from .igc_metric_logger import MetricLogger
 from sklearn.metrics import f1_score
 
 from .prompt_types import PromptType
+from ..nn.lora1d import LoRAConv1DWrapper
 from ..shared.llm_shared import (
     load_pretrained_default, save_pretrained_default
 )
@@ -466,3 +471,149 @@ class LlmModule(IgcModule):
             'attention_mask': attention_mask,
             'labels': labels,
         }
+
+    @staticmethod
+    def flatten(_list: List[Any]) -> List[Any]:
+        return [item for sub_list in _list for item in sub_list]
+
+    @staticmethod
+    def trainable_iter(
+            model: nn.Module,
+            mode: Optional[str] = "all",
+            layer_filter: Optional[str] = None,
+            window: Optional[int] = 2) -> Iterator[Parameter]:
+        """
+
+        Returns subset of layers that later we pass to optimizer.
+
+        :param layer_filter: if we need apply layer filter. ( lora )
+        :param model: model
+        :param mode: mode first/last
+        :param window: how many layers from start we need capture
+        :return:
+        """
+        # such as transformer block
+        layer_block = {}
+        layer_idx = set()
+
+        for i, (n, p) in enumerate(model.named_parameters()):
+            try:
+                layer_number = int(re.search(r'\.h\.\d+\.', n).group().strip(".h"))
+                # if we have additional filter on layer name
+                if layer_filter is not None and layer_filter not in n:
+                    continue
+                if layer_number not in layer_block:
+                    layer_block[layer_number] = []
+                layer_block[layer_number].append(i)
+                layer_idx.add(layer_number)
+            except AttributeError:
+                continue
+
+        start_idx = int((len(layer_idx) - 1) / 2) if mode == "middle" else 0
+        last_idx = (max(layer_idx) + 1) if mode == "lora" else (start_idx + window)
+        sort_order_rev = True if mode == "middle" else False
+
+        root_layers = list(layer_block.keys())
+        root_layers.sort(reverse=sort_order_rev)
+        param_slice = root_layers[start_idx:last_idx]
+
+        list_of_layers = []
+        list_of_layers += [layer_block[k] for k in param_slice]
+        flattened = LlmModule.flatten(list_of_layers)
+        flattened.sort()
+
+        for i, p in enumerate(model.parameters()):
+            if i in flattened:
+                yield p
+
+    def clone_and_attach(
+            self, rank: int,
+            callback: Callable[[nn.Module], None],
+            is_attention: Optional[bool] = True) -> nn.Module:
+        """
+        :return:
+        """
+        model = copy.deepcopy(self.model)
+        if is_attention:
+            for m in model.transformer.h:
+                m.mlp.c_fc = LoRAConv1DWrapper(m.mlp.c_fc, rank)
+                m.mlp.c_proj = LoRAConv1DWrapper(m.mlp.c_proj, rank)
+                m.attn.c_attn = LoRAConv1DWrapper(m.attn.c_attn, rank)
+        else:
+            for m in model.transformer.h:
+                m.mlp.c_fc = LoRAConv1DWrapper(m.mlp.c_fc, rank)
+                m.mlp.c_proj = LoRAConv1DWrapper(m.mlp.c_proj, rank)
+
+    @staticmethod
+    def parameters_to_fine_tune(
+            model: nn.Module,
+            mode: str) -> Iterator[Parameter]:
+        """
+        :param model:
+        :param mode:
+        :return:
+        """
+        if mode == 'all':
+            return model.parameters()
+        elif mode == 'last':
+            return LlmModule.trainable_iter(model, mode=mode)
+        elif mode == 'first':
+            return LlmModule.trainable_iter(model, mode=mode)
+        elif mode == 'middle':
+            return LlmModule.trainable_iter(model, mode=mode)
+        elif mode.startswith('lora'):
+            return LlmModule.trainable_iter(model, mode='lora', layer_filter='lora')
+        else:
+            raise NotImplementedError()
+
+    @staticmethod
+    def lora_state_dict(
+            model: nn.Module,
+            bias: str = 'none'
+    ) -> Dict[str, torch.Tensor]:
+        my_state_dict = model.state_dict()
+        if bias == 'none':
+            return {k: my_state_dict[k] for k in my_state_dict if 'lora_' in k}
+        elif bias == 'all':
+            return {k: my_state_dict[k] for k in my_state_dict if 'lora_' in k or 'bias' in k}
+        elif bias == 'lora_only':
+            to_return = {}
+            for k in my_state_dict:
+                if 'lora_' in k:
+                    to_return[k] = my_state_dict[k]
+                    bias_name = k.split('lora_')[0] + 'bias'
+                    if bias_name in my_state_dict:
+                        to_return[bias_name] = my_state_dict[bias_name]
+            return to_return
+        else:
+            raise NotImplementedError
+
+    @staticmethod
+    def mark_as_trainable(
+            model: nn.Module, bias: str = 'none',
+            target_class: type = None,
+            layer_prefix="lora_only",
+    ) -> None:
+        """
+
+        :param layer_prefix:
+        :param target_class:
+        :param model:
+        :param bias:
+        :return:
+        """
+        for n, p in model.named_parameters():
+            if 'lora_' not in n:
+                p.requires_grad = False
+        if bias == 'none':
+            return
+        elif bias == 'all':
+            for n, p in model.named_parameters():
+                if 'bias' in n:
+                    p.requires_grad = True
+        elif bias == layer_prefix:
+            for m in model.modules():
+                if isinstance(m, target_class) and hasattr(m, 'bias') and m.bias is not None:
+                    m.bias.requires_grad = True
+        else:
+            raise NotImplementedError

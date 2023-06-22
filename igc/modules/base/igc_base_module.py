@@ -580,7 +580,7 @@ class IgcModule(IgcBaseState):
             checkpoint['optimizer_state_dict'] = _optimizer.state_dict()
 
         if _shed is not None:
-            if isinstance(self.scheduler, list):
+            if isinstance(_shed, list):
                 checkpoint['scheduler_state_dicts'] = [
                     scheduler.state_dict() for scheduler in _shed]
             else:
