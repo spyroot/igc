@@ -268,7 +268,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         return masking_methods
 
     def enable_masking_method(
-        self, mask_type: Union[MaskingOption, MaskingType]
+            self, mask_type: Union[MaskingOption, MaskingType]
     ):
         """
         Receive mask enum and dispatch to its callback.
@@ -282,8 +282,8 @@ class LlmEmbeddingsTrainer(LlmModule):
             raise ValueError("Unknown masking type")
 
     def swap_masking_method(
-        self, epoch: int,
-        mask_type: List[Union[MaskingOption, MaskingType]] = None
+            self, epoch: int,
+            mask_type: List[Union[MaskingOption, MaskingType]] = None
     ):
         """
         Switch to masking method to next masking method after every epoch freq
@@ -311,8 +311,8 @@ class LlmEmbeddingsTrainer(LlmModule):
                 self.dataset.disable_masking()
 
     def _train(
-        self,
-        mask_type: List[Union[MaskingOption, MaskingType]] = None
+            self,
+            mask_type: List[Union[MaskingOption, MaskingType]] = None
     ):
         """Train LLM model to map high level goal to redfish actions.
 
@@ -333,13 +333,13 @@ class LlmEmbeddingsTrainer(LlmModule):
             self.model.to(self.device)
 
         if self.is_accelerator:
-            last_epoch, scheduler_state = self.load_checkpoint(
+            checkpoint_state = self.load_checkpoint(
                 self._module_checkpoint_dir,
-                map_location=None) if self._module_checkpoint_dir is not None else 0
+                map_location=None, is_reset_lr=self._reset_lr) if self._module_checkpoint_dir is not None else 0
         else:
-            last_epoch, scheduler_state = self.load_checkpoint(
+            checkpoint_state = self.load_checkpoint(
                 self._module_checkpoint_dir,
-                map_location=self.device) if self._module_checkpoint_dir is not None else 0
+                map_location=self.device, is_reset_lr=self._reset_lr) if self._module_checkpoint_dir is not None else 0
 
         self.logger.info(f"Rank {self.rank}: "
                          f"Uploading model from {self.model.device} "
@@ -347,7 +347,6 @@ class LlmEmbeddingsTrainer(LlmModule):
                          f"using accelerate: {'yes' if self.is_accelerator else 'no'}, "
                          f"current mem {torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
 
-        train_dataset, eval_dataset = self.split_dataset()
         sampler = self.dataset_sampler()
 
         self.logger.info(f"Creating dataloader "
@@ -377,16 +376,13 @@ class LlmEmbeddingsTrainer(LlmModule):
             collate_fn=LlmEmbeddingsTrainer.custom_collate_fn,
         )
 
+        last_epoch = checkpoint_state.last_epoch
         self._trainer_args.epochs = self.num_epochs - last_epoch
         self._trainer_args.steps_per_epoch = len(train_dataloader)
 
-        self.logger.info(f"Rank {self.rank}: "
-                         f"Data loader created: "
-                         f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
-
-        if self._reset_lr:
-            for param_group in self.optimizer.param_groups:
-                param_group['lr'] = self._lr
+        self.logger.info(
+            f"Rank {self.rank}: Data loader created: "
+            f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
 
         self.model = self.model.to(self.device)
 
@@ -400,7 +396,8 @@ class LlmEmbeddingsTrainer(LlmModule):
                          f"Memory utilization after we loaded model: "
                          f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
 
-        self.scheduler.load_state_dict(scheduler_state)
+        # we update the scheduler state here.
+        self.scheduler.load_state_dict(checkpoint_state.scheduler_state)
 
         if self.is_accelerator:
             self.model, self.optimizer, train_dataloader, eval_dataloader, self.scheduler = self.accelerator.prepare(
@@ -408,15 +405,15 @@ class LlmEmbeddingsTrainer(LlmModule):
             )
 
         torch.cuda.empty_cache()
-        self.logger.info(f"Rank {self.rank}: "
-                         f"Memory utilization after we prepared : "
-                         f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
+        self.logger.info(
+            f"Rank {self.rank}: Memory utilization after we prepared : "
+            f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
 
         if self.is_quantize:
             self.model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
 
         total_batches = len(train_dataloader)
-        dataset_size = len(train_dataset)
+        dataset_size = len(train_data)
         calculated_total_batches = dataset_size // self.batch_size
         batch_log_frequency = round(64 * 0.2)
 
@@ -438,7 +435,7 @@ class LlmEmbeddingsTrainer(LlmModule):
             # swap mask and pass a batch
             self.swap_masking_method(epoch, mask_type)
 
-            for i, batch in enumerate(train_dataloader):
+            for _, batch in enumerate(train_dataloader):
 
                 attention_mask = batch['attention_mask'].to(self.device)
                 mask_inverted = ~attention_mask.bool()
@@ -520,7 +517,8 @@ class LlmEmbeddingsTrainer(LlmModule):
 
             # save best checkpoint
             if self.is_rank_zero():
-                if validation_accuracy > self._best_validation_metric or (epoch + 1) % self._save_freq == 0:
+                is_best_accuracy = validation_accuracy > self._best_validation_metric
+                if is_best_accuracy or (epoch + 1) % self._save_freq == 0:
                     self._best_validation_metric = validation_accuracy
                     if self._module_checkpoint_dir is not None:
                         if self.is_accelerator:
@@ -532,10 +530,19 @@ class LlmEmbeddingsTrainer(LlmModule):
                                 epoch + 1,
                                 model=model,
                                 optimizer=opt,
-                                scheduler=shed
+                                scheduler=shed,
+                                last_accuracy=validation_accuracy,
+                                initial_lr=self._lr,
+                                is_best_accuracy=is_best_accuracy,
                             )
                         else:
-                            self.save_checkpoint(self._module_checkpoint_dir, epoch + 1)
+                            self.save_checkpoint(
+                                self._module_checkpoint_dir,
+                                epoch + 1,
+                                last_accuracy=validation_accuracy,
+                                initial_lr=self._lr,
+                                is_best_accuracy=is_best_accuracy,
+                            )
 
         if self.is_quantize:
             self.model = convert(self.model)
@@ -560,9 +567,9 @@ class LlmEmbeddingsTrainer(LlmModule):
         )
 
     def decode_masked_output(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor
     ):
         """
         :param input_ids:
@@ -583,7 +590,7 @@ class LlmEmbeddingsTrainer(LlmModule):
 
     @staticmethod
     def custom_loss(
-        logits: torch.tensor, targets: torch.tensor) -> torch.tensor:
+            logits: torch.tensor, targets: torch.tensor) -> torch.tensor:
         """
         """
         if logits.dim() == 2:
@@ -600,9 +607,9 @@ class LlmEmbeddingsTrainer(LlmModule):
 
     @staticmethod
     def compute_accuracy(
-        logits: torch.Tensor,
-        targets: torch.Tensor,
-        original_mask: torch.Tensor
+            logits: torch.Tensor,
+            targets: torch.Tensor,
+            original_mask: torch.Tensor
     ):
         """
         Computes  accuracy for either sequence classification or generation.

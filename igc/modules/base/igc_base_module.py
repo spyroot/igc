@@ -30,9 +30,12 @@ from ...ds import ds_utils as igc_util
 from ...ds.redfish_dataset import JSONDataset
 from ...modules.base.igc_abstract_logger import AbstractLogger
 from ...shared.modules_typing import SaveStrategy
-from ...shared.shared_torch_utils import get_device
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
+
+# a checkpoint state
+CheckpointState = namedtuple('Checkpoint', [
+    'last_epoch', 'scheduler_state', 'initial_lr', 'best_accuracy', 'batch_idx'])
 
 
 class DownloadModuleError(Exception):
@@ -47,14 +50,14 @@ class IgcModule(IgcBaseState):
     logger = AbstractLogger.create_logger()
 
     def __init__(
-        self,
-        module_name: str,
-        spec: argparse.Namespace,
-        llm_model, llm_tokenizer,
-        ds: Optional[Union[JSONDataset, Dataset]] = None,
-        metric_logger: Optional[MetricLogger] = None,
-        is_inference: Optional[bool] = False,
-        device=None
+            self,
+            module_name: str,
+            spec: argparse.Namespace,
+            llm_model, llm_tokenizer,
+            ds: Optional[Union[JSONDataset, Dataset]] = None,
+            metric_logger: Optional[MetricLogger] = None,
+            is_inference: Optional[bool] = False,
+            device=None
     ):
         """
 
@@ -281,9 +284,9 @@ class IgcModule(IgcBaseState):
         return random_split(self.dataset, [train_size, eval_size])
 
     def split_slice_dataset(
-        self,
-        train_ratio: float = 0.8,
-        sample_ratio: float = 0.01
+            self,
+            train_ratio: float = 0.8,
+            sample_ratio: float = 0.01
     ) -> list[Subset[Any]]:
         """
         Split a subset of the dataset and specify the amount of sample used.
@@ -419,11 +422,11 @@ class IgcModule(IgcBaseState):
 
     @staticmethod
     def copy_checkpoint(
-        specs: Union[str, argparse.Namespace],
-        module_name: str,
-        pre_trained: PreTrainedModel,
-        checkpoint_file: str = None,
-        device: str = None
+            specs: Union[str, argparse.Namespace],
+            module_name: str,
+            pre_trained: PreTrainedModel,
+            checkpoint_file: str = None,
+            device: str = None
     ) -> Tuple[Union[None, PreTrainedModel], int, str]:
         """
         Copy last checkpoint to last saved model to module dir and return
@@ -539,23 +542,34 @@ class IgcModule(IgcBaseState):
         return True
 
     def save_checkpoint(
-        self,
-        checkpoint_dir,
-        epoch: int,
-        num_check_points_to_keep: Optional[int] = 3,
-        model=None,
-        optimizer=None,
-        scheduler=None,
+            self,
+            checkpoint_dir: str,
+            epoch: int,
+            num_check_points_to_keep: Optional[int] = 3,
+            model=None,
+            optimizer=None,
+            scheduler=None,
+            last_accuracy: Optional[float] = None,
+            initial_lr: Optional[float] = None,
+            is_best_accuracy: Optional[bool] = False,
+            batch_idx: Optional[int] = None,
     ) -> str:
         """
         Save model checkpoint.
 
-        :param scheduler:
-        :param optimizer:
-        :param model:
-        :param checkpoint_dir: a directory for checkpoint
-        :param epoch: a checkpoint we are saving.
-        :param num_check_points_to_keep:   number of checkpoints to keep.
+        :param checkpoint_dir: Directory where the checkpoint will be saved.
+        :param epoch: Current epoch for the checkpoint being saved.
+        :param num_check_points_to_keep: Number of checkpoints to keep.
+        :param model: Optional. The model to be saved. If not provided,
+                                the trainer's model will be saved.
+        :param optimizer: Optional. The optimizer to be saved.
+                          If not provided, the trainer's optimizer will be saved.
+        :param scheduler: Optional. The scheduler to be saved.
+                          If not provided, the trainer's scheduler will be saved.
+        :param initial_lr:  If the initial lr provide we save it.
+        :param last_accuracy: if the last accuracy provide we save it , so we can track it.
+        :param is_best_accuracy: if the is_best_accuracy accuracy we save it as separate file.
+        :param batch_idx:  if we're saving during batch training, we save the batch_idx
         :return:  return path where checkpoint saved
         """
 
@@ -563,7 +577,10 @@ class IgcModule(IgcBaseState):
             return ""
 
         epoch_mod = epoch % num_check_points_to_keep
-        checkpoint_file = f"{checkpoint_dir}/{self.module_name}_epoch_{epoch_mod}.pt"
+        if is_best_accuracy:
+            checkpoint_file = f"{checkpoint_dir}/{self.module_name}_epoch_best.pt"
+        else:
+            checkpoint_file = f"{checkpoint_dir}/{self.module_name}_epoch_{epoch_mod}.pt"
 
         _model = model if model is not None else self.model
         _shed = scheduler if scheduler is not None else self.scheduler
@@ -585,100 +602,153 @@ class IgcModule(IgcBaseState):
             else:
                 checkpoint['scheduler_state_dict'] = _shed.state_dict()
 
+        if last_accuracy is not None:
+            checkpoint['last_accuracy'] = last_accuracy
+
+        if initial_lr is not None:
+            checkpoint['initial_lr'] = initial_lr
+
+        if batch_idx is not None:
+            checkpoint['batch_idx'] = initial_lr
+
         torch.save(checkpoint, checkpoint_file)
+
         self.logger.info(
-            f"Rank: {self.rank} {self.module_name} checkpoint saved to {checkpoint_file}.")
+            f"Rank: {self.rank} {self.module_name} "
+            f"checkpoint saved to {checkpoint_file}.")
 
         return checkpoint_file
 
-    def load_checkpoint(
-        self,
-        checkpoint_dir: str,
-        resuming: Optional[bool] = True,
-        map_location=None
-    ) -> [int, Dict[str, Any]]:
+    def checkpoint_file(
+            self, checkpoint_dir: str,
+            resuming: Optional[bool] = True
+    ) -> str:
+        """Returns a checkpoint file, it either a last checkpoint or a model file.
+        :param checkpoint_dir: a directory
+        :param resuming: if we are not resuming it will not
+                         return model file only checkpoint if it presents.
+        :return: a path to a file.
         """
-        Load model checkpoint for resuming training.
-
-        :param map_location:
-        :param resuming:
-        :param checkpoint_dir: Directory location of the checkpoints.
-        :return: Last saved epoch from the checkpoint.
-        """
-
-        scheduler = None
-
-        map_to = {'cuda:1': 'cuda:0'} if map_location is None else map_location
-        get_device()
-
-        # during re-resume we don't load model, we load from checkpoint
         if os.path.isfile(checkpoint_dir):
             checkpoint_file = checkpoint_dir
         else:
-            #
             model_file = self._model_file(checkpoint_dir)
             if not resuming:
                 if not os.path.exists(model_file):
                     self.logger.info(f"Model file {model_file} not found.")
 
-            self.logger.info(f"Searching for latest checkpoint.")
             checkpoint_file = self.last_checkpoint(checkpoint_dir)
 
-        if checkpoint_file:
-            self.logger.info(f"Found latest checkpoint, loading {checkpoint_file}.")
-            checkpoint = torch.load(checkpoint_file)
+        return checkpoint_file
 
-            required_keys = ['model_state_dict', 'epoch']
-            if resuming:
-                required_keys = ['model_state_dict', 'optimizer_state_dict', 'epoch']
+    def load_checkpoint(
+            self,
+            checkpoint_dir: str,
+            resuming: Optional[bool] = True,
+            map_location: Optional[str, Dict] = None,
+            lr: Optional[float] = None,
+    ) -> [int, Dict[str, Any]]:
+        """
+        Load model checkpoint for resuming a training,  if resuming is False
+        it will load a module file.
 
-            missing_keys = [key for key in required_keys if key not in checkpoint]
-            if missing_keys:
-                raise KeyError(f"Checkpoint file {self.module_name} {checkpoint_file} "
-                               f"is missing the following keys: {missing_keys}")
+        :param resuming:
+        :param map_location: if you need map to a particular device.
+        :param lr:  if you need reset learning rate to a default. i.e. we don't load from state
+        :param checkpoint_dir: Directory location of the checkpoints.
+        :return: Last saved epoch from the checkpoint.
+        """
 
-            optional_keys = ['is_trained']
-            missing_keys = [key for key in optional_keys if key not in checkpoint]
-            if missing_keys:
-                warnings.warn("Optional key is missing from the checkpoint file. ")
+        scheduler = None
+        map_to = {'cuda:1': 'cuda:0'} if map_location is None else map_location
 
-            self.model.load_state_dict(checkpoint['model_state_dict'])
+        checkpoint_file = self.checkpoint_file(checkpoint_dir, resuming)
+        if not checkpoint_file:
+            self.logger.info(f"No checkpoint files found checkpoint dir {checkpoint_dir}")
+            return 0, scheduler
 
-            if resuming:
-                if 'optimizer_state_dict' in checkpoint:
-                    self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.logger.info(f"Found latest checkpoint, loading {checkpoint_file}.")
+        checkpoint = torch.load(checkpoint_file)
+
+        required_keys = ['model_state_dict', 'epoch']
+        if resuming:
+            required_keys = ['model_state_dict', 'optimizer_state_dict', 'epoch']
+
+        missing_keys = [key for key in required_keys if key not in checkpoint]
+        if missing_keys:
+            raise KeyError(
+                f"Checkpoint file {self.module_name} {checkpoint_file} "
+                f"is missing the following keys: {missing_keys}")
+
+        optional_keys = ['is_trained']
+        missing_keys = [key for key in optional_keys if key not in checkpoint]
+        if missing_keys:
+            warnings.warn("Optional key is missing from the checkpoint file. ")
+
+        if not hasattr(self.model, 'load_state_dict'):
+            warnings.warn("Model does not have load_state_dict method. ")
+            return 0, scheduler
+
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+
+        if resuming:
+            if 'optimizer_state_dict' in checkpoint:
+                if not hasattr(self.optimizer, 'load_state_dict'):
+                    warnings.warn("Optimizer does not have load_state_dict method. ")
+                    return 0, scheduler
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                if lr is not None:
+                    self.logger.info(f"Resting learning rate to {lr}")
+                    for param_group in self.optimizer.param_groups:
+                        param_group['lr'] = lr
+
+            # in case we reset learning rate, we don't load scheduler state.
+            if lr is not None:
                 if 'scheduler_state_dict' in checkpoint:
                     scheduler = checkpoint['scheduler_state_dict']
                     if self.scheduler is not None:
+                        if not hasattr(self.scheduler, 'load_state_dict'):
+                            warnings.warn("Scheduler does not have load_state_dict method. ")
+                            return 0, scheduler
                         self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
                 elif 'scheduler_state_dicts' in checkpoint:
                     scheduler = checkpoint['scheduler_state_dicts']
+
                     if self.scheduler is not None:
-                        for idx, scheduler_state_dict in enumerate(checkpoint['scheduler_state_dicts']):
+                        for idx, scheduler_state_dict in enumerate(
+                                checkpoint['scheduler_state_dicts']):
+                            if not hasattr(self.scheduler[idx], 'load_state_dict'):
+                                warnings.warn("Scheduler does not have load_state_dict method. ")
+                                return 0, scheduler
                             self.scheduler[idx].load_state_dict(scheduler_state_dict)
 
-            epoch = checkpoint['epoch']
-            self.logger.info(
-                f"Rank: {self.rank} module {self.module_name} "
-                f"loading checkpoint loaded from "
-                f"{checkpoint_file}, epoch: {epoch}")
-            return epoch, scheduler
+        last_accuracy = checkpoint['last_accuracy'] if "last_accuracy" in checkpoint else float('-inf')
+        initial_lr = checkpoint['initial_lr'] if "initial_lr" in checkpoint else None
+        batch_idx = checkpoint['batch_idx'] if "batch_idx" in checkpoint else 0
+        epoch = checkpoint['epoch'] if "epoch" in checkpoint else 0
 
-        self.logger.info(f"No checkpoint files found in dir {checkpoint_dir}")
-        return 0, scheduler
+        self.logger.info(
+            f"Rank: {self.rank} module {self.module_name} "
+            f"loaded checkpoint from "
+            f"{checkpoint_file}, epoch: {epoch}")
+
+        return CheckpointState(epoch, scheduler, initial_lr, last_accuracy, batch_idx)
 
     @staticmethod
     def load(
-        module_name: str,
-        model: torch.nn.Module,
-        specs: Union[str, argparse.Namespace],
-        is_inference: bool = True,
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
-        map_location=None,
+            module_name: str,
+            model: torch.nn.Module,
+            specs: Union[str, argparse.Namespace],
+            is_inference: bool = True,
+            optimizer: Optional[torch.optim.Optimizer] = None,
+            scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
+            map_location=None,
     ) -> tuple[Optional[int], bool]:
         """
-        Load model from checkpoint for inference.
+        Load model from checkpoint for inference, if caller provide optimizer and scheduler
+        and if we do save hem in the model file, method will load optimizer state to optimizer
+        and scheduler to a scheduler. It only does so if inference is False.
 
         :param module_name: igc module name.
         :param model: The model to load the checkpoint into.
@@ -690,11 +760,7 @@ class IgcModule(IgcBaseState):
         :param map_location: where are mapping the model to.
 
         """
-        if map_location is None:
-            map_to = {'cuda:1': 'cuda:0'}
-        else:
-            map_to = map_location
-
+        map_to = {'cuda:1': 'cuda:0'} if map_location is None else map_location
         module_dir, experiment_dir = IgcModule.checkpoint_dir(specs, module_name)
         last_checkpoint_file = IgcModule.last_checkpoint(module_dir)
         last_module_file = IgcModule.model_file(experiment_dir, module_name)
@@ -715,8 +781,7 @@ class IgcModule(IgcBaseState):
         required_keys = ['model_state_dict', 'epoch']
         missing_keys = [key for key in required_keys if key not in checkpoint]
         if missing_keys:
-            print(f"Checkpoint file {last_file} "
-                  f" is missing the following keys: {missing_keys}")
+            warnings.warn(f"Checkpoint file: {last_file} is missing the following keys: {missing_keys}")
             return 0, False
 
         is_trained = checkpoint['is_trained'] if 'is_trained' in checkpoint else False
@@ -732,8 +797,6 @@ class IgcModule(IgcBaseState):
         print(f"Loading checkpoint loaded from {last_file}, epoch: {epoch}")
 
         if is_inference:
-            # in inference mod we don't need to load optimizer and scheduler
-            # so if we loaded from checkpoint we drop that
             if 'optimizer_state_dict' in checkpoint:
                 checkpoint.pop('optimizer_state_dict')
             if 'scheduler_state_dict' in checkpoint:
@@ -785,33 +848,52 @@ class IgcModule(IgcBaseState):
     def log_memory_usage(self):
         """
         Log memory usage.
-        :return:
+        :return: None
         """
         if torch.cuda.is_available():
             mem_get_info = torch.cuda.memory_stats()
-            self.logger.info("Memory allocated:", mem_get_info["allocated_bytes.all.current"] / 1024 ** 3, "GB")
+            self.logger.debug("Memory allocated:", mem_get_info["allocated_bytes.all.current"] / 1024 ** 3, "GB")
             # additional CUDA statistics if available
             if hasattr(torch.cuda, 'utilization'):
-                self.logger.info(f"CUDA utilization:", torch.cuda.utilization())
+                self.logger.debug(f"CUDA utilization:", torch.cuda.utilization())
             if hasattr(torch.cuda, 'memory_summary'):
                 torch.cuda.memory_summary()
 
     @staticmethod
     def read_model_specs(
-        default_model_file: str = "../datasets/models.json"
+            default_model_file: str = "../datasets/models.json"
     ):
-        """Read model specs file.
+        """Read model specs file from following structure.
 
+        {
+          "mirrors": {
+            "192.168.x.x": [
+              {
+                "spec": "http://x.x.x.x/datasets/models.json"
+              },
+              {
+                "files": [
+                  "http://x.x.x.x/igc/modules/finetuned/state_encoder/state_encoder_epoch_0.pt",
+                ]
+              },
+              {
+                "local_file": [
+                  "modules/finetuned/state_encoder/state_encoder_epoch_0.ptr",
+                ]
+              }
+            ],
+
+        :param default_model_file: The path to the default model specs file.
         :return:  The model specs data and root dir where the modules need to be saved
         """
 
         dataset_path = pkg_resources.resource_filename(
-            "igc", default_model_file)
+            "igc", default_model_file
+        )
 
         if not os.path.isfile(dataset_path):
             raise FileNotFoundError(
                 f"The model specs file '{dataset_path}' does not exist.")
-
         try:
             with open(dataset_path, "r") as file:
                 models_data = json.load(file)
@@ -831,8 +913,6 @@ class IgcModule(IgcBaseState):
                 raise ValueError(
                     f"Invalid model specs file. Mirror entries for '{mirror_url}' is not a list.")
 
-            mandatory_keys = ["spec", "files", "local_file"]
-
             for entry in mirror_entries:
                 if not isinstance(entry, dict):
                     raise ValueError(
@@ -843,13 +923,13 @@ class IgcModule(IgcBaseState):
 
     @staticmethod
     def _download_module(
-        url: str,
-        path: str,
-        filename: Optional[str] = None,
-        checksum: Optional[str] = None,
-        overwrite: Optional[bool] = False,
-        retry: int = 5,
-        is_strict=False
+            url: str,
+            path: str,
+            filename: Optional[str] = None,
+            checksum: Optional[str] = None,
+            overwrite: Optional[bool] = False,
+            retry: int = 5,
+            is_strict=False
     ) -> tuple[bool, str]:
         """
         Download igc module file from url and store in default location.
@@ -950,18 +1030,20 @@ class IgcModule(IgcBaseState):
 
     @staticmethod
     def download_module(
-        mirror_url: str,
-        module_dir: str,
-        module_filename: str,
-        checksum: str = None,
-        is_overwrite: Optional[bool] = False,
-    ):
+            mirror_url: str,
+            module_dir: str,
+            module_filename: str,
+            checksum: str = None,
+            is_overwrite: Optional[bool] = False,
+    ) -> Tuple[bool, str]:
         """
         Download a module file from the specified mirror URL.
+        The download dir could a temporary directory hence we return path
+        where the file is downloaded.
 
         :param module_dir: a directory where we want to save a file.
-        :param mirror_url: The URL of the mirror from which to download the file.
         :param module_filename: The name of the file to be downloaded.
+        :param mirror_url: The URL of the mirror from which to download the file.
         :param checksum: Optional. The checksum value for the file. If provided,
                          the downloaded file's checksum will be
                          verified against this value.
@@ -985,14 +1067,13 @@ class IgcModule(IgcBaseState):
 
         try:
             logger.debug(f"Downloading from mirror: {mirror_url} file: {module_filename}")
-            if checksum is not None:
-                logger.debug(f"Using checksum: {checksum}")
-            else:
-                logger.debug(f"No md5 checksum provided.")
+            logger.debug(f"Using checksum: "
+                         f"{checksum}") if checksum is not None else logger.debug(
+                "No md5 checksum provided.")
 
             if checksum is not None:
                 if igc_util.check_integrity(f"{module_dir}/{module_filename}", md5=checksum):
-                    return True
+                    return True, f"{module_dir}/{module_filename}"
 
             _is_downloaded_done, file_path = IgcModule._download_module(
                 url=mirror_url,
@@ -1001,10 +1082,10 @@ class IgcModule(IgcBaseState):
                 checksum=checksum,
                 overwrite=is_overwrite
             )
-            _dataset_file.append(file_path)
+
             if _is_downloaded_done:
                 logger.debug("All file in the system: {}".format(file_path))
-                return True
+                return True, file_path
 
         except URLError as e:
             logger.debug(
@@ -1012,13 +1093,12 @@ class IgcModule(IgcBaseState):
                 "Moving to the next mirror.".format(mirror_url, module_filename))
             logger.error(e)
 
-        return False
+        return False, ""
 
     @staticmethod
     def download_modules(mirrors: Union[str, Dict]):
-        """
-        Download multiple module files from the specified mirror URLs.
-        Either single string or dictionary of mirror URLs can be provided.
+        """Download multiple module files from the specified mirror URLs.
+            Either single string or dictionary of mirror URLs can be provided.
         :return:
         """
         # If mirrors is a string,  single mirror URL
@@ -1032,7 +1112,7 @@ class IgcModule(IgcBaseState):
                 f"or a dictionary, received {type(mirrors).__name__}.")
 
         logger = IgcModule.logger
-        logger.info("Downloading module files...")
+        logger.debug("Downloading module files...")
 
         all_files_downloaded = True
 
@@ -1050,22 +1130,27 @@ class IgcModule(IgcBaseState):
             for remote_file, local_file in files.items():
                 if isinstance(local_file, str) and local_file:
                     local_path = local_file
+                    local_dir = os.path.dirname(local_file)
                 elif local_file is None:
                     local_path = None
+                    local_dir = None
                 else:
                     raise DownloadModuleError(
                         f"The local file path for {remote_file} should be a string or None, "
                         f"received {type(local_file).__name__}.")
 
                 logger.debug(f"Downloading file: {remote_file}")
-                download_result = IgcModule.download_module(
-                    mirror_url, remote_file, is_overwrite=True
+                is_download, file_path = IgcModule.download_module(
+                    mirror_url=mirror_url,
+                    module_dir=local_dir,
+                    module_filename=remote_file,
+                    is_overwrite=True
                 )
 
-                if download_result:
+                if is_download:
                     logger.info(f"Downloaded file: {remote_file}")
                     if local_path is not None:
-                        shutil.move(download_result[1], local_path)
+                        shutil.move(file_path, local_path)
                         logger.info(f"Moved file to: {local_path}")
                 else:
                     logger.error(f"Failed to download file: {remote_file}")
@@ -1100,7 +1185,7 @@ class IgcModule(IgcBaseState):
 
             _download_result = []
             for url, module_dir, module_file in zip(
-                module_remote_files, module_local_dirs, module_local_files):
+                    module_remote_files, module_local_dirs, module_local_files):
                 logger.debug(f"Downloading module from {url}")
                 logger.debug(f"Downloading module to {module_file}")
                 os.makedirs(module_dir, exist_ok=True)
@@ -1125,11 +1210,11 @@ class IgcModule(IgcBaseState):
 
     @staticmethod
     def checkpoint_to_module(
-        spec: Union[str, argparse.Namespace],
-        module_name: str,
-        pre_trained_tokenizer: Optional[PreTrainedTokenizer] = None,
-        pre_trained_callback: Optional[Callable] = None,
-        device: Optional[Union[str, torch.device]] = None,
+            spec: Union[str, argparse.Namespace],
+            module_name: str,
+            pre_trained_tokenizer: Optional[PreTrainedTokenizer] = None,
+            pre_trained_callback: Optional[Callable] = None,
+            device: Optional[Union[str, torch.device]] = None,
     ) -> Tuple[Union[None, PreTrainedModel], int, str]:
         """
         Download all modules, if modules contains only checkpoints from last save.
@@ -1140,22 +1225,26 @@ class IgcModule(IgcBaseState):
 
         :param spec: The specification of the model to download (e.g., model name or configuration file path).
         :param module_name: The name of the module to download.
-        :param pre_trained_callback: Optional. A callback function to customize the loading of the pre-trained model.
-                    If not provided, a default callback will be used.
         :param device:  a default device where we use the model.
         :param pre_trained_tokenizer: a callback function to create a tokenizer.
+        :param pre_trained_callback: Optional. A callback function to customize the
+                            loading of the pre-trained model.
+                            If not provided, a default callback will be used.
+
         :return: A tuple containing the pre-trained model, the epoch of the loaded checkpoint,
                 and the file path of the final model.
         """
-
         if not isinstance(spec, (str, argparse.Namespace)):
-            raise ValueError("The 'spec' argument must be a string or argparse.Namespace.")
+            raise ValueError(
+                "The 'spec' argument must be a string or argparse.Namespace.")
 
         if not isinstance(module_name, str):
-            raise ValueError("The 'module_name' argument must be a string.")
+            raise ValueError(
+                "The 'module_name' argument must be a string.")
 
         if pre_trained_callback is not None and not callable(pre_trained_callback):
-            raise ValueError("The 'pre_trained_callback' argument must be a callable or None.")
+            raise ValueError(
+                "The 'pre_trained_callback' argument must be a callable or None.")
 
         if device is None:
             device = torch.device("cpu")
@@ -1176,12 +1265,10 @@ class IgcModule(IgcBaseState):
             pre_trained.config.pad_token = pre_trained_tokenizer.pad_token
             pre_trained.config.eos_token = pre_trained_tokenizer.eos_token
 
-        print(pre_trained)
-
         files = IgcModule.download()
         if not files:
             raise DownloadModuleError(
-                f"Failed to download module files for {module_name}.")
+                f"Failed to download module files for a {module_name}.")
 
         largest_epoch = 0
         last_checkpoint_file = None
