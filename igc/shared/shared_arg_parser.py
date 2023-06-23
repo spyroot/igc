@@ -455,7 +455,7 @@ def add_trainer_group(parser):
     )
 
     parser.add_argument(
-        "--reset_lr",
+        "--reset_lr", action='store_true',
         type=bool, default=False,
         help="Resets to initial learning rate."
     )
