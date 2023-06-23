@@ -335,11 +335,13 @@ class LlmEmbeddingsTrainer(LlmModule):
         if self.is_accelerator:
             checkpoint_state = self.load_checkpoint(
                 self._module_checkpoint_dir,
-                map_location=None, is_reset_lr=self._reset_lr) if self._module_checkpoint_dir is not None else 0
+                map_location=None,
+                lr=self._reset_lr) if self._module_checkpoint_dir is not None else 0
         else:
             checkpoint_state = self.load_checkpoint(
                 self._module_checkpoint_dir,
-                map_location=self.device, is_reset_lr=self._reset_lr) if self._module_checkpoint_dir is not None else 0
+                map_location=self.device,
+                lr=self._reset_lr) if self._module_checkpoint_dir is not None else 0
 
         self.logger.info(f"Rank {self.rank}: "
                          f"Uploading model from {self.model.device} "
@@ -377,6 +379,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         )
 
         last_epoch = checkpoint_state.last_epoch
+        validation_accuracy = checkpoint_state.last_epoch
         self._trainer_args.epochs = self.num_epochs - last_epoch
         self._trainer_args.steps_per_epoch = len(train_dataloader)
 
