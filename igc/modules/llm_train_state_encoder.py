@@ -398,7 +398,8 @@ class LlmEmbeddingsTrainer(LlmModule):
                          f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
 
         # we update the scheduler state here.
-        self.scheduler.load_state_dict(checkpoint_state.scheduler_state)
+        if checkpoint_state.scheduler_state is not None:
+            self.scheduler.load_state_dict(checkpoint_state.scheduler_state)
 
         if self.is_accelerator:
             self.model, self.optimizer, train_dataloader, eval_dataloader, self.scheduler = self.accelerator.prepare(
