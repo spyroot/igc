@@ -543,7 +543,7 @@ class IgcModule(IgcBaseState):
         checkpoint_dir,
         epoch: int,
         num_check_points_to_keep: Optional[int] = 3,
-        model = None,
+        model=None,
         optimizer=None,
         scheduler=None,
     ) -> str:
@@ -596,7 +596,7 @@ class IgcModule(IgcBaseState):
         checkpoint_dir: str,
         resuming: Optional[bool] = True,
         map_location=None
-    ) -> int:
+    ) -> [int, Dict[str, Any]]:
         """
         Load model checkpoint for resuming training.
 
@@ -605,6 +605,8 @@ class IgcModule(IgcBaseState):
         :param checkpoint_dir: Directory location of the checkpoints.
         :return: Last saved epoch from the checkpoint.
         """
+
+        scheduler = None
 
         map_to = {'cuda:1': 'cuda:0'} if map_location is None else map_location
         get_device()
@@ -646,20 +648,24 @@ class IgcModule(IgcBaseState):
                 if 'optimizer_state_dict' in checkpoint:
                     self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
                 if 'scheduler_state_dict' in checkpoint:
-                    self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                    scheduler = checkpoint['scheduler_state_dict']
+                    if self.scheduler is not None:
+                        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
                 elif 'scheduler_state_dicts' in checkpoint:
-                    for idx, scheduler_state_dict in enumerate(checkpoint['scheduler_state_dicts']):
-                        self.scheduler[idx].load_state_dict(scheduler_state_dict)
+                    scheduler = checkpoint['scheduler_state_dicts']
+                    if self.scheduler is not None:
+                        for idx, scheduler_state_dict in enumerate(checkpoint['scheduler_state_dicts']):
+                            self.scheduler[idx].load_state_dict(scheduler_state_dict)
 
             epoch = checkpoint['epoch']
             self.logger.info(
                 f"Rank: {self.rank} module {self.module_name} "
                 f"loading checkpoint loaded from "
                 f"{checkpoint_file}, epoch: {epoch}")
-            return epoch
+            return epoch, scheduler
 
         self.logger.info(f"No checkpoint files found in dir {checkpoint_dir}")
-        return 0
+        return 0, scheduler
 
     @staticmethod
     def load(

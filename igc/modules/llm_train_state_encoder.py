@@ -335,11 +335,11 @@ class LlmEmbeddingsTrainer(LlmModule):
             self.model.to(self.device)
 
         if self.is_accelerator:
-            last_epoch = self.load_checkpoint(
+            last_epoch, scheduler_state = self.load_checkpoint(
                 self._module_checkpoint_dir,
                 map_location=None) if self._module_checkpoint_dir is not None else 0
         else:
-            last_epoch = self.load_checkpoint(
+            last_epoch, scheduler_state = self.load_checkpoint(
                 self._module_checkpoint_dir,
                 map_location=self.device) if self._module_checkpoint_dir is not None else 0
 
@@ -388,6 +388,8 @@ class LlmEmbeddingsTrainer(LlmModule):
             optimizer=self.optimizer,
             **vars(self._trainer_args)
         )
+        
+        self.scheduler.load_state_dict(scheduler_state)
 
         if self.is_accelerator:
             self.model, self.optimizer, train_dataloader, eval_dataloader, self.scheduler = self.accelerator.prepare(
