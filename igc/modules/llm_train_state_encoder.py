@@ -331,16 +331,13 @@ class LlmEmbeddingsTrainer(LlmModule):
         if not self.is_accelerator:
             self.model.to(self.device)
 
-        if self.is_accelerator:
-            checkpoint_state = self.load_checkpoint(
-                self._module_checkpoint_dir,
-                map_location=None,
-                lr=self._reset_lr) if self._module_checkpoint_dir is not None else 0
-        else:
-            checkpoint_state = self.load_checkpoint(
-                self._module_checkpoint_dir,
-                map_location=self.device,
-                lr=self._reset_lr) if self._module_checkpoint_dir is not None else 0
+        lr = self._lr if self._reset_lr else None
+        map_location = None if self.is_accelerator else self.device
+
+        checkpoint_state = self.load_checkpoint(
+            self._module_checkpoint_dir,
+            map_location=map_location,
+            lr=lr)
 
         print(self.optimizer)
 

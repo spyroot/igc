@@ -659,6 +659,9 @@ class IgcModule(IgcBaseState):
         :return: Last saved epoch from the checkpoint.
         """
 
+        if self._module_checkpoint_dir is None:
+            return CheckpointState(0, None, 0, -float('-inf'), 0)
+
         scheduler = None
         map_to = {'cuda:1': 'cuda:0'} if map_location is None else map_location
 
