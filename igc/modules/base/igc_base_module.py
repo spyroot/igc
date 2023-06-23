@@ -698,8 +698,6 @@ class IgcModule(IgcBaseState):
                     return CheckpointState(0, None, 0, -float('-inf'), 0)
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
                 if lr is not None:
-                    self.optimizer['lr'] = lr
-                    self.optimizer['initial_lr'] = lr
                     self.logger.info(f"Resting learning rate to {lr}")
                     for param_group in self.optimizer.param_groups:
                         param_group['initial_lr'] = lr
