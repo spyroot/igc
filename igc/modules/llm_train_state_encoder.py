@@ -429,6 +429,9 @@ class LlmEmbeddingsTrainer(LlmModule):
         for epoch in range(last_epoch, self.num_epochs):
             self.model.train()
 
+            for i, param_group in enumerate(self.optimizer.param_groups):
+                print(f'Learning rate of parameter group {i}: {param_group["lr"]}')
+
             total_loss = 0.0
             num_batches = 0
             batch_losses = np.zeros(total_batches)
