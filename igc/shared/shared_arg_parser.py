@@ -202,7 +202,7 @@ def add_scheduler_group(parser):
 
     scheduler_group.add_argument(
         "--max_lr",
-        type=int, default=0.1,
+        type=int, default=0.008,
         help="Upper learning rate boundaries in the cycle for each parameter group. ."
     )
 
