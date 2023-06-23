@@ -700,6 +700,7 @@ class IgcModule(IgcBaseState):
                 if lr is not None:
                     self.logger.info(f"Resting learning rate to {lr}")
                     for param_group in self.optimizer.param_groups:
+                        param_group['initial_lr'] = lr
                         param_group['lr'] = lr
 
             # in case we reset learning rate, we don't load scheduler state.

@@ -74,7 +74,7 @@ class LlmEmbeddingsTrainer(LlmModule):
             device=device
         )
 
-        self.is_quantize = False
+        self._is_quantize = False
         self.num_epochs = spec.num_train_epochs
         self.batch_size = spec.per_device_train_batch_size
 
@@ -327,7 +327,6 @@ class LlmEmbeddingsTrainer(LlmModule):
             f"Rank {self.rank} starting train, device {self.device}")
 
         torch.cuda.empty_cache()
-        validation_accuracy = float('-inf')
 
         if not self.is_accelerator:
             self.model.to(self.device)
@@ -342,6 +341,8 @@ class LlmEmbeddingsTrainer(LlmModule):
                 self._module_checkpoint_dir,
                 map_location=self.device,
                 lr=self._reset_lr) if self._module_checkpoint_dir is not None else 0
+
+        print(self.optimizer)
 
         self.logger.info(f"Rank {self.rank}: "
                          f"Uploading model from {self.model.device} "
@@ -412,7 +413,7 @@ class LlmEmbeddingsTrainer(LlmModule):
             f"Rank {self.rank}: Memory utilization after we prepared : "
             f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
 
-        if self.is_quantize:
+        if self._is_quantize:
             self.model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
 
         total_batches = len(train_dataloader)
@@ -485,7 +486,7 @@ class LlmEmbeddingsTrainer(LlmModule):
                 torch.cuda.empty_cache()
 
                 #
-                if self.is_quantize:
+                if self._is_quantize:
                     self.model.apply(torch.quantization.propagate_qconfig_)
                     self.model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
 
@@ -547,7 +548,7 @@ class LlmEmbeddingsTrainer(LlmModule):
                                 is_best_accuracy=is_best_accuracy,
                             )
 
-        if self.is_quantize:
+        if self._is_quantize:
             self.model = convert(self.model)
 
         self.model = self.accelerator.unwrap_model(self.model)
