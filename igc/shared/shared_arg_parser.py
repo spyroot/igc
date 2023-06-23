@@ -1,12 +1,10 @@
 import argparse
-import os
 from typing import Optional
 
 import deepspeed
 import loguru
-from accelerate import Accelerator
+
 from .shared_torch_builder import TorchBuilder
-from .shared_torch_utils import get_device
 from ..ds.redfish_masked_dataset import MaskingOption, MaskingType
 
 
@@ -796,6 +794,10 @@ def shared_arg_parser(
     )
 
     args = parser.parse_args()
+    # in case we are using accelerator we let accelerate decide on the deivce.
+    if args.use_accelerator:
+        args.device = None
+
     # args.device = get_device(rank=int(os.environ.get('LOCAL_RANK', -1))) \
     #     if args.device == "auto" else args.device
 

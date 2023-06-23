@@ -35,7 +35,6 @@ def shared_main(
         torch.cuda.empty_cache()
 
     if device_list_visibility:
-        # Validate device_list_visibility format
         if isinstance(device_list_visibility, str):
             if not re.match(r'^\d(,\d)*$', device_list_visibility):
                 raise ValueError("Invalid format for device_list_visibility. "

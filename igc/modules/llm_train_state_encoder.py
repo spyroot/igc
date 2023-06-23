@@ -87,8 +87,8 @@ class LlmEmbeddingsTrainer(LlmModule):
         self._save_freq = 16
 
         self._is_shuffle = True
+        self._pin_memory = False if "pin_memory" not in spec else spec.pin_memory
         self._num_workers = spec.num_workers
-        self._default_mask_token = "@odata.id"
         self._lr = spec.llm_learning_rate
 
         self.optimizer = TorchBuilder.create_optimizer(
@@ -327,9 +327,6 @@ class LlmEmbeddingsTrainer(LlmModule):
 
         torch.cuda.empty_cache()
         validation_accuracy = float('-inf')
-        self.logger.info(f"Uploading model from {self.model.device} "
-                         f"to device {self.device}, "
-                         f"using accelerate: {self.is_accelerator}")
 
         if not self.is_accelerator:
             self.model.to(self.device)
@@ -346,13 +343,14 @@ class LlmEmbeddingsTrainer(LlmModule):
         self.logger.info(f"Rank {self.rank}: "
                          f"Uploading model from {self.model.device} "
                          f"to device {self.device}, "
-                         f"using accelerate: {self.is_accelerator}")
+                         f"using accelerate: {'yes' if self.is_accelerator else 'no'}, "
+                         f"current mem {torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
 
         train_dataset, eval_dataset = self.split_dataset()
         sampler = self.dataset_sampler()
 
         self.logger.info(f"Creating dataloader "
-                         f"{self.batch_size} "
+                         f"batch size {self.batch_size} "
                          f"num worker {self._num_workers}")
 
         train_data, eval_data = self.split_dataset()
@@ -363,7 +361,7 @@ class LlmEmbeddingsTrainer(LlmModule):
             sampler=sampler,
             num_workers=self._num_workers,
             shuffle=self._is_shuffle,
-            pin_memory=False,
+            pin_memory=self._pin_memory,
             collate_fn=LlmEmbeddingsTrainer.custom_collate_fn
         )
 
@@ -374,12 +372,16 @@ class LlmEmbeddingsTrainer(LlmModule):
             num_workers=self._num_workers,
             shuffle=False,
             drop_last=True,
-            pin_memory=False,
+            pin_memory=self._pin_memory,
             collate_fn=LlmEmbeddingsTrainer.custom_collate_fn,
         )
 
         self._trainer_args.epochs = self.num_epochs - last_epoch
         self._trainer_args.steps_per_epoch = len(train_dataloader)
+
+        self.logger.info(f"Rank {self.rank}: "
+                         f"Data loader created: "
+                         f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
 
         self.model = self.model.to(self.device)
 
@@ -388,13 +390,22 @@ class LlmEmbeddingsTrainer(LlmModule):
             optimizer=self.optimizer,
             **vars(self._trainer_args)
         )
-        
+
+        self.logger.info(f"Rank {self.rank}: "
+                         f"Memory utilization after we loaded model: "
+                         f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
+
         self.scheduler.load_state_dict(scheduler_state)
 
         if self.is_accelerator:
             self.model, self.optimizer, train_dataloader, eval_dataloader, self.scheduler = self.accelerator.prepare(
                 self.model, self.optimizer, train_dataloader, eval_dataloader, self.scheduler
             )
+
+        torch.cuda.empty_cache()
+        self.logger.info(f"Rank {self.rank}: "
+                         f"Memory utilization after we prepared : "
+                         f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
 
         if self.is_quantize:
             self.model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
@@ -405,10 +416,11 @@ class LlmEmbeddingsTrainer(LlmModule):
         batch_log_frequency = round(64 * 0.2)
 
         if total_batches == calculated_total_batches:
-            print(f"Staring training total_batches: {total_batches} "
+            print(f"Rank {self.rank}, Staring training, "
+                  f"total_batches: {total_batches} "
                   f"train dataset size: {dataset_size} "
                   f"batch_size {self.batch_size} "
-                  f"lr {self._lr} "
+                  f"current lr {self._lr} "
                   f"batch stats freq: {batch_log_frequency}.")
 
         for epoch in range(last_epoch, self.num_epochs):
@@ -430,6 +442,8 @@ class LlmEmbeddingsTrainer(LlmModule):
                 input_ids = input_ids.masked_fill(mask_inverted == 1, -100).contiguous()
 
                 target_ids = input_ids[:, 1:].clone().detach()
+                target_ids = target_ids.to(self.device)
+
                 mask = (batch["input_ids"] == self.tokenizer.pad_token_id)
                 target_ids = target_ids.masked_fill(mask[:, 1:], -100)
 
@@ -438,7 +452,6 @@ class LlmEmbeddingsTrainer(LlmModule):
 
                 input_ids = batch['input_ids'].to(self.device)
                 masks = batch['attention_mask'].to(self.device)
-                target_ids = target_ids.to(self.device)
 
                 batch_inputs = {
                     'input_ids': input_ids,
