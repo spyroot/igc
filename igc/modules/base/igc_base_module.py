@@ -700,14 +700,14 @@ class IgcModule(IgcBaseState):
                     warnings.warn("Optimizer does not have load_state_dict method. ")
                     return CheckpointState(0, None, 0, -float('-inf'), 0)
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
                 if lr is not None:
                     self.logger.info(f"Resting learning rate to {lr}")
                     for param_group in self.optimizer.param_groups:
                         param_group['initial_lr'] = lr
                         param_group['lr'] = lr
 
-            # in case we reset learning rate, we don't load scheduler state.
-            if lr is not None:
+            if lr is None:
                 if 'scheduler_state_dict' in checkpoint:
                     scheduler = checkpoint['scheduler_state_dict']
                     if self.scheduler is not None:

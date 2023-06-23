@@ -400,9 +400,6 @@ class LlmEmbeddingsTrainer(LlmModule):
         # we update the scheduler state here.
         self.scheduler.load_state_dict(checkpoint_state.scheduler_state)
 
-        for i, param_group in enumerate(self.optimizer.param_groups):
-            print(f'Learning rate of parameter group {i}: {param_group["lr"]}')
-
         if self.is_accelerator:
             self.model, self.optimizer, train_dataloader, eval_dataloader, self.scheduler = self.accelerator.prepare(
                 self.model, self.optimizer, train_dataloader, eval_dataloader, self.scheduler
