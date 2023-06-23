@@ -645,7 +645,7 @@ class IgcModule(IgcBaseState):
             self,
             checkpoint_dir: str,
             resuming: Optional[bool] = True,
-            map_location: Optional[str, Dict] = None,
+            map_location: Optional[Union[str, Dict]] = None,
             lr: Optional[float] = None,
     ) -> CheckpointState:
         """
