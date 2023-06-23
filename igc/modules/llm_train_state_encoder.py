@@ -487,9 +487,11 @@ class LlmEmbeddingsTrainer(LlmModule):
                 # calculate the progress percentage
                 progress_percentage = int(round((num_batches + 1) / total_batches * 100))
                 if (num_batches % batch_log_frequency == 0) or (num_batches == total_batches - 1):
+                    lr = self.optimizer.param_groups[0]['lr']
                     print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Batch "
                           f"{num_batches + 1}/{total_batches} "
-                          f"- Progress: {progress_percentage:.2f}% - Batch Loss mean: {batch_losses.mean():.4f}")
+                          f"- Progress: {progress_percentage:.2f}% - "
+                          f"Batch Loss mean: {batch_losses.mean():.4f} - lr: {lr:.5f}")
                     self.metric_logger.log_metric("llm_emb_batch_loss", batch_losses.mean(), epoch)
 
                 num_batches += 1
