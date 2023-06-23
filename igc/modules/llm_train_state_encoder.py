@@ -88,6 +88,7 @@ class LlmEmbeddingsTrainer(LlmModule):
 
         self._is_shuffle = True
         self._pin_memory = False if "pin_memory" not in spec else spec.pin_memory
+        self._reset_lr = False if "reset_lr" not in spec else spec.reset_lr
         self._num_workers = spec.num_workers
         self._lr = spec.llm_learning_rate
 
@@ -382,6 +383,10 @@ class LlmEmbeddingsTrainer(LlmModule):
         self.logger.info(f"Rank {self.rank}: "
                          f"Data loader created: "
                          f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
+
+        if self._reset_lr:
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = self._lr
 
         self.model = self.model.to(self.device)
 

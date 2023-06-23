@@ -454,6 +454,12 @@ def add_trainer_group(parser):
         help="By default uses freq otherwise at the end of each epoch."
     )
 
+    parser.add_argument(
+        "--reset_lr",
+        type=bool, default=False,
+        help="Resets to initial learning rate."
+    )
+
     return parser
 
 
