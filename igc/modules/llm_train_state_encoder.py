@@ -339,8 +339,6 @@ class LlmEmbeddingsTrainer(LlmModule):
             map_location=map_location,
             lr=lr)
 
-        print(self.optimizer)
-
         self.logger.info(f"Rank {self.rank}: "
                          f"Uploading model from {self.model.device} "
                          f"to device {self.device}, "
@@ -430,9 +428,6 @@ class LlmEmbeddingsTrainer(LlmModule):
         for epoch in range(last_epoch, self.num_epochs):
             self.model.train()
 
-            for i, param_group in enumerate(self.optimizer.param_groups):
-                print(f'Learning rate of parameter group {i}: {param_group[i]["lr"]}')
-
             total_loss = 0.0
             num_batches = 0
             batch_losses = np.zeros(total_batches)
@@ -476,9 +471,9 @@ class LlmEmbeddingsTrainer(LlmModule):
                     loss.backward()
 
                 self.optimizer.step()
+                self.scheduler.step()
 
                 if self.is_last_worker():
-                    self.scheduler.step()
                     current_lr = self.optimizer.param_groups[0]['lr']
                     self.metric_logger.log_metric("learning_rate", current_lr, epoch)
 

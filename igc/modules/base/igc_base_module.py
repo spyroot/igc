@@ -695,6 +695,7 @@ class IgcModule(IgcBaseState):
         self.model.load_state_dict(checkpoint['model_state_dict'])
 
         if resuming:
+
             if 'optimizer_state_dict' in checkpoint:
                 if not hasattr(self.optimizer, 'load_state_dict'):
                     warnings.warn("Optimizer does not have load_state_dict method. ")
@@ -703,11 +704,14 @@ class IgcModule(IgcBaseState):
 
                 if lr is not None:
                     self.logger.info(f"Resting learning rate to {lr}")
-                    for param_group in self.optimizer.param_groups:
+                    for i, param_group in enumerate(self.optimizer.param_groups):
                         param_group['initial_lr'] = lr
                         param_group['lr'] = lr
+                        param_group.pop('min_lr', None)
+                        param_group.pop('max_lr', None)
 
             if lr is None:
+                raise
                 if 'scheduler_state_dict' in checkpoint:
                     scheduler = checkpoint['scheduler_state_dict']
                     if self.scheduler is not None:

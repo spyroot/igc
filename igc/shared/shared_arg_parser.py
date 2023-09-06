@@ -200,8 +200,14 @@ def add_scheduler_group(parser):
 
     scheduler_group.add_argument(
         "--max_lr",
-        type=int, default=0.008,
+        type=int, default=5e-5,
         help="Upper learning rate boundaries in the cycle for each parameter group. ."
+    )
+
+    scheduler_group.add_argument(
+        "--div_factor",
+        type=float, default=None,
+        help="Determines the initial learning rate via initial_lr = max_lr/div_factor ."
     )
 
     return parser
@@ -717,9 +723,9 @@ def add_reporting_group(parser):
 
 
 def shared_arg_parser(
-        is_deepspeed_arg_parser: Optional[bool] = False,
-        is_accelerate_arg_parser: Optional[bool] = False,
-        is_fairscale_arg_parser: Optional[bool] = False
+    is_deepspeed_arg_parser: Optional[bool] = False,
+    is_accelerate_arg_parser: Optional[bool] = False,
+    is_fairscale_arg_parser: Optional[bool] = False
 ):
     """
 
@@ -802,6 +808,10 @@ def shared_arg_parser(
     # in case we are using accelerator we let accelerate decide on the deivce.
     if args.use_accelerator:
         args.device = None
+
+    # set defaults
+    if args.div_factor is None:
+        args.div_factor = args.max_lr / 0.008
 
     # args.device = get_device(rank=int(os.environ.get('LOCAL_RANK', -1))) \
     #     if args.device == "auto" else args.device
