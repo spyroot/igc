@@ -71,6 +71,13 @@ Optional step login to huggingface hub
 huggingface-cli login --token $HUGGINGFACE_TOKEN
 ```
 
+Verify
+
+```bash
+accelerate --help                                                                                                                                                                                       igc root@ms33
+[2023-09-06 07:10:20,690] [INFO] [real_accelerator.py:158:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+```
+
 ## High level
 
 Before you train, please read because you essentially need to train 4-5 models.  
