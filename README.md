@@ -17,8 +17,21 @@ Reinforce the Learning problem.
 # Installation
 
 ```bash
+apt-get install swig
+```
+
+```bash
 conda create -n igc python=3.10
 conda activate igc
+```
+
+code test on cuda 12 and torch 2 night build.
+
+```bash
+pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu121 
+```
+
+```bash
 conda install pytorch::pytorch torchvision torchaudio -c pytorch
 pip install 'transformers[torch]'
 pip install deepspeed
@@ -37,6 +50,25 @@ pip install deepspeed
 pip install transformers 
 pip accelerate 
 pip optimum
+```
+
+Optional in case pip failed use conda. 
+
+```bash
+conda install pytorch==2.1.0.dev20230901 pytorch-cuda=11.8 -c pytorch-nightly -c nvidia
+
+```
+
+Optional install huggingface hub
+
+```bash
+pip install --upgrade huggingface_hub
+```
+
+Optional step login to huggingface hub
+
+```bash
+huggingface-cli login --token $HUGGINGFACE_TOKEN
 ```
 
 ## High level
