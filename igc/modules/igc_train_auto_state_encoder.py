@@ -20,6 +20,7 @@ from torch.utils.data import DataLoader
 from igc.ds.redfish_dataset import JSONDataset
 from .base.igc_base_module import IgcModule
 from .base.igc_metric_logger import MetricLogger
+from igc.modules.encoders.backbone_utils import backbone_module, emb_shape
 from igc.modules.llm.igc_autoencoder import AutoStateEncoder
 from igc.shared.shared_torch_builder import TorchBuilder
 import torch.nn.functional as F
@@ -66,10 +67,11 @@ class AutoencoderTrainer(IgcModule):
         self.logger.info(f"Creating auto-encoder input dim"
                          f" {self._input_dim} {self._latent_dim} batch_size: {self.batch_size}")
 
-        self._encoder_model = self.model.transformer
-        llm_model.transformer.config.is_decoder = False
+        # Backbone-agnostic base module + dims (GPT-2 .transformer/.wpe only worked for GPT-2).
+        self._encoder_model = backbone_module(self.model)
+        backbone_module(llm_model).config.is_decoder = False
         # self._llm_model.resize_token_embeddings(len(llm_tokenizer))
-        input_shape = self._encoder_model.wpe.weight.shape
+        input_shape = emb_shape(self.model)
         self.emb_shape = (input_shape[0] - 1, input_shape[1])
 
         self.model_autoencoder = AutoStateEncoder(input_shape=input_shape)

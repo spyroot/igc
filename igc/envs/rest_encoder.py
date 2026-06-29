@@ -3,6 +3,8 @@ import time
 import torch
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
+from igc.modules.encoders.backbone_utils import backbone_module, emb_shape
+
 
 class RestBaseEncoder:
     def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, device=None):
@@ -12,13 +14,15 @@ class RestBaseEncoder:
         """
         self.model = model
         self.tokenizer = tokenizer
-        self.encoder_model = model.transformer
+        # Backbone-agnostic base module (GPT-2 .transformer, Llama .model, ...) and dims.
+        self.encoder_model = backbone_module(model)
         self.model.config.is_decoder = False
         self.model.resize_token_embeddings(len(tokenizer))
         self.device = device
 
-        # subtracting 1 to exclude padding index
-        input_shape = self.encoder_model.wpe.weight.shape
+        # (positions, hidden) from the backbone config — works for RoPE backbones with no
+        # GPT-2 wpe positional table. Subtract 1 to exclude the padding index.
+        input_shape = emb_shape(model)
         self.emb_shape = (input_shape[0] - 1, input_shape[1])
         self.cache = {}
 

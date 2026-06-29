@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
+from igc.modules.encoders.backbone_utils import backbone_module, emb_shape
+
 
 class Conv1DLatent(nn.Module):
     def __init__(self, input_dim, kernel_size=2, padding=1):
@@ -18,9 +20,9 @@ class Conv1DLatent(nn.Module):
     def forward(self, last_hidden_state):
         """
         :param last_hidden_state:
-        :return: (batch_size, 768)
+        :return: (batch_size, H) where H is the backbone hidden size
         """
-        # (batch_size, seq_len, 768) -> (batch_size, 768, seq_len)
+        # (batch_size, seq_len, H) -> (batch_size, H, seq_len)
         last_hidden_state = last_hidden_state.permute(0, 2, 1)
         emb = self.cn1(last_hidden_state)
         emb = F.relu(emb)
@@ -37,13 +39,15 @@ class BaseEncoder:
         """
         self._model = model
         self._tokenizer = tokenizer
-        self._encoder_model = model.transformer
+        # Backbone-agnostic base module (GPT-2 .transformer, Llama .model, ...) and dims.
+        self._encoder_model = backbone_module(model)
         self._encoder_model.eval()
-        model.transformer.config.is_decoder = False
+        self._encoder_model.config.is_decoder = False
         self._model.resize_token_embeddings(len(tokenizer))
 
-        # subtracting 1 to exclude padding index
-        input_shape = self._encoder_model.wpe.weight.shape
+        # (positions, hidden) from the backbone config — works for RoPE backbones with no
+        # GPT-2 wpe positional table. Subtract 1 to exclude the padding index.
+        input_shape = emb_shape(model)
         self.emb_shape = (input_shape[0] - 1, input_shape[1])
         self._1d_conv = Conv1DLatent(input_dim=input_shape)
         self.cache = {}
