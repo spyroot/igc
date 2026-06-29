@@ -907,36 +907,36 @@ class JSONDataset(
         :param input_ids:
         :return:
         """
-        idx = 0
         chunks = []
         num_tokens = input_ids.size(1)
+        max_len = self._max_len
 
-        # no need pad
-        if num_tokens <= self._max_len:
+        # short input: a single, unpadded chunk
+        if num_tokens <= max_len:
             chunks.append((input_ids, attention_mask))
             return chunks
 
-        # pad with offset - 1
-        max_len = self._max_len
-
+        # Sliding window of width max_len advancing by (max_len - overlap). Stop as
+        # soon as a window reaches the end, so we never emit a redundant padded tail
+        # that a previous (overlapping) window already covered. stride is floored at 1
+        # to avoid an infinite loop if overlap >= max_len.
+        stride = max(1, max_len - self._overlap)
+        idx = 0
         while idx < num_tokens:
-            if idx + max_len < num_tokens:
-                chunk_input_ids = input_ids[:, idx:idx + max_len]
-                chunk_attention_mask = attention_mask[:, idx:idx + max_len]
-            else:
-                chunk_input_ids = input_ids[:, idx:]
-                chunk_attention_mask = attention_mask[:, idx:]
+            end = idx + max_len
+            chunk_input_ids = input_ids[:, idx:end]
+            chunk_attention_mask = attention_mask[:, idx:end]
 
-            new_chunk_size = max_len - chunk_attention_mask.size(1)
-            padded_input_ids = torch.nn.functional.pad(
-                chunk_input_ids, (0, max_len - chunk_input_ids.size(1)), value=self.tokenizer.pad_token_id)
+            pad = max_len - chunk_input_ids.size(1)
+            if pad > 0:
+                chunk_input_ids = torch.nn.functional.pad(
+                    chunk_input_ids, (0, pad), value=self.tokenizer.pad_token_id)
+                chunk_attention_mask = torch.nn.functional.pad(chunk_attention_mask, (0, pad))
 
-            padded_attention_mask = torch.nn.functional.pad(
-                chunk_attention_mask, (0, max_len - chunk_attention_mask.size(1)))
-
-            chunks.append((padded_input_ids, padded_attention_mask))
-            idx = idx + max_len - self._overlap
-            num_tokens -= new_chunk_size
+            chunks.append((chunk_input_ids, chunk_attention_mask))
+            if end >= num_tokens:
+                break
+            idx += stride
 
         return chunks
 
