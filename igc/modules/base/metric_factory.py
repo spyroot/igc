@@ -77,14 +77,23 @@ class NeptuneLogger(BaseLogger):
 
 
 class WandbLogger(BaseLogger):
-    def __init__(self, project: str, entity: str):
-        """
+    def __init__(self, project: str = None, entity: str = None):
+        """Start a W&B run; project/entity default to ``$WANDB_PROJECT`` / ``$WANDB_ENTITY``.
 
-        :param project:
-        :param entity:
+        Defaulting from the environment (which `.internal/wandb.env` or the launcher sets)
+        is what lets the logger build when the parsed spec carries no project/entity — the
+        prior required-arg signature fell through to a None logger, so nothing was tracked.
+
+        :param project: W&B project (default: ``$WANDB_PROJECT``).
+        :param entity: W&B entity/team (default: ``$WANDB_ENTITY``).
         """
+        import os
+
         import wandb
-        self.run = wandb.init(project=project, entity=entity)
+        self.run = wandb.init(
+            project=project or os.environ.get("WANDB_PROJECT"),
+            entity=entity or os.environ.get("WANDB_ENTITY"),
+        )
 
     def log_scalar(self, tag: str, value: float, step: int):
         """
