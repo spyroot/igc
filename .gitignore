@@ -159,3 +159,21 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 /collector_private.sh
+
+# Agent / instruction / handoff / plan files — never commit (hard rule)
+CLAUDE.md
+AGENTS.md
+AGENT_BOOTSTRAP.md
+AGENT_HANDOFF*.md
+CODEX_HANDOFF.md
+CODEX_TASKS.md
+CODEX_*.md
+TEAM_GUIDE.md
+COORDINATION.md
+IMPROVEMENT_PLAN.md
+ROADMAP*.md
+CLAUDE_REVIEW*
+CLAUDE_PLAN.md
+CLAUDE_PATCH.diff
+.codex/
+.claude/
