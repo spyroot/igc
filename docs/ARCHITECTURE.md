@@ -15,16 +15,125 @@ carries that capability to new, unseen environments with little or no retraining
 
 ---
 
+## 0. Current reality, target interaction, and model map
+
+The diagrams in this section are a design map. They intentionally separate the current Phase 0 code
+path from the target architecture so planning work does not mistake scaffolding for an integrated
+training path.
+
+### Current Phase 0 code path
+
+Today, the default Redfish path is still a captured-data, one-hot-action RL shell. The
+`MockServer` class, defined in `igc/envs/rest_mock_server.py`, replays captured Redfish responses;
+the Gym environments encode responses with the legacy GPT-2-shaped encoder path; and the RL trainer
+still writes four-field replay tuples. Treat any DQN/HER metric as a smoke/debug signal until the
+transition, terminal-mask, and evaluator contracts are fixed.
+
+```mermaid
+flowchart LR
+    Capture["Captured Redfish data\n~/.json_responses + rest_api_map.npy"]
+    Dataset["JSONDataset\nigc/ds/redfish_dataset.py\nURL/method maps + loose action targets"]
+    Mock["MockServer\nigc/envs/rest_mock_server.py\nreplay + callback mutation"]
+    Env["RestApiEnv / VectorizedRestApiEnv\nigc/envs/*\none-hot URL + HTTP method"]
+    Encoder["Legacy response encoder\nraw JSON -> GPT-2-shaped tensor"]
+    Policy["Igc_QNetwork\nfixed output width = URL count + methods"]
+    Buffer["Buffer\nigc/modules/igc_experience_buffer.py\n(state, action, reward, next_state)"]
+    Trainer["IgcAgentTrainer\nigc/modules/igc_train_agent.py\nlegacy DQN/HER loop"]
+
+    Capture --> Dataset --> Mock --> Env --> Encoder --> Policy --> Env
+    Env --> Buffer --> Trainer --> Policy
+```
+
+### Target interaction model
+
+The target path keeps Redfish as one adapter, but moves the decision boundary to structured
+observations, legal candidate actions, domain evaluators, and guarded execution. `RedfishStateV0` is
+the proposed first compact-state schema: a JSON-serializable structured payload under
+`Observation.structured`, not a learned graph model yet.
+
+```mermaid
+flowchart LR
+    Goal["Goal\nigc/core/types.py\ninstruction + spec + constraints + plan"]
+    Planner["Planner / casting layer\nplanned M3"]
+    State["RedfishStateV0\nstructured resources, links,\nstatus, tasks, settings, telemetry"]
+    Catalog["ToolCatalog.available_actions(obs)\nplanned Redfish adapter\nlegal ToolAction candidates"]
+    Codec["ActionCodec\nigc/modules/policy/action_codec.py\nrender + cache candidate templates"]
+    Pointer["Pointer Q head\nigc/modules/policy/pointer_policy.py\nscore legal candidates only"]
+    Args["Argument stage\nigc/modules/policy/argument_decoder.py\nfills per-slot enum values"]
+    Guard["Guardrail\nplanned dry-run -> approval -> executor"]
+    Sim["Simulator\nMockServer adapter first\nlive Redfish gated"]
+    Eval["Evaluator.verify(goal, obs)\nplanned domain reward + success"]
+    Step["StepResult / Transition\nigc/core/types.py\nthin step + rich replay record"]
+    Replay["Replay / HER\nterminal masks + achieved_goal"]
+
+    Goal --> Planner --> Catalog
+    State --> Catalog --> Codec --> Pointer --> Args --> Guard --> Sim
+    Sim --> State
+    State --> Eval --> Step --> Replay --> Pointer
+    Goal --> Eval
+```
+
+### Model dependency map
+
+The model stack is a dependency graph, not six independent training jobs. The backbone has to be
+made config-driven before downstream heads can be trusted; the RL policy should not report real
+learning metrics until structured state, legal actions, evaluator rewards, and replay masks are in
+place. The math gate for these claims lives in [MATH_CHECKS.md](MATH_CHECKS.md).
+
+```mermaid
+flowchart TD
+    M1["M1 backbone encoder\nconfig-driven causal/decoder model"]
+    S0["RedfishStateV0 extractor\nstructured state contract + fixtures"]
+    M2["M2 state pooler / autoencoder\npooled structured/text state"]
+    M3["M3 planner\ninstruction -> sub-goal plan"]
+    M4["M4 evaluator / reward\nstructured verify + dense reward"]
+    M5["M5 world model\nnext-state + status/task phase"]
+    M6["M6 RL policy\ncandidate scoring + replay/HER"]
+    Gate["Offline eval harness\nno GPU/network/live host by default"]
+
+    S0 --> M2
+    M1 --> M2
+    M1 --> M3
+    S0 --> M4
+    M2 --> M5
+    M4 --> M5
+    M2 --> M6
+    M3 --> M6
+    M4 --> M6
+    M5 --> M6
+    M6 --> Gate
+```
+
+### RedfishStateV0 field budget
+
+`RedfishStateV0` is the smallest useful structured state target to validate before any learned graph
+pooling. It should be deterministic, JSON-serializable, and testable from tiny synthetic Redfish
+fixtures.
+
+| Field group | Minimum content | Why it stays |
+| --- | --- | --- |
+| Resource identity | canonical URI, `@odata.type`, schema version, collection membership | preserves stable entities |
+| Topology | selected `@odata.id` links, parent/subordinate edges | keeps Redfish's hypermedia graph visible |
+| Health/control | `Status.State`, `Status.Health`, power/boot/firmware/storage summaries | carries control-relevant state |
+| Action surface | allowed methods, `Actions`, targets, argument schemas, allowable values, risk level | builds legal `ToolAction` candidates |
+| Deferred state | current vs pending settings, task/job phase, reboot/apply-time hints | prevents false Markov collapse |
+| Observation metadata | HTTP status, error class, freshness/staleness, ETag when present | separates unknown, stale, and failed reads |
+| Goal context | goal spec fragment, sub-goal index, achieved-goal fields, previous action/result | supports evaluator rewards and HER |
+
+Validation comes before pooling: extractor golden tests, action-catalog parity, pending-settings
+counterexamples, component-order invariance, and replay/HER shape tests.
+
 ## 1. Where igc is today, and the five target layers
 
-`igc` already has a working MDP shell (gym env + mock REST server + GPT-2 state encoder +
-goal-conditioned DQN with HER), but every layer is welded to Redfish and GPT-2. The target is five
-clean layers behind one interface. The map below marks each layer **refactor existing** (reuse what
-is there) vs **build new** (greenfield), and calls out the keystone change.
+`igc` already has a Redfish-specific MDP shell (Gym env + mock REST server + GPT-2-shaped state
+encoder + legacy goal-conditioned DQN/HER trainer), but every layer is welded to Redfish and GPT-2.
+The legacy trainer is useful for smoke/debug work, not for trusted RL metrics yet. The target is five
+clean layers behind one interface. The map below marks each layer **refactor existing** (reuse what is
+there) vs **build new** (greenfield), and calls out the keystone change.
 
 ![Five-layer gap map](diagrams/01-five-layer-gap-map.svg)
 
-- **Goal** — `Goal(instruction, success_criteria, constraints, plan)`. Today only a `GoalTypeState`
+- **Goal** — `Goal(instruction, spec, constraints, plan)`. Today only a `GoalTypeState`
   enum + a loose `self.goals` dict. *Build new.*
 - **Environment** — a `GoalEnvironment` interface (`reset / available_actions / step / verify`) with
   Redfish as one adapter. The `MockServer` simulator + gym shell are reusable. *Refactor.*
@@ -43,18 +152,20 @@ that pins slice order before any default flips.
 ### Scalable action selection — the pointer / candidate-scoring policy
 
 The one-hot action space explodes because the policy's output width equals the number of discovered
-URLs (`num_actions`), and adding methods/arguments multiplies it. The fix is a **pointer /
+URLs (`num_actions`), and adding methods/arguments multiplies it. The target fix is a **pointer /
 candidate-scoring policy**: instead of a fixed `Linear(hidden, num_actions)` head, the policy scores
-the *legal* candidate actions that `available_actions(obs)` already returns for the current state.
+the *legal* candidate actions that a Redfish `ToolCatalog.available_actions(obs)` adapter will return
+for the current state. The pointer head and action codec are scaffolded; the Redfish adapter and env
+cutover are still planned.
 
 - The policy encodes state + goal into a query `q`; each candidate `ToolAction` is rendered to a
   canonical, value-independent string (`igc/core/action_render.py`, landed) and embedded into a key
   `k_i` by the shared backbone (cached by `action_template_key`). The score is `Q(s, a_i) = q · k_i`,
   so the output width = number of *currently legal* candidates (local fan-out, tens) — **never the
   global catalog**.
-- Adding tools/URLs/methods grows (cached) encoding compute, not policy weights; a brand-new tool is
-  zero-shot scorable because its text is embedded by the same backbone — no output-layer resize, no
-  adler32 re-index, no head retrain.
+- Adding tools/URLs/methods grows (cached) encoding compute, not policy weights. A brand-new tool is
+  intended to be scorable in the same embedding space — no output-layer resize, no adler32 re-index,
+  no head retrain — but transfer remains an evaluation target until the offline harness proves it.
 - Arguments are filled in a second stage from `ToolSpec.arg_schema` (small categorical heads for
   enumerated/bounded slots; constrained backbone decoding for freeform path/SQL/body), then
   `ToolCatalog.validate` gates execution.
@@ -64,8 +175,10 @@ the *legal* candidate actions that `available_actions(obs)` already returns for 
   codec stay byte-for-byte intact until a parity test (pointer ≡ one-hot on the enumerated Redfish
   case) is green, then the default flips.
 
-State is encoded by the same backbone (pooled last-hidden of `Observation.text` + `Goal.instruction`),
-with dims derived from `config.hidden_size` — not the hardcoded `1025` / `768`.
+Target state encoding uses the same backbone (pooled last-hidden of `Observation.text` plus
+`Goal.instruction`) with dims derived from `config.hidden_size`, not hardcoded `1025` / `768`. The
+current environment path still encodes raw JSON responses into legacy tensors, so `RedfishStateV0`
+and state-pooler work must land before this becomes the training path.
 
 ## 2. How a new simulator plugs into the agent
 
@@ -122,8 +235,9 @@ explicit pipeline stages.
 ### Meta-learning: a transferable multi-step agent
 
 The end goal is not a single Redfish policy but an agent that **transfers** — plug it into a new REST
-API (or filesystem/SQL/GitHub) and it should operate that backend with little or no retraining. The
-design makes this concrete, layer by layer:
+API (or filesystem/SQL/GitHub) and it should operate that backend with little or no retraining. This
+is the target hypothesis; it becomes a claim only after offline eval traces and metrics support it.
+The design makes the hypothesis concrete, layer by layer:
 
 1. **Extract the goal.** The planner (the "casting" layer) maps a high-level instruction to a `Goal`
    and an ordered sub-goal `plan` (the hierarchical decomposition above).
@@ -164,8 +278,8 @@ de-hardcoded before the first backbone fit.
 
 ## 5. Backbone modernization (GPT-2 → flash-class LLM)
 
-The central loader already uses `AutoTokenizer` + a class arg and `ValueHead` already reads
-`config.hidden_size`, so the model is *nearly* backbone-agnostic. The welds to remove:
+The target loader should use `AutoTokenizer` + a class arg, and `ValueHead` should read
+`config.hidden_size`, so the model becomes backbone-agnostic. The welds to remove:
 
 - **Kill `.transformer`/`.wpe` reads** → a `backbone_utils.py` helper (`base_model_prefix`,
   `config.hidden_size`, `max_position_embeddings`). RoPE models have no positional table, so
@@ -224,7 +338,9 @@ Found in-tree during design review:
 - `rl_batch_size` is typed as a float.
 - Stale shell scripts still point at a nonexistent `trainer.py`.
 - `train_rl_agent.py` has a tuple-unpack bug.
-- Buffer entries are 4-tuples with no `done` flag.
+- ~~Buffer entries are 4-tuples with no `done` flag.~~ **Fixed:** `igc/modules/igc_experience_buffer.py`
+  now stores/returns a per-transition `done`; the trainer's target uses
+  `igc.modules.rl.q_targets.q_learning_target` with a `(1 - done)` mask.
 - Magic dimensions such as `1026`, `1025`, and `seq*768` are still hard-coupled to GPT-2 shapes.
 
 ## 9. Open decisions
@@ -232,5 +348,27 @@ Found in-tree during design review:
 1. Trainable base model id (the `--model_type` value for the flash-class backbone).
 2. Planner build — learned (`GoalExtractor`→planner), LLM-via-Flash, or both.
 3. `--raw_data_dir` — new flag or alias of the existing `--json_data_dir`.
-4. Live canary — is an approved non-production Redfish host available (with pacing)?
-5. Reward decomposition — how per-sub-goal rewards sum-consistently with the terminal reward.
+4. Reward decomposition — how per-sub-goal rewards sum-consistently with the terminal reward.
+
+### Resolved design decisions (review "hard flags")
+
+1. **`Transition` vs `StepResult`** — both, distinct roles (`igc/core/types.py`).
+   `GoalEnvironment.step()` returns the thin Gymnasium `StepResult`
+   (`observation, reward, terminated, truncated, info`); `Transition` is the rich
+   replay-buffer record adding `action, next_observation, desired_goal,
+   achieved_goal` plus a `relabel()` helper. The env stays goal-agnostic; the agent
+   assembles a `Transition` before pushing to replay.
+2. **terminal vs truncated semantics** — Gymnasium semantics. `terminated` is a true
+   MDP terminal (goal reached / unrecoverable) → bootstrapping stops (target =
+   reward). `truncated` is a budget/time cut → bootstrapping continues. The DQN mask
+   is `(1 - terminated)` only; a transition is terminal iff the env goal was reached.
+3. **legal-action source of truth** — merged catalog. The `.npy`
+   `allowed_methods_mapping` is authoritative for *verb legality* per URL (the binding
+   `idrac_ctl` contract); the JSON `Actions` / `@Redfish.ActionInfo` blocks supply the
+   *parameter space* (enums) consumed by the stage-2 argument decoder. CSDL schema is a
+   later enrichment.
+4. **credential logging** — redacted before any live canary
+   (`MockServer._redact_headers`; no username/password/token in request logs).
+5. **two-stage action with values** — `action_to_prompt` intentionally drops argument
+   values, so mutating actions are completed by `igc/modules/policy/argument_decoder.py`
+   (per-slot enum scoring, no cross-product explosion).
