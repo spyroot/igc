@@ -1,9 +1,7 @@
 import os
 import re
-from argparse import ArgumentParser, HelpFormatter
 
 import torch
-from transformers import deepspeed
 from .shared_arg_parser import shared_arg_parser
 from .shared_torch_utils import get_device
 

@@ -109,7 +109,9 @@ class IgcMain:
                 llm_module.train()
 
             if (self._specs.train == "agent" or self._specs.train == "all") and self._specs.rl is not None:
-                rl_module = IgcRlModule(self._specs, self.metric_logger, self.dataset)
+                rl_module = IgcRlModule(
+                    "rl_agent", self._specs, self.metric_logger, self.dataset,
+                    device=self._specs.device)
                 rl_module.train()
 
     def load(

@@ -38,9 +38,9 @@ class IgcRlModule(IgcBaseState):
         super().__init__(module_name, spec)
 
         if llm_model is None:
-            llm_model, _, last_epoch = IgcLanguageModule.load(spec, module_names="state_encoder")
-        else:
-            llm_model = llm_model
+            # IgcLanguageModule.load returns a dict {module_name: LlmModule}; take the model.
+            modules = IgcLanguageModule.load(spec, module_names="state_encoder")
+            llm_model = modules["state_encoder"].model
 
         tokenizer = ds.tokenizer
         # encoder = BaseEncoder(model=llm_model, tokenizer=tokenizer, device=device)
