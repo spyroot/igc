@@ -712,7 +712,6 @@ class IgcModule(IgcBaseState):
                         param_group.pop('max_lr', None)
 
             if lr is None:
-                raise
                 if 'scheduler_state_dict' in checkpoint:
                     scheduler = checkpoint['scheduler_state_dict']
                     if self.scheduler is not None:

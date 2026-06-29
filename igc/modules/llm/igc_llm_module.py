@@ -139,6 +139,19 @@ class IgcLanguageModule:
             llm_model = llm_embeddings.get_model()
             llm_tokenizer = llm_embeddings.get_tokenizer()
 
+        # The downstream stages (goal/parameter extractor, state autoencoder) consume the
+        # state encoder trained in a PRIOR run. When this run does not train it itself
+        # (llm != latent/all), load the fine-tuned encoder from disk so the model handed to
+        # those trainers is never None — which previously crashed them with a NoneType.
+        if llm_model is None and self._spec.llm in ("goal", "parameter", "encoder"):
+            llm_model = self.load_finetuned_state_encoder()
+            llm_tokenizer = self._dataset.tokenizer
+            if llm_model is None:
+                raise RuntimeError(
+                    "No fine-tuned state encoder checkpoint found; train stage m1 "
+                    f"(--train llm --llm latent) before --llm {self._spec.llm}.")
+            llm_state = ModelType.FINETUNED
+
         return llm_model, llm_tokenizer, llm_state
 
     def load_finetuned_state_encoder(self, path: str = None):
