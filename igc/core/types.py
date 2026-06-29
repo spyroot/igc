@@ -15,7 +15,7 @@ Mus mbayramo@stanford.edu
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from typing import Any, Optional
 
@@ -116,10 +116,16 @@ class Goal:
 
 
 @dataclass
-class Transition:
-    """One MDP step. Five fields including the ``terminated``/``truncated`` done
-    flags the legacy 4-tuple replay buffer lacked; ``info`` may carry an
-    ``achieved_goal`` for hindsight relabeling.
+class StepResult:
+    """The thin per-step return of :meth:`GoalEnvironment.step` — Gymnasium-style
+    ``(observation, reward, terminated, truncated, info)``.
+
+    ``terminated`` marks a *true* MDP terminal (goal reached or an unrecoverable
+    failure): bootstrapping must STOP, so the DQN target is just ``reward``.
+    ``truncated`` marks an episode cut for an external budget/time limit and is
+    NOT terminal: bootstrapping CONTINUES (``reward + gamma * max_a' Q``). The
+    agent assembles a :class:`Transition` from a StepResult plus the pre-step
+    observation, the action taken, and the episode goals before pushing to replay.
     """
 
     observation: Observation
@@ -127,6 +133,43 @@ class Transition:
     terminated: bool
     truncated: bool
     info: dict = field(default_factory=dict)
+
+
+@dataclass
+class Transition:
+    """One goal-conditioned replay-buffer record — a full MDP transition.
+
+    Unlike the thin :class:`StepResult`, this stores everything hindsight
+    relabeling (HER) needs: the pre-step ``observation``, the ``action`` taken,
+    the ``reward``, the ``next_observation`` after the step, the Gymnasium
+    ``terminated``/``truncated`` flags (same bootstrap semantics as StepResult),
+    the episode's ``desired_goal``, and the ``achieved_goal`` realized at
+    ``next_observation``. HER swaps ``desired_goal`` for an ``achieved_goal``
+    sampled from a FUTURE step of the same episode and recomputes the reward,
+    which is why ``next_observation`` and ``achieved_goal`` must be stored per
+    step (the legacy 4-tuple buffer kept neither).
+    """
+
+    observation: Observation
+    action: ToolAction
+    reward: float
+    next_observation: Observation
+    terminated: bool
+    truncated: bool
+    desired_goal: Optional[Goal] = None
+    achieved_goal: Optional[Goal] = None
+    info: dict = field(default_factory=dict)
+
+    def relabel(self, desired_goal: Goal, reward: float, terminated: bool) -> "Transition":
+        """Return a HER-relabeled copy conditioned on a goal achieved later.
+
+        The ``desired_goal`` is replaced by one realized at a FUTURE step of the
+        same episode, and ``reward``/``terminated`` are recomputed by the
+        Evaluator for that substituted goal. The observation, action, and
+        ``next_observation`` are unchanged — only the goal the transition is
+        conditioned on moves.
+        """
+        return replace(self, desired_goal=desired_goal, reward=reward, terminated=terminated)
 
 
 @dataclass

@@ -8,7 +8,7 @@ Author:
 Mus mbayramo@stanford.edu
 """
 from igc.core.protocols import Evaluator, GoalEnvironment, Simulator, ToolCatalog
-from igc.core.types import Observation, SimResult, Transition
+from igc.core.types import Observation, SimResult, StepResult
 
 
 class GoodSim:
@@ -54,7 +54,7 @@ class GoodEnv:
         return []
 
     def step(self, action):
-        return Transition(
+        return StepResult(
             observation=Observation(text="{}"), reward=0.0, terminated=False, truncated=False
         )
 

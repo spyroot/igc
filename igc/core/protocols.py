@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Optional, Protocol, runtime_checkable
 
-from igc.core.types import Goal, Observation, SimResult, ToolAction, ToolSpec, Transition
+from igc.core.types import Goal, Observation, SimResult, StepResult, ToolAction, ToolSpec
 
 
 @runtime_checkable
@@ -67,7 +67,7 @@ class GoalEnvironment(Protocol):
 
     def available_actions(self, obs: Observation) -> list[ToolAction]: ...
 
-    def step(self, action: ToolAction) -> Transition: ...
+    def step(self, action: ToolAction) -> StepResult: ...
 
     def verify(self, obs: Observation, goal: Goal) -> tuple[bool, float]: ...
 

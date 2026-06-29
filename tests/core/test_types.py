@@ -15,6 +15,7 @@ from igc.core.types import (
     Observation,
     RiskLevel,
     SimResult,
+    StepResult,
     ToolAction,
     ToolSpec,
     Transition,
@@ -90,11 +91,48 @@ def test_from_dict_requires_core_keys(bad):
         ToolAction.from_dict(bad)
 
 
-def test_transition_carries_done_flags():
-    """Transition exposes the terminated/truncated flags the 4-tuple buffer lacked."""
-    t = Transition(observation=Observation(text="{}"), reward=1.0, terminated=True, truncated=False)
-    assert t.terminated and not t.truncated
+def test_step_result_carries_done_flags():
+    """StepResult (the thin env return) exposes terminated/truncated and a default info."""
+    s = StepResult(observation=Observation(text="{}"), reward=1.0, terminated=True, truncated=False)
+    assert s.terminated and not s.truncated
+    assert s.info == {}
+
+
+def test_transition_stores_her_fields():
+    """Transition is the rich replay record: action, next_observation, and goals."""
+    obs = Observation(text="{}")
+    nxt = Observation(text='{"PowerState": "On"}')
+    act = ToolAction(tool_name="redfish", op="GET", target="/redfish/v1/Systems/1")
+    t = Transition(
+        observation=obs,
+        action=act,
+        reward=0.0,
+        next_observation=nxt,
+        terminated=False,
+        truncated=False,
+    )
+    assert t.action is act
+    assert t.next_observation is nxt
+    assert t.desired_goal is None and t.achieved_goal is None
     assert t.info == {}
+
+
+def test_transition_relabel_swaps_goal_and_reward_only():
+    """HER relabel returns a copy with a new desired_goal/reward/terminated; the
+    observation, action, and next_observation are untouched."""
+    obs = Observation(text="{}")
+    nxt = Observation(text='{"PowerState": "On"}')
+    act = ToolAction(tool_name="redfish", op="POST", target="/redfish/v1/Systems/1/Actions")
+    desired = Goal(instruction="power on")
+    achieved = Goal(instruction="reached PowerState=On", spec={"PowerState": "On"})
+    t = Transition(
+        observation=obs, action=act, reward=0.0, next_observation=nxt,
+        terminated=False, truncated=False, desired_goal=desired,
+    )
+    r = t.relabel(desired_goal=achieved, reward=1.0, terminated=True)
+    assert r.desired_goal is achieved and r.reward == 1.0 and r.terminated is True
+    assert r.observation is obs and r.action is act and r.next_observation is nxt
+    assert t.desired_goal is desired and t.reward == 0.0  # original unchanged
 
 
 def test_observation_and_simresult_defaults():
