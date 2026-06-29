@@ -70,3 +70,6 @@ class GoalEnvironment(Protocol):
     def step(self, action: ToolAction) -> Transition: ...
 
     def verify(self, obs: Observation, goal: Goal) -> tuple[bool, float]: ...
+
+
+# Author: Mus mbayramo@stanford.edu

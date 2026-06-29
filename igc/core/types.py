@@ -156,3 +156,6 @@ class ToolSpec:
     risk_level: RiskLevel = RiskLevel.READ_ONLY
     target_space: str = "enumerated"
     description: str = ""
+
+
+# Author: Mus mbayramo@stanford.edu

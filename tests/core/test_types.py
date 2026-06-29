@@ -116,3 +116,6 @@ def test_toolspec_defaults_enumerated_read_only():
     spec = ToolSpec(tool_name="redfish", ops=["GET", "HEAD"])
     assert spec.target_space == "enumerated"
     assert spec.risk_level is RiskLevel.READ_ONLY
+
+
+# Author: Mus mbayramo@stanford.edu

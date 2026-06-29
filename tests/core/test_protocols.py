@@ -84,3 +84,6 @@ def test_protocols_are_runtime_checkable():
     """isinstance against each Protocol must not raise (i.e. runtime_checkable)."""
     for proto in (Simulator, ToolCatalog, Evaluator, GoalEnvironment):
         assert isinstance(object(), proto) is False
+
+
+# Author: Mus mbayramo@stanford.edu
