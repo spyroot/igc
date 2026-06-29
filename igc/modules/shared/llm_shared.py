@@ -9,11 +9,29 @@ import pkgutil
 from typing import Optional, Union, Dict, Tuple
 
 from transformers import (
-    GPT2LMHeadModel,
-    GPT2Tokenizer,
+    AutoModelForCausalLM,
+    AutoTokenizer,
     PreTrainedModel,
     PreTrainedTokenizer
 )
+
+
+def _model_id(args: Union[str, argparse.Namespace]) -> str:
+    """The HF repo id or local weights path — a bare string, or ``args.model_type``."""
+    return args if isinstance(args, str) else args.model_type
+
+
+def _spec_flag(args: Union[str, argparse.Namespace], name: str, default):
+    """Read an optional spec flag; a bare-string ``args`` carries no flags (returns default)."""
+    return default if isinstance(args, str) else getattr(args, name, default)
+
+
+def _resolve_dtype(name: Optional[str]):
+    """Map a dtype name (``"bfloat16"``/...) to a ``torch.dtype``; pass ``None``/``"auto"`` through."""
+    if name is None or name == "auto":
+        return name
+    import torch
+    return getattr(torch, name)
 
 
 def from_pretrained_default(
@@ -24,10 +42,16 @@ def from_pretrained_default(
         device_map: Union[str, Dict[str, str]] = "balanced"
 ) -> Tuple[Optional[PreTrainedModel], Optional[PreTrainedTokenizer]]:
     """
-    This is default callback used to load default model that we fine tune.
+    Default callback that loads the backbone we fine-tune, for ANY HF model.
+
+    Uses ``AutoModelForCausalLM`` / ``AutoTokenizer`` keyed on ``--model_type`` (a HF repo
+    id OR a local weights dir, e.g. ``/home/nvidia/models/DeepSeek-V4-Flash`` — loads with
+    no download), honouring ``--trust_remote_code`` (custom architectures like DeepSeek) and
+    ``--llm_torch_dtype`` (bf16 for a large model).
 
     :param only_model:  return only model, no tokenizer.
-    :param device_map:  where to upload model
+    :param device_map:  retained for callers; placement of a large model is handled by the
+        trainer / accelerate (kept as-is to preserve the existing training flow).
     :param add_padding: add pad tokens to tokenizer, that make sense if we also restore tokenizer.
     :param args: Argument parser namespace or string specifying the model_type.
     :param only_tokenizer: Whether to return only the tokenizer.
@@ -39,29 +63,25 @@ def from_pretrained_default(
     if device_map == "mps":
         device_map = "auto"
 
+    model_id = _model_id(args)
+    trust_remote_code = bool(_spec_flag(args, "trust_remote_code", False))
+    torch_dtype = _resolve_dtype(_spec_flag(args, "llm_torch_dtype", None))
+
     if not only_tokenizer:
-        if isinstance(args, str):
-            model = GPT2LMHeadModel.from_pretrained(
-                args
-            )
-        else:
-            model = GPT2LMHeadModel.from_pretrained(
-                args.model_type
-            )
+        load_kwargs = {"trust_remote_code": trust_remote_code}
+        if torch_dtype is not None:
+            load_kwargs["torch_dtype"] = torch_dtype
+        model = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
 
     if not only_model:
-        if isinstance(args, str):
-            tokenizer = GPT2Tokenizer.from_pretrained(args)
-        else:
-            tokenizer = GPT2Tokenizer.from_pretrained(args.model_type)
-
-        if add_padding:
+        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=trust_remote_code)
+        if add_padding and tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
             tokenizer.pad_token_id = tokenizer.eos_token_id
 
     if add_padding and model is not None and tokenizer is not None:
-        model.config.pad_token_id = tokenizer.eos_token_id
-        model.config.pad_token = tokenizer.eos_token
+        model.config.pad_token_id = tokenizer.pad_token_id
+        model.config.pad_token = tokenizer.pad_token
 
     return model, tokenizer
 
@@ -118,7 +138,7 @@ def load_igc_tokenizer(
     if not os.path.exists(tok_dir):
         raise ValueError(f"Tokenizer directory '{tok_dir}' does not exist.")
 
-    tokenizer = GPT2Tokenizer.from_pretrained(tok_dir)
+    tokenizer = AutoTokenizer.from_pretrained(tok_dir)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.pad_token_id = tokenizer.eos_token_id
     return tokenizer
@@ -126,8 +146,8 @@ def load_igc_tokenizer(
 
 def save_pretrained_default(
         huggingface_dir,
-        model: GPT2Tokenizer,
-        tokenizer: GPT2Tokenizer,
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizer,
         only_tokenizer=False
 ):
     """
@@ -173,10 +193,12 @@ def load_pretrained_default(
     :return: A tuple consisting of the pre-trained GPT-2 model and its tokenizer.
     """
 
-    tokenizer = GPT2Tokenizer.from_pretrained(
+    trust_remote_code = bool(getattr(args, "trust_remote_code", False))
+    tokenizer = AutoTokenizer.from_pretrained(
         path_to_model,
         cache_dir=args.llm_cache_dir
         if hasattr(args, "llm_cache_dir") else None,
+        trust_remote_code=trust_remote_code,
     )
 
     model_args = {
@@ -197,9 +219,10 @@ def load_pretrained_default(
     }
 
     model_args = {k: v for k, v in model_args.items() if v is not None}
-    model = GPT2LMHeadModel.from_pretrained(
+    model = AutoModelForCausalLM.from_pretrained(
         path_to_model,
         cache_dir=args.llm_cache_dir if hasattr(args, "llm_cache_dir") else None,
+        trust_remote_code=trust_remote_code,
         **model_args,
     )
     return model, tokenizer

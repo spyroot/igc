@@ -164,8 +164,18 @@ def add_model_type_group(parser):
         type=str, default="gpt2",
         help="Backbone model: a HuggingFace repo id or local path (free-form). Defaults "
              "to gpt2 for the small/offline path; set a large decoder for GPU fine-tuning "
-             "(large models need significant memory)."
+             "(large models need significant memory). May be a local weights dir, e.g. "
+             "/home/nvidia/models/DeepSeek-V4-Flash, to load without a download."
     )
+    model_type_group.add_argument(
+        "--trust_remote_code", action="store_true",
+        help="Allow loading a model/tokenizer whose code ships in the weights repo "
+             "(required for custom architectures such as DeepSeek). Only enable for "
+             "weights you trust — it executes that repo's Python.")
+    model_type_group.add_argument(
+        "--llm_torch_dtype", type=str, default=None,
+        choices=["bfloat16", "float16", "float32", "auto"],
+        help="dtype to load the backbone in (bf16 for a large model on GPU).")
     model_type_group.add_argument(
         "--use_peft", action="store_true",
         help="Fine-tune with LoRA via HuggingFace PEFT (bf16 base + small adapters) — the "
