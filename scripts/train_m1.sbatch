@@ -2,9 +2,10 @@
 # First end-to-end GPU loop: train M1, the state-encoder (causal/masked-LM SFT,
 # igc/modules/llm_train_state_encoder.py LlmEmbeddingsTrainer) on ONE GB300.
 # Validate on a small model first, then set IGC_MODEL to a large decoder and scale.
-# Runbook + cautions: GPU_ACCESS.md. Launch from a cluster login node:
+# Runbook + cautions: GPU_ACCESS.md. Full guide: docs/TRAINING.md.
 #
-#   sbatch scripts/train_m1.sbatch                          # gpt2 smoke
+#   export WANDB_API_KEY=...            # in your shell, NOT here (rotate if ever shared)
+#   sbatch scripts/train_m1.sbatch                          # gpt2 smoke -> wandb
 #   IGC_MODEL=<hf-repo-id> EPOCHS=3 sbatch scripts/train_m1.sbatch
 #
 #SBATCH --job-name=igc-m1
@@ -29,8 +30,19 @@ IGC_DIR="${IGC_DIR:-$HOME/igc}"                  # node-local igc checkout
 DATA_DIR="${DATA_DIR:-$HOME/.json_responses}"    # node-local captured Redfish responses
 EPOCHS="${EPOCHS:-3}"
 NGC_IMAGE="${NGC_IMAGE:-nvcr.io/nvidia/pytorch:26.03-py3}"
+SEED="${SEED:-42}"
 
-echo "igc M1 SFT | model=${IGC_MODEL} epochs=${EPOCHS} node=$(hostname)"
+# Experiment tracking. Default to wandb; the API key MUST come from your environment
+# (export WANDB_API_KEY=...). Never hardcode or commit it. WANDB_PROJECT is safe to set.
+IGC_REPORT="${IGC_REPORT:-wandb}"
+if [ "${IGC_REPORT}" = "wandb" ]; then
+    : "${WANDB_API_KEY:?set WANDB_API_KEY in your environment to use wandb (do not hardcode it)}"
+    export WANDB_API_KEY
+    export WANDB_PROJECT="${WANDB_PROJECT:-igc}"
+    export WANDB_NAME="${WANDB_NAME:-m1-${IGC_MODEL//\//_}-${SLURM_JOB_ID:-local}}"
+fi
+
+echo "igc M1 SFT | model=${IGC_MODEL} epochs=${EPOCHS} report=${IGC_REPORT} node=$(hostname)"
 
 srun --container-image="${NGC_IMAGE}" \
      --container-mounts="${IGC_DIR}:/workspace/igc,${DATA_DIR}:/root/.json_responses" \
@@ -44,6 +56,7 @@ srun --container-image="${NGC_IMAGE}" \
             --model_type "'"${IGC_MODEL}"'" \
             --num_train_epochs "'"${EPOCHS}"'" \
             --json_data_dir /root/.json_responses \
-            --device cuda:0 \
+            --device cuda:0 --seed "'"${SEED}"'" \
+            --metric_report "'"${IGC_REPORT}"'" \
             --log_level info --llm_log_level info
      '
