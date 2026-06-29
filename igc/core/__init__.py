@@ -3,6 +3,9 @@
 Pure-stdlib types shared by every environment adapter, the trajectory layer, and
 the learning/eval layer. Heavier protocols (Simulator, GoalEnvironment) live in
 ``igc.core.protocols``; keep this package import-light.
+
+Author:
+Mus mbayramo@stanford.edu
 """
 from igc.core.types import (
     Goal,

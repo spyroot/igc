@@ -6,6 +6,9 @@ checks (which verify member names, exactly what we want for duck-typed plugins).
 
 Pure stdlib + typing, so this stays cheap and CPU/offline-testable. The concrete
 data records live in :mod:`igc.core.types`.
+
+Author:
+Mus mbayramo@stanford.edu
 """
 from __future__ import annotations
 

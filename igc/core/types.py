@@ -8,6 +8,9 @@ carries arguments — the slot the one-hot encoding never had.
 
 Pure standard library on purpose (no torch/numpy/transformers): these types are
 imported everywhere and must stay cheap and CPU/offline-testable.
+
+Author:
+Mus mbayramo@stanford.edu
 """
 from __future__ import annotations
 

@@ -3,6 +3,9 @@
 Verifies the Protocols are runtime_checkable and that a complete duck-typed stub
 satisfies ``isinstance`` while an incomplete one does not — the structural contract
 the env registry relies on.
+
+Author:
+Mus mbayramo@stanford.edu
 """
 from igc.core.protocols import Evaluator, GoalEnvironment, Simulator, ToolCatalog
 from igc.core.types import Observation, SimResult, Transition

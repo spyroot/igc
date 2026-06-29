@@ -2,6 +2,9 @@
 
 Covers the keystone ToolAction (hashability, JSON round-trip, equality/hash
 consistency, defensive copying) and the other core dataclasses' defaults.
+
+Author:
+Mus mbayramo@stanford.edu
 """
 import json
 
