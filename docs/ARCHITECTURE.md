@@ -35,6 +35,33 @@ adler32 codec, the Q-network head, and the goal extractor all depend on it — s
 **coexistence-then-cutover** behind an `action_repr ∈ {onehot, tool}` flag and a golden parity test
 that pins slice order before any default flips.
 
+### Scalable action selection — the pointer / candidate-scoring policy
+
+The one-hot action space explodes because the policy's output width equals the number of discovered
+URLs (`num_actions`), and adding methods/arguments multiplies it. The fix is a **pointer /
+candidate-scoring policy**: instead of a fixed `Linear(hidden, num_actions)` head, the policy scores
+the *legal* candidate actions that `available_actions(obs)` already returns for the current state.
+
+- The policy encodes state + goal into a query `q`; each candidate `ToolAction` is rendered to a
+  canonical, value-independent string (`igc/core/action_render.py`, landed) and embedded into a key
+  `k_i` by the shared backbone (cached by `action_template_key`). The score is `Q(s, a_i) = q · k_i`,
+  so the output width = number of *currently legal* candidates (local fan-out, tens) — **never the
+  global catalog**.
+- Adding tools/URLs/methods grows (cached) encoding compute, not policy weights; a brand-new tool is
+  zero-shot scorable because its text is embedded by the same backbone — no output-layer resize, no
+  adler32 re-index, no head retrain.
+- Arguments are filled in a second stage from `ToolSpec.arg_schema` (small categorical heads for
+  enumerated/bounded slots; constrained backbone decoding for freeform path/SQL/body), then
+  `ToolCatalog.validate` gates execution.
+- The large LLM is the shared encoder for state, candidate-action text, and freeform-argument
+  generation (LoRA + bf16); only tiny heads (state-query, action-projector, argument-decoder) train.
+- Migration: `--action_repr {onehot, pointer}` (default `onehot`); the legacy `Igc_QNetwork` + adler32
+  codec stay byte-for-byte intact until a parity test (pointer ≡ one-hot on the enumerated Redfish
+  case) is green, then the default flips.
+
+State is encoded by the same backbone (pooled last-hidden of `Observation.text` + `Goal.instruction`),
+with dims derived from `config.hidden_size` — not the hardcoded `1025` / `768`.
+
 ## 2. How a new simulator plugs into the agent
 
 The target framework uses **typed Protocols + a decorator registry + per-env plugin packages**. The
