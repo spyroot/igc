@@ -38,7 +38,6 @@ Author: Mus mbayramo@stanford.edu
 import argparse
 import json
 import os
-from random import random
 from typing import Callable, Any, Dict, Optional
 
 import requests
