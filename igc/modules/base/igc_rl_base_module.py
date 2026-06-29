@@ -35,7 +35,7 @@ class RlBaseModule(IgcModule):
                  llm_tokenizer,
                  ds: Optional[JSONDataset] = None,
                  metric_logger: Optional[MetricLogger] = None,
-                 is_inference: Optional[bool] = "False",
+                 is_inference: Optional[bool] = False,
                  device=None):
         """
         Base RL module

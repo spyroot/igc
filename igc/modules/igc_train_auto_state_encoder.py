@@ -39,7 +39,7 @@ class AutoencoderTrainer(IgcModule):
                  llm_tokenizer,
                  ds: Optional[JSONDataset] = None,
                  metric_logger: Optional[MetricLogger] = None,
-                 is_inference: Optional[bool] = "False",
+                 is_inference: Optional[bool] = False,
                  device: Optional[torch.device] = None):
         """
         :param module_name: Name of the module.

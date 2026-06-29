@@ -7,7 +7,12 @@ and RoPE models (no positional table -> None), using lightweight stub objects.
 Author:
 Mus mbayramo@stanford.edu
 """
-from igc.modules.encoders.backbone_utils import backbone_module, hidden_size, max_positions
+from igc.modules.encoders.backbone_utils import (
+    backbone_module,
+    emb_shape,
+    hidden_size,
+    max_positions,
+)
 
 
 class StubConfig:
@@ -90,6 +95,21 @@ def test_backbone_module_fallback_to_model():
     m = NoPrefix()
     assert backbone_module(m) is m
     assert backbone_module(sentinel) is sentinel
+
+
+def test_emb_shape_gpt2_matches_wpe_order():
+    """emb_shape returns (positions, hidden) — the same order as the old wpe.weight.shape."""
+    assert emb_shape(StubConfig(n_positions=1024, n_embd=768)) == (1024, 768)
+
+
+def test_emb_shape_modern_uses_config():
+    """A modern decoder derives (max_position_embeddings, hidden_size)."""
+    assert emb_shape(StubConfig(max_position_embeddings=8192, hidden_size=4096)) == (8192, 4096)
+
+
+def test_emb_shape_rope_uses_fallback_seq_len():
+    """A RoPE model (no positional table) falls back to the supplied seq length for positions."""
+    assert emb_shape(StubConfig(hidden_size=4096), fallback_seq_len=2048) == (2048, 4096)
 
 
 # Author: Mus mbayramo@stanford.edu

@@ -71,4 +71,23 @@ def max_positions(model_or_config: Any) -> Optional[int]:
     return None
 
 
+def emb_shape(model_or_config: Any, fallback_seq_len: int = 1024) -> tuple:
+    """The ``(positions, hidden)`` shape the legacy code read from ``wpe.weight.shape``.
+
+    Replaces ``model.transformer.wpe.weight.shape`` (GPT-2 only) with a config-derived
+    pair that works for any backbone: ``hidden`` from :func:`hidden_size`, and
+    ``positions`` from :func:`max_positions`, falling back to ``fallback_seq_len`` when
+    the model is RoPE (no positional table, so ``max_positions`` returns ``None``).
+
+    :param model_or_config: an HF model or its config.
+    :param fallback_seq_len: sequence length to use when the model has no positional
+        table (RoPE backbones).
+    :return: ``(positions, hidden)`` — same order as the old ``wpe.weight.shape``.
+    """
+    positions = max_positions(model_or_config)
+    if positions is None:
+        positions = int(fallback_seq_len)
+    return positions, hidden_size(model_or_config)
+
+
 # Author: Mus mbayramo@stanford.edu
