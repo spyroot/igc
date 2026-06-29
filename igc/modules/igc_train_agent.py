@@ -23,6 +23,7 @@ from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.modules.base.igc_rl_base_module import RlBaseModule
 from igc.modules.igc_experience_buffer import Buffer
 from igc.modules.igc_q_network import Igc_QNetwork
+from igc.modules.rl.q_targets import q_learning_target, relabel_future
 
 
 def env_reward_function(state, goal):
@@ -165,6 +166,7 @@ class IgcAgentTrainer(RlBaseModule):
         self.env_reward_function = env_reward_function
         self.num_relabeled = 4
         self.goal_reached = []
+        self._rng = np.random.default_rng()
 
     @staticmethod
     def update_target(model: nn.Module, target_model: nn.Module):
@@ -300,21 +302,27 @@ class IgcAgentTrainer(RlBaseModule):
             _state, action_one_hot, rewards, _next_state, goal = episode_experience[timestep]
             combined_current_state = torch.cat([_state, goal], dim=1).clone()
             combined_next_state = torch.cat([_next_state, goal], dim=1).clone()
-            self.replay_buffer.add(combined_current_state, action_one_hot.clone(), rewards.clone(), combined_next_state)
+            # terminal iff the env goal was reached on this transition; truncation
+            # (running out of steps) is not terminal and must keep bootstrapping.
+            done = (rewards >= 1.0).to(rewards.dtype)
+            self.replay_buffer.add(
+                combined_current_state, action_one_hot.clone(),
+                rewards.clone(), combined_next_state, done.clone())
 
-            for _ in range(self.num_relabeled):
-                final_state, _, _, _, _ = episode_experience[-1]
-                relabeled_goal = final_state.clone()
-
-                relabeled_reward = self.env_reward_function(_state.clone(), relabeled_goal.clone())
+            # HER "future" relabeling: substitute goals achieved at a sampled future
+            # next-state and recompute the reward against this transition's own
+            # achieved next-state (episode_experience tuple index 3 == next_state).
+            for relabeled_goal, relabeled_reward, relabeled_done in relabel_future(
+                    episode_experience, timestep, _next_state,
+                    self.num_relabeled, self.env_reward_function, self._rng):
                 relabeled_current_state = torch.cat([_state, relabeled_goal], dim=1).clone()
                 relabeled_next_state = torch.cat([_next_state, relabeled_goal], dim=1).clone()
-
                 self.replay_buffer.add(
                     relabeled_current_state,
                     action_one_hot.clone(),
                     relabeled_reward.clone(),
-                    relabeled_next_state
+                    relabeled_next_state,
+                    relabeled_done.clone(),
                 )
 
             num_experiences_added += 1
@@ -348,17 +356,19 @@ class IgcAgentTrainer(RlBaseModule):
                 total_reward += rewards_sum_per_trajectory.item()
 
             for _ in range(self.num_optimization_steps):
-                state, action_one_hot, reward, next_state = self.replay_buffer.sample_batch()
+                state, action_one_hot, reward, next_state, done = self.replay_buffer.sample_batch()
                 self.optimizer.zero_grad()
                 next_state = next_state.to(self.device)
                 target_q_vals = self.target_model(next_state).detach()
 
                 reward = reward.to(self.device)
+                done = done.to(self.device)
                 target_q_vals = target_q_vals.to(self.device)
 
-                q_loss_target = torch.clip(
-                    reward + self.gamma * torch.max(
-                        target_q_vals, dim=-1).values, -1.0 / (1 - self.gamma), 0)
+                # reward + gamma * (1 - done) * max_a' Q_target(s', a'): the done mask
+                # stops bootstrapping at terminals and preserves the +1 success reward
+                # (the prior clip(..., ceiling=0) erased every {0, +1} success).
+                q_loss_target = q_learning_target(reward, done, target_q_vals, self.gamma)
 
                 state = state.to(self.device)
                 action_one_hot = action_one_hot.to(self.device)
