@@ -32,6 +32,10 @@ EPOCHS="${EPOCHS:-3}"
 NGC_IMAGE="${NGC_IMAGE:-nvcr.io/nvidia/pytorch:26.03-py3}"
 SEED="${SEED:-42}"
 
+# LoRA/PEFT for a large backbone (the gpt2 smoke uses full FT). Set IGC_USE_PEFT=1 to enable.
+export EXTRA_ARGS=""
+[ "${IGC_USE_PEFT:-0}" = "1" ] && EXTRA_ARGS="--use_peft --lora_r ${LORA_R:-16} --lora_alpha ${LORA_ALPHA:-32}"
+
 # Experiment tracking. Default to wandb; the API key MUST come from your environment
 # (export WANDB_API_KEY=...). Never hardcode or commit it. WANDB_PROJECT is safe to set.
 IGC_REPORT="${IGC_REPORT:-wandb}"
@@ -60,5 +64,6 @@ srun --container-image="${NGC_IMAGE}" \
             --json_data_dir /root/.json_responses \
             --device cuda:0 --seed "'"${SEED}"'" \
             --metric_report "'"${IGC_REPORT}"'" \
+            ${EXTRA_ARGS} \
             --log_level info --llm_log_level info
      '

@@ -70,10 +70,10 @@ squeue --me ; tail -f igc-m1-*.out                              # watch
 [scripts/train_m1.sbatch](../scripts/train_m1.sbatch) runs `igc_main.py --train llm --llm latent`
 on 1 GPU with `NCCL_NVLS_ENABLE=0` and slots 2/15/16 excluded. **Start with the `gpt2` smoke** before
 spending a large model's time — it surfaces any remaining launch issues cheaply. A *large* model on
-one GPU needs LoRA/PEFT (the PEFT integration is a tracked next step); full fine-tune is for the small
+one GPU needs LoRA — set `IGC_USE_PEFT=1` (LoRA via HF PEFT); full fine-tune is for the small
 validation model only.
 
-Knobs (env): `IGC_MODEL`, `EPOCHS`, `SEED`, `IGC_DIR`, `DATA_DIR`, `NGC_IMAGE`, `IGC_REPORT`,
+Knobs (env): `IGC_MODEL`, `EPOCHS`, `SEED`, `IGC_USE_PEFT` (+`LORA_R`/`LORA_ALPHA`), `IGC_DIR`, `DATA_DIR`, `NGC_IMAGE`, `IGC_REPORT`,
 `WANDB_PROJECT`, `WANDB_NAME`.
 
 ## 5. Checkpoints & weight sharing
