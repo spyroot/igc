@@ -33,7 +33,10 @@ def add_accelerator_parser_group(parser) -> argparse.ArgumentParser:
     accelerate_group.add_argument(
         "--split_batches", type=bool, default=False, help="Split batches flag")
     accelerate_group.add_argument(
-        "--mixed_precision", type=str, default=None, help="Mixed precision setting")
+        "--mixed_precision", type=str, default=None,
+        choices=["no", "fp16", "bf16", "fp8"],
+        help="Compute precision for training (bf16 recommended for a large model; fp8 uses "
+             "the GB300 FP8 tensor cores). Defaults to bf16 when --sharding is enabled.")
     accelerate_group.add_argument(
         "--cpu", type=bool, default=False, help="CPU flag")
     accelerate_group.add_argument(
@@ -665,6 +668,14 @@ def add_distribute_backends(parser):
         type=str, help="Use Deepspeed. The value can be either"
                        " the location of the DeepSpeed JSON config file "
                        "(e.g., `ds_config.json`) or an already loaded JSON file as a `dict`.")
+
+    group.add_argument(
+        "--sharding", type=str, default="none",
+        choices=["none", "ddp", "zero2", "zero3", "zero3_offload", "fsdp"],
+        help="Multi-GPU model sharding. none/ddp replicate the whole model per GPU (small "
+             "models only); zero2/zero3 use DeepSpeed ZeRO to shard optimizer/grads[/params]; "
+             "zero3_offload adds CPU offload; fsdp uses PyTorch FullyShardedDataParallel. "
+             "zero3 is the path for fine-tuning a large dense backbone across many GB300s.")
 
     return parser
 
