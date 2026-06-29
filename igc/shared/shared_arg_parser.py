@@ -1,7 +1,6 @@
 import argparse
 from typing import Optional
 
-import deepspeed
 import loguru
 
 from .shared_torch_builder import TorchBuilder
@@ -75,7 +74,6 @@ def add_optimizer_group(parser):
     :param parser:
     :return:
     """
-    group_name = "optimizer"
     optimizer_group = parser.add_argument_group('Optimizer')
     optimizer_group.add_argument(
         "--llm_optimizer",
@@ -164,8 +162,9 @@ def add_model_type_group(parser):
     model_type_group.add_argument(
         "--model_type",
         type=str, default="gpt2",
-        choices=['gpt2-xl', 'gpt2-large', 'gpt2-medium', 'gpt2'],
-        help="Model type, note for anything beyond we need huge memory."
+        help="Backbone model: a HuggingFace repo id or local path (free-form). Defaults "
+             "to gpt2 for the small/offline path; set a large decoder for GPU fine-tuning "
+             "(large models need significant memory)."
     )
     return parser
 
@@ -279,7 +278,7 @@ def add_rl_trainer_group(parser):
 
     trainer_group.add_argument(
         "--rl_buffer_size",
-        type=float, default=1e6,
+        type=int, default=1_000_000,
         help="Experience buffer size.")
 
     trainer_group.add_argument(
@@ -289,9 +288,21 @@ def add_rl_trainer_group(parser):
 
     trainer_group.add_argument(
         "--rl_batch_size",
-        type=float, default=8,
+        type=int, default=8,
         help="Batch size we use for rl agent. "
              "Note number environments will be the same since it vectorized.")
+
+    trainer_group.add_argument(
+        "--action_repr",
+        type=str, default="onehot", choices=["onehot", "pointer"],
+        help="Action representation. 'onehot' is the legacy fixed Box(num_urls+6) head; "
+             "'pointer' scores the candidates from available_actions(obs) so the policy "
+             "width tracks the candidate count, not the global catalog.")
+
+    trainer_group.add_argument(
+        "--action_emb_dim",
+        type=int, default=256,
+        help="Query/key dimension for the pointer policy (Igc_PointerQNetwork q_dim).")
 
     trainer_group.add_argument(
         "--rl_lr",
@@ -676,6 +687,13 @@ def add_dataset_dataloader(parser):
              "This mainly need a node that build dataset")
 
     group.add_argument(
+        "--raw_data_dir",
+        type=str, default="~/.json_responses",
+        help="Raw captured Redfish responses the mock REST env serves; mirrors "
+             "--json_data_dir. Defined so the RL path (igc_rl_module / rest_mock_server) "
+             "reads spec.raw_data_dir without an AttributeError.")
+
+    group.add_argument(
         "--dataset_dir",
         type=str, default="datasets",
         help="A location where we unpack or build a dataset.")
@@ -790,6 +808,7 @@ def shared_arg_parser(
             help="Enable gradient scaling using fairscale.")
 
     if is_deepspeed_arg_parser:
+        import deepspeed  # lazy: only needed for the deepspeed config args (cluster only)
         parser = deepspeed.add_config_arguments(parser)
 
     available_gpus = TorchBuilder.available_gpus_string()
