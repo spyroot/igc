@@ -196,11 +196,11 @@ class MockServer:
                          f"rest_mapping={rest_mapping}, "
                          f"redfish_ip={redfish_ip}, "
                          f"redfish_username={redfish_username}, "
-                         f"redfish_password={redfish_password}, "
+                         f"redfish_password={'***' if redfish_password else None}, "
                          f"redfish_port={redfish_port}, "
                          f"insecure={insecure}, "
                          f"is_http={is_http}, "
-                         f"x_auth={x_auth}, "
+                         f"x_auth={'***' if x_auth else None}, "
                          f"is_live={is_live}")
 
         self._rest_mapping = rest_mapping
@@ -268,6 +268,19 @@ class MockServer:
     def x_auth(self) -> str:
         return self._x_auth
 
+    @staticmethod
+    def _redact_headers(headers: dict) -> dict:
+        """Return a copy of headers with credential-bearing values masked.
+
+        Keeps logs from leaking live Redfish credentials (Authorization /
+        X-Auth-Token) — required before any live canary.
+
+        :param headers: the request headers.
+        :return: a copy with sensitive values replaced by ``<redacted>``.
+        """
+        sensitive = {"Authorization", "X-Auth-Token"}
+        return {k: ("<redacted>" if k in sensitive else v) for k, v in headers.items()}
+
     def authentication_header(self):
         pass
 
@@ -287,10 +300,8 @@ class MockServer:
             headers.update(hdr)
 
         full_url = self.redfish_ip + req
-        self.logger.debug(f"GET Request URL: {full_url} "
-                          f"username {self.username} "
-                          f"password {self.password}")
-        self.logger.debug(f"GET Request Headers: {headers}")
+        self.logger.debug(f"GET Request URL: {full_url}")
+        self.logger.debug(f"GET Request Headers: {self._redact_headers(headers)}")
 
         if self.x_auth is not None:
             headers.update({'X-Auth-Token': self.x_auth})
@@ -301,7 +312,7 @@ class MockServer:
             )
         else:
             headers.update({'Authorization': f"{self.username}:{self.password}"})
-            self.logger.debug(f"GET Request Headers (Authorization): {headers}")
+            self.logger.debug(f"GET Request Headers (Authorization): {self._redact_headers(headers)}")
 
             return requests.head(
                 full_url,
@@ -326,10 +337,8 @@ class MockServer:
             headers.update(hdr)
 
         full_url = self.redfish_ip + req
-        self.logger.debug(f"GET Request URL: {full_url} "
-                          f"username {self.username} "
-                          f"password {self.password}")
-        self.logger.debug(f"GET Request Headers: {headers}")
+        self.logger.debug(f"GET Request URL: {full_url}")
+        self.logger.debug(f"GET Request Headers: {self._redact_headers(headers)}")
 
         if self.x_auth is not None:
             headers.update({'X-Auth-Token': self.x_auth})
@@ -340,7 +349,7 @@ class MockServer:
             )
         else:
             headers.update({'Authorization': f"{self.username}:{self.password}"})
-            self.logger.debug(f"GET Request Headers (Authorization): {headers}")
+            self.logger.debug(f"GET Request Headers (Authorization): {self._redact_headers(headers)}")
             return requests.delete(
                 full_url,
                 verify=self._is_verify_cert,
@@ -365,10 +374,8 @@ class MockServer:
             headers.update(hdr)
 
         full_url = self.redfish_ip + req
-        self.logger.debug(f"GET Request URL: {full_url} "
-                          f"username {self.username} "
-                          f"password {self.password}")
-        self.logger.debug(f"GET Request Headers: {headers}")
+        self.logger.debug(f"GET Request URL: {full_url}")
+        self.logger.debug(f"GET Request Headers: {self._redact_headers(headers)}")
 
         if self.x_auth is not None:
             headers.update({'X-Auth-Token': self.x_auth})
@@ -380,7 +387,7 @@ class MockServer:
             )
         else:
             headers.update({'Authorization': f"{self.username}:{self.password}"})
-            self.logger.debug(f"GET Request Headers (Authorization): {headers}")
+            self.logger.debug(f"GET Request Headers (Authorization): {self._redact_headers(headers)}")
             return requests.post(
                 full_url,
                 data=payload,
@@ -407,10 +414,8 @@ class MockServer:
             headers.update(hdr)
 
         full_url = self.redfish_ip + req
-        self.logger.debug(f"GET Request URL: {full_url} "
-                          f"username {self.username} "
-                          f"password {self.password}")
-        self.logger.debug(f"GET Request Headers: {headers}")
+        self.logger.debug(f"GET Request URL: {full_url}")
+        self.logger.debug(f"GET Request Headers: {self._redact_headers(headers)}")
 
         if self.x_auth is not None:
             headers.update({'X-Auth-Token': self.x_auth})
@@ -422,7 +427,7 @@ class MockServer:
             )
         else:
             headers.update({'Authorization': f"{self.username}:{self.password}"})
-            self.logger.debug(f"GET Request Headers (Authorization): {headers}")
+            self.logger.debug(f"GET Request Headers (Authorization): {self._redact_headers(headers)}")
             return requests.patch(
                 full_url, data=payload,
                 verify=self._is_verify_cert,
@@ -448,10 +453,8 @@ class MockServer:
             headers.update(hdr)
 
         full_url = self.redfish_ip + req
-        self.logger.debug(f"GET Request URL: {full_url} "
-                          f"username {self.username} "
-                          f"password {self.password}")
-        self.logger.debug(f"GET Request Headers: {headers}")
+        self.logger.debug(f"GET Request URL: {full_url}")
+        self.logger.debug(f"GET Request Headers: {self._redact_headers(headers)}")
 
         if self.x_auth is not None:
             headers.update({'X-Auth-Token': self.x_auth})
@@ -463,7 +466,7 @@ class MockServer:
         else:
             self.logger.info("")
             headers.update({'Authorization': f"{self.username}:{self.password}"})
-            self.logger.debug(f"GET Request Headers (Authorization): {headers}")
+            self.logger.debug(f"GET Request Headers (Authorization): {self._redact_headers(headers)}")
             return requests.get(
                 full_url,
                 verify=self._is_verify_cert,
