@@ -16,10 +16,11 @@ export HUGGINGFACE_TOKEN=...    # only if pulling a gated model
 Alternatively keep them in the gitignored `.internal/` (never committed) and source it:
 
 ```bash
-# .internal/wandb.env   (chmod 600)
-export WANDB_API_KEY=...
+# .internal/wandb.env   (chmod 600) — project: https://wandb.ai/spyroot/igc
+export WANDB_API_KEY=...           # training runs
+export WANDB_WEAVE_API_KEY=...     # W&B Weave (LLM tracing / eval)
+export WANDB_ENTITY=spyroot
 export WANDB_PROJECT=igc
-# export WANDB_ENTITY=<team>     # if the project is under a team
 ```
 
 `scripts/train_m1.sbatch` auto-sources `$IGC_DIR/.internal/wandb.env` when present (copy it to the

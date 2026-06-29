@@ -21,6 +21,7 @@ aniso8601
 # logging / metrics / experiment tracking
 tensorboard
 wandb
+weave
 loguru
 tabulate
 prettytable
