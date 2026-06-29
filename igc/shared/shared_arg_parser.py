@@ -166,6 +166,17 @@ def add_model_type_group(parser):
              "to gpt2 for the small/offline path; set a large decoder for GPU fine-tuning "
              "(large models need significant memory)."
     )
+    model_type_group.add_argument(
+        "--use_peft", action="store_true",
+        help="Fine-tune with LoRA via HuggingFace PEFT (bf16 base + small adapters) — the "
+             "supported path for a large backbone on a single GPU.")
+    model_type_group.add_argument("--lora_r", type=int, default=16, help="LoRA rank.")
+    model_type_group.add_argument("--lora_alpha", type=int, default=32, help="LoRA alpha (scaling).")
+    model_type_group.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout.")
+    model_type_group.add_argument(
+        "--lora_target_modules", type=str, nargs="+", default=None,
+        help="LoRA target module names; default auto-selects by backbone (GPT-2 Conv1D vs "
+             "a modern decoder's q_proj/k_proj/...).")
     return parser
 
 

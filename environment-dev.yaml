@@ -27,6 +27,7 @@ dependencies:
       - torch
       - transformers
       - accelerate
+      - peft
       - tokenizers
       - safetensors
       # RL env

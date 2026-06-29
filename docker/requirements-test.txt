@@ -6,6 +6,7 @@ pyyaml
 tqdm
 transformers
 accelerate
+peft
 tokenizers
 safetensors
 gym==0.26.2

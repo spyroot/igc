@@ -52,4 +52,14 @@ def test_model_type_is_free_form(monkeypatch):
     assert args.model_type == "meta-llama/Meta-Llama-3-8B"
 
 
+def test_peft_flags(monkeypatch):
+    """--use_peft defaults off; LoRA hyperparams have sane defaults and parse."""
+    defaults = _parse(monkeypatch, [])
+    assert defaults.use_peft is False
+    assert defaults.lora_r == 16 and defaults.lora_alpha == 32 and defaults.lora_target_modules is None
+    on = _parse(monkeypatch, ["--use_peft", "--lora_r", "8", "--lora_target_modules", "q_proj", "v_proj"])
+    assert on.use_peft is True and on.lora_r == 8
+    assert on.lora_target_modules == ["q_proj", "v_proj"]
+
+
 # Author: Mus mbayramo@stanford.edu
