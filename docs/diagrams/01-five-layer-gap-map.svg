@@ -1,0 +1,49 @@
+<svg width="100%" viewBox="0 0 680 506" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Mapping the five target layers onto igc today</title>
+<desc>Five rows, one per target architecture layer, each marked refactor-existing (amber) or build-new (coral), plus a keystone note that the one-hot action encoding must become a structured ToolAction.</desc>
+<style>
+svg{--surface-2:#ffffff;--surface-1:#f7f7f5;--surface-0:#f0efea;--text-primary:#1f1e1b;--text-secondary:#57564f;--text-muted:#8a897f;--border:#e3e2dc;--border-strong:#cbcabf}
+.t,.th,.ts{font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:var(--text-primary)}
+.t,.th{font-size:14px}.th{font-weight:500}.ts{font-size:12px;fill:var(--text-secondary)}
+rect.c-teal{fill:#E1F5EE;stroke:#5DCAA5}.c-teal text{fill:#04342C}
+rect.c-coral{fill:#FAECE7;stroke:#F0997B}.c-coral text{fill:#7A2E15}
+rect.c-amber{fill:#FBF1DD;stroke:#E9C277}.c-amber text{fill:#5A3D10}
+rect.c-purple{fill:#EEEDFE;stroke:#AFA9EC}.c-purple text{fill:#26215C}
+@media (prefers-color-scheme:dark){svg{--surface-2:#26251f;--surface-1:#201f1a;--surface-0:#1a1915;--text-primary:#ECEAE0;--text-secondary:#B8B6AA;--border:#3a392f;--border-strong:#4a493d}rect.c-teal{fill:#0F3E33;stroke:#1D9E75}.c-teal text{fill:#9FE1CB}rect.c-coral{fill:#3E2417;stroke:#D85A30}.c-coral text{fill:#F5C4B3}rect.c-amber{fill:#3A2E12;stroke:#C79A3A}.c-amber text{fill:#E9C277}rect.c-purple{fill:#2A2550;stroke:#7F77DD}.c-purple text{fill:#CECBF6}}
+</style>
+
+<text class="th" x="40" y="40">Mapping the 5 target layers onto igc today</text>
+
+<g class="c-amber"><rect class="c-amber" x="402" y="28" width="110" height="22" rx="11"/><text class="ts" x="457" y="43" text-anchor="middle">refactor existing</text></g>
+<g class="c-coral"><rect class="c-coral" x="522" y="28" width="110" height="22" rx="11"/><text class="ts" x="577" y="43" text-anchor="middle">build new</text></g>
+
+<rect x="40" y="80" width="600" height="58" rx="4" fill="var(--surface-1)" stroke="var(--border)"/>
+<text class="th" x="54" y="105">1 · Goal</text>
+<text class="ts" x="54" y="125">Goal(instruction, success_criteria, constraints, safety) — today only GoalTypeState enum</text>
+<g class="c-coral"><rect class="c-coral" x="536" y="97" width="96" height="24" rx="12"/><text class="ts" x="584" y="113" text-anchor="middle">build new</text></g>
+
+<rect x="40" y="150" width="600" height="58" rx="4" fill="var(--surface-1)" stroke="var(--border)"/>
+<text class="th" x="54" y="175">2 · Environment</text>
+<text class="ts" x="54" y="195">GoalEnvironment interface, Redfish = one adapter — MockServer + gym shell reusable</text>
+<g class="c-amber"><rect class="c-amber" x="536" y="167" width="96" height="24" rx="12"/><text class="ts" x="584" y="183" text-anchor="middle">refactor</text></g>
+
+<rect x="40" y="220" width="600" height="58" rx="4" fill="var(--surface-1)" stroke="var(--border)"/>
+<text class="th" x="54" y="245">3 · Trajectory</text>
+<text class="ts" x="54" y="265">Typed Observation / ToolAction / Transition + recorder — only MockResponse exists</text>
+<g class="c-coral"><rect class="c-coral" x="536" y="237" width="96" height="24" rx="12"/><text class="ts" x="584" y="253" text-anchor="middle">build new</text></g>
+
+<rect x="40" y="290" width="600" height="58" rx="4" fill="var(--surface-1)" stroke="var(--border)"/>
+<text class="th" x="54" y="315">4 · Learning &amp; eval</text>
+<text class="ts" x="54" y="335">Evaluators · preference data · reward model — trainers exist, eval/pref greenfield</text>
+<g class="c-coral"><rect class="c-coral" x="536" y="307" width="96" height="24" rx="12"/><text class="ts" x="584" y="323" text-anchor="middle">build new</text></g>
+
+<rect x="40" y="360" width="600" height="58" rx="4" fill="var(--surface-1)" stroke="var(--border)"/>
+<text class="th" x="54" y="385">5 · Runtime guardrail</text>
+<text class="ts" x="54" y="405">dry-run → approval gate → executor — today a single _is_live boolean seam</text>
+<g class="c-amber"><rect class="c-amber" x="536" y="377" width="96" height="24" rx="12"/><text class="ts" x="584" y="393" text-anchor="middle">refactor</text></g>
+
+<rect x="40" y="432" width="600" height="54" rx="4" fill="var(--surface-2)" stroke="var(--border-strong)"/>
+<g class="c-purple"><rect class="c-purple" x="54" y="446" width="84" height="24" rx="12"/><text class="ts" x="96" y="462" text-anchor="middle">keystone</text></g>
+<text class="ts" x="150" y="455">Replace one-hot(url)+one-hot(method) with ToolAction(tool, args, risk).</text>
+<text class="ts" x="150" y="473">The env, dataset codec, Q-network head and goal extractor all depend on it.</text>
+</svg>

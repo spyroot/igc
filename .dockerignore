@@ -1,0 +1,29 @@
+# Keep the build context small and free of data/secrets/checkpoints.
+.git
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.idea/
+# datasets, captures, tarballs, numpy maps — never bake into an image
+datasets/
+test_datasets/
+tests/datasets/
+*.tar.gz
+*.npy
+~/.json_responses
+# training artifacts
+experiments/
+backups/
+logs/
+*.log
+checkpoints/
+# submodule (not needed for the offline gate image)
+idrac_ctl/
+# local agent/coordination docs (gitignored already)
+COORDINATION.md
+CLAUDE.md
+AGENTS.md
+FLASH_BRAIN.md
+GPU_ACCESS.md
+.codex/

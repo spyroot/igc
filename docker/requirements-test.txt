@@ -1,0 +1,32 @@
+# CPU offline-test deps for the reproducible test image (docker/Dockerfile.test).
+# torch is installed separately from the CPU wheel index in the Dockerfile.
+# numpy pinned <2: the legacy env's numpy 2.x breaks accelerate/sklearn/nltk/evaluate.
+numpy<2
+pyyaml
+tqdm
+transformers
+accelerate
+tokenizers
+safetensors
+gym==0.26.2
+gymnasium
+# mock REST env
+Flask
+flask_restful
+flask_httpauth
+StringGenerator
+aniso8601
+itsdangerous
+Werkzeug
+# metrics / utilities
+tabulate
+prettytable
+tensorboard
+loguru
+scikit-learn
+nltk
+rouge_score
+evaluate
+# dev / test
+pytest
+ruff

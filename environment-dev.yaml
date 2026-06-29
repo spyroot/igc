@@ -1,0 +1,54 @@
+# Local CPU dev / offline-test environment for igc (mac arm64 or linux x86_64).
+#
+# This is NOT the training environment. Training/fine-tuning runs on the GB300 NVL72
+# via the NGC container (see docker/Dockerfile.train and GPU_ACCESS.md). The CUDA-pinned
+# conda-recipe.yaml is the cluster/GPU recipe and does not build on a mac.
+#
+# Purpose: run the offline gate (`pytest -q` + `ruff`) and the mock REST env on CPU.
+#   conda env create -f environment-dev.yaml
+#   conda activate igc-dev
+#   pytest -q            # offline subset, no GPU/network/HF-download/live host
+#
+# numpy is pinned <2 on purpose: the legacy `igc` env has numpy 2.x, which breaks
+# accelerate/scikit-learn/nltk/evaluate imports.
+name: igc-dev
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.10
+  - pip
+  - numpy<2
+  - pyyaml
+  - tqdm
+  - pip:
+      # ML core (CPU)
+      - torch
+      - transformers
+      - accelerate
+      - tokenizers
+      - safetensors
+      # RL env
+      - gym==0.26.2
+      - gymnasium
+      # mock REST server (igc/envs/rest_mock_server.py)
+      - Flask
+      - flask_restful
+      - flask_httpauth
+      - StringGenerator
+      - aniso8601
+      - itsdangerous
+      - Werkzeug
+      # metrics / utilities used across igc
+      - tabulate
+      - prettytable
+      - tensorboard
+      - loguru
+      - scikit-learn
+      - nltk
+      - rouge_score
+      - evaluate
+      # dev / test
+      - pytest
+      - ruff

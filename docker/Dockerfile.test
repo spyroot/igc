@@ -1,0 +1,21 @@
+# CPU-only reproducible image for the offline gate (pytest + ruff) — mac/linux CI.
+# No GPU/CUDA, no network at test time, no HuggingFace downloads, no live Redfish host.
+#
+#   docker build -f docker/Dockerfile.test -t igc-test:cpu .
+#   docker run --rm igc-test:cpu                 # runs `pytest -q`
+#   docker run --rm igc-test:cpu ruff check igc tests
+FROM python:3.10-slim
+
+WORKDIR /workspace/igc
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY docker/requirements-test.txt /tmp/requirements-test.txt
+# CPU torch wheels (keeps the image small; no CUDA).
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch \
+    && pip install --no-cache-dir -r /tmp/requirements-test.txt
+
+COPY . /workspace/igc
+ENV PYTHONUNBUFFERED=1
+CMD ["pytest", "-q"]
