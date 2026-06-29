@@ -36,7 +36,9 @@ SEED="${SEED:-42}"
 # (export WANDB_API_KEY=...). Never hardcode or commit it. WANDB_PROJECT is safe to set.
 IGC_REPORT="${IGC_REPORT:-wandb}"
 if [ "${IGC_REPORT}" = "wandb" ]; then
-    : "${WANDB_API_KEY:?set WANDB_API_KEY in your environment to use wandb (do not hardcode it)}"
+    # convenience: source a node-local gitignored key file if present (.internal/ is never committed)
+    [ -f "${IGC_DIR}/.internal/wandb.env" ] && . "${IGC_DIR}/.internal/wandb.env"
+    : "${WANDB_API_KEY:?set WANDB_API_KEY in your env or ${IGC_DIR}/.internal/wandb.env to use wandb}"
     export WANDB_API_KEY
     export WANDB_PROJECT="${WANDB_PROJECT:-igc}"
     export WANDB_NAME="${WANDB_NAME:-m1-${IGC_MODEL//\//_}-${SLURM_JOB_ID:-local}}"

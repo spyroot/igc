@@ -13,7 +13,18 @@ export WANDB_API_KEY=...        # from wandb.ai → User → API keys; rotate if
 export HUGGINGFACE_TOKEN=...    # only if pulling a gated model
 ```
 
-If a key has been shared anywhere (chat, a paste, a screenshot), **rotate it** before using it.
+Alternatively keep them in the gitignored `.internal/` (never committed) and source it:
+
+```bash
+# .internal/wandb.env   (chmod 600)
+export WANDB_API_KEY=...
+export WANDB_PROJECT=igc
+# export WANDB_ENTITY=<team>     # if the project is under a team
+```
+
+`scripts/train_m1.sbatch` auto-sources `$IGC_DIR/.internal/wandb.env` when present (copy it to the
+cluster login node alongside the checkout — it is not in git). If a key has been shared anywhere
+(chat, a paste, a screenshot), **rotate it** before using it.
 
 ## 1. Environment
 
