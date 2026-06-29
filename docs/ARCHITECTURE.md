@@ -6,6 +6,11 @@ framework**, and the phased plan + training/MLOps roadmap to get there. Redfish 
 environment adapter among several (filesystem, SQL, GitHub), and the LLM backbone moves from GPT-2
 to a config-driven large decoder model fine-tuned on the GB300 NVL72 cluster.
 
+The end goal is not one Redfish policy but a **transferable, multi-step meta-learner**: an agent that
+extracts a high-level goal, decomposes it into sub-goals, *discovers* the action space of whatever
+REST API (or other tool backend) it is plugged into, finds an optimal strategy to reach the goal, and
+carries that capability to new, unseen environments with little or no retraining.
+
 > Status: working design. Diagrams are theme-aware SVGs under [`docs/diagrams/`](diagrams/).
 
 ---
@@ -113,6 +118,33 @@ and `effects`; the simulator models deferred/async state; reward is decomposed (
 per-sub-goal + progress shaping) with HER over reachable sub-goals; the planner ("casting" layer)
 generalizes `GoalExtractorTrainer` from one action to an ordered plan; and API/state discovery become
 explicit pipeline stages.
+
+### Meta-learning: a transferable multi-step agent
+
+The end goal is not a single Redfish policy but an agent that **transfers** — plug it into a new REST
+API (or filesystem/SQL/GitHub) and it should operate that backend with little or no retraining. The
+design makes this concrete, layer by layer:
+
+1. **Extract the goal.** The planner (the "casting" layer) maps a high-level instruction to a `Goal`
+   and an ordered sub-goal `plan` (the hierarchical decomposition above).
+2. **Discover the action space.** A new backend exposes its tools/ops through `ToolCatalog` +
+   `available_actions(obs)` (for Redfish, derived from the `idrac_ctl` crawl + the `.npy` map). The
+   agent never needs a fixed, pre-enumerated action set — it reads what is legal *now*.
+3. **Act zero/few-shot.** Because the policy is the **pointer / candidate-scoring** head (§1), a tool
+   it has never seen is still scorable: its `tool_name/op/schema` text is embedded by the shared
+   backbone, so there is no output-layer resize, no re-index, no head retrain. This is what turns "a
+   new API" from a retraining event into an inference-time lookup.
+4. **Find an optimal strategy.** Goal-conditioned RL (DQN + HER) over the sub-goal plan learns the
+   ordering and the fewest-steps path; the world model supplies preconditions/dynamics so the agent
+   plans rather than flails.
+5. **Adapt on the new environment.** Trained across *multiple* environments (filesystem, SQL, GitHub,
+   Redfish) — the meta-training distribution — the shared backbone, pointer policy, and state encoder
+   transfer; a short interaction (plus an optional LoRA / world-model update) adapts to the new
+   backend's quirks. This is the meta-learning ("learn to learn") payoff: capability acquired on known
+   APIs carries to unknown ones.
+
+In short: **extract → plan → discover → execute → transfer.** Every layer is built so the unit of
+generalization is *the skill of operating a tool API*, not *a specific API*.
 
 ## 4. The six models and the training curriculum
 
