@@ -473,9 +473,14 @@ class LlmEmbeddingsTrainer(LlmModule):
                 self.optimizer.step()
                 self.scheduler.step()
 
-                if self.is_last_worker():
+                if self.is_rank_zero():
+                    step = epoch * total_batches + num_batches
                     current_lr = self.optimizer.param_groups[0]['lr']
-                    self.metric_logger.log_metric("learning_rate", current_lr, epoch)
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), max_norm=float('inf')).item()
+                    self.metric_logger.log_metric("train/loss", loss.item(), step)
+                    self.metric_logger.log_metric("train/lr", current_lr, step)
+                    self.metric_logger.log_metric("train/grad_norm", grad_norm, step)
 
                 batch_losses[num_batches] = loss.item()
                 total_loss += loss.item()
@@ -494,17 +499,18 @@ class LlmEmbeddingsTrainer(LlmModule):
                           f"{num_batches + 1}/{total_batches} "
                           f"- Progress: {progress_percentage:.2f}% - "
                           f"Batch Loss mean: {batch_losses.mean():.4f} - lr: {lr:.5f}")
-                    self.metric_logger.log_metric("llm_emb_batch_loss", batch_losses.mean(), epoch)
 
                 num_batches += 1
                 self._current_mask_method_counter += 1
+
+            # one monotonic step at the epoch boundary for per-epoch metrics
+            epoch_step = (epoch + 1) * total_batches - 1
 
             # validation on epoch or freq
             if self.on_epoch_eval or ((epoch + 1) % self._eval_freq == 0):
                 validation_accuracy = self.validate(eval_dataloader)
                 if self.is_rank_zero():
-                    self.metric_logger.log_metric("llm_emb_accuracy", validation_accuracy, epoch)
-                    # self.metric_logger.log_metric("llm_emb_perplexity", perplexity, epoch)
+                    self.metric_logger.log_metric("eval/accuracy", validation_accuracy, epoch_step)
 
                 print(f"Rank {self.rank} Epoch {epoch + 1} - Validation Accuracy: "
                       f"{validation_accuracy} Best: {self._best_validation_metric}")
@@ -512,7 +518,7 @@ class LlmEmbeddingsTrainer(LlmModule):
             if num_batches > 0:
                 average_loss = total_loss / num_batches
                 if self.is_rank_zero():
-                    self.metric_logger.log_metric("llm_emb_epoch_loss", average_loss, epoch)
+                    self.metric_logger.log_metric("train/epoch_loss", average_loss, epoch_step)
                 print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
 
             # save best checkpoint
