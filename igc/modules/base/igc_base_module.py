@@ -81,8 +81,9 @@ class IgcModule(IgcBaseState):
             raise TypeError(f"spec should be an instance of argparse.Namespace, "
                             f"received {type(spec).__name__}.")
 
-        if not isinstance(llm_model, PreTrainedModel):
-            raise TypeError(f"llm_model should be an instance of PreTrainedModel, "
+        # Accept a PreTrainedModel or a PEFT-wrapped model (LoRA adapters via --use_peft).
+        if not isinstance(llm_model, PreTrainedModel) and not hasattr(llm_model, "peft_config"):
+            raise TypeError(f"llm_model should be a PreTrainedModel or a PEFT model, "
                             f"received {type(llm_model).__name__}.")
 
         if not isinstance(llm_tokenizer, PreTrainedTokenizer):

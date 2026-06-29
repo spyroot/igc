@@ -108,6 +108,22 @@ class IgcLanguageModule:
                 device_map=self._spec.device_map
             )
 
+            if hasattr(pretrained_model, 'resize_token_embeddings'):
+                pretrained_model.resize_token_embeddings(len(self._dataset.tokenizer))
+
+            # LoRA via PEFT for large-backbone fine-tuning on a single GPU (--use_peft).
+            if getattr(self._spec, 'use_peft', False):
+                from .peft_lora import apply_lora
+                pretrained_model = apply_lora(
+                    pretrained_model,
+                    r=getattr(self._spec, 'lora_r', 16),
+                    alpha=getattr(self._spec, 'lora_alpha', 32),
+                    dropout=getattr(self._spec, 'lora_dropout', 0.05),
+                    target_modules=getattr(self._spec, 'lora_target_modules', None),
+                    model_type=getattr(self._spec, 'model_type', None),
+                )
+                pretrained_model.print_trainable_parameters()
+
             llm_embeddings = LlmEmbeddingsTrainer(
                 module_name="state_encoder",
                 spec=self._spec,
@@ -118,9 +134,6 @@ class IgcLanguageModule:
                 is_inference=False,
                 device=self._spec.device
             )
-
-            if hasattr(pretrained_model, 'resize_token_embeddings'):
-                pretrained_model.resize_token_embeddings(len(self._dataset.tokenizer))
 
             llm_embeddings.train()
             llm_model = llm_embeddings.get_model()
