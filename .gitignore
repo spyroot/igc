@@ -180,3 +180,7 @@ CLAUDE_PATCH.diff
 .codex/
 .claude/
 .internal/
+
+# Slurm job logs (training output) — never commit
+*.out
+slurm-*.out
