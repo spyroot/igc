@@ -37,18 +37,16 @@ that pins slice order before any default flips.
 
 ## 2. How a new simulator plugs into the agent
 
-The framework uses **typed Protocols + a decorator registry + per-env plugin packages**. The core
-never changes when you add an environment; the existing `MockServer.request → MockResponse` seam is
-kept intact behind a `RedfishSimulator` adapter.
+The target framework uses **typed Protocols + a decorator registry + per-env plugin packages**. The
+core should not change when a new environment is added; the existing `MockServer.request → MockResponse`
+seam is kept intact behind a planned `RedfishSimulator` adapter.
 
-- Core contracts in `igc/core/`: `ToolAction`, `Observation`, `Goal`, `Transition`, `SimResult`,
-  `ToolSpec`, `RiskLevel`, plus `Simulator` and `GoalEnvironment` as `@runtime_checkable` Protocols.
-- One registry `igc/envs/registry.py`: `@register("name")` + `make(name, cfg, model=, tokenizer=)` /
-  `make_vec(...)`. Trainers obtain envs only via `make` — never by naming a concrete class.
-- Each env is a plugin package `igc/envs/<name>/` with `simulator.py`, `catalog.py`, `evaluator.py`,
-  `recorder.py`, and a manifest.
+Implemented today in Phase 0: `igc/core/types.py` defines the core dataclasses and enums, and
+`igc/core/protocols.py` defines the runtime-checkable Protocols. Still planned: `igc/envs/registry.py`,
+`make(...)` / `make_vec(...)`, per-env plugin packages under `igc/envs/<name>/`, and the Redfish adapter
+that preserves the mock-server seam.
 
-**Recipe to add a new simulator (touches no core file):**
+**Target recipe to add a new simulator (touches no core file once the registry lands):**
 
 1. Copy `igc/envs/_template/` → `igc/envs/<name>/`.
 2. Implement the `Simulator` (`execute(target, op, args)→SimResult`, plus `snapshot`/`restore`).
@@ -140,10 +138,10 @@ The central loader already uses `AutoTokenizer` + a class arg and `ValueHead` al
 
 ## 7. Infra · monitoring · deploy (NVL72)
 
-- **Slurm runbook:** 1-GPU first, NGC `pytorch:26.03-py3` via pyxis, **always**
-  `--exclude=gb300-poc1-slot2,gb300-poc1-slot15,gb300-poc1-slot16`, `NCCL_NVLS_ENABLE=0`, stage data
-  + HF cache to node-local NVMe and pin with `-w slotN` (no shared FS). 4-GPU FSDP only after a 2-GPU
-  smoke passes (NVLink fabric is flaky — TP=4 crashes).
+The canonical runtime setup lives in [ENVIRONMENT.md](ENVIRONMENT.md). Architecturally, training stays
+separate from local development: Phase 0 gates on CPU, while training/fine-tuning runs on the GB300
+NVL72 through a one-GPU-first Slurm/pyxis workflow.
+
 - **Monitoring** reuses the existing `MetricLogger` (`--metric_report` tb/wandb/mlflow): per-model
   curves (loss/perplexity/accuracy/grad-norm/tokens-per-sec; reward/success-rate/episode-length for
   M6).
@@ -157,10 +155,18 @@ The central loader already uses `AutoTokenizer` + a class arg and `ValueHead` al
 
 ## 8. Verified defects to clear in Phase 0
 
-Found in-tree during design review: `spec.raw_data_dir` AttributeError (RL path unrunnable today) ·
-`lora1d` wrapper crashes on construction · `load_checkpoint` bare `raise` breaks resume ·
-`rl_batch_size` typed float · stale `.sh` scripts point at a nonexistent `trainer.py` ·
-`train_rl_agent.py` tuple-unpack bug · Buffer 4-tuple has no `done` · magic dims `1026/1025/seq*768`.
+Found in-tree during design review:
+
+- `igc/shared/shared_arg_parser.py` currently defines `--json_data_dir`, while
+  `igc/modules/igc_rl_module.py` references missing `spec.raw_data_dir`; Phase 0 must alias or rename
+  one side.
+- `lora1d` wrapper crashes on construction.
+- `load_checkpoint` uses a bare `raise`, which breaks resume handling.
+- `rl_batch_size` is typed as a float.
+- Stale shell scripts still point at a nonexistent `trainer.py`.
+- `train_rl_agent.py` has a tuple-unpack bug.
+- Buffer entries are 4-tuples with no `done` flag.
+- Magic dimensions such as `1026`, `1025`, and `seq*768` are still hard-coupled to GPT-2 shapes.
 
 ## 9. Open decisions
 

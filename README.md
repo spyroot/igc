@@ -1,287 +1,99 @@
 # igc
-Infrastructure Goal Condition  Reinforce Learner
 
-Reinforcement learning (RL) has indeed shown great success in solving various 
-problems by learning optimal decision-making policies. In the context you mentioned, 
-the focus is on formulating real-life problems related to cloud infrastructure deployment as a finite 
-Markov Decision Process (MDP) and developing an RL agent that can learn to act within this 
-environment to achieve a predefined goal.
+Infrastructure Goal-Condition Reinforce Learner (`igc`) is a Python research project for training a
+goal-conditioned reinforcement-learning agent to operate Redfish-exposed infrastructure as a Markov
+Decision Process. The agent observes Redfish GET/HEAD responses, chooses REST actions, and learns
+from captured Redfish data collected by the `idrac_ctl/` git submodule.
 
-This proposal describes the end-to-end system. Furthermore, the study examines a specific problem within the 
-realm of cloud infrastructure, aiming to identify the optimal strategy for deploying infrastructure from the 
-most minimal initial configuration state. Thus, our work cast the entire problem as a Goal condition to 
-Reinforce the Learning problem.
+## Start here: Phase 0 local development
 
-# Model Architecture
-
-# Installation
+Use the CPU development environment first. `environment-dev.yaml`, the repo-local conda file, creates
+`igc-dev` with CPU PyTorch, pytest, ruff, and the mock-REST dependencies needed for the offline gate.
 
 ```bash
-apt-get install swig
+conda env create -f environment-dev.yaml
+conda activate igc-dev
 ```
 
+On macOS, set the OpenMP guard before tests that import Torch together with scientific Python
+packages:
+
 ```bash
-conda create -n igc python=3.10
-conda activate igc
+export KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1
 ```
 
-code test on cuda 12 and torch 2 night build.
+Run the current Phase 0 smoke checks:
 
 ```bash
-pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu121 
+python -m pytest -q tests/core
+ruff check igc/core tests/core
 ```
 
-```bash
-conda install pytorch::pytorch torchvision torchaudio -c pytorch
-pip install 'transformers[torch]'
-pip install deepspeed
-pip install fairscale
-pip install asv
-pip install pynvml
-pip install 'gym[all]'
-pip install loguru
-pip install tensorboard
-pip install tabulate
-pip install pynvml
-pip install evaluate
-pip install rouge_score
-pip install scikit-learn
-pip install deepspeed
-pip install transformers 
-pip accelerate 
-pip optimum
-```
+The intended integration gate is `pytest -q` plus `ruff check <changed files>` once the Phase 0 test
+harness and markers are fully in place. Until then, keep new tests explicit, offline, and CPU-only.
+For Docker, GPU, and cluster details, see [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md), the runtime and
+verification guide.
 
-Optional in case pip failed use conda. 
+## What is in this repository
 
-```bash
-conda install pytorch==2.1.0.dev20230901 pytorch-cuda=11.8 -c pytorch-nightly -c nvidia
+- `igc/ds/` contains the Redfish dataset pipeline, including JSON response loading, tokenizer input
+  construction, masked datasets, and the `rest_api_map.npy` loader.
+- `igc/envs/` contains the mock REST environment and Gym-style wrappers used for offline simulation.
+- `igc/interfaces/` contains the REST mapping interface that binds URLs to captured response files.
+- `igc/modules/` contains model and training code for the language model, state encoder, value head,
+  and RL agent.
+- `igc/shared/` contains shared argument parsing and utility code.
+- `igc/core/` contains the Phase 0 typed contracts being introduced for the generic tool-use agent
+  architecture.
+- `tests/` contains pytest coverage. Default tests must stay offline: no GPU, network, HuggingFace
+  download, live Redfish host, or real `idrac_ctl` crawl.
+- `docs/` contains the deeper design and environment material. Start with
+  [docs/README.md](docs/README.md).
+- `idrac_ctl/` is a git submodule for Redfish data collection. Do not edit it from this repository.
 
-```
+## Data flow
 
-Optional install huggingface hub
+`idrac_ctl/`, the pinned data-collection submodule, discovers Redfish resources and writes captured
+JSON to `~/.json_responses/<host>/...`. The same discovery step writes `rest_api_map.npy`, a numpy map
+with `url_file_mapping` and `allowed_methods_mapping`. `igc/ds/ds_rest_trajectories.py` loads that map
+with `np.load(..., allow_pickle=True).item()`; those keys are the binding contract between the two
+repositories.
 
-```bash
-pip install --upgrade huggingface_hub
-```
+The default development path does not run discovery. Use captured data or the mock REST server in
+`igc/envs/` for offline tests. A live Redfish crawl can affect real management controllers, so it
+requires explicit current-task approval, an approved non-production host, credentials passed through
+environment variables or flags, and pacing. Never hardcode or print `IDRAC_IP`, `IDRAC_USERNAME`, or
+`IDRAC_PASSWORD` values.
 
-Optional step login to huggingface hub
+`HUGGINGFACE_TOKEN`, when set by the developer for opt-in model downloads, is not needed for Phase 0
+local smoke tests and must not be logged or committed.
 
-```bash
-huggingface-cli login --token $HUGGINGFACE_TOKEN
-```
+## How the agent learns
 
-Verify
+The current Redfish-specific stack is being generalized into a pluggable goal-conditioned tool-use
+agent framework. The target architecture keeps Redfish as one environment adapter while adding typed
+`Goal`, `Observation`, `ToolAction`, and `Transition` contracts, environment registries, trajectory
+recording, evaluators, and runtime guardrails.
 
-```bash
-accelerate --help                                                                                                                                                                                       igc root@ms33
-[2023-09-06 07:10:20,690] [INFO] [real_accelerator.py:158:get_accelerator] Setting ds_accelerator to cuda (auto detect)
-```
+Training is intentionally staged. First the backbone language model learns Redfish JSON structure;
+then pooling/autoencoder, planner, reward, world-model, and RL policy pieces build on that
+representation. The full plan and model curriculum live in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## High level
+## Working rules
 
-Before you train, please read because you essentially need to train 4-5 models.  
-So it is a bit of a journey. 
+- Keep README as the quickstart; put detailed setup, architecture, and training material in `docs/`.
+- Keep default validation local, offline, and CPU-only.
+- Mark GPU, HuggingFace download, slow, or live Redfish tests so they skip by default.
+- Do not commit credentials, captured responses, datasets, checkpoints, tokenizers, tarballs, or
+  generated raw model output.
+- Do not edit `idrac_ctl/` here. Changes to that tool belong in the `spyroot/idrac_ctl` repository,
+  followed by a deliberate submodule bump in `igc`.
 
-At a high level, the training procedure for the language model (LLM) consists of three different steps, 
-although the latter two are not necessary if you only want to train the RL agent.
+## Next reading
 
-### State Representation Model
-
-The first model focuses on representing the state. Each API response, along with any parameters
-that the REST API modifies, can be considered as a small Markov Decision Process (MDP).
-
-Therefore, the state observed by the RL agent corresponds to the GET or HEAR query made 
-to a specific REST API.  This step involves defining 
-the state representation for the RL agent.
-
-### Data Collection from the Target REST Server 
-
-In this step, the system needs to collect sufficient data from the target system that expose REST API interface. 
-My system utilizes tools to interact with the Redfish API. To begin, the first part involves 
-gathering data from any Redfish host. The system collects the JSON representations of every API 
-supported by the system through a recursive walk.
-
-[Tool used to discover](https://github.com/spyroot/idrac_ctl)
-
-```bash
-# tool to collect data from redfish rest system
-# note this tool will be integrated directly into the trainer so separate args will first
-# collect the data
-igc_ctl
-```
-
-In my research, I mainly focus on redfish API since the API provides information about how to 
-interact with the system, so the hop here is that the agent will learn.  Note that during discover 
-phase all json stored in "~/.json_responses"  not that I provide entire dataset
-that you don't need build it.
-
-Hence, after discover, all responses are stored in JSON format locally. Now depend on the execution 
-mode if "~/.json_responses" present in the system and no local dataset presents the initial 
-call to a trainer will rebuild the entire dataset.
-
-[Json dataset](https://github.com/spyroot/igc/blob/main/igc/ds/redfish_dataset.py)
-
-Note that there are several steps involved in this process. In short, all collected data 
-is passed to the LLM tokenizer and stored in tensor format. During the discovery phase,
-we also collect and store
-collection of all API and file names for each response. It is stored as a numpy file 
-and consists of mapping API a path to the response that holds the API response 
-for GET and HEAD.
-
-* GET store a view for particular API
-* HEAD use to figure out what methods each API supports.  (POST/DELETE/PATCH etc)
-
-The action space is concatenation of one hot vector for each API, one hot vector 
-for a method and goal, where store separately and never concatenated to action.
-
-In order to understand the need to store the path to the response, let's focus on the 
-gym environment that is provided.
-
-As part of the environment, the Rest API server serves as a mock object with 
-two options available:
-
-* It can execute a real API call and forward it to the actual Redfish server.
-
-* It can execute a mock request.
-
-Since all the trajectories have been collected, it is possible to simulate any 
-GET API request that does not mutate a state by reading the collected 
-file and responding offline.
-
-For teaching the agent a specific goal, let's consider a scenario where we want the agent to
-perform a valid Redfish POST API request that requires providing some JSON data and mutates a state. 
-By default, the mock servers respond to POST/PATCH/DELETE API requests with 
-a 404 status code and a JSON error.
-
-However, the environment allows for the registration of handlers by external objects. 
-For example, if we have 2000 APIs and we only want to teach the agent to change a password, 
-we can register a callback with error and success messages specifically for that goal. 
-This allows customization of the responses based on specific goals or objectives.
-
-Let say we train on goal change a password.
-We need a mutate a state.  (change password) (POST or PATCH)
-Observe a state. (GET)
-
-* You can read JSON and convert to a dictionary.
-* register callback that take JSON payload, decode and update internal dict.
-* Since we do have initial representation for each API all action that mutate can be offline.
-* Hence, you can register callback that will reward an agent if agent changed password.
-
-During the initial dataset build process, it is crucial to make the responses available 
-for the Mock server for a read operation. To achieve this, during the construction of the JSON dataset, 
-all the responses are compressed and stored along with the dataset. When a regular client needs 
-to obtain the dataset, they can download this data from the provided mirrors.
-
-On the client side, once the dataset is obtained, the responses are unpacked and stored 
-in a  separate folder within the datasets directory. This dataset becomes a vital component 
-of the system as it is used in all the models and algorithms employed in the training process. 
-The stored responses serve as a reference for the Mock server, enabling it to mimic real  
-API behavior and providing appropriate responses during the RL agent's interactions 
-with the environment.
-
-## Tokenizer and Latent representation.
-
-During the dataset creation process, the GPT-2 tokenizer is expanded by default, 
-which in turn expands the dimensions of the embeddings. As a result, when 
-loading the dataset, the initial GPT-2 model needs to be resized accordingly.
-
-The second step of dataset building focuses on training the Language Model (LLM). 
-In this step, there are two main tasks:
-
-* The LLM should be able to extract meaningful latent representations of the state. 
-For example, consider the output of the last hidden state is [batch_size, 1023, 768].
-
-* When training the RL agent, consider if we use typically a 3-layer Multi-Layer Perceptron (MLP). 
-feed forward network. Hence, we can note that just first linear layer alone requires 1023 * 768 parameters. 
-
-Hence, so far, and this is my current proposal in terms of observation and state representation. 
-
-- First, we train LLM, and in order to do that, we need to teach LLM JSON representation. 
-That way I do register special tokens - JSON Object, JSON Array etc , odata.id , target, etc.
-
-To fine-tune the GPT model, a separate dataset is created by inheriting from the main dataset 
-and implementing various masking techniques. In this approach, specific REST API requests are 
-masked to ensure that the attention mask focuses on the REST API within the original JSON response. 
-You can check the code can to understand the details of the masking process. 
-
-The main point here we want to teach LLM keep attention to REST API in responses,
-keep attention to all parameters particular API takes,  action in REST API. (i.e reset compute,
-change bios etc.)
-
-After completing the training of the LLM, the current approach involves utilizing a separate 
-Auto Encoder and 1D convolution pooling.  The goal here reduce the dimensionality 
-of the output from the last hidden layer of LLM encoder. 
-
-This step aims to handle scenarios where the API response for a single GET request might consist 
-of a very large JSON object, potentially containing thousands of lines. To process such data, 
-it needs to be split into smaller chunks and passed through the 
-LLM encoder.
-
-Furthermore, it has been found through experimentation that directly passing the
-last hidden shape [1023, 768] from the LLM encoder as an observation to the RL agent 
-can be complex and challenging. Therefore, the approach of using an autoencoder 
-and 1D convolution pooling helps in simplifying the representation and reducing 
-the dimensionality, making it more suitable for the RL agent to process effectively.
-
-## Phase 2
-
-We train auto encoder and reduce dimension of LLM encoder output.  Note that if you do many GPU
-you probably can collapse this step during first phase and attach auto encoder and train
-but it very hard to fit even in 4 GPU system with 24Gb memory
-
-
-# Instruction
-
-* Training state encoder
-
-```bash
-python igc_main.py --train llm --num_train_epochs 1000 \
---llm latent --llm_log_level info --log_level info --device cuda:1
-```
-
-mac mps
-```bash
-python igc_main.py --train llm --num_train_epochs 1000 \
---llm latent --llm_log_level info --log_level info --device mps
-```
-
-* Training auto state encoder.
-
-```bash
-python trainer.py --train llm --num_train_epochs 1000 \
---llm encoder --llm_log_level info --log_level info
-```
-
-## 
-Accelerate
-
-```bash
-echo '{
-  "compute_environment": "LOCAL_MACHINE",
-  "distributed_type": "MULTI_GPU",
-  "downcast_bf16": "no",
-  "gpu_ids": "all",
-  "machine_rank": 0,
-  "main_training_function": "main",
-  "mixed_precision": "no",
-  "num_machines": 1,
-  "num_processes": 2,
-  "rdzv_backend": "static",
-  "same_network": true,
-  "tpu_env": [],
-  "tpu_use_cluster": false,
-  "tpu_use_sudo": false,
-  "use_cpu": false
-}' > config.json
-```
-
-```bash
-accelerate launch --config_file ./config.yaml trainer_state_encoder_only.py --train llm --num_train_epochs 1000 \
---llm latent --llm_log_level info --log_level info --use_accelerator
-```
-
-```bash
-```        
-
-## Training RL agent
+- [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — local CPU env, Docker test image, and GB300/NVL72
+  training surfaces.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — target architecture, simulator plugin model,
+  training curriculum, and Phase 0 stabilization work.
+- [docs/README.md](docs/README.md) — index for the docs directory and diagrams.
