@@ -372,3 +372,45 @@ Found in-tree during design review:
 5. **two-stage action with values** — `action_to_prompt` intentionally drops argument
    values, so mutating actions are completed by `igc/modules/policy/argument_decoder.py`
    (per-slot enum scoring, no cross-product explosion).
+
+## 10. Meta-RL direction (agreed 2026-06-30)
+
+**Final goal (Tier 4):** a generalist RL agent that operates ANY REST API — given a goal it
+*discovers* the API's action space, plans the call sequence to reach it, and **generalizes to an
+unseen API**, adapting from a few examples (meta-learning). Redfish is the first proving ground because
+we can simulate it; the recipe (build a simulator → train) repeats per API. Tiers: 1 = Redfish loop
+works; 2 = generalization + ablations + safety (research result); 4 = several simulators → generalize to
+an unseen REST API. Tier 3 (filesystem/SQL) folds in as diverse sims that force generalization.
+
+**It is a sparse-reward problem.** Reward arrives only at goal completion of a multi-step API
+interaction, so three complementary attacks: **HER** (relabel achieved states — `q_targets.relabel_future`
++ `Transition.achieved_goal`), **LLM priors + meta-learning** (smart exploration), and **action-space
+discovery + the pointer policy** (score only discovered legal candidates → shrink the search).
+
+**Architecture — RL² cast as a Transformer.** The LLM backbone carries cross-episode history in its
+context = the in-context meta-learner (the Transformer analog of RL²'s RNN; cf. Decision Transformer /
+Algorithm Distillation). M1/M2 compress observations so a long history fits the context budget. **Dense
+first; MoE is a later upgrade** (upcycle/distill once there are many APIs + data + expert-parallel infra)
+— MoE adds capacity/specialization, not the meta-learning (which lives in attention-over-history).
+
+**Backbone sizing — decoupled.** Small dense bf16 backbone for the hot-loop encoder/RL (M1/M2/M6,
+runs every step); a larger 14–32B for the goal extractor (M3, runs once per episode). Trainable =
+small/mid dense bf16 + LoRA + ZeRO-3 (`--sharding zero3`). DeepSeek-V4-Flash (284B FP8/FP4 MoE) is the
+**inference/teacher** only (deployed NVFP4), never the trainable backbone.
+
+**M3 — Design B (standalone distillation).** Own backbone + tokenizer + DeepSeek-distilled
+`(instruction → goal + params)` data, reusing the existing `GoalExtractorTrainer`; bootstrap by calling
+DeepSeek directly. Verify teacher outputs against `Goal.spec` before distilling.
+
+**Training curriculum.**
+1. **Represent** (supervised, separate): M1 backbone SFT + M2 autoencoder → compact states. Pretrained
+   first; RL LoRA-adapts on top (do not co-train the whole backbone with RL).
+2. **Plan** (distill) + **Reward** (build, parallel): M3 from DeepSeek; M4 schema-driven verifier.
+3. **Meta-RL — ONE optimization path:** the in-context RL²-Transformer policy over the API-sim
+   distribution, with HER, a **BC/SFT warm-start** (imitate teacher demos before RL — the main lever
+   against the sparse-reward cold start), and a **narrow→broad task curriculum**. Meta is not a phase
+   after single-task RL; it *is* RL over a task distribution with cross-episode memory.
+4. **Scale** (later): MoE via upcycle/distillation.
+
+**Eval (the contribution):** on a held-out API, *success vs. number of adaptation examples* — the
+few-shot adaptation curve.
