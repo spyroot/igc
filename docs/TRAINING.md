@@ -1,8 +1,9 @@
 # Training & reproducibility
 
 How to reproduce an igc training run end to end: environment, data, launch, experiment
-tracking (Weights & Biases), checkpoints, and weight sharing. Cluster topology and the
-hard cautions live in `GPU_ACCESS.md`; environment setup in [ENVIRONMENT.md](ENVIRONMENT.md).
+tracking (Weights & Biases), checkpoints, and weight sharing. Cluster topology, local
+development setup, and the current GB300 NVL72 safety cautions live in
+[ENVIRONMENT.md](ENVIRONMENT.md).
 
 ## 0. Secrets (read first)
 
@@ -10,7 +11,7 @@ Never put a token in a script, a committed file, or chat. Auth comes from the en
 
 ```bash
 export WANDB_API_KEY=...        # from wandb.ai → User → API keys; rotate if ever exposed
-export HUGGINGFACE_TOKEN=...    # only if pulling a gated model
+export HUGGINGFACE_TOKEN=...    # only if the Hugging Face tooling needs gated-model auth
 ```
 
 Alternatively keep them in the gitignored `.internal/` (never committed) and source it:
@@ -26,6 +27,10 @@ export WANDB_PROJECT=igc
 `scripts/train_m1.sbatch` auto-sources `$IGC_DIR/.internal/wandb.env` when present (copy it to the
 cluster login node alongside the checkout — it is not in git). If a key has been shared anywhere
 (chat, a paste, a screenshot), **rotate it** before using it.
+
+For Hugging Face gated models, prefer a staged local model path in `IGC_MODEL`/`--model_type` or a
+pre-authenticated Hugging Face cache/session on the training node. The igc loader does not write token
+values into repo files.
 
 ## 1. Environment
 
@@ -51,9 +56,10 @@ export WANDB_PROJECT=igc                 # optional; defaults to "igc"
 # WANDB_NAME is auto-derived from the model + Slurm job id
 ```
 
-You will see the usual training-loop curves in the wandb run: training/val **loss**, **perplexity**,
-token **accuracy**, **grad-norm**, **learning rate**, tokens/sec, and GPU memory. For the RL agent
-(later phases) the same logger reports reward, success-rate, and episode length.
+Current M1 state-encoder runs log `train/loss`, `train/lr`, `train/grad_norm`, `eval/accuracy`, and
+`train/epoch_loss`. Current RL-agent runs log `epoch_mean_loss`, `epoch_cumulative_reward`, and
+`epoch_goal_reached_count`. Treat perplexity, tokens/sec, GPU memory, and success-rate curves as
+planned instrumentation unless a later change adds those exact metric keys.
 
 To use TensorBoard instead: `IGC_REPORT=tensorboard sbatch scripts/train_m1.sbatch`.
 
@@ -73,14 +79,57 @@ spending a large model's time — it surfaces any remaining launch issues cheapl
 one GPU needs LoRA — set `IGC_USE_PEFT=1` (LoRA via HF PEFT); full fine-tune is for the small
 validation model only.
 
-Knobs (env): `IGC_MODEL`, `EPOCHS`, `SEED`, `IGC_USE_PEFT` (+`LORA_R`/`LORA_ALPHA`), `IGC_DIR`, `DATA_DIR`, `NGC_IMAGE`, `IGC_REPORT`,
-`WANDB_PROJECT`, `WANDB_NAME`.
+Knobs (env): `IGC_MODEL`, `EPOCHS`, `SEED`, `IGC_USE_PEFT` (+`LORA_R`/`LORA_ALPHA`), `IGC_DIR`,
+`DATA_DIR`, `NGC_IMAGE`, `IGC_REPORT`, `WANDB_PROJECT`, `WANDB_NAME`.
+
+### Backbone, precision, and sharding flags
+
+The first GPU loop above is intentionally a one-GPU smoke. The training CLI defines broader knobs in
+`igc/shared/shared_arg_parser.py`; the sbatch wrappers expose only the common path through environment
+variables.
+
+Wrapper mappings:
+
+- `IGC_MODEL` maps to `--model_type`, a HuggingFace repo id or local weights path; it defaults to
+  `gpt2` for the cheap smoke.
+- `IGC_USE_PEFT=1` maps to `--use_peft`, enabling LoRA via HuggingFace PEFT for adapter tuning.
+- `LORA_R` and `LORA_ALPHA` map to `--lora_r` and `--lora_alpha`; the remaining LoRA knobs are CLI-only.
+
+CLI-only flags today:
+
+- `--trust_remote_code` allows model/tokenizer Python from a trusted weights repo or local path.
+- `--llm_torch_dtype` selects the load dtype; use `bfloat16` for a large GPU run when supported.
+- `--lora_dropout` and `--lora_target_modules` tune adapter dropout and target module names.
+- `--use_accelerator` builds the Accelerate runtime instead of the plain single-process path.
+- `--sharding` accepts `none`, `ddp`, `zero2`, `zero3`, `zero3_offload`, or `fsdp`.
+- `--mixed_precision` accepts `fp16`, `bf16`, or `fp8`; sharded runs default to `bf16` when unset.
+- `--gradient_accumulation_steps` accumulates micro-batches before an optimizer step.
+
+For a staged local backbone, pass its path through `IGC_MODEL` or `--model_type`, add
+`--llm_torch_dtype bfloat16` when appropriate, and enable `--trust_remote_code` only when the model
+path is trusted.
+
+Sharding is not just a flag flip in the current sbatch wrappers. `--sharding zero3` or `--sharding fsdp`
+needs `--use_accelerator` plus a matching multi-process `accelerate launch` command inside the
+container; the checked-in wrappers still start with one process so the smoke path is easy to debug.
+Keep `NCCL_NVLS_ENABLE=0`, start with one GPU, and record the exact launch command and metrics before
+calling any sharded run successful.
 
 ## 5. Checkpoints & weight sharing
 
-Checkpoints land in `output_dir/run_name/<module>` (node-local). **Weights never go into the igc
-repo** (datasets/checkpoints/tokenizers/tarballs are gitignored). Share them through a separate store
-with [scripts/publish_checkpoint.sh](../scripts/publish_checkpoint.sh):
+Checkpoints are node-local and must not be committed. With `scripts/train_m1.sbatch`, the default
+`output_dir` comes from `igc/shared/shared_main.py` and resolves to
+`experiments/<model_batch_optimizer_scheduler_lr>/<module>`. With `scripts/train_igc.sbatch`, the
+launcher sets `--output_dir experiments/${IGC_RUN}`, so stages land under
+`experiments/${IGC_RUN}/<module>`.
+
+Validate the path before publishing:
+
+```bash
+find experiments -maxdepth 2 -type d -name state_encoder -print
+```
+
+Share weights through a separate store with [scripts/publish_checkpoint.sh](../scripts/publish_checkpoint.sh):
 
 ```bash
 # a) separate git-lfs weights repo or a synced path:
