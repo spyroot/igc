@@ -1217,15 +1217,18 @@ class JSONDataset(
             chunks = self.create_chunks(input_ids, attention_mask)
             # for each chunk add it as a separate data point
             for i, chunk_tuple in enumerate(chunks):
+                # Unpack the chunk FIRST, then apply last-chunk handling — the previous
+                # order referenced padded_chunk before assignment (UnboundLocalError).
+                padded_chunk, padded_mask = chunk_tuple
+                padded_chunk = padded_chunk.squeeze(dim=0)
+                padded_mask = padded_mask.squeeze(dim=0)
 
                 if i == len(chunks) - 1:
+                    # last chunk: force the final token to a pad token
                     last_token_pad = torch.full_like(padded_chunk[-1:], self.tokenizer.pad_token_id)
                     padded_chunk = torch.cat((padded_chunk[:-1], last_token_pad))
                     padded_mask = torch.cat((padded_mask[:-1], padded_mask[-1:]))
 
-                padded_chunk, padded_mask = chunk_tuple
-                padded_chunk = padded_chunk.squeeze(dim=0)
-                padded_mask = padded_mask.squeeze(dim=0)
                 self._masked_data["train_data"].append(
                     {
                         "input_ids": padded_chunk,
