@@ -414,3 +414,90 @@ DeepSeek directly. Verify teacher outputs against `Goal.spec` before distilling.
 
 **Eval (the contribution):** on a held-out API, *success vs. number of adaptation examples* — the
 few-shot adaptation curve.
+
+## 11. Architecture diagrams (Tier-4 meta-RL)
+
+Four views of the agreed design (§10). Maintainable mermaid; render on GitHub.
+
+### 11.1 Tier-4 system — generalist API meta-RL agent
+
+```mermaid
+flowchart TB
+    NL["Natural-language goal<br/>(set boot=PXE, power-cycle)"]
+    NL --> M3["M3 planner / goal extractor<br/>distilled from DeepSeek<br/>-> Goal(spec, params, sub-goals)"]
+    M3 -->|goal-conditions| AGENT
+
+    subgraph AGENT["Goal-conditioned RL2 agent (one shared policy)"]
+        ENC["M1/M2 encoder<br/>API response -> compact state vector"]
+        HIST["Transformer over history<br/>state, action, reward = in-context task memory"]
+        POL["Pointer policy<br/>score discovered legal candidates"]
+        ARG["Argument decoder<br/>fill action values"]
+        ENC --> HIST --> POL --> ARG
+    end
+
+    subgraph ENVS["Environment = any simulated REST API"]
+        DISC["Action-space DISCOVERY<br/>.npy / OpenAPI / HATEOAS links"]
+        SIM["Simulator<br/>mock REST from captured data or spec"]
+    end
+
+    ARG -->|REST call| SIM
+    SIM -->|response| ENC
+    DISC -->|legal candidates| POL
+    SIM --> M4["M4 evaluator<br/>verify Goal.spec vs state -> sparse reward"]
+    M4 --> HER["HER replay<br/>relabel achieved states"]
+    HER --> POL
+
+    META["Meta-train over MANY API simulators<br/>-> generalize few-shot to a HELD-OUT API"]
+    ENVS -.-> META
+```
+
+### 11.2 RL2 cast as a Transformer (the in-context meta-learner)
+
+```mermaid
+flowchart LR
+    subgraph TRIAL["One trial = a task (API) sampled from the distribution"]
+        E1["episode 1<br/>s,a,r ..."]
+        E2["episode 2<br/>s,a,r ..."]
+        Ek["episode k<br/>s,a,r ..."]
+    end
+    E1 --> CTX
+    E2 --> CTX
+    Ek --> CTX
+    CTX["Transformer context window<br/>compressed states + prev action + prev reward"]
+    CTX --> POL["policy head (pointer scoring)"]
+    POL --> ADAPT["in-context adaptation:<br/>behaviour improves across episodes<br/>WITHOUT weight updates"]
+    NOTE["M1/M2 compress each observation<br/>so a long history fits the context budget"]
+    CTX -.- NOTE
+```
+
+### 11.3 Training curriculum (separate prerequisites -> one meta-RL path)
+
+```mermaid
+flowchart TB
+    subgraph SEP["Separate prerequisite phases"]
+        REP["Represent<br/>M1 backbone SFT + M2 autoencoder<br/>small dense, pretrained first"]
+        PLAN["Plan<br/>M3 distilled from DeepSeek"]
+        REW["Reward<br/>M4 schema-driven verifier"]
+    end
+    REP --> META
+    PLAN --> META
+    REW --> META
+    subgraph ONE["Meta-RL = ONE optimization path"]
+        META["in-context RL2-Transformer policy<br/>over the API-simulator distribution<br/>+ HER + BC warm-start + task curriculum (narrow -> broad)"]
+    end
+    META --> SCALE["Scale (later)<br/>MoE via upcycle / distillation"]
+```
+
+### 11.4 Backbone topology + distillation (decoupled sizes)
+
+```mermaid
+flowchart LR
+    DS["DeepSeek-V4-Flash<br/>284B MoE, NVFP4<br/>DEPLOYED inference endpoint"]
+    DS -->|teacher: generate goal/param data| DISTILL["distillation set<br/>verified Goal objects"]
+    DISTILL -->|SFT| M3B["M3 goal extractor<br/>14-32B dense, OWN backbone<br/>(runs once per episode)"]
+    SMALL["small dense bf16 backbone 1-7B<br/>+ LoRA + ZeRO-3 (hot loop)"]
+    SMALL --> M1["M1 state encoder"]
+    SMALL --> M2["M2 autoencoder"]
+    SMALL --> M6["M6 RL policy heads"]
+    DS -.->|direct call for bootstrap| M3B
+```
