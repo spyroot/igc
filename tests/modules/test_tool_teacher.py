@@ -50,6 +50,72 @@ def test_stub_induces_signature_expected_and_errors() -> None:
     assert card.provenance["source"] == "stub" and card.provenance["k_observed"] == 2
 
 
+def test_stub_keeps_json_shape_types_distinct() -> None:
+    """Observed success bodies preserve JSON shape names, including bool vs int."""
+    card = StubTeacher().induce(
+        "redfish",
+        _spec(),
+        "Reset",
+        [
+            _tr(
+                200,
+                {
+                    "Enabled": True,
+                    "RetryCount": 2,
+                    "Voltage": 12.5,
+                    "Links": ["Systems"],
+                    "Status": {"Health": "OK"},
+                    "Maybe": None,
+                    "Name": "System",
+                },
+            )
+        ],
+    )
+    assert card.expected_response == {
+        "Enabled": "boolean",
+        "RetryCount": "integer",
+        "Voltage": "number",
+        "Links": "array",
+        "Status": "object",
+        "Maybe": "null",
+        "Name": "string",
+    }
+
+
+def test_stub_accumulates_evidence_for_duplicate_error_status() -> None:
+    """Repeated failures of the same status merge into one rule with all evidence ids."""
+    transitions = [
+        _tr(409, {"error": "pending job"}),
+        _tr(409, {"error": "pending firmware apply"}),
+        _tr(412, {"error": "etag required"}),
+    ]
+    card = StubTeacher().induce("redfish", _spec(), "Reset", transitions)
+    assert [rule.match["status"] for rule in card.error_taxonomy] == [409, 412]
+    assert card.error_taxonomy[0].evidence_ids == ["t0", "t1"]
+    assert card.error_taxonomy[1].evidence_ids == ["t2"]
+
+
+def test_stub_reports_empty_card_for_no_relevant_evidence() -> None:
+    """A tool/op with no matching transitions produces no unsupported claims."""
+    card = StubTeacher().induce("redfish", _spec(), "Reset", [_tr(500, {}, op="Other")])
+    assert card.expected_response == {}
+    assert card.error_taxonomy == []
+    assert card.provenance["evidence_ids"] == []
+    assert card.provenance["k_observed"] == 0
+
+
+def test_stub_signature_falls_back_for_non_dict_schema_fragments() -> None:
+    """Non-dict schema fragments are accepted as string slots, not treated as errors."""
+    spec = ToolSpec(
+        "ComputerSystem",
+        ["Reset"],
+        arg_schema={"Reset": {"ResetType": "string"}},
+        risk_level=RiskLevel.MUTATING,
+    )
+    card = StubTeacher().induce("redfish", spec, "Reset", [_tr(204, {"TaskState": "x"})])
+    assert card.effective_signature == {"ResetType": {"type": "string"}}
+
+
 def test_stub_pulls_enum_from_actioninfo() -> None:
     """ActionInfo enums populate the induced signature (catalog is the enum source)."""
     card = StubTeacher().induce(
