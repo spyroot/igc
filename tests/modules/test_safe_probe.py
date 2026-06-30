@@ -65,6 +65,18 @@ def test_card_narrows_probes_to_its_tool() -> None:
     assert [a.tool_name for a in probes] == ["Chassis"]
 
 
+def test_card_cannot_raise_default_read_only_ceiling() -> None:
+    """A card for a mutating op cannot offer that op as a default probe."""
+    catalog = FakeCatalog([
+        ToolAction("ComputerSystem", "GET", risk_level=RiskLevel.READ_ONLY),
+        ToolAction("ComputerSystem", "Reset", risk_level=RiskLevel.MUTATING),
+        ToolAction("Chassis", "GET", risk_level=RiskLevel.READ_ONLY),
+    ])
+    card = ToolCard(env_name="redfish", tool_name="ComputerSystem", op="Reset")
+    probes = safe_probe_actions(card, catalog, _OBS)
+    assert [a.op for a in probes] == ["GET"]
+
+
 def test_custom_ceiling_allows_mutating() -> None:
     """An explicit MUTATING ceiling admits mutating probes (but never via a card)."""
     catalog = FakeCatalog([
