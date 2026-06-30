@@ -137,14 +137,29 @@ class RestTrajectory(AbstractLogger):
         return url_file_mapping, allowed_methods_mapping
 
     def remap_respond_location(self, host: str) -> None:
-        """Create tarball if needed.
+        """Re-root each response path to a host-relative suffix (``/<host>/<file>``).
+
+        The ``.npy`` mapping produced during discovery stores absolute response
+        paths rooted at the *capture* machine's raw dir (e.g.
+        ``/Users/x/.json_responses/<host>/foo.json``). When the dataset is rebuilt
+        on a different machine that prefix no longer exists, so stripping
+        ``self.raw_json_dir`` alone silently leaves the value untouched and every
+        downstream ``_default_original_dir + value`` lookup misses, yielding an
+        empty dataset. Anchoring on the ``/<host>/`` path segment makes the remap
+        independent of the capture machine while preserving the same-machine case.
+
+        :param host: The host sub-directory name; also a path segment in value.
         :return:
         """
         data = self._rest_map_data[host]["rest_api_map"]
+        marker = f"/{host}/"
         for key, value in data.items():
-            if value.startswith(self.raw_json_dir):
-                updated_value = value[len(self.raw_json_dir):]
-                data[key] = updated_value
+            idx = value.find(marker)
+            if idx != -1:
+                # portable: keep '/<host>/<file>' regardless of capture prefix
+                data[key] = value[idx:]
+            elif value.startswith(self.raw_json_dir):
+                data[key] = value[len(self.raw_json_dir):]
 
     def load(self) -> None:
         """
