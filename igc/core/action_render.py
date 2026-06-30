@@ -19,9 +19,12 @@ Mus mbayramo@stanford.edu
 from __future__ import annotations
 
 import hashlib
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from igc.core.types import ToolAction, ToolSpec
+
+if TYPE_CHECKING:  # avoid a runtime import cycle; the card is duck-typed below
+    from igc.core.tool_card import ToolCard
 
 
 def _infer_type(value) -> str:
@@ -66,7 +69,11 @@ def _arg_types(action: ToolAction, spec: Optional[ToolSpec]) -> dict:
     return {slot: _infer_type(value) for slot, value in (action.arguments or {}).items()}
 
 
-def action_to_prompt(action: ToolAction, spec: Optional[ToolSpec] = None) -> str:
+def action_to_prompt(
+    action: ToolAction,
+    spec: Optional[ToolSpec] = None,
+    card: Optional["ToolCard"] = None,
+) -> str:
     """Render a ToolAction into a canonical, order-stable, value-independent string.
 
     The string encodes the action TYPE — tool, op, target, the argument shape
@@ -74,10 +81,18 @@ def action_to_prompt(action: ToolAction, spec: Optional[ToolSpec] = None) -> str
     a backbone embeds for candidate scoring. Concrete argument *values* are never
     included, so actions differing only in values render identically.
 
+    When a ``card`` (a :class:`~igc.core.tool_card.ToolCard` for this op,
+    ``docs/ARCHITECTURE.md`` §12.4 seam A) is supplied, its bounded
+    :meth:`~igc.core.tool_card.ToolCard.render_clause` is appended so the backbone
+    embeds a tool-aware candidate; this re-keys exactly that candidate (see
+    :func:`action_template_key`). With ``card=None`` the rendering is byte-identical
+    to the cardless form, so the passive path is unchanged.
+
     :param action: the action to render.
     :param spec: optional tool spec; when given and it declares a schema for the
         action's op, argument types come from ``spec.arg_schema[op]`` rather than
         being inferred from the values.
+    :param card: optional grounded ToolCard whose clause refines the rendering.
     :return: the canonical rendering.
     """
     parts = [f"tool={action.tool_name}", f"op={action.op}"]
@@ -91,20 +106,29 @@ def action_to_prompt(action: ToolAction, spec: Optional[ToolSpec] = None) -> str
         parts.append("args=[]")
     if action.schema_id:
         parts.append(f"schema={action.schema_id}")
+    if card is not None:
+        parts.append(card.render_clause())
     return " ".join(parts)
 
 
-def action_template_key(action: ToolAction, spec: Optional[ToolSpec] = None) -> str:
+def action_template_key(
+    action: ToolAction,
+    spec: Optional[ToolSpec] = None,
+    card: Optional["ToolCard"] = None,
+) -> str:
     """Stable hash of :func:`action_to_prompt`, used as an embedding-cache key.
 
     Uses ``hashlib`` (not the salted built-in ``hash``) so the key is identical
-    across processes and runs.
+    across processes and runs. Passing a ``card`` mixes its clause into the key, so a
+    card-enriched candidate gets its own cache entry while every other candidate is
+    untouched (``card=None`` reproduces the original key exactly).
 
     :param action: the action to key.
     :param spec: optional tool spec, forwarded to :func:`action_to_prompt`.
-    :return: a hex digest uniquely identifying the action TYPE.
+    :param card: optional grounded ToolCard, forwarded to :func:`action_to_prompt`.
+    :return: a hex digest uniquely identifying the (optionally card-enriched) action TYPE.
     """
-    rendered = action_to_prompt(action, spec)
+    rendered = action_to_prompt(action, spec, card)
     return hashlib.blake2b(rendered.encode("utf-8"), digest_size=16).hexdigest()
 
 

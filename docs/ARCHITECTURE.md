@@ -501,3 +501,216 @@ flowchart LR
     SMALL --> M6["M6 RL policy heads"]
     DS -.->|direct call for bootstrap| M3B
 ```
+
+## 12. Tool-teaching (LLM-taught few-shot tool acquisition)
+
+Today the pointer policy (§1, "pointer / candidate-scoring policy") is *passively*
+tool-aware: `action_to_prompt` (`igc/core/action_render.py`, landed) renders an unseen
+op's `tool=… op=… target=… args=[slot:type] schema=…` text, and `ActionCodec`
+(`igc/modules/policy/action_codec.py`) embeds it through the shared backbone, so a
+brand-new tool is *scorable* with no head resize — `Igc_PointerQNetwork`
+(`igc/modules/policy/pointer_policy.py`) is pure `q · k_i` over the legal-candidate
+fan-out (§3.3, step 3). But that signal is only the tool's *declared surface*; the agent
+still learns *how to actually drive* the tool by sparse-reward trial-and-error (reward
+arrives only at goal completion — §10). **Tool-teaching adds an active loop**: the
+DeepSeek-V4-Flash teacher M3 already reuses (the deployed NVFP4 endpoint, §11.4) reads
+the agent's own `k` real `(call → result/error)` interactions with an unknown op and
+induces a grounded, versioned **ToolCard**, which flows through the *exact existing*
+render→cache→pointer→argument pipeline to accelerate few-shot acquisition. Passive
+scorability makes an unseen tool *scorable*; tool-teaching makes it *quickly learnable*.
+
+```mermaid
+flowchart TB
+    FACTS["Discovery facts (passive, today)<br/>ToolSpec(tool, op, arg_schema, risk_level)<br/>Redfish: .npy allowed_methods_mapping +<br/>@Redfish.ActionInfo enums (§9.3 resolved)"]
+    OBS["k observed Transitions THIS trial<br/>igc/core/types.py: .action,<br/>.next_observation.status/.error/.text"]
+    FACTS --> TEACH
+    OBS --> TEACH
+    TEACH["ToolTeacher.induce()<br/>reuse DeepSeek-V4-Flash (§11.4)<br/>evidence-bound JSON prompt · StubTeacher offline"]
+    TEACH --> CARD["ToolCard (igc/core/tool_card.py)<br/>keyed (env_name, tool_name, op), per-trial<br/>effective_signature · expected_response ·<br/>error_taxonomy · preconditions · grounding · version"]
+    CARD --> GATES
+    subgraph GATES["Grounding gates (run BEFORE any injection)"]
+        G1["1 evidence-bound prompt<br/>uncited claims dropped"]
+        G2["2 schema gate + .npy/ActionInfo override (§9.3)"]
+        G3["3 M4 replay · Evaluator.verify + MockServer"]
+        G4["4 online falsification<br/>confirm vs contradict => falsified"]
+        G1 --> G2 --> G3 --> G4
+    end
+    GATES --> STATUS{"grounding.status"}
+    STATUS -->|grounded: may up-rank| INFER
+    STATUS -->|provisional: widen only| INFER
+    subgraph INFER["Injection (inference-time, no weight update)"]
+        A["A candidate text<br/>action_to_prompt(card) re-keys<br/>ActionCodec cache · NO head resize"]
+        B["B RL2 context block (§11.2)"]
+        C["C argument_decoder enum tightening<br/>bounded by ActionInfo"]
+        D["D READ_ONLY safe-probe gate"]
+    end
+    GATES --> TRAIN
+    subgraph TRAIN["Gradient-trained (offline meta-train only)"]
+        BC["BC warm-start (§10 main lever)"]
+        AD["Algorithm Distillation<br/>teacher-free at test"]
+        SHAPE["potential shaping F=γΦ'−Φ over q_targets<br/>source reward stays M4 verify()"]
+    end
+```
+
+### 12.1 Why — passive scorability vs. quick learnability
+
+Passive scorability (§1, §3.3 step 3) embeds an unseen op's declared text so the pointer
+head can *score* it; it does nothing to teach the op's effective signature, response
+shape, or error semantics, so cold-start exploration on a never-seen tool is blind
+trial-and-error under M4's sparse reward (§10). Tool-teaching layers an active induction
+loop on top, leaving the passive path byte-identical when no card is present (the
+`card=None` parity guarantee, pinned by `tests/core/test_action_render_card.py`).
+
+### 12.2 The ToolCard artifact
+
+A `ToolCard` (`igc/core/tool_card.py` — pure-stdlib dataclass, `to_dict`/`from_dict`
+round-trip, mirroring `igc/core/types.py`) is an evidence-checked spec of one op, keyed
+`(env_name, tool_name, op)` and **per-trial namespaced** (`ToolCardStore`) so a
+held-out-API trial's cards never leak across trials. Fields: `effective_signature` (a
+*refinement* of `ToolSpec.arg_schema[op]`, never a replacement; enums ⊆
+`@Redfish.ActionInfo` allowable values), `expected_response` (field → type, distilled
+from observed 2xx bodies), `error_taxonomy` (`retriable | fatal | precondition_unmet`,
+each citing ≥1 `Transition`), `preconditions`/`usage_tips`, `provenance`
+(`deepseek-v4-flash | stub`, evidence ids, `k_observed`), `grounding` (`status ∈
+{provisional, grounded, contradicted}` + confirm/contradict + M4 counters), `version`,
+`content_hash` (blake2b of the canonical learned content — excludes the volatile
+grounding tallies so a counter tick does not churn the embedding cache), and
+`spec_fingerprint` (blake2b of `ToolSpec.arg_schema[op]` — a moved op schema
+auto-invalidates a stale card).
+
+### 12.3 Induction — ToolTeacher (reuse M3's teacher)
+
+`ToolTeacher.induce()` (`igc/modules/teach/tool_teacher.py`, slice 6b) issues a
+JSON-schema'd, **evidence-bound** prompt against the *same* DeepSeek-V4-Flash endpoint
+M3 distills from (§11.4 "direct call for bootstrap") — a reuse, not a new LLM. Inputs are
+the discovery facts (`ToolSpec`, and for Redfish the `.npy` `allowed_methods_mapping` +
+`@Redfish.ActionInfo` enums) plus the `k` observed `Transition` records
+(`.action`, `.next_observation.status/.error`, truncated `.text/.structured`,
+`.terminated`). The teacher redacts host/credentials before prompting (mirroring
+`MockServer._redact_headers`). A `StubTeacher` replays recorded cards for the offline
+CPU subset (no network, no DeepSeek). The teacher is **inference-only, never trained**
+(§10, §11.4).
+
+### 12.4 Four injection seams
+
+Only **grounded** claims may up-rank; **provisional** claims may only widen exploration.
+All four seams are inference-time (no weight update during held-out adaptation):
+
+- **A · candidate text** — `action_to_prompt(action, spec, card=None)` appends a bounded,
+  value-independent `card=[…]` clause that mixes into `action_template_key`, **re-keying
+  exactly that candidate's blake2b `ActionCodec` cache entry** so the backbone re-embeds
+  it (every other candidate stays byte-identical; pinned by
+  `tests/modules/test_action_codec_card.py`). `card=None` reproduces today's string
+  byte-for-byte. **No head resize** — the card rides the candidate *text*, so no `prior`
+  argument is added to the cosine-normalized `score_candidates` (avoids scale-mixing a
+  logit bias).
+- **B · RL² context block** — the same card text as a compact token block prepended once
+  per trial to the cross-episode history (§11.2); M1/M2 keep it within the context budget.
+- **C · argument-decoder enum tightening** — `card.effective_signature` tightens
+  `ArgumentSlot.choices`/`required` in `arg_slots_for`
+  (`igc/modules/policy/argument_decoder.py`), but **only within `@Redfish.ActionInfo`
+  enums**, never beyond them.
+- **D · READ_ONLY safe-probe gate** — `safe_probe_actions(card, catalog, obs)`
+  (`igc/modules/teach/safe_probe.py`) = the card's probes ∩
+  `ToolCatalog.available_actions(obs)`, filtered by `ToolCatalog.validate` and
+  `RiskLevel ≤ READ_ONLY`. This drives cold-start probing on GET/HEAD only, before any
+  mutating op is even legal.
+
+### 12.5 Grounding and the safety invariant
+
+The teacher *will* fabricate; nothing is trusted on assertion. `ToolCardGrounder`
+(`igc/modules/teach/grounding.py`) runs four gates before any injection: (1)
+**evidence** — every `error_taxonomy` entry must cite a real `Transition`; uncited
+entries are dropped. (2) **schema + enum** — every arg slot must exist in
+`ToolSpec.arg_schema[op]`, and enum claims are clipped to `@Redfish.ActionInfo`
+allowable values; **the `.npy`/ActionInfo overrides the teacher on any enum conflict**
+(§9.3, resolved — binding contract). (3) **M4 replay** — each claim becomes an assertion
+checked via `Evaluator.verify` (M4, `igc/core/protocols.py`) + a no-op replay against
+`MockServer`/cassette; only passing claims flip `grounding.status` to `grounded` (lands
+in slice 6b/6c — the offline slice carries gates 1, 2, 4). (4) **online falsification** —
+every real `StepResult` updates `n_confirmations`/`n_contradictions`; the status flows
+`provisional → grounded`, or `→ contradicted` once contradictions dominate (prior
+zeroed), and a `spec_fingerprint` mismatch auto-invalidates the card.
+
+**Safety invariant (binding):** a card may only **raise** caution, never lower
+`RiskLevel` or unlock a DESTRUCTIVE/MUTATING op. `ToolCatalog.validate` plus the Phase-7
+dry-run/approval guardrail remain the sole authority; cards are advisory to scoring
+only. *Honest caveat:* the Phase-7 guardrail is itself **queued** (see ROADMAP) — only
+credential redaction has landed — so this is a design-time guarantee, not yet enforced,
+and must not be reported as already-enforced.
+
+### 12.6 Training
+
+Tool-teaching is **not a new phase**; it rides §10's single meta-RL optimization path
+(§11.3) inside Phase 6, and depends on M1/M2 (compress so `k` interactions + card fit the
+RL² budget), M3 (the teacher), and M4 (the grounder). The interplay:
+
+- **BC/SFT warm-start** (§10's main lever against the sparse-reward cold start): teacher
+  demos enter BC *only after* M4 confirms they reached a sub-goal, carrying their ToolCard
+  in context, so the policy learns the card→action mapping before RL.
+- **Algorithm Distillation** (the learned core): next-action cross-entropy over
+  `[ToolCard, ep1(s,a,r), ep2…]` cross-episode histories, internalizing the across-episode
+  improvement operator (§10/§11.2's "improves across episodes WITHOUT weight updates") so
+  the **test-time agent needs no teacher in the loop**.
+- **HER unchanged**: `relabel_future` + `q_learning_target` with the `(1-done)` mask
+  (`igc/modules/rl/q_targets.py`) run over the card-conditioned episodes — the card is part
+  of the observation, not a separate loss.
+- **Potential-based shaping**: a grounded card supplies a potential Φ over (precondition-met,
+  expected-progress); shaping is `F = γΦ′ − Φ` over `q_targets`, which *provably cannot
+  change the optimal policy*, and decays as real-Q confidence grows. **The source reward
+  stays M4's `verify()` — this is not a new reward channel** (it deliberately avoids a
+  second, hallucination-amplifying reward signal adjacent to the still-open §9.4
+  reward-decomposition decision).
+
+The only new trainable parameters are the LoRA adapter already in budget (small/mid dense
+bf16 + LoRA + ZeRO-3). The honest core: **few-shot adaptation on a held-out API happens at
+inference time** (seams A–D + AD-internalized in-context improvement); the *ability to use
+cards* is what gets gradient-trained offline over the meta-train API distribution.
+
+### 12.7 Evaluation
+
+The primary metric extends §10's contribution (success_rate vs. number of adaptation
+interactions on a **held-out API**) into a with-vs-without A/B: `curve_A` = passive
+pointer text only (§3.3); `curve_B` = + ToolCard teaching. The claim is that `curve_B`
+reaches a target success_rate in fewer interactions and at lower `episode_length` (the two
+M6 metrics, §4). Crucially, the **teacher-free distilled agent at test time must match the
+teacher-in-loop agent** — the honest proof the across-episode operator was internalized,
+not a present-teacher crutch.
+
+Honesty guardrails: a **negative control** (converged success_rate *and* episode_length
+must match the no-teaching baseline — proves teaching left no permanent crutch and shaping
+did not hack the final metric); **StubTeacher + per-`env_name` keying** (held-out cards
+come only from that API's own few shots, no cross-API leakage); calibration (Brier score
+of teacher confidence; falsification latency). Ablations: (1) no-grounding (quantifies the
+hallucination tax); (2) k-sweep (0,1,3,5); (3) text-in-candidate vs RL²-context vs both;
+(4) frozen vs refreshed card; (5) provisional-allowed vs grounded-only; (6) AD on/off; (7)
+BC warm-start on/off; (8) shuffled error-taxonomy control. All offline: held-out API via
+`CassetteSimulator`/`MockServer`, CPU + StubEncoder for plumbing, `@pytest.mark.gpu` for
+backbone-in-the-loop curves.
+
+### 12.8 Novelty and honest risks
+
+The learned core *is* Algorithm Distillation (§10's RL²-as-Transformer); the novelty is
+not the objective but (i) the acquired unit is a REST-op acquisition skill over a
+*discovered* action surface, and (ii) the in-context history is seeded by an explicit,
+schema-bound, evidence-grounded, verifier-gated ToolCard — where vanilla
+AD/Decision-Transformer/in-context-RL start from raw `(s,a,r)`. Versus Voyager, a ToolCard
+is a grounded declarative spec adversarially checked against M4/observed evidence, not
+self-verified executable code; versus Toolformer, adaptation to a *new* tool is
+inference-time with zero weight update and the knowledge is an inspectable, M4-verified
+data structure, not latent weights; versus RAP / ReAct / Reflexion, the card is the
+structured, schema-typed, verifier-gated counterpart that flows into a learned pointer
+Q-score plus argument-enum pruning *and* is distilled into weights.
+
+Honest risks: (1) hallucinated knowledge mis-ranking — mitigated by the four gates +
+grounded-only up-ranking + the `.npy`/ActionInfo override + potential-based shaping. (2)
+**AD-transfer-to-held-out** and **"the enriched candidate key measurably lifts an unseen
+op's rank"** are **hypotheses**, load-bearing and proven only by the curve eval. (3)
+**Enum-tightening value is narrow**: where `@Redfish.ActionInfo` was captured, enums
+already live in `spec.arg_schema[op][slot]['enum']` and already feed `arg_slots_for`, so
+the card's enum term adds value mainly where capture is *missing* — ablation (3) must
+isolate this honestly. (4) Card-as-context could become a test-time crutch — measured by
+the teacher-free vs teacher-in-loop ablation. (5) Safety rides on the **still-queued
+Phase-7 guardrail**. (6) The **M5 precondition seed is deferred** until M5 exists (§4
+stage 3); it is not load-bearing for the contribution. Cards are dataset artifacts
+(gitignored like `~/.json_responses`), never committed.
