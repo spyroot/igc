@@ -37,6 +37,33 @@ def _reset_spec():
     )
 
 
+def _bios_patch_spec():
+    """A PATCH tool with independent categorical and free-form slots."""
+    return ToolSpec(
+        tool_name="redfish",
+        ops=["PATCH"],
+        arg_schema={
+            "PATCH": {
+                "BootMode": {
+                    "type": "string",
+                    "choices": ["Bios", "Uefi"],
+                    "required": True,
+                },
+                "OneTimeBoot": {
+                    "type": "boolean",
+                    "enum": [True, False],
+                    "required": False,
+                },
+                "Attributes": {
+                    "type": "object",
+                    "required": True,
+                },
+            }
+        },
+        risk_level=RiskLevel.MUTATING,
+    )
+
+
 def test_arg_slots_for_reads_enum_required_and_type():
     """arg_slots_for maps an enum to choices and carries type/required."""
     slots = arg_slots_for(_reset_spec(), "POST")
@@ -45,6 +72,24 @@ def test_arg_slots_for_reads_enum_required_and_type():
     assert slot.name == "ResetType" and slot.type == "string"
     assert slot.choices == ("On", "ForceOff", "GracefulShutdown")
     assert slot.required and slot.is_categorical
+
+
+def test_arg_slots_for_multi_slot_schema_preserves_independent_slots():
+    """Multi-slot schemas keep per-slot choices separate rather than cross-producting."""
+    boot_mode, one_time_boot, attributes = arg_slots_for(_bios_patch_spec(), "PATCH")
+
+    assert boot_mode.name == "BootMode"
+    assert boot_mode.choices == ("Bios", "Uefi")
+    assert boot_mode.required
+
+    assert one_time_boot.name == "OneTimeBoot"
+    assert one_time_boot.choices == (True, False)
+    assert not one_time_boot.required
+
+    assert attributes.name == "Attributes"
+    assert attributes.choices is None
+    assert attributes.required
+    assert not attributes.is_categorical
 
 
 def test_arg_slots_for_read_op_has_no_slots():
@@ -58,6 +103,12 @@ def test_arg_slots_for_non_dict_fragment_is_freeform():
     spec = ToolSpec(tool_name="t", ops=["POST"], arg_schema={"POST": {"raw": "string"}})
     slot = arg_slots_for(spec, "POST")[0]
     assert slot.name == "raw" and not slot.is_categorical
+
+
+def test_arg_slots_for_missing_enum_is_required_freeform_stub():
+    """A required schema entry without enum/choices remains a free-form stub slot."""
+    slot = arg_slots_for(_bios_patch_spec(), "PATCH")[2]
+    assert slot == ArgumentSlot(name="Attributes", type="object", choices=None, required=True)
 
 
 def test_select_categorical_is_argmax_over_choice_width():
@@ -77,6 +128,14 @@ def test_select_categorical_rejects_wrong_width_and_freeform():
         select_categorical(free, [1.0])
 
 
+def test_select_categorical_scores_each_slot_independently():
+    """Independent slots can choose values without enumerating every combination."""
+    boot_mode, one_time_boot, _ = arg_slots_for(_bios_patch_spec(), "PATCH")
+
+    assert select_categorical(boot_mode, [0.1, 0.9]) == "Uefi"
+    assert select_categorical(one_time_boot, [0.8, 0.2]) is True
+
+
 def test_assemble_arguments_enforces_required_and_skips_optional_none():
     """Required slots must be present; an unset optional slot is simply omitted."""
     required = arg_slots_for(_reset_spec(), "POST")
@@ -85,6 +144,25 @@ def test_assemble_arguments_enforces_required_and_skips_optional_none():
         assemble_arguments(required, {})  # required ResetType missing
     optional = [ArgumentSlot(name="Note")]
     assert assemble_arguments(optional, {"Note": None}) == {}
+
+
+def test_assemble_arguments_requires_freeform_stub_and_keeps_falsey_values():
+    """Free-form required slots still need values; falsey values are valid choices."""
+    slots = arg_slots_for(_bios_patch_spec(), "PATCH")
+
+    with pytest.raises(ValueError):
+        assemble_arguments(slots, {"BootMode": "Uefi"})
+
+    args = assemble_arguments(
+        slots,
+        {
+            "BootMode": "Uefi",
+            "OneTimeBoot": False,
+            "Attributes": {},
+        },
+    )
+
+    assert args == {"BootMode": "Uefi", "OneTimeBoot": False, "Attributes": {}}
 
 
 def test_apply_arguments_fills_template_values_only():
@@ -99,6 +177,17 @@ def test_apply_arguments_fills_template_values_only():
     assert action.tool_name == "redfish" and action.op == "POST"
     assert action.target == template.target and action.risk_level == RiskLevel.MUTATING
     assert template.arguments == {}  # original template unchanged
+
+
+def test_apply_arguments_copies_input_mapping():
+    """Mutating the caller's dict after apply_arguments does not affect the action."""
+    template = ToolAction(tool_name="redfish", op="PATCH", target="/redfish/v1/Systems/1/Bios")
+    arguments = {"Attributes": {"BootMode": "Uefi"}}
+
+    action = apply_arguments(template, arguments)
+    arguments["Attributes"] = {"BootMode": "Bios"}
+
+    assert action.arguments == {"Attributes": {"BootMode": "Uefi"}}
 
 
 def test_categorical_scorer_output_width_tracks_choices():
