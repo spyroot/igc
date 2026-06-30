@@ -278,6 +278,11 @@ class JSONDataset(
         self.logger.info(f"Consistency check enabled: {do_consistency_check}")
         self.logger.info(f"tokenizer: {tokenizer}")
 
+        # Whether to run the strict consistency check during build (see _build_dataset).
+        # With partial captures (tolerantly skipped files) it would falsely fail, so it is
+        # gated by this flag rather than run unconditionally.
+        self._do_consistency_check = do_consistency_check
+
         # unpack tarballs.
         self._unpack_tarballs()
         # create all tarballs if we have raw files, rebuilding.
@@ -663,7 +668,8 @@ class JSONDataset(
                              f"num action to indices entries: {len(self._data['action_idx_to_hash'])} "
                              f"num masked entries: {len(self._masked_data['train_data'])} ")
 
-            self._check_consistency()
+            if self._do_consistency_check:
+                self._check_consistency()
 
             self.tokenizer.save_pretrained(f"{self._dataset_root_dir}/tokenizer")
 
