@@ -88,6 +88,51 @@ def test_only_tokenizer_skips_model(monkeypatch):
     assert "model" not in captured
 
 
+def test_only_model_skips_tokenizer_and_padding(monkeypatch):
+    """only_model=True loads no tokenizer and leaves pad config untouched."""
+    captured = _install_fakes(monkeypatch)
+    model, tokenizer = llm_shared.from_pretrained_default("gpt2", only_model=True)
+    assert model is not None and tokenizer is None
+    assert "tok" not in captured
+    assert model.config.pad_token_id is None
+    assert model.config.pad_token is None
+
+
+def test_load_pretrained_default_forwards_loader_flags(monkeypatch):
+    """Fine-tuned load forwards cache/trust/device-map/loading flags to Auto classes."""
+    captured = _install_fakes(monkeypatch)
+    spec = argparse.Namespace(
+        llm_cache_dir="/tmp/igc-hf-cache",
+        trust_remote_code=True,
+        llm_ignore_mismatched_sizes=True,
+        llm_output_loading_info=True,
+        llm_fast_init=False,
+        llm_torch_dtype="auto",
+    )
+    model, tokenizer = llm_shared.load_pretrained_default(
+        spec,
+        "/tmp/igc-model",
+        device_map={"": "cpu"},
+    )
+    assert model is not None and tokenizer is not None
+    assert captured["tok"] == (
+        "/tmp/igc-model",
+        {"cache_dir": "/tmp/igc-hf-cache", "trust_remote_code": True},
+    )
+    assert captured["model"] == (
+        "/tmp/igc-model",
+        {
+            "cache_dir": "/tmp/igc-hf-cache",
+            "trust_remote_code": True,
+            "ignore_mismatched_sizes": True,
+            "output_loading_info": True,
+            "_fast_init": False,
+            "torch_dtype": "auto",
+            "device_map": {"": "cpu"},
+        },
+    )
+
+
 def test_helpers():
     """_model_id / _spec_flag / _resolve_dtype behave for str and Namespace inputs."""
     import torch
