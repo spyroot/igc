@@ -37,6 +37,18 @@ def test_evidence_gate_drops_uncited_error_rules() -> None:
     assert statuses == {409}
 
 
+def test_evidence_gate_can_be_disabled_for_fixture_cards() -> None:
+    """A local fixture can preserve uncited rules when evidence is not required."""
+    card = ToolCard(
+        env_name="redfish", tool_name="ComputerSystem", op="Reset",
+        error_taxonomy=[
+            ErrorRule(match={"status": 503}, error_class=ErrorClass.RETRIABLE, evidence_ids=[]),
+        ],
+    )
+    grounded = ToolCardGrounder(require_evidence=False).ground(card, _spec())
+    assert [r.match for r in grounded.error_taxonomy] == [{"status": 503}]
+
+
 def test_schema_gate_drops_unknown_arg_slots() -> None:
     """An arg slot the catalog never declared is a hallucination and is dropped."""
     card = ToolCard(
@@ -58,6 +70,17 @@ def test_enum_clip_catalog_overrides_teacher() -> None:
     assert grounded.effective_signature["ResetType"]["enum"] == ["On", "ForceOff"]  # Teleport dropped
 
 
+def test_observed_fields_clip_expected_response_claims() -> None:
+    """Expected response fields are limited to fields observed in real bodies."""
+    card = ToolCard(
+        env_name="redfish", tool_name="ComputerSystem", op="Reset",
+        expected_response={"TaskState": "string", "Missing": "string"},
+    )
+    grounded = ToolCardGrounder().ground(card, _spec(), observed_fields={"TaskState"})
+    assert grounded.expected_response == {"TaskState": "string"}
+    assert set(card.expected_response) == {"TaskState", "Missing"}
+
+
 def test_stale_card_is_emptied_and_contradicted() -> None:
     """A card induced against a different op schema is invalidated."""
     card = ToolCard(
@@ -77,6 +100,17 @@ def test_observe_promotes_grounded_on_anticipated_error() -> None:
         error_taxonomy=[ErrorRule(match={"status": 409}, error_class=ErrorClass.PRECONDITION_UNMET, evidence_ids=["t1"])],
     )
     ToolCardGrounder().observe(card, 409, {"error": "pending"})
+    assert card.grounding.status is GroundingStatus.GROUNDED
+    assert card.grounding.n_confirmations == 1
+
+
+def test_observe_confirms_on_complete_expected_response() -> None:
+    """A real 2xx body containing every declared response field confirms the card."""
+    card = ToolCard(
+        env_name="redfish", tool_name="ComputerSystem", op="Reset",
+        expected_response={"TaskState": "string", "Id": "integer"},
+    )
+    ToolCardGrounder().observe(card, 200, {"TaskState": "Running", "Id": 7})
     assert card.grounding.status is GroundingStatus.GROUNDED
     assert card.grounding.n_confirmations == 1
 
