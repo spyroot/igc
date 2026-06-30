@@ -19,7 +19,7 @@ from urllib.error import URLError
 import pkg_resources
 import torch
 from torch.utils.data import random_split, Subset, Dataset
-from transformers import PreTrainedModel, PreTrainedTokenizer
+from transformers import PreTrainedModel, PreTrainedTokenizer, PreTrainedTokenizerBase
 
 from .igc_metric_logger import MetricLogger
 from .igc_specs import make_default_spec
@@ -86,9 +86,11 @@ class IgcModule(IgcBaseState):
             raise TypeError(f"llm_model should be a PreTrainedModel or a PEFT model, "
                             f"received {type(llm_model).__name__}.")
 
-        if not isinstance(llm_tokenizer, PreTrainedTokenizer):
+        # PreTrainedTokenizerBase covers both slow (PreTrainedTokenizer) and fast
+        # (PreTrainedTokenizerFast) tokenizers — e.g. Qwen ships a fast tokenizer.
+        if not isinstance(llm_tokenizer, PreTrainedTokenizerBase):
             raise TypeError(
-                f"llm_tokenizer should be an instance of PreTrainedTokenizer, "
+                f"llm_tokenizer should be a PreTrainedTokenizerBase, "
                 f"received {type(llm_tokenizer).__name__}.")
 
         if ds is not None and not isinstance(ds, (JSONDataset, Dataset)):
@@ -183,7 +185,7 @@ class IgcModule(IgcBaseState):
         :param tokenizer:
         :return:
         """
-        if not isinstance(tokenizer, PreTrainedTokenizer):
+        if not isinstance(tokenizer, PreTrainedTokenizerBase):
             raise ValueError("Invalid Hugging Face tokenizer provided.")
 
         self.tokenizer = tokenizer
