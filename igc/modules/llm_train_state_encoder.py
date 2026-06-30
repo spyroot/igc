@@ -383,7 +383,11 @@ class LlmEmbeddingsTrainer(LlmModule):
             f"Rank {self.rank}: Data loader created: "
             f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
 
-        self.model = self.model.to(self.device)
+        # Under accelerate, let accelerator.prepare() place the model — a manual .to(device)
+        # here materializes the full (unsharded) model on one GPU before prepare, defeating
+        # DeepSpeed ZeRO-3 / FSDP and OOM-ing a large backbone. Only place it on the plain path.
+        if not self.is_accelerator:
+            self.model = self.model.to(self.device)
 
         self.scheduler = TorchBuilder.create_scheduler(
             self._trainer_args.llm_scheduler,
