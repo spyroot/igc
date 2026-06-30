@@ -143,6 +143,7 @@ class IgcMain:
         """
         self._dataset = MaskedJSONDataset(
             self._dataset_dir,
+            default_tokenize=self._specs.model_type,
             do_consistency_check=self._specs.do_consistency_check
         )
 

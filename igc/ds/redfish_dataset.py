@@ -1283,9 +1283,13 @@ class JSONDataset(
                 # extract the extra file name it key so, we get rest api
                 json_lines = json_file.read()
                 if not self.respond_to_api_contains(_file_path):
-                    raise DatasetConsistencyError(
-                        f"Inconsistency we have file {_file_path} but no corresponding "
-                        f"rest api, size of resp_api {len(self._respond_to_api)}.")
+                    # Tolerate partial captures: a response file with no entry in the
+                    # rest_api_map is skipped, not fatal (idrac_ctl crawls can be partial,
+                    # e.g. a Settings.json whose parent URL was not recorded in the .npy map).
+                    self.logger.warning(
+                        f"Skipping {_file_path}: no corresponding rest api in the map "
+                        f"(resp_api size {len(self._respond_to_api)}).")
+                    return
 
                 _rest_api = self.respond_to_api(file_path)
                 hash_value = zlib.adler32(_rest_api.encode())
