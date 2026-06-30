@@ -33,7 +33,7 @@ import torch
 import torch.nn.functional as F
 from huggingface_hub.utils import HFValidationError
 from tqdm import tqdm
-from transformers import GPT2Tokenizer, PreTrainedTokenizer
+from transformers import AutoTokenizer, GPT2Tokenizer, PreTrainedTokenizer
 
 from igc.interfaces.rest_mapping_interface import RestMappingInterface
 from igc.interfaces.rest_one_hot_interface import RestActionEncoderInterface
@@ -184,17 +184,22 @@ class JSONDataset(
             self.tokenizer = tokenizer
             tok_name = self.tokenizer.name_or_path
         else:
+            # Load the backbone tokenizer (AutoTokenizer keyed on default_tokenize / --model_type),
+            # which also adds the IGC @odata special tokens. Do NOT discard it for GPT-2 — that
+            # corrupted any non-GPT-2 backbone (resize to the wrong vocab + mismatched token ids).
             self.tokenizer = self._load_tokenizer()
-            if tokenizer is None:
-                self.tokenizer = GPT2Tokenizer.from_pretrained(default_tokenize)
-                self.logger.info(f"Using default gpt tokenizer: {self.tokenizer.name_or_path}")
-                tok_name = default_tokenize
-            else:
-                self.logger.info(f"Using igc tokenizer: {self.tokenizer.name_or_path}")
-                tok_name = self.tokenizer.name_or_path
+            if self.tokenizer is None:
+                # No cached tokenizer yet — build it from the backbone and add the special tokens.
+                self.tokenizer = AutoTokenizer.from_pretrained(default_tokenize)
+                self.add_special_tokens()
+            tok_name = self.tokenizer.name_or_path
+            self.logger.info(f"Using tokenizer: {tok_name}")
 
-        self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+        # Only synthesize a pad token when the backbone tokenizer lacks one (GPT-2); a model
+        # whose tokenizer already has a distinct pad (e.g. Qwen) keeps it.
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
         if is_force_download:
             delete_directory_with_confirmation(self._dataset_root_dir)
@@ -299,8 +304,8 @@ class JSONDataset(
         try:
             # we do this only if tokenizer dir not present, and we are skipping download.
             if not os.path.exists(self.tokenizer_dir()) and self._skip_download:
-                self.tokenizer = GPT2Tokenizer.from_pretrained(self._default_tokenize_name)
-                self.logger.info(f"Creating default gpt tokenizer: {self.tokenizer.name_or_path}")
+                self.tokenizer = AutoTokenizer.from_pretrained(self._default_tokenize_name)
+                self.logger.info(f"Creating backbone tokenizer: {self.tokenizer.name_or_path}")
                 self._build_tokenizer()
                 self.tokenizer.save_pretrained(self.tokenizer_dir())
                 self.logger.info(f"Saving tokenizer to {self.tokenizer_dir()}")
@@ -311,9 +316,10 @@ class JSONDataset(
 
         # load if we can, else return None , we will download it later.
         if os.path.exists(self.tokenizer_dir()):
-            self.tokenizer = GPT2Tokenizer.from_pretrained(self.tokenizer_dir())
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+            self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_dir())
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+                self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
             self.logger.info(f"Loading tokenizer from {self._default_tok_dir}. ")
             self.logger.info(f"Number tokens in the loaded tokenizer: {len(self.tokenizer)}")
             self.add_special_tokens()

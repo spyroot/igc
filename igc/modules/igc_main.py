@@ -82,6 +82,7 @@ class IgcMain:
         if self._dataset is None:
             self._dataset = MaskedJSONDataset(
                 self._dataset_dir,
+                default_tokenize=self._specs.model_type,
                 do_consistency_check=self._specs.do_consistency_check
             )
         return self._dataset
