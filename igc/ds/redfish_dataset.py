@@ -1903,12 +1903,19 @@ class JSONDataset(
         ]
 
     def _is_tokenizer_consistency(self):
-        """CHeck that all required tokenizer files exist.
+        """Check that a saved tokenizer exists — backbone-agnostically.
+
+        A fast tokenizer (e.g. Qwen) writes ``tokenizer.json``; a slow one (GPT-2) writes
+        ``vocab.json`` + ``merges.txt``. Require ``tokenizer_config.json`` plus at least one
+        vocab artifact, rather than the exact GPT-2 file set (which a fast tokenizer lacks).
         :return:
         """
-        return all(
-            os.path.exists(os.path.join(self.tokenizer_dir(), f))
-            for f in JSONDataset.default_tokenizer_files()
+        tok_dir = self.tokenizer_dir()
+        if not os.path.exists(os.path.join(tok_dir, "tokenizer_config.json")):
+            return False
+        return any(
+            os.path.exists(os.path.join(tok_dir, f))
+            for f in ("tokenizer.json", "vocab.json")
         )
 
     def is_tokenizer_loader(self) -> False:
