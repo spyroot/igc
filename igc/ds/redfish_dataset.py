@@ -207,6 +207,10 @@ class JSONDataset(
         os.makedirs(self._dataset_root_dir, exist_ok=True)
         os.makedirs(self._default_raw_dir, exist_ok=True)
 
+        # A HF repo id (e.g. "Qwen/Qwen2.5-0.5B-Instruct") contains "/"; sanitize it so the
+        # cache filenames don't create phantom subdirectories under raw/.
+        tok_name = tok_name.replace("/", "_")
+
         # this file create during build process.
         self._dataset_file_name = str(
             Path(self._default_raw_dir) / f"processed_dataset_{tok_name}.pt")
