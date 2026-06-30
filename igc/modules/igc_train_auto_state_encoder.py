@@ -1,11 +1,10 @@
 """
-This class is used to train a state auto encoder.
+Train the state autoencoder over backbone hidden states.
 
-Here is idea. We take REST API and pass to GPT
-We take hidden representation and pass 1D conv layer with kernel size 2
-That essentially create a polling layer with stride 2
-We pass the two an encoder and reduce the dimension to fixed size block
-Then do standard autoencoder procedure and reconstruct.
+Tokenized Redfish batches are encoded by the configured Hugging Face backbone
+module, then ``AutoStateEncoder`` reconstructs the resulting hidden-state
+tensor. The trainer keeps backbone access shape-driven through
+``igc.modules.encoders.backbone_utils``.
 
 Author:Mus mbayramo@stanford.edu
 """
@@ -28,10 +27,7 @@ import torch.nn.functional as F
 
 class AutoencoderTrainer(IgcModule):
     """
-
-    Autoencoder trainer used to train the autoencoder to reduce
-    state dimension of latent space llm outputs.
-
+    Train an autoencoder over backbone hidden states for compact state features.
     """
     def __init__(self,
                  module_name: str,
@@ -43,12 +39,16 @@ class AutoencoderTrainer(IgcModule):
                  is_inference: Optional[bool] = False,
                  device: Optional[torch.device] = None):
         """
-        :param module_name: Name of the module.
-        :param spec: Specifications for trainer
-        :param llm_model:
-        :param llm_tokenizer:
-        :param ds: dataset
-        :param metric_logger: trainer metric logger
+        Initialize the backbone sampler, autoencoder, and optimizer.
+
+        :param module_name: Stable module name used for logging and checkpoints.
+        :param spec: Training configuration namespace parsed by the shared CLI.
+        :param llm_model: Backbone model that produces hidden states to reconstruct.
+        :param llm_tokenizer: Tokenizer paired with ``llm_model``.
+        :param ds: Redfish JSON dataset used for autoencoder batches.
+        :param metric_logger: Optional metric sink for reconstruction metrics.
+        :param is_inference: Whether to skip training-only setup in the base module.
+        :param device: Torch device used for hidden states and autoencoder tensors.
         """
         super().__init__(
             module_name,
@@ -91,10 +91,10 @@ class AutoencoderTrainer(IgcModule):
 
     def _get_reconstruction_loss(self, batch):
         """
-        Compute reconstruction loss
+        Compute per-element reconstruction loss for a tuple-style tensor batch.
 
-        :param batch:
-        :return:
+        :param batch: Tuple whose first item is the tensor to reconstruct.
+        :return: Per-element mean squared reconstruction loss from ``self.model``.
         """
         x, _ = batch
         x_hat = self.model.forward(x)
@@ -103,7 +103,7 @@ class AutoencoderTrainer(IgcModule):
 
     def encode(self):
         """
-        :return:
+        Attach a simple autoencoder encoder weight to the model embeddings.
         """
         input_dim = self.model.config.hidden_size
         latent_dim = 128
@@ -116,9 +116,10 @@ class AutoencoderTrainer(IgcModule):
 
     @staticmethod
     def custom_collate_fn(samples):
-        """Collate data before we pass to the model.
-        :param samples:
-        :return:
+        """Stack tokenized samples into a model batch.
+
+        :param samples: Dataset rows containing ``input_ids`` and ``attention_mask``.
+        :return: Batch dictionary with tensor values stacked on the leading axis.
         """
         included_keys = ['input_ids', 'attention_mask']
         batch = {key: torch.stack([s[key] for s in samples]) for key in included_keys}
@@ -126,6 +127,12 @@ class AutoencoderTrainer(IgcModule):
 
     @torch.no_grad()
     def sample(self, batch):
+        """
+        Encode one tokenized batch into hidden states.
+
+        :param batch: Tokenized batch accepted by the backbone model.
+        :return: Last hidden state tensor on the trainer device.
+        """
         with torch.no_grad():
             output = self._encoder_model(**batch)
         return output.last_hidden_state.to(self.device)
@@ -133,7 +140,9 @@ class AutoencoderTrainer(IgcModule):
     @torch.no_grad()
     def sample_all(self):
         """
-        :return:
+        Encode the training split into a list of CPU hidden-state tensors.
+
+        :return: List of detached hidden-state tensors sampled from the training split.
         """
         train_dataset, _ = self.split_slice_dataset()
         train_dataloader = DataLoader(
@@ -156,11 +165,10 @@ class AutoencoderTrainer(IgcModule):
 
     def measure_reconstruction(self, test_data):
         """
-        Measure the reconstruction performance
-        of the autoencoder on the test data.
+        Measure autoencoder reconstruction over hidden-state tensor batches.
 
-        :param test_data: Test dataset
-        :return: Average reconstruction loss
+        :param test_data: Iterable of tensors shaped for ``self.model_autoencoder``.
+        :return: Average reconstruction loss across the provided batches.
         """
         self.model_autoencoder.eval()
         total_loss = 0.0
@@ -178,7 +186,7 @@ class AutoencoderTrainer(IgcModule):
 
     def train(self):
         """
-        :return:
+        Train the autoencoder and save the resulting model.
         """
         self.logger.info(
             f"Rank {self.rank} starting train, device {self.device}")
@@ -190,7 +198,7 @@ class AutoencoderTrainer(IgcModule):
 
         # torch.cuda.empty_cache()
 
-        self.logger.info(f"Starting training")
+        self.logger.info("Starting training")
         train_dataloader = DataLoader(
             self.dataset,
             batch_size=self.batch_size,
