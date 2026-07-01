@@ -20,11 +20,17 @@ conda env create -f environment-dev.yaml
 conda activate igc-dev
 ```
 
-On macOS, set the OpenMP guard before Torch/scientific-Python imports that can load duplicate OpenMP
-libraries:
+For local smoke runs, set the guard variables in the same shell before invoking pytest.
+`KMP_DUPLICATE_LIB_OK` and `OMP_NUM_THREADS`, local shell variables for macOS OpenMP behavior,
+avoid duplicate OpenMP loader failures and keep CPU checks single-threaded. `TRANSFORMERS_OFFLINE`
+and `HF_DATASETS_OFFLINE`, local shell variables honored by HuggingFace Transformers and Datasets,
+keep the smoke gate from attempting model or dataset downloads.
 
 ```bash
-export KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1
+export KMP_DUPLICATE_LIB_OK=TRUE
+export OMP_NUM_THREADS=1
+export TRANSFORMERS_OFFLINE=1
+export HF_DATASETS_OFFLINE=1
 ```
 
 Current Phase 0 smoke checks are explicit while the full offline harness is still being stabilized:
