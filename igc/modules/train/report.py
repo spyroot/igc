@@ -30,6 +30,37 @@ from typing import Dict, List, Optional
 _FAIRNESS_KEYS = ("model", "tokenizer", "data_manifest", "eval_split", "max_steps", "seq_len")
 
 
+def capture_environment() -> dict:
+    """Public-safe snapshot of the runtime for a run manifest.
+
+    Records Python + key library versions and the GPU model/count — but NEVER a hostname,
+    IP, endpoint, or credential (the plan's public-safety rule). Every probe is best-effort
+    so this never raises during a run.
+
+    :return: a dict of ``python``/``platform``/library versions and (if CUDA is present)
+        ``cuda``/``gpu_count``/``gpu_name``.
+    """
+    import platform
+    import sys
+
+    env = {"python": sys.version.split()[0], "platform": platform.system()}
+    for mod in ("torch", "transformers", "peft", "accelerate", "deepspeed", "numpy"):
+        try:
+            env[mod] = __import__(mod).__version__
+        except Exception:  # noqa: BLE001 — best-effort; a missing lib is just None
+            env[mod] = None
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            env["cuda"] = torch.version.cuda
+            env["gpu_count"] = torch.cuda.device_count()
+            env["gpu_name"] = torch.cuda.get_device_name(0)
+    except Exception:  # noqa: BLE001
+        pass
+    return env
+
+
 @dataclass
 class RunManifest:
     """Reproducibility header for one run (what was trained, on what, how far)."""
@@ -48,7 +79,17 @@ class RunManifest:
     tokens_per_sec: Optional[float] = None
     peak_mem_gb: Optional[float] = None
     git_commit: str = ""
-    settings: dict = field(default_factory=dict)   # resolved profile / launcher settings
+    settings: dict = field(default_factory=dict)      # resolved profile / launcher settings
+    # Comprehensive capture — so a report is self-describing and nothing is missed.
+    argv: list = field(default_factory=list)          # the exact igc_main.py command
+    started_at: str = ""                              # ISO timestamp (caller-provided)
+    ended_at: str = ""
+    wall_clock_sec: Optional[float] = None
+    checkpoint_path: str = ""
+    environment: dict = field(default_factory=dict)   # versions + GPU (from capture_environment)
+    dataset: dict = field(default_factory=dict)       # source-mix by trust level, counts, tokenizer hash, max_len, masking
+    training: dict = field(default_factory=dict)      # final_loss, best_eval, epochs_done, total_steps
+    warnings: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)

@@ -11,7 +11,7 @@ Mus mbayramo@stanford.edu
 
 from pathlib import Path
 
-from igc.modules.train.report import ResultBundle, RunManifest, compare
+from igc.modules.train.report import ResultBundle, RunManifest, capture_environment, compare
 
 
 def _bundle(arm_method, rank, metrics, *, data="ds-v1", split="held-out-a", steps=200, seq=1024):
@@ -72,6 +72,38 @@ def test_fairness_check_flags_unequal_setup() -> None:
     assert "data_manifest" in joined and "max_steps" in joined
     md = rep.to_markdown()
     assert "NOT an apples-to-apples comparison" in md
+
+
+def test_capture_environment_is_public_safe():
+    """capture_environment records versions/GPU but no hostname/IP/endpoint."""
+    env = capture_environment()
+    assert "python" in env and "platform" in env
+    assert set(env) & {"torch", "transformers", "peft", "numpy"}  # library keys present (value may be None)
+    import socket
+    assert socket.gethostname() not in " ".join(str(v) for v in env.values())  # no host leak
+
+
+def test_enriched_manifest_round_trips(tmp_path: Path) -> None:
+    """The comprehensive-capture fields survive write/read."""
+    b = ResultBundle(
+        manifest=RunManifest(
+            run_id="r1", profile="m1_7b_rslora_r32", model="Qwen/Qwen2.5-7B-Instruct",
+            argv=["--train", "llm", "--adapter_method", "rslora"],
+            started_at="2026-07-01T09:00:00", checkpoint_path="experiments/r1/last.pt",
+            environment=capture_environment(),
+            dataset={"num_examples": 4191, "source_mix": {"real": 3000, "synthetic": 1191}},
+            training={"final_loss": 3.1, "best_eval": 0.72, "epochs_done": 3},
+            warnings=["frozen new-token embeddings on tied backbone"],
+        ),
+        metrics={"recall@1": 0.72},
+    )
+    p = tmp_path / "report.json"
+    b.write(str(p))
+    back = ResultBundle.read(str(p))
+    assert back.manifest.argv == ["--train", "llm", "--adapter_method", "rslora"]
+    assert back.manifest.dataset["source_mix"]["synthetic"] == 1191
+    assert back.manifest.training["epochs_done"] == 3
+    assert back.manifest.warnings and back.manifest.environment.get("python")
 
 
 # Author: Mus mbayramo@stanford.edu

@@ -67,7 +67,9 @@ class AutoencoderTrainer(IgcModule):
         self.logger.info(f"Creating auto-encoder input dim"
                          f" {self._input_dim} {self._latent_dim} batch_size: {self.batch_size}")
 
-        # Backbone-agnostic base module + dims (GPT-2 .transformer/.wpe only worked for GPT-2).
+        # Backbone-agnostic base module + embedding dims via backbone_module()/emb_shape():
+        # works for both the GPT-2 smoke backbone (m1_gpt2_smoke) and modern decoders (Qwen).
+        # The old .transformer/.wpe access only worked for GPT-2 — kept agnostic on purpose.
         self._encoder_model = backbone_module(self.model)
         backbone_module(llm_model).config.is_decoder = False
         # self._llm_model.resize_token_embeddings(len(llm_tokenizer))
@@ -190,7 +192,7 @@ class AutoencoderTrainer(IgcModule):
 
         # torch.cuda.empty_cache()
 
-        self.logger.info(f"Starting training")
+        self.logger.info("Starting training")
         train_dataloader = DataLoader(
             self.dataset,
             batch_size=self.batch_size,
