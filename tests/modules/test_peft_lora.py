@@ -56,7 +56,7 @@ def test_default_save_modules_by_backbone():
 
 
 def test_apply_lora_on_tiny_gpt2_makes_few_params_trainable():
-    """LoRA on a tiny gpt2 leaves adapters + embeddings trainable (still << total)."""
+    """LoRA on a tiny gpt2 leaves only the adapters trainable by default (<< total)."""
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
     pytest.importorskip("peft")
@@ -66,21 +66,37 @@ def test_apply_lora_on_tiny_gpt2_makes_few_params_trainable():
     peft_model = apply_lora(model, r=4, model_type="gpt2")
     trainable, total = trainable_parameter_summary(peft_model)
 
-    assert 0 < trainable < total          # base weights stay frozen
-    assert trainable < base_total * 0.5   # adapters + embedding are a small fraction
+    assert 0 < trainable < total          # base weights (incl. embedding) stay frozen
+    assert trainable < base_total * 0.5   # adapters are a small fraction
 
 
-def test_embeddings_trainable_by_default_but_optional():
-    """train_embeddings keeps the resized embedding trainable; opting out freezes it."""
+def test_embedding_training_is_opt_in():
+    """Embeddings are frozen by default; train_embeddings=True adds them (opt-in)."""
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
     pytest.importorskip("peft")
 
-    with_emb, _ = trainable_parameter_summary(apply_lora(_tiny_gpt2(), r=4, model_type="gpt2"))
-    without_emb, _ = trainable_parameter_summary(
-        apply_lora(_tiny_gpt2(), r=4, model_type="gpt2", train_embeddings=False)
+    frozen, _ = trainable_parameter_summary(apply_lora(_tiny_gpt2(), r=4, model_type="gpt2"))
+    whole, _ = trainable_parameter_summary(
+        apply_lora(_tiny_gpt2(), r=4, model_type="gpt2", train_embeddings=True)
     )
-    assert with_emb > without_emb  # the embedding rows add trainable params
+    assert whole > frozen  # opting in adds the full embedding's params
+
+
+def test_new_token_ids_trains_only_new_rows():
+    """train_embeddings + new_token_ids trains just those rows (< whole matrix)."""
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    pytest.importorskip("peft")
+
+    frozen, _ = trainable_parameter_summary(apply_lora(_tiny_gpt2(), r=4, model_type="gpt2"))
+    whole, _ = trainable_parameter_summary(
+        apply_lora(_tiny_gpt2(), r=4, model_type="gpt2", train_embeddings=True)
+    )
+    new_rows, _ = trainable_parameter_summary(
+        apply_lora(_tiny_gpt2(), r=4, model_type="gpt2", train_embeddings=True, new_token_ids=[126, 127])
+    )
+    assert frozen < new_rows < whole  # 2 rows: more than adapters-only, far less than whole
 
 
 # Author: Mus mbayramo@stanford.edu

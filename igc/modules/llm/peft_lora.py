@@ -70,15 +70,20 @@ def apply_lora(
     target_modules: Optional[List[str]] = None,
     model_type: Optional[str] = None,
     modules_to_save: Optional[List[str]] = None,
-    train_embeddings: bool = True,
+    train_embeddings: bool = False,
+    new_token_ids: Optional[List[int]] = None,
 ) -> Any:
     """Wrap a causal-LM with LoRA adapters via PEFT and return the ``PeftModel``.
 
-    The injected adapters are trainable and the base weights stay frozen (bf16 base for
-    memory). By default the input embedding is ALSO trainable (``modules_to_save``): igc
-    extends the tokenizer and resizes the embedding, so the new rows must move or M1's
-    representation objective is a no-op. This is the supported path for fine-tuning a
-    large backbone on a single GPU.
+    The injected adapters are trainable and the base weights (including the embedding)
+    stay frozen by default — the stable path. igc extends the tokenizer and resizes the
+    embedding, so ideally the NEW rows would train, but on a ``tie_word_embeddings``
+    backbone (Qwen) neither PEFT approach is safe today: whole-embedding
+    ``modules_to_save`` DIVERGES at the encoder lr, and ``trainable_token_indices``
+    breaks the tied ``embed_tokens``/``lm_head`` at runtime. So embedding training is an
+    explicit opt-in (``train_embeddings=True``), pending an untie / grad-mask follow-up;
+    on an UNtied backbone ``new_token_ids`` trains only the new rows via
+    ``trainable_token_indices``.
 
     :param model: the HF ``AutoModelForCausalLM`` to adapt.
     :param r: LoRA rank.
@@ -86,28 +91,34 @@ def apply_lora(
     :param dropout: LoRA dropout.
     :param target_modules: module names to adapt; defaults to :func:`default_target_modules`.
     :param model_type: backbone type hint used for default target/save selection.
-    :param modules_to_save: modules kept fully trainable (embeddings); defaults to
-        :func:`default_save_modules` when ``train_embeddings`` is set.
-    :param train_embeddings: when True (default), keep the resized embedding trainable;
-        set False to freeze it (LoRA-adapters-only, the legacy behavior).
+    :param modules_to_save: modules kept fully trainable; overrides the embedding defaults.
+    :param train_embeddings: opt-in to train the embedding (default False = frozen).
+    :param new_token_ids: with ``train_embeddings``, train ONLY these rows (untied models).
     :return: a ``peft.PeftModel`` wrapping ``model``.
     """
     from peft import LoraConfig, get_peft_model  # lazy: keep this module importable without peft
 
     if target_modules is None:
         target_modules = default_target_modules(model, model_type)
-    if modules_to_save is None and train_embeddings:
-        modules_to_save = default_save_modules(model, model_type)
-    config = LoraConfig(
+    kwargs = dict(
         r=r,
         lora_alpha=alpha,
         lora_dropout=dropout,
         target_modules=target_modules,
-        modules_to_save=modules_to_save,
         bias="none",
         task_type="CAUSAL_LM",
     )
-    return get_peft_model(model, config)
+    if train_embeddings and new_token_ids:
+        # Preferred: train ONLY the new IGC-token rows; the tied base stays frozen.
+        emb = default_save_modules(model, model_type)[0]
+        kwargs["trainable_token_indices"] = {emb: list(new_token_ids)}
+    elif modules_to_save is not None:
+        kwargs["modules_to_save"] = modules_to_save
+    elif train_embeddings:
+        # Fallback (no new-token ids known): whole-embedding trainable. WARNING: this
+        # can diverge on a tied-embedding backbone — pass new_token_ids when possible.
+        kwargs["modules_to_save"] = default_save_modules(model, model_type)
+    return get_peft_model(model, LoraConfig(**kwargs))
 
 
 def trainable_parameter_summary(model: Any) -> Tuple[int, int]:

@@ -112,6 +112,10 @@ class IgcLanguageModule:
                 pretrained_model.resize_token_embeddings(len(self._dataset.tokenizer))
 
             # LoRA via PEFT for large-backbone fine-tuning on a single GPU (--use_peft).
+            # Embeddings stay frozen (apply_lora default): training the resized IGC-token
+            # rows on a tied Qwen backbone is not yet stable — whole-matrix modules_to_save
+            # diverges and trainable_token_indices breaks the tied embed/lm_head. Tracked
+            # as a follow-up; the double-shift label fix is the active correctness change.
             if getattr(self._spec, 'use_peft', False):
                 from .peft_lora import apply_lora
                 pretrained_model = apply_lora(
