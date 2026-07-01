@@ -99,4 +99,15 @@ def test_new_token_ids_trains_only_new_rows():
     assert frozen < new_rows < whole  # 2 rows: more than adapters-only, far less than whole
 
 
+def test_adapter_method_rslora_and_bad_method():
+    """adapter_method='rslora' sets use_rslora; an unknown method raises."""
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    pytest.importorskip("peft")
+    pm = apply_lora(_tiny_gpt2(), r=8, model_type="gpt2", adapter_method="rslora")
+    assert pm.peft_config["default"].use_rslora is True
+    with pytest.raises(ValueError):
+        apply_lora(_tiny_gpt2(), model_type="gpt2", adapter_method="bogus")
+
+
 # Author: Mus mbayramo@stanford.edu

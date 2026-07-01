@@ -72,6 +72,8 @@ def apply_lora(
     modules_to_save: Optional[List[str]] = None,
     train_embeddings: bool = False,
     new_token_ids: Optional[List[int]] = None,
+    adapter_method: str = "lora",
+    init_lora_weights: Any = True,
 ) -> Any:
     """Wrap a causal-LM with LoRA adapters via PEFT and return the ``PeftModel``.
 
@@ -94,6 +96,11 @@ def apply_lora(
     :param modules_to_save: modules kept fully trainable; overrides the embedding defaults.
     :param train_embeddings: opt-in to train the embedding (default False = frozen).
     :param new_token_ids: with ``train_embeddings``, train ONLY these rows (untied models).
+    :param adapter_method: ``"lora"`` (default), ``"rslora"`` (rank-stabilized scaling),
+        or ``"dora"`` (magnitude/direction decomposition) — the ablation axis of
+        ``docs/TRAINING_OPTIMIZATION_PLAN.md``.
+    :param init_lora_weights: PEFT adapter init — ``True`` (default), or a string
+        initializer such as ``"pissa"`` / ``"eva"`` / ``"loftq"``.
     :return: a ``peft.PeftModel`` wrapping ``model``.
     """
     from peft import LoraConfig, get_peft_model  # lazy: keep this module importable without peft
@@ -107,7 +114,15 @@ def apply_lora(
         target_modules=target_modules,
         bias="none",
         task_type="CAUSAL_LM",
+        init_lora_weights=init_lora_weights,
     )
+    method = (adapter_method or "lora").lower()
+    if method == "rslora":
+        kwargs["use_rslora"] = True
+    elif method == "dora":
+        kwargs["use_dora"] = True
+    elif method != "lora":
+        raise ValueError(f"unknown adapter_method {adapter_method!r}; use lora|rslora|dora")
     if train_embeddings and new_token_ids:
         # Preferred: train ONLY the new IGC-token rows; the tied base stays frozen.
         emb = default_save_modules(model, model_type)[0]
