@@ -39,6 +39,29 @@ from igc.ds.redfish_masked_dataset import (
 )
 
 
+def build_causal_lm_labels(input_ids, attention_mask, pad_token_id=None):
+    """Build full-length next-token labels for a Hugging Face CausalLM.
+
+    A HF causal LM shifts internally when given ``labels`` — it computes the loss of
+    ``logits[:, :-1]`` against ``labels[:, 1:]`` — so labels must be the SAME length as
+    ``input_ids`` and NOT pre-shifted. Pre-shifting (the old ``target_ids = input_ids[:,
+    1:]`` with a truncated input) double-shifts and trains the model to predict two
+    tokens ahead. Attention-padding and pad-token positions are set to ``-100`` so they
+    are ignored in the loss; ``input_ids`` itself is never altered (``-100`` is not a
+    valid embedding index).
+
+    :param input_ids: ``[B, L]`` token ids.
+    :param attention_mask: ``[B, L]`` mask (1 = attended, 0 = padding).
+    :param pad_token_id: the tokenizer pad id to ignore, or ``None`` to skip that mask.
+    :return: ``[B, L]`` labels with ``-100`` on ignored positions.
+    """
+    labels = input_ids.clone()
+    labels = labels.masked_fill(~attention_mask.bool(), -100)
+    if pad_token_id is not None:
+        labels = labels.masked_fill(input_ids == pad_token_id, -100)
+    return labels
+
+
 class LlmEmbeddingsTrainer(LlmModule):
     """
     Large language model trainer. Its main job train a language
@@ -329,7 +352,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         torch.cuda.empty_cache()
 
         if not self.is_accelerator:
-            self.model.to(self.device)
+            self.model = self.model.to(self.device)
 
         lr = self._lr if self._reset_lr else None
         map_location = None if self.is_accelerator else self.device
@@ -441,28 +464,21 @@ class LlmEmbeddingsTrainer(LlmModule):
 
             for _, batch in enumerate(train_dataloader):
 
-                attention_mask = batch['attention_mask'].to(self.device)
-                mask_inverted = ~attention_mask.bool()
-
-                input_ids = batch["input_ids"].to(self.device)
-                input_ids = input_ids.masked_fill(mask_inverted == 1, -100).contiguous()
-
-                target_ids = input_ids[:, 1:].clone().detach()
-                target_ids = target_ids.to(self.device)
-
-                mask = (batch["input_ids"] == self.tokenizer.pad_token_id)
-                target_ids = target_ids.masked_fill(mask[:, 1:], -100)
-
-                batch['input_ids'] = batch['input_ids'][:, :-1]
-                batch['attention_mask'] = batch['attention_mask'][:, :-1]
-
                 input_ids = batch['input_ids'].to(self.device)
-                masks = batch['attention_mask'].to(self.device)
+                attention_mask = batch['attention_mask'].to(self.device)
+
+                # Full-length labels: a HF CausalLM shifts internally (loss over
+                # logits[:-1] vs labels[1:]). Pre-shifting the target here as well
+                # (the old target_ids = input_ids[:, 1:] + truncated input) double-shifts
+                # and trains the model to predict two tokens ahead. build_causal_lm_labels
+                # keeps the sequence full-length and only sets -100 on ignored positions.
+                labels = build_causal_lm_labels(
+                    input_ids, attention_mask, self.tokenizer.pad_token_id)
 
                 batch_inputs = {
                     'input_ids': input_ids,
-                    'attention_mask': masks,
-                    'labels': target_ids
+                    'attention_mask': attention_mask,
+                    'labels': labels,
                 }
 
                 outputs = self.model(**batch_inputs)
@@ -557,7 +573,8 @@ class LlmEmbeddingsTrainer(LlmModule):
         if self._is_quantize:
             self.model = convert(self.model)
 
-        self.model = self.accelerator.unwrap_model(self.model)
+        if self.is_accelerator:
+            self.model = self.accelerator.unwrap_model(self.model)
         self.save_model(self._module_checkpoint_dir)
         self.save_finetuned()
 
