@@ -55,6 +55,18 @@ def test_default_save_modules_by_backbone():
     assert default_save_modules(model_type="llama") == ["embed_tokens"]
 
 
+def test_default_save_modules_from_model_config():
+    """When no model_type is given, the model config selects the saved embedding."""
+
+    class _Cfg:
+        model_type = "gpt2"
+
+    class _Model:
+        config = _Cfg()
+
+    assert default_save_modules(model=_Model()) == ["wte"]
+
+
 def test_apply_lora_on_tiny_gpt2_makes_few_params_trainable():
     """LoRA on a tiny gpt2 leaves only the adapters trainable by default (<< total)."""
     pytest.importorskip("torch")
@@ -108,6 +120,47 @@ def test_adapter_method_rslora_and_bad_method():
     assert pm.peft_config["default"].use_rslora is True
     with pytest.raises(ValueError):
         apply_lora(_tiny_gpt2(), model_type="gpt2", adapter_method="bogus")
+
+
+def test_apply_lora_explicit_modules_to_save_override_default_embedding():
+    """An explicit modules_to_save list is passed to PEFT instead of the default embedding."""
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    pytest.importorskip("peft")
+
+    peft_model = apply_lora(
+        _tiny_gpt2(),
+        r=4,
+        model_type="gpt2",
+        modules_to_save=["lm_head"],
+    )
+
+    assert peft_model.peft_config["default"].modules_to_save == ["lm_head"]
+    assert any(
+        "lm_head.modules_to_save" in name and param.requires_grad
+        for name, param in peft_model.named_parameters()
+    )
+    assert not any(
+        "wte.modules_to_save" in name and param.requires_grad
+        for name, param in peft_model.named_parameters()
+    )
+
+
+def test_apply_lora_can_disable_saved_embeddings():
+    """train_embeddings=False leaves modules_to_save unset for adapter-only tuning."""
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    pytest.importorskip("peft")
+
+    peft_model = apply_lora(
+        _tiny_gpt2(),
+        r=4,
+        model_type="gpt2",
+        train_embeddings=False,
+    )
+
+    assert peft_model.peft_config["default"].modules_to_save is None
+    assert not any("modules_to_save" in name for name, _ in peft_model.named_parameters())
 
 
 # Author: Mus mbayramo@stanford.edu
