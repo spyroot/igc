@@ -79,4 +79,36 @@ def test_card_triggers_exactly_one_new_embedding() -> None:
     assert enc.encoded_count == 3  # only the carded candidate is new
 
 
+def test_carded_actions_dedup_values_but_preserve_target_type() -> None:
+    """Carded cache keys collapse value-only changes, not distinct targets."""
+    enc = CountingEncoder(hidden_size=16)
+    codec = ActionCodec(enc, specs=_specs())
+    actions = [
+        ToolAction(
+            "ComputerSystem",
+            "Reset",
+            target="/redfish/v1/Systems/1",
+            arguments={"ResetType": "On"},
+        ),
+        ToolAction(
+            "ComputerSystem",
+            "Reset",
+            target="/redfish/v1/Systems/1",
+            arguments={"ResetType": "ForceOff"},
+        ),
+        ToolAction(
+            "ComputerSystem",
+            "Reset",
+            target="/redfish/v1/Systems/2",
+            arguments={"ResetType": "On"},
+        ),
+    ]
+
+    keys = codec.encode(actions, cards={("ComputerSystem", "Reset"): _card()})
+
+    assert enc.encoded_count == 2
+    assert torch.equal(keys[0], keys[1])
+    assert not torch.equal(keys[0], keys[2])
+
+
 # Author: Mus mbayramo@stanford.edu
