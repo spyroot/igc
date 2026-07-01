@@ -77,15 +77,25 @@ class NeptuneLogger(BaseLogger):
 
 
 class WandbLogger(BaseLogger):
-    def __init__(self, project: str = None, entity: str = None):
+    def __init__(self, project: str = None, entity: str = None,
+                 name: str = None, group: str = None, job_type: str = None,
+                 tags: list = None, config: dict = None):
         """Start a W&B run; project/entity default to ``$WANDB_PROJECT`` / ``$WANDB_ENTITY``.
 
         Defaulting from the environment (which `.internal/wandb.env` or the launcher sets)
         is what lets the logger build when the parsed spec carries no project/entity — the
         prior required-arg signature fell through to a None logger, so nothing was tracked.
+        ``name``/``group``/``job_type``/``tags``/``config`` (built by
+        :func:`_wandb_run_meta` from the spec) make the training STAGE (e.g. m1 state
+        encoder), model, batch, and epochs legible in the W&B UI instead of a random name.
 
         :param project: W&B project (default: ``$WANDB_PROJECT``).
         :param entity: W&B entity/team (default: ``$WANDB_ENTITY``).
+        :param name: human-readable run name (e.g. ``m1-state-encoder-qwen2.5-0.5b-e5-bs8``).
+        :param group: run group (the stage), so all runs of a stage cluster together.
+        :param job_type: ``train`` / ``eval``.
+        :param tags: filterable tags (stage, model, bs, epochs, lora, sharding).
+        :param config: the run's hyperparameters, shown in the W&B config panel.
         """
         import os
 
@@ -93,6 +103,11 @@ class WandbLogger(BaseLogger):
         self.run = wandb.init(
             project=project or os.environ.get("WANDB_PROJECT"),
             entity=entity or os.environ.get("WANDB_ENTITY"),
+            name=name,
+            group=group,
+            job_type=job_type,
+            tags=tags,
+            config=config,
         )
 
     def log_scalar(self, tag: str, value: float, step: int):
@@ -124,6 +139,64 @@ class ClearMLLogger(BaseLogger):
         :return:
         """
         self.task.get_logger().report_scalar(title=tag, series='series', iteration=step, value=value)
+
+
+def _wandb_run_meta(kw: dict) -> dict:
+    """Build W&B run metadata (name/group/job_type/tags/config) from the spec kwargs.
+
+    Maps the ``--train``/``--llm``/``--rl`` selection to the curriculum STAGE so a W&B
+    run reads as e.g. ``m1-state-encoder`` grouped, tagged, and configured — not a random
+    name. ``m1`` = state encoder (``--train llm --llm latent``), then m2/m3/m4/m6 as they
+    come online.
+
+    :param kw: the flattened spec (``vars(specs)``).
+    :return: a dict of ``name``, ``group``, ``job_type``, ``tags``, ``config``.
+    """
+    train, llm = kw.get("train"), kw.get("llm")
+    stage_map = {
+        ("llm", "latent"): "m1-state-encoder",
+        ("llm", "all"): "m1m2-encoder",
+        ("llm", "goal"): "m3-goal-extractor",
+        ("llm", "parameter"): "m3p-param-extractor",
+    }
+    if train in ("agent",) or kw.get("rl"):
+        stage = "m6-rl-agent"
+    else:
+        stage = stage_map.get((train, llm), f"{train or 'run'}-{llm}" if llm else (train or "run"))
+
+    model = str(kw.get("model_type") or "").rstrip("/").split("/")[-1].lower() or "model"
+    epochs, bs = kw.get("num_train_epochs"), kw.get("per_device_train_batch_size")
+
+    tags = [stage, model]
+    if epochs is not None:
+        tags.append(f"ep{epochs}")
+    if bs is not None:
+        tags.append(f"bs{bs}")
+    if kw.get("use_peft"):
+        tags.append("lora")
+    if kw.get("sharding") and kw.get("sharding") != "none":
+        tags.append(str(kw.get("sharding")))
+
+    name_bits = [stage, model]
+    if epochs is not None:
+        name_bits.append(f"e{epochs}")
+    if bs is not None:
+        name_bits.append(f"bs{bs}")
+
+    config_keys = [
+        "model_type", "train", "llm", "rl", "num_train_epochs",
+        "per_device_train_batch_size", "num_workers", "use_peft",
+        "lora_r", "lora_alpha", "sharding", "llm_torch_dtype", "device",
+    ]
+    config = {k: kw[k] for k in config_keys if k in kw}
+
+    return {
+        "name": "-".join(name_bits),
+        "group": stage,
+        "job_type": "train",
+        "tags": tags,
+        "config": config,
+    }
 
 
 def create_logger(report_to: str, **kwargs: Optional[str]):
@@ -158,7 +231,8 @@ def create_logger(report_to: str, **kwargs: Optional[str]):
                 os.makedirs(output_dir, exist_ok=True)
             return TensorBoardLogger(output_dir=output_dir)
         elif report_to == 'wandb':
-            return WandbLogger(**common_args)
+            wb_args = {k: common_args[k] for k in ("project", "entity") if k in common_args}
+            return WandbLogger(**wb_args, **_wandb_run_meta(kwargs))
         elif report_to == 'clearml':
             return ClearMLLogger(**common_args)
         else:
