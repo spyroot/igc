@@ -118,6 +118,7 @@ class IgcLanguageModule:
             # as a follow-up; the double-shift label fix is the active correctness change.
             if getattr(self._spec, 'use_peft', False):
                 from .peft_lora import apply_lora
+                lora_init = getattr(self._spec, 'lora_init', 'default')
                 pretrained_model = apply_lora(
                     pretrained_model,
                     r=getattr(self._spec, 'lora_r', 16),
@@ -125,6 +126,8 @@ class IgcLanguageModule:
                     dropout=getattr(self._spec, 'lora_dropout', 0.05),
                     target_modules=getattr(self._spec, 'lora_target_modules', None),
                     model_type=getattr(self._spec, 'model_type', None),
+                    adapter_method=getattr(self._spec, 'adapter_method', 'lora'),
+                    init_lora_weights=(True if lora_init in ('', 'default') else lora_init),
                 )
                 pretrained_model.print_trainable_parameters()
 

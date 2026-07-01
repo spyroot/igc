@@ -190,6 +190,12 @@ def add_model_type_group(parser):
         "--lora_target_modules", type=str, nargs="+", default=None,
         help="LoRA target module names; default auto-selects by backbone (GPT-2 Conv1D vs "
              "a modern decoder's q_proj/k_proj/...).")
+    model_type_group.add_argument(
+        "--adapter_method", type=str, default="lora", choices=["lora", "rslora", "dora"],
+        help="Adapter family (docs/TRAINING_OPTIMIZATION_PLAN.md ablation axis).")
+    model_type_group.add_argument(
+        "--lora_init", type=str, default="default", choices=["default", "pissa", "eva", "loftq"],
+        help="LoRA adapter initialization; maps to PEFT init_lora_weights.")
     return parser
 
 

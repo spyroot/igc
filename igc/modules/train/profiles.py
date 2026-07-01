@@ -79,7 +79,8 @@ class TrainingProfile:
     lr: float = 1e-4
     scheduler: str = "OneCycleLR"
     warmup_ratio: float = 0.03
-    max_steps: Optional[int] = None
+    epochs: int = 3                  # used when max_steps is None
+    max_steps: Optional[int] = None  # hard step cap (overrides epochs when set)
     sharding: str = "none"           # none | zero3 | fsdp
     seq_len: int = 1024
     num_workers: int = 8
@@ -91,7 +92,7 @@ class TrainingProfile:
             "precision": self.precision, "torch_dtype": self.torch_dtype,
             "batch_size": self.batch_size, "grad_accum": self.grad_accum, "lr": self.lr,
             "scheduler": self.scheduler, "warmup_ratio": self.warmup_ratio,
-            "max_steps": self.max_steps, "sharding": self.sharding,
+            "epochs": self.epochs, "max_steps": self.max_steps, "sharding": self.sharding,
             "seq_len": self.seq_len, "num_workers": self.num_workers,
         }
         if self.use_peft and self.adapter is not None:
