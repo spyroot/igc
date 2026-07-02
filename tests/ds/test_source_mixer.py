@@ -157,4 +157,36 @@ def test_invalid_eval_fraction_raises(bad):
         SourceMix([], eval_fraction=bad)
 
 
+def test_eval_split_id_encodes_policy():
+    """eval_split_id depends on floor/fraction/seed, not on the corpus contents."""
+    same_policy_a = SourceMix([_real_source(5)], eval_fraction=0.15, seed=0).manifest()
+    same_policy_b = SourceMix([_real_source(9)], eval_fraction=0.15, seed=0).manifest()
+    other_fraction = SourceMix([_real_source(5)], eval_fraction=0.30, seed=0).manifest()
+    assert same_policy_a.eval_split_id() == same_policy_b.eval_split_id()
+    assert same_policy_a.eval_split_id() != other_fraction.eval_split_id()
+    assert "REAL" in same_policy_a.eval_split_id() and "0.15" in same_policy_a.eval_split_id()
+
+
+def test_to_run_manifest_fields_feed_fair_comparison():
+    """DataManifest fields populate RunManifest so the report's fairness check sees the mix."""
+    from igc.modules.train.report import ResultBundle, RunManifest, compare
+
+    dm = SourceMix([_real_source(20)], eval_fraction=0.15, seed=0).manifest()
+    dm_same = SourceMix([_real_source(20)], eval_fraction=0.15, seed=0).manifest()
+    dm_other = SourceMix([_real_source(50)], eval_fraction=0.15, seed=0).manifest()  # different corpus
+
+    fields = dm.to_run_manifest_fields()
+    assert set(fields) == {"data_manifest", "eval_split"}
+
+    b1 = ResultBundle(manifest=RunManifest(run_id="r1", profile="p", model="m",
+                      adapter_method="lora", **dm.to_run_manifest_fields()), metrics={"recall@1": 0.6})
+    b2 = ResultBundle(manifest=RunManifest(run_id="r2", profile="p", model="m",
+                      adapter_method="rslora", **dm_same.to_run_manifest_fields()), metrics={"recall@1": 0.7})
+    b3 = ResultBundle(manifest=RunManifest(run_id="r3", profile="p", model="m",
+                      adapter_method="dora", **dm_other.to_run_manifest_fields()), metrics={"recall@1": 0.9})
+
+    assert not compare([b1, b2]).fairness_issues            # same mix + policy -> fair
+    assert "data_manifest" in " ".join(compare([b1, b3]).fairness_issues)  # different mix -> flagged
+
+
 # Author: Mus mbayramo@stanford.edu

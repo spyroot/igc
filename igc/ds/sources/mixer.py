@@ -74,6 +74,28 @@ class DataManifest:
         payload = json.dumps(self.__dict__, sort_keys=True, default=str)
         return hashlib.blake2b(payload.encode("utf-8"), digest_size=8).hexdigest()
 
+    def eval_split_id(self) -> str:
+        """Return a stable id of the eval-split policy (floor / fraction / seed).
+
+        Distinct from :meth:`content_hash` (which identifies the exact record mix): this
+        identifies HOW the split was drawn, so two runs over the same corpus with the same
+        policy share an ``eval_split`` id.
+
+        :return: e.g. ``"floor=REAL:frac=0.15:seed=0"``.
+        """
+        return f"floor={self.eval_trust_floor}:frac={self.eval_fraction}:seed={self.seed}"
+
+    def to_run_manifest_fields(self) -> Dict[str, str]:
+        """Fields to populate a training ``RunManifest`` from this mix.
+
+        A run records its exact data mix by constructing
+        ``RunManifest(..., **manifest.to_run_manifest_fields())`` so the report bundle's
+        fair-comparison check can tell whether two runs trained on the same data + split.
+
+        :return: ``{"data_manifest": content_hash, "eval_split": eval_split_id}``.
+        """
+        return {"data_manifest": self.content_hash(), "eval_split": self.eval_split_id()}
+
 
 class SourceMix:
     """Compose sources into one corpus with a deterministic trust-tier train/eval split.
