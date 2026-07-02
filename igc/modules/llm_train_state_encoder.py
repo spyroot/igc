@@ -62,6 +62,25 @@ def build_causal_lm_labels(input_ids, attention_mask, pad_token_id=None):
     return labels
 
 
+def is_accum_boundary(micro_step_index: int, accum_steps: int, total_batches: int) -> bool:
+    """Whether a manually-accumulated optimizer step should fire on this micro-batch.
+
+    Used on the plain (non-accelerator) path, which has no accumulation wrapper: fire every
+    ``accum_steps`` micro-batches, and always on the final batch of the epoch so a trailing
+    partial accumulation window is flushed rather than silently dropped. Over one epoch this
+    yields ``ceil(total_batches / accum_steps)`` optimizer steps.
+
+    :param micro_step_index: zero-based index of the current micro-batch within the epoch.
+    :param accum_steps: gradient accumulation steps (coerced to ``>= 1``).
+    :param total_batches: number of micro-batches in the epoch.
+    :return: ``True`` to run optimizer.step()/scheduler.step()/zero_grad() now.
+    """
+    accum_steps = max(1, accum_steps)
+    reached_window = (micro_step_index + 1) % accum_steps == 0
+    is_last_batch = (micro_step_index + 1) == total_batches
+    return reached_window or is_last_batch
+
+
 class LlmEmbeddingsTrainer(LlmModule):
     """
     Large language model trainer. Its main job train a language
@@ -110,7 +129,12 @@ class LlmEmbeddingsTrainer(LlmModule):
         self._save_freq = 16
 
         self._is_shuffle = True
-        self._pin_memory = False if "pin_memory" not in spec else spec.pin_memory
+        # pin_memory enables overlapped host->device copies (helps only on GPU). The real
+        # flag is --dataloader_pin_memory; the old "pin_memory" key never existed on spec,
+        # so this was always False. Default it on when CUDA is present (the launcher does
+        # not emit the flag) and honor an explicit --dataloader_pin_memory.
+        self._pin_memory = bool(
+            getattr(spec, "dataloader_pin_memory", False)) or torch.cuda.is_available()
         self._reset_lr = False if "reset_lr" not in spec else spec.reset_lr
         self._num_workers = spec.num_workers
         self._lr = spec.llm_learning_rate
@@ -444,6 +468,13 @@ class LlmEmbeddingsTrainer(LlmModule):
         calculated_total_batches = dataset_size // self.batch_size
         batch_log_frequency = round(64 * 0.2)
 
+        # Gradient accumulation. On the plain path we step every `accum` micro-batches; under
+        # accelerate the prepared optimizer/scheduler gate themselves and accelerator.backward()
+        # scales the loss, so `accum` here only drives the manual (non-accelerator) path.
+        accum = max(1, int(getattr(self._trainer_args, "gradient_accumulation_steps", 1)))
+        if self.is_rank_zero():
+            self.logger.info(f"Gradient accumulation steps: {accum}")
+
         if total_batches == calculated_total_batches:
             print(f"Rank {self.rank}, Staring training, "
                   f"total_batches: {total_batches} "
@@ -464,8 +495,9 @@ class LlmEmbeddingsTrainer(LlmModule):
 
             for _, batch in enumerate(train_dataloader):
 
-                input_ids = batch['input_ids'].to(self.device)
-                attention_mask = batch['attention_mask'].to(self.device)
+                input_ids = batch['input_ids'].to(self.device, non_blocking=self._pin_memory)
+                attention_mask = batch['attention_mask'].to(
+                    self.device, non_blocking=self._pin_memory)
 
                 # Full-length labels: a HF CausalLM shifts internally (loss over
                 # logits[:-1] vs labels[1:]). Pre-shifting the target here as well
@@ -481,19 +513,35 @@ class LlmEmbeddingsTrainer(LlmModule):
                     'labels': labels,
                 }
 
-                outputs = self.model(**batch_inputs)
-                loss = outputs.loss
-
-                self.optimizer.zero_grad()
                 if self.is_accelerator:
-                    self.accelerator.backward(loss)
+                    # Accelerate owns accumulation: accelerator.backward() scales the loss by
+                    # gradient_accumulation_steps (DeepSpeed scales internally), and the prepared
+                    # optimizer/scheduler no-op on non-boundary micro-batches, so stepping every
+                    # iteration inside accumulate() is correct.
+                    with self.accelerator.accumulate(self.model):
+                        outputs = self.model(**batch_inputs)
+                        loss = outputs.loss
+                        self.accelerator.backward(loss)
+                        self.optimizer.step()
+                        self.scheduler.step()
+                        self.optimizer.zero_grad()
+                    is_step = self.accelerator.sync_gradients
                 else:
-                    loss.backward()
+                    # Plain path has no wrapper: accumulate by hand. Scale the loss by accum,
+                    # backward every micro-batch, and only step on the accumulation boundary so
+                    # --gradient_accumulation_steps is actually honored (it was ignored before).
+                    outputs = self.model(**batch_inputs)
+                    loss = outputs.loss
+                    (loss / accum).backward()
+                    is_step = is_accum_boundary(num_batches, accum, total_batches)
+                    if is_step:
+                        self.optimizer.step()
+                        self.scheduler.step()
+                        self.optimizer.zero_grad()
 
-                self.optimizer.step()
-                self.scheduler.step()
-
-                if self.is_rank_zero():
+                # Log once per real optimizer step so the curves track optimizer steps, not
+                # micro-batches. grad_norm here is measure-only (max_norm=inf never clips).
+                if is_step and self.is_rank_zero():
                     step = epoch * total_batches + num_batches
                     current_lr = self.optimizer.param_groups[0]['lr']
                     grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -504,9 +552,7 @@ class LlmEmbeddingsTrainer(LlmModule):
 
                 batch_losses[num_batches] = loss.item()
                 total_loss += loss.item()
-                torch.cuda.empty_cache()
 
-                #
                 if self._is_quantize:
                     self.model.apply(torch.quantization.propagate_qconfig_)
                     self.model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
