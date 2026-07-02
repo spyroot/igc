@@ -81,6 +81,20 @@ def is_accum_boundary(micro_step_index: int, accum_steps: int, total_batches: in
     return reached_window or is_last_batch
 
 
+def reached_max_steps(global_step: int, max_steps: Optional[int]) -> bool:
+    """Whether training should stop because the optimizer-step cap is reached.
+
+    ``--max_train_steps`` caps the number of OPTIMIZER updates (not micro-batches). A value of
+    ``None`` or ``<= 0`` means no cap. Without this check ``_train`` loops ``num_train_epochs``
+    (default 1000) and silently ignores the step cap.
+
+    :param global_step: optimizer steps taken so far this run.
+    :param max_steps: the configured cap, or ``None`` / ``<= 0`` for uncapped.
+    :return: ``True`` when ``max_steps`` is a positive int and ``global_step >= max_steps``.
+    """
+    return max_steps is not None and max_steps > 0 and global_step >= max_steps
+
+
 class LlmEmbeddingsTrainer(LlmModule):
     """
     Large language model trainer. Its main job train a language
@@ -475,6 +489,11 @@ class LlmEmbeddingsTrainer(LlmModule):
         if self.is_rank_zero():
             self.logger.info(f"Gradient accumulation steps: {accum}")
 
+        # Honor --max_train_steps: cap OPTIMIZER updates. Without this the loop runs
+        # num_train_epochs (default 1000) and ignores the cap entirely.
+        max_steps = getattr(self._trainer_args, "max_train_steps", None)
+        global_opt_steps = 0
+
         if total_batches == calculated_total_batches:
             print(f"Rank {self.rank}, Staring training, "
                   f"total_batches: {total_batches} "
@@ -484,6 +503,8 @@ class LlmEmbeddingsTrainer(LlmModule):
                   f"batch stats freq: {batch_log_frequency}.")
 
         for epoch in range(last_epoch, self.num_epochs):
+            if reached_max_steps(global_opt_steps, max_steps):
+                break
             self.model.train()
 
             total_loss = 0.0
@@ -550,6 +571,9 @@ class LlmEmbeddingsTrainer(LlmModule):
                     self.metric_logger.log_metric("train/lr", current_lr, step)
                     self.metric_logger.log_metric("train/grad_norm", grad_norm, step)
 
+                if is_step:
+                    global_opt_steps += 1
+
                 batch_losses[num_batches] = loss.item()
                 total_loss += loss.item()
 
@@ -568,6 +592,9 @@ class LlmEmbeddingsTrainer(LlmModule):
 
                 num_batches += 1
                 self._current_mask_method_counter += 1
+
+                if reached_max_steps(global_opt_steps, max_steps):
+                    break
 
             # one monotonic step at the epoch boundary for per-epoch metrics
             epoch_step = (epoch + 1) * total_batches - 1

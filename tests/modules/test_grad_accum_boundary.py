@@ -16,7 +16,7 @@ import math
 
 import pytest
 
-from igc.modules.llm_train_state_encoder import is_accum_boundary
+from igc.modules.llm_train_state_encoder import is_accum_boundary, reached_max_steps
 
 
 def _boundaries(total, accum):
@@ -56,6 +56,20 @@ def test_final_batch_always_flushes():
     """The last micro-batch is always a boundary so no accumulated gradients are stranded."""
     assert is_accum_boundary(9, 4, 10) is True   # last batch, mid-window
     assert is_accum_boundary(5, 4, 6) is True     # last batch, partial window
+
+
+def test_reached_max_steps_uncapped_when_none_or_nonpositive():
+    """None / 0 / negative max_steps mean no cap, so training never stops on the counter."""
+    assert reached_max_steps(10_000, None) is False
+    assert reached_max_steps(10_000, 0) is False
+    assert reached_max_steps(10_000, -5) is False
+
+
+def test_reached_max_steps_stops_at_the_cap():
+    """With a positive cap, stop once optimizer steps reach it (honors --max_train_steps)."""
+    assert reached_max_steps(49, 50) is False
+    assert reached_max_steps(50, 50) is True
+    assert reached_max_steps(51, 50) is True
 
 
 # Author: Mus mbayramo@stanford.edu
