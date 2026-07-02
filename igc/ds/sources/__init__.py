@@ -18,6 +18,12 @@ from igc.ds.sources.base import (
 )
 from igc.ds.sources.redfish_fixture_source import RedfishFixtureSource
 from igc.ds.sources.mixer import DataManifest, SourceMix, unit_hash
+from igc.ds.sources.training_object import (
+    TrainingExample,
+    compact_resource,
+    normalize,
+    normalize_record,
+)
 
 __all__ = [
     "READ_METHODS",
@@ -28,6 +34,10 @@ __all__ = [
     "SourceMix",
     "DataManifest",
     "unit_hash",
+    "TrainingExample",
+    "compact_resource",
+    "normalize",
+    "normalize_record",
 ]
 
 # Author: Mus mbayramo@stanford.edu
