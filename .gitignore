@@ -181,6 +181,11 @@ CLAUDE_PATCH.diff
 .claude/
 .internal/
 
+# Internal docs — operational/private: cluster topology, node IPs/hosts, runbooks,
+# private endpoints, secrets-adjacent notes. External (public-safe) docs live in docs/
+# and ARE committed; anything internal goes here and is never committed.
+docs/internal/
+
 # Slurm job logs (training output) — never commit
 *.out
 slurm-*.out
