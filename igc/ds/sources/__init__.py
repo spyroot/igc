@@ -24,6 +24,14 @@ from igc.ds.sources.training_object import (
     normalize,
     normalize_record,
 )
+from igc.ds.sources.corpus_io import (
+    iter_examples,
+    read_examples,
+    read_manifest,
+    write_corpus,
+    write_examples,
+    write_manifest,
+)
 
 __all__ = [
     "READ_METHODS",
@@ -38,6 +46,12 @@ __all__ = [
     "compact_resource",
     "normalize",
     "normalize_record",
+    "write_examples",
+    "iter_examples",
+    "read_examples",
+    "write_manifest",
+    "read_manifest",
+    "write_corpus",
 ]
 
 # Author: Mus mbayramo@stanford.edu
