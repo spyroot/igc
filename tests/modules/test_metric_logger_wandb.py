@@ -23,7 +23,9 @@ class _FakeWandb:
         self.last_init = None
         self.run = _FakeRun()
 
-    def init(self, project=None, entity=None):
+    def init(self, project=None, entity=None, **kwargs):
+        # Real wandb.init also accepts name/group/job_type/tags/config; accept and ignore
+        # them here so the fake matches how WandbLogger calls wandb.init.
         self.last_init = {"project": project, "entity": entity}
         return self.run
 
