@@ -8,8 +8,11 @@ sharding. Data/output dirs are intentionally NOT baked in. Pure stdlib.
 Author:
 Mus mbayramo@stanford.edu
 """
+import json
 
-from igc.modules.train.launch import profile_to_argv
+import pytest
+
+from igc.modules.train.launch import main, profile_to_argv
 from igc.modules.train.profiles import resolve_profile
 
 
@@ -54,6 +57,42 @@ def test_override_flows_into_argv():
     """A resolved override (e.g. batch_size) is reflected in the argv."""
     argv = profile_to_argv(resolve_profile("m1_7b_lora", batch_size=16))
     assert _val(argv, "--per_device_train_batch_size") == "16"
+
+
+def test_main_print_argv_applies_typed_set_overrides(capsys):
+    """CLI --set overrides are coerced before printing the igc_main argv."""
+    rc = main([
+        "--profile", "m1_3b_lora",
+        "--set", "batch_size=12",
+        "--set", "lr=2e-4",
+        "--set", "max_steps=25",
+        "--print-argv",
+    ])
+    argv = capsys.readouterr().out.strip().split()
+
+    assert rc == 0
+    assert _val(argv, "--per_device_train_batch_size") == "12"
+    assert _val(argv, "--llm_learning_rate") == "0.0002"
+    assert _val(argv, "--max_train_steps") == "25"
+    assert "--num_train_epochs" not in argv
+
+
+def test_main_prints_public_safe_profile_json(capsys):
+    """Without --print-argv, CLI output is a resolved profile JSON payload."""
+    rc = main(["--profile", "m1_7b_full_zero3", "--set", "num_workers=2"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert payload["profile"] == "m1_7b_full_zero3"
+    assert payload["num_workers"] == 2
+    assert payload["adapter"]["method"] == "full_finetune"
+    assert "json_data_dir" not in payload and "output_dir" not in payload
+
+
+def test_main_rejects_unknown_set_override():
+    """A typo in --set fails loudly instead of silently changing the command."""
+    with pytest.raises(ValueError, match="unknown profile override"):
+        main(["--profile", "m1_3b_lora", "--set", "btch_size=16"])
 
 
 # Author: Mus mbayramo@stanford.edu
