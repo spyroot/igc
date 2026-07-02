@@ -76,6 +76,32 @@ validation model only.
 Knobs (env): `IGC_MODEL`, `EPOCHS`, `SEED`, `IGC_USE_PEFT` (+`LORA_R`/`LORA_ALPHA`), `IGC_DIR`, `DATA_DIR`, `NGC_IMAGE`, `IGC_REPORT`,
 `WANDB_PROJECT`, `WANDB_NAME`.
 
+### Profile launcher for tuning
+
+[scripts/run_profile.sh](../scripts/run_profile.sh) is the launcher for profile-based M1 tuning; it
+calls `igc.modules.train.launch`, which expands a named profile into `igc_main.py` flags and then
+passes trailing arguments through to the trainer. Use it when you need knobs that
+`scripts/train_m1.sbatch` does not expose directly. Its wrapper-specific environment variables are
+`IGC_PROFILE`, `IGC_DATA_DIR`, `IGC_OUTPUT_DIR`, and `IGC_METRIC_REPORT`.
+
+```bash
+IGC_PROFILE=m1_gpt2_smoke \
+IGC_DATA_DIR=$HOME/.json_responses \
+IGC_METRIC_REPORT=tensorboard \
+bash scripts/run_profile.sh --gradient_accumulation_steps 4 --num_workers 2
+```
+
+For the first large-backbone run, keep `per_device_train_batch_size` small, raise
+`--gradient_accumulation_steps` before raising the micro-batch size, and watch the reported GPU memory
+and tokens/sec in the selected metric backend. Tune `--num_workers` only if loader throughput becomes
+the bottleneck.
+
+### Multi-stage launcher
+
+[scripts/train_igc.sbatch](../scripts/train_igc.sbatch) is the staged curriculum launcher; it writes
+stage outputs under `experiments/${IGC_RUN}`. Keep the same `IGC_RUN` for every stage so later stages
+can find earlier checkpoints; see the script header for stage names and epoch knobs.
+
 ## 5. Checkpoints & weight sharing
 
 Checkpoints land in `output_dir/run_name/<module>` (node-local). **Weights never go into the igc
