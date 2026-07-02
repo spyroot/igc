@@ -79,6 +79,36 @@ def test_allowed_methods_matched_by_url(tmp_path: Path) -> None:
     assert by_url["/redfish/v1/Chassis/1"].allowed_methods is None  # not in map
 
 
+def test_allowed_methods_match_filename_fallback_url(tmp_path: Path) -> None:
+    """The .npy method map still applies when URL comes from the filename."""
+    amap = {"/redfish/v1/Chassis/1": ["GET", "HEAD"]}
+    src = RedfishFixtureSource(str(_corpus(tmp_path)), "real_dell", TrustLevel.REAL,
+                               allowed_methods_map=amap)
+    rec = next(r for r in src.iter_records()
+               if r.provenance["file"] == "_redfish_v1_Chassis_1.json")
+    assert rec.url == "/redfish/v1/Chassis/1"
+    assert rec.allowed_methods == ["GET", "HEAD"]
+
+
+def test_glob_pattern_limits_selected_fixture_files(tmp_path: Path) -> None:
+    """A custom glob selects only matching corpus files and skips sidecars."""
+    root = tmp_path / "capture"
+    _write(root, "_redfish_v1_Systems_1.json",
+           {"@odata.id": "/redfish/v1/Systems/1", "Id": "1"})
+    _write(root, "_redfish_v1_Systems_2.extra.json",
+           {"@odata.id": "/redfish/v1/Systems/2", "Id": "2"})
+    _write(root, "_redfish_v1_Chassis_1.txt",
+           {"@odata.id": "/redfish/v1/Chassis/1", "Id": "1"})
+
+    src = RedfishFixtureSource(str(root), "real_dell", TrustLevel.REAL,
+                               glob_pattern="*_Systems_1.json")
+
+    recs = list(src.iter_records())
+    assert [r.url for r in recs] == ["/redfish/v1/Systems/1"]
+    assert src.num_emitted == 1
+    assert src.num_skipped == 0
+
+
 def test_url_from_filename_helper() -> None:
     """The filename->URL reconstruction strips markers and maps '_'->'/'."""
     f = RedfishFixtureSource.url_from_filename
