@@ -17,6 +17,7 @@ from igc.ds.sources.base import (
     TrustLevel,
 )
 from igc.ds.sources.redfish_fixture_source import RedfishFixtureSource
+from igc.ds.sources.mixer import DataManifest, SourceMix, unit_hash
 
 __all__ = [
     "READ_METHODS",
@@ -24,6 +25,9 @@ __all__ = [
     "SourceRecord",
     "TrustLevel",
     "RedfishFixtureSource",
+    "SourceMix",
+    "DataManifest",
+    "unit_hash",
 ]
 
 # Author: Mus mbayramo@stanford.edu
