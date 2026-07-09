@@ -34,6 +34,33 @@ def _resolve_dtype(name: Optional[str]):
     return getattr(torch, name)
 
 
+def _from_pretrained_best_attention(model_id: str, load_kwargs: dict):
+    """Load a causal LM preferring the fastest attention kernel the env supports.
+
+    Tries FlashAttention-2 (CUDA only), then SDPA, then falls back to the default
+    (eager) path. On CPU or a backbone that doesn't support the faster kernels
+    (e.g. GPT-2) this is a no-op that returns the same model as before, so it is
+    safe offline while giving the 3B/7B GPU profiles FlashAttention on GB300.
+
+    :param model_id: HF repo id or local model dir.
+    :param load_kwargs: kwargs already assembled (trust_remote_code, torch_dtype).
+    :return: the loaded ``AutoModelForCausalLM``.
+    """
+    import torch
+
+    candidates = []
+    if torch.cuda.is_available():
+        candidates.append("flash_attention_2")
+    candidates.append("sdpa")
+    for impl in candidates:
+        try:
+            return AutoModelForCausalLM.from_pretrained(
+                model_id, attn_implementation=impl, **load_kwargs)
+        except (ImportError, ValueError, RuntimeError, OSError):
+            continue
+    return AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
+
+
 def from_pretrained_default(
         args: Union[str, argparse.Namespace],
         only_tokenizer: bool = False,
@@ -71,7 +98,7 @@ def from_pretrained_default(
         load_kwargs = {"trust_remote_code": trust_remote_code}
         if torch_dtype is not None:
             load_kwargs["torch_dtype"] = torch_dtype
-        model = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
+        model = _from_pretrained_best_attention(model_id, load_kwargs)
 
     if not only_model:
         tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=trust_remote_code)
