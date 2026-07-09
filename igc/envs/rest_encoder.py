@@ -4,6 +4,7 @@ import torch
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from igc.modules.encoders.backbone_utils import backbone_module, emb_shape
+from igc.modules.shared.llm_shared import safe_resize_token_embeddings
 
 
 class RestBaseEncoder:
@@ -17,7 +18,7 @@ class RestBaseEncoder:
         # Backbone-agnostic base module (GPT-2 .transformer, Llama .model, ...) and dims.
         self.encoder_model = backbone_module(model)
         self.model.config.is_decoder = False
-        self.model.resize_token_embeddings(len(tokenizer))
+        safe_resize_token_embeddings(self.model, tokenizer)
         self.device = device
 
         # (positions, hidden) from the backbone config — works for RoPE backbones with no

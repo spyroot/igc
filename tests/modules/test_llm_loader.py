@@ -1,7 +1,7 @@
 """Offline tests for the config-driven backbone loader (igc.modules.shared.llm_shared).
 
 Mocks AutoModelForCausalLM/AutoTokenizer so it verifies the dispatch (local path or HF id,
-trust_remote_code, torch_dtype, pad-token handling) with no download — the change that lets
+trust_remote_code, dtype, pad-token handling) with no download — the change that lets
 --model_type=/home/nvidia/models/DeepSeek-V4-Flash load the raw weights off the node.
 
 Author:
@@ -63,7 +63,7 @@ def test_loads_local_path_with_trust_and_dtype(monkeypatch):
     model_id, kw = captured["model"]
     assert model_id == "/home/nvidia/models/DeepSeek-V4-Flash"
     assert kw["trust_remote_code"] is True
-    assert kw["torch_dtype"] is torch.bfloat16
+    assert kw["dtype"] is torch.bfloat16  # transformers 5.x kwarg (torch_dtype deprecated)
     assert captured["tok"][1]["trust_remote_code"] is True
     # pad token gets filled from eos when the tokenizer lacks one
     assert tokenizer.pad_token == "<eos>"
@@ -77,7 +77,7 @@ def test_bare_string_carries_no_flags(monkeypatch):
     model_id, kw = captured["model"]
     assert model_id == "gpt2"
     assert kw["trust_remote_code"] is False
-    assert "torch_dtype" not in kw  # None dtype is not forwarded
+    assert "dtype" not in kw and "torch_dtype" not in kw  # None dtype is not forwarded
 
 
 def test_only_tokenizer_skips_model(monkeypatch):
@@ -126,8 +126,8 @@ def test_load_pretrained_default_forwards_loader_flags(monkeypatch):
             "trust_remote_code": True,
             "ignore_mismatched_sizes": True,
             "output_loading_info": True,
-            "_fast_init": False,
-            "torch_dtype": "auto",
+            # _fast_init is no longer forwarded: transformers 5.x ignores it.
+            "dtype": "auto",
             "device_map": {"": "cpu"},
         },
     )

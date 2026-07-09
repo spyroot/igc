@@ -25,7 +25,7 @@ from .igc_metric_logger import MetricLogger
 from .igc_specs import make_default_spec
 from .igc_state import IgcBaseState
 from .igc_tokenize_state import GenericTokenizeState
-from ..shared.llm_shared import from_pretrained_default
+from ..shared.llm_shared import from_pretrained_default, safe_resize_token_embeddings
 from ...ds import ds_utils as igc_util
 from ...ds.redfish_dataset import JSONDataset
 from ...modules.base.igc_abstract_logger import AbstractLogger
@@ -135,7 +135,7 @@ class IgcModule(IgcBaseState):
 
         # model param
         self.model = llm_model
-        self.model.resize_token_embeddings(len(llm_tokenizer))
+        safe_resize_token_embeddings(self.model, llm_tokenizer)
         self.tokenizer = llm_tokenizer
         self.module_name = module_name
 
@@ -1280,9 +1280,10 @@ class IgcModule(IgcBaseState):
         )
 
         if pre_trained_tokenizer is not None:
-            pre_trained.resize_token_embeddings(len(pre_trained_tokenizer))
-            pre_trained_tokenizer.pad_token = pre_trained_tokenizer.eos_token
-            pre_trained_tokenizer.pad_token_id = pre_trained_tokenizer.eos_token_id
+            safe_resize_token_embeddings(pre_trained, pre_trained_tokenizer)
+            if pre_trained_tokenizer.pad_token is None:
+                pre_trained_tokenizer.pad_token = pre_trained_tokenizer.eos_token
+                pre_trained_tokenizer.pad_token_id = pre_trained_tokenizer.eos_token_id
             pre_trained.config.pad_token_id = pre_trained_tokenizer.pad_token_id
             pre_trained.config.eos_token_id = pre_trained_tokenizer.eos_token_id
             pre_trained.config.pad_token = pre_trained_tokenizer.pad_token

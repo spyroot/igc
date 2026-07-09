@@ -21,7 +21,11 @@ from ...modules.base.igc_metric_logger import MetricLogger
 from ...modules.igc_train_auto_state_encoder import AutoencoderTrainer
 from ...modules.llm_train_goal_extract import GoalExtractorTrainer
 from ...modules.llm_train_state_encoder import LlmEmbeddingsTrainer
-from ...modules.shared.llm_shared import from_pretrained_default, load_igc_tokenizer
+from ...modules.shared.llm_shared import (
+    from_pretrained_default,
+    load_igc_tokenizer,
+    safe_resize_token_embeddings,
+)
 from ...shared.modules_typing import ModelType, IgcModuleType
 
 
@@ -90,7 +94,7 @@ class IgcLanguageModule:
             _model, _ = self._from_pretrained_fn(
                 self._spec, only_tokenizer=False, only_model=True
             )
-            _model.resize_token_embeddings(len(self._dataset.tokenizer))
+            safe_resize_token_embeddings(_model, self._dataset.tokenizer)
             llm_state = ModelType.PRETRAINED
             return _model, llm_tokenizer, llm_state
 
@@ -109,7 +113,7 @@ class IgcLanguageModule:
             )
 
             if hasattr(pretrained_model, 'resize_token_embeddings'):
-                pretrained_model.resize_token_embeddings(len(self._dataset.tokenizer))
+                safe_resize_token_embeddings(pretrained_model, self._dataset.tokenizer)
 
             # LoRA via PEFT for large-backbone fine-tuning on a single GPU (--use_peft).
             # Embeddings stay frozen (apply_lora default): training the resized IGC-token
@@ -210,7 +214,7 @@ class IgcLanguageModule:
                 metric_logger=self._metric_logger
             )
             if hasattr(_model, 'resize_token_embeddings'):
-                _model.resize_token_embeddings(len(tokenizer))
+                safe_resize_token_embeddings(_model, tokenizer)
             goal_extractor.train_goal_representation()
 
         # we train goal and parameter extractor, the goal here to extract
@@ -227,7 +231,7 @@ class IgcLanguageModule:
                 is_inference=False
             )
             if hasattr(_model, 'resize_token_embeddings'):
-                _model.resize_token_embeddings(len(tokenizer))
+                safe_resize_token_embeddings(_model, tokenizer)
             parameter_extractor.train_goal_and_parameter_extractor()
 
         # we train auto encoder the aim here to reduce state re-presentation
@@ -244,7 +248,7 @@ class IgcLanguageModule:
                 device=self._spec.device)
 
             if hasattr(_model, 'resize_token_embeddings'):
-                _model.resize_token_embeddings(len(tokenizer))
+                safe_resize_token_embeddings(_model, tokenizer)
             autoencoder.train()
 
         # self.llm_autoencoder.train_autoencoder()
@@ -270,8 +274,14 @@ class IgcLanguageModule:
             device_map=spec.device_map
         )
         tokenizer = load_igc_tokenizer()
-        model.resize_token_embeddings(len(tokenizer))
-        model.config.pad_token_id = model.config.eos_token_id
+        safe_resize_token_embeddings(model, tokenizer)
+        # pad comes from the tokenizer; config.eos_token_id may be a LIST on
+        # Llama-3-style configs, so never assign it to pad blindly.
+        if tokenizer.pad_token_id is not None:
+            model.config.pad_token_id = tokenizer.pad_token_id
+        elif model.config.pad_token_id is None:
+            eos = model.config.eos_token_id
+            model.config.pad_token_id = eos[0] if isinstance(eos, list) else eos
         return model, tokenizer
 
     @staticmethod
