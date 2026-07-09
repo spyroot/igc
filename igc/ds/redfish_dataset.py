@@ -1848,8 +1848,8 @@ class JSONDataset(
     def build_special_tok_table() -> List[str]:
         """
         This method called to build a table for all tokens.
-        This token added to a tokenizer,  we also store in dataset
-        on client when we download dataset we need make
+        Token added to a tokenizer,  note we also store in dataset
+        on client side when we download dataset we need make
         sure we use same token ids.
 
         Again it important since during masking if we make

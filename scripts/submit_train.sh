@@ -8,7 +8,7 @@
 #   IGC_MODEL=<hf-id> IGC_USE_PEFT=1 EPOCHS=3 ./scripts/submit_train.sh m1
 #   ./scripts/submit_train.sh m6 -w gb300-poc1-slot7   # pin to a node where data is staged
 #
-# Never targets slot2 (Flash), slot15 (download), slot16 (down).
+# Never targets slot2 (Flash), slot15/.55 (Pro, TP=4 — busy), slot16 (down). slot1/.41 is also down.
 
 set -euo pipefail
 
@@ -33,7 +33,7 @@ echo "== per-node GRES + state =="
 sinfo -o "%n %G %t" || true
 
 echo
-echo "Reminder: Slurm cannot see the out-of-band Flash containers. Before a long run, confirm your"
+echo "Reminder: Slurm cannot see the out-of-band Flash/Pro containers. Before a long run, confirm your"
 echo "target node is truly free:  ssh nvidia@<node> nvidia-smi   (a Flash replica sits on its GPU 0)."
 echo "Excluding: ${EXCLUDE}"
 echo
