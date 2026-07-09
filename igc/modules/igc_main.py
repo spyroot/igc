@@ -84,6 +84,8 @@ class IgcMain:
             self._dataset = MaskedJSONDataset(
                 self._dataset_dir,
                 default_tokenize=self._specs.model_type,
+                max_len=self._specs.seq_len,
+                recreate_dataset=self._specs.recreate_dataset,
                 do_consistency_check=self._specs.do_consistency_check
             )
         return self._dataset
@@ -145,6 +147,8 @@ class IgcMain:
         self._dataset = MaskedJSONDataset(
             self._dataset_dir,
             default_tokenize=self._specs.model_type,
+            max_len=self._specs.seq_len,
+            recreate_dataset=self._specs.recreate_dataset,
             do_consistency_check=self._specs.do_consistency_check
         )
 
