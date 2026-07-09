@@ -36,12 +36,11 @@ def env_reward_function(state, goal):
     :return: Reward vector with ``1.0`` when any state row matches the goal,
         otherwise ``0.0``.
     """
-    # print(f"state {state.shape} {goal.shape}")
-    is_goal_reached = torch.any(torch.all(state == goal, dim=1), dim=0)
-    goal_reached = torch.where(is_goal_reached, torch.tensor(1.0), torch.tensor(0.0))
-    goal_reached = goal_reached.unsqueeze(dim=0).expand(state.size(0))
-    # print("Goal reached shape", goal_reached.shape)
-    return goal_reached
+    # per-row match with the same tolerance VectorizedRestApiEnv.check_goal uses,
+    # so HER-recomputed success and env success agree; a cross-batch any() here
+    # previously leaked one env's success to every row of the relabeled batch.
+    matched = torch.all(torch.isclose(state, goal, rtol=1e-3, atol=1e-3), dim=1)
+    return matched.to(torch.float32)
 
 
 class IgcAgentTrainer(RlBaseModule):
@@ -129,9 +128,9 @@ class IgcAgentTrainer(RlBaseModule):
 
         self.current_goal_action = None
         self.action_dim = self.env.action_space.shape[-1]
-        self.observation_space = 1025
-
-        self.device = device
+        # observation width comes from the env's encoder, not a legacy constant;
+        # the base module already resolved self.device (read-only property here).
+        self.observation_space = self.env.observation_space.shape[-1]
         self.agent_model = Igc_QNetwork(
             self.observation_space * 2,
             self.action_dim,
@@ -349,6 +348,9 @@ class IgcAgentTrainer(RlBaseModule):
             losses = []
 
             for _ in range(self.num_episodes):
+                # a fresh goal per episode: HER relabels alone do not vary the
+                # conditioning goal, so a single fixed goal starves generalization.
+                self.current_goal = self._create_goal()
                 episode_experience, rewards_sum_per_trajectory, goal_reached_count = self.train_goal(epsilon)
                 total_goal_reached += goal_reached_count
                 self.update_replay_buffer(episode_experience)
@@ -398,3 +400,20 @@ class IgcAgentTrainer(RlBaseModule):
 
             # Decay epsilon
             epsilon *= self.epsilon_decay_factor
+
+            # persist the agent: without this a full run discarded every weight.
+            if self._module_checkpoint_dir is not None:
+                self.save_checkpoint(
+                    self._module_checkpoint_dir,
+                    epoch=epoch_idx,
+                    model=self.agent_model,
+                    optimizer=self.optimizer,
+                )
+
+        if self._module_checkpoint_dir is not None:
+            self.save_checkpoint(
+                self._module_checkpoint_dir,
+                epoch=self.num_epochs,
+                model=self.agent_model,
+                optimizer=self.optimizer,
+            )
