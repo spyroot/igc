@@ -117,7 +117,7 @@ class IgcModule(IgcBaseState):
             raise ValueError("Invalid value for per_device_train_batch_size. "
                              "It should be greater than 0.")
 
-        if spec.overfit and spec.per_device_train_batch_size > len(ds):
+        if spec.overfit and ds is not None and spec.per_device_train_batch_size > len(ds):
             raise ValueError("Invalid combination of overfit and per_device_train_batch_size. "
                              "per_device_train_batch_size should be smaller than "
                              "the dataset size when overfit is True.")
@@ -284,7 +284,10 @@ class IgcModule(IgcBaseState):
             raise ValueError(
                 "Invalid dataset sizes. Adjust the ratio value to ensure non-zero splits.")
 
-        return random_split(self.dataset, [train_size, eval_size])
+        seed = int(getattr(self._trainer_args, "seed", 42) or 42)
+        return random_split(
+            self.dataset, [train_size, eval_size],
+            generator=torch.Generator().manual_seed(seed))
 
     def split_slice_dataset(
             self,
@@ -313,8 +316,8 @@ class IgcModule(IgcBaseState):
         indices = torch.randperm(len(self.dataset))
         data = torch.utils.data.Subset(self.dataset, indices[:sample_size])
 
-        train_size = int(len(self.dataset) * train_ratio)
-        eval_size = len(self.dataset) - train_size
+        train_size = int(len(data) * train_ratio)
+        eval_size = len(data) - train_size
 
         if train_size <= 0 or eval_size <= 0:
             raise ValueError(
@@ -384,6 +387,7 @@ class IgcModule(IgcBaseState):
         if not os.path.exists(model_file):
             warnings.warn(f"Checkpoint file {model_file} not found.")
             return False
+        return True
 
     @staticmethod
     def last_checkpoint(module_checkpoint_dir: str):
@@ -395,7 +399,12 @@ class IgcModule(IgcBaseState):
         checkpoint_files = [f for f in os.listdir(module_checkpoint_dir) if f.endswith('.pt')]
         checkpoint_files = [os.path.join(module_checkpoint_dir, f) for f in checkpoint_files]
         checkpoint_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
-        if checkpoint_files:
+        # prefer real epoch checkpoints (which carry optimizer/scheduler state) over the
+        # weights-only {module}_last.pt written by save_model; fall back to it otherwise.
+        resumable = [f for f in checkpoint_files if not f.endswith('_last.pt')]
+        if resumable:
+            checkpoint_file = resumable[0]
+        elif checkpoint_files:
             checkpoint_file = checkpoint_files[0]
 
         return checkpoint_file
@@ -523,7 +532,9 @@ class IgcModule(IgcBaseState):
         :param checkpoint_dir: The directory containing the model.
         """
         if map_location is None:
-            map_location = {'cuda:1': 'cuda:0'}
+            # default to cpu: safe on any box (no cuda:1-only remap, no MPS dtype
+            # limits); load_state_dict moves tensors onto the model's device.
+            map_location = 'cpu'
 
         model_file = self._model_file(checkpoint_dir)
         if not os.path.exists(model_file):
@@ -595,7 +606,7 @@ class IgcModule(IgcBaseState):
             'is_trained': True,
         }
 
-        if optimizer is not None:
+        if _optimizer is not None:
             checkpoint['optimizer_state_dict'] = _optimizer.state_dict()
 
         if _shed is not None:
@@ -612,7 +623,7 @@ class IgcModule(IgcBaseState):
             checkpoint['initial_lr'] = initial_lr
 
         if batch_idx is not None:
-            checkpoint['batch_idx'] = initial_lr
+            checkpoint['batch_idx'] = batch_idx
 
         torch.save(checkpoint, checkpoint_file)
 
@@ -770,7 +781,9 @@ class IgcModule(IgcBaseState):
         :param map_location: where are mapping the model to.
 
         """
-        map_to = {'cuda:1': 'cuda:0'} if map_location is None else map_location
+        # default to cpu: safe on any box; load_state_dict moves tensors to the
+        # model's device, so an explicit map is only needed for special layouts.
+        map_to = 'cpu' if map_location is None else map_location
         module_dir, experiment_dir = IgcModule.checkpoint_dir(specs, module_name)
         last_checkpoint_file = IgcModule.last_checkpoint(module_dir)
         last_module_file = IgcModule.model_file(experiment_dir, module_name)
