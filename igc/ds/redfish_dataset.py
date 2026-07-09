@@ -510,7 +510,8 @@ class JSONDataset(
                 "mirrors": self._mirrors,
                 "resources": self._resources,
                 "tokenizer": {
-                    "num_tokens": len(self.tokenizer)
+                    "num_tokens": len(self.tokenizer),
+                    "model_type": self._default_tokenize_name,
                 }
             }
             json_file_path = Path(self._dataset_root_dir) / "dataset.json"
@@ -738,20 +739,56 @@ class JSONDataset(
                 f"files to {self._default_original_dir}")
             unpack_tar_gz(self._dataset_tokenizer_tarball_name, self.tokenizer_dir())
 
+    @staticmethod
+    def check_tokenizer_provenance(
+            tokenizer_spec: dict,
+            num_tokens: int,
+            model_type: Optional[str] = None,
+    ) -> None:
+        """Refuse a cached dataset whose recorded tokenizer conflicts with the live one.
+
+        The pre-tokenized ``.pt`` caches hold token ids from the tokenizer that built
+        them; consuming them with a different tokenizer trains garbage silently. The
+        spec's ``tokenizer`` section (written by ``_save``) records the provenance;
+        absent fields (older captures) are skipped, so existing datasets still load.
+
+        :param tokenizer_spec: the ``tokenizer`` dict from ``dataset.json`` (may be empty).
+        :param num_tokens: ``len(tokenizer)`` of the tokenizer now in use.
+        :param model_type: the current ``--model_type`` backbone id, when known.
+        :raises ValueError: on a provenance mismatch, with a rebuild hint.
+        """
+        recorded_tokens = tokenizer_spec.get("num_tokens")
+        if recorded_tokens is not None and int(recorded_tokens) != int(num_tokens):
+            raise ValueError(
+                f"Dataset caches were tokenized with a {recorded_tokens}-token tokenizer "
+                f"but the loaded tokenizer has {num_tokens} tokens. Rebuild the dataset "
+                f"for this backbone with --recreate_dataset.")
+        recorded_model = tokenizer_spec.get("model_type")
+        if recorded_model is not None and model_type is not None and recorded_model != model_type:
+            raise ValueError(
+                f"Dataset caches were built for --model_type {recorded_model!r} but the "
+                f"current run uses {model_type!r}. Rebuild with --recreate_dataset.")
+
     def _load_dataset_spec(self):
         """Read dataset spec and update mirror and resources.
         :return:
         """
         json_file_path = Path(self._dataset_root_dir) / self._default_dataset_spec
         self.logger.info(f"Loading dataset spec from: {json_file_path}")
+        tokenizer_spec = {}
         try:
             with open(json_file_path, "r") as json_file:
                 json_data = json.load(json_file)
                 self._mirrors = json_data["mirrors"]
                 self._resources = json_data["resources"]
+                tokenizer_spec = json_data.get("tokenizer") or {}
                 self.logger.info("Dataset spec loaded successfully.")
         except Exception as e:
             self.logger.error(f"Error loading dataset spec: {e}")
+        # outside the try so a provenance conflict is NOT swallowed by the log-only except
+        if self.tokenizer is not None:
+            self.check_tokenizer_provenance(
+                tokenizer_spec, len(self.tokenizer), self._default_tokenize_name)
 
     def _load_dataset(self):
         """
