@@ -10,6 +10,10 @@ Reinforce Learner).
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the generic goal-conditioned tool-use framework design,
   simulator plugin plan, hierarchical workload model, model curriculum, backbone modernization, and
   Phase 0 stabilization notes.
+- [MATH_CHECKS.md](MATH_CHECKS.md) — the math and optimization gate for Bellman targets, HER,
+  replay masks, tensor shapes, finite-gradient checks, and trustworthy training claims.
+- [TRAINING_OPTIMIZATION_PLAN.md](TRAINING_OPTIMIZATION_PLAN.md) — the large-model training,
+  optimization, and GPU-efficiency roadmap for 3B/7B state-encoder work.
 
 The repository [README](../README.md) stays short and tutorial-oriented. Put deeper design and runtime
 material in this directory so setup instructions and architecture details do not drift apart.

@@ -1,8 +1,9 @@
 # Training & reproducibility
 
 How to reproduce an igc training run end to end: environment, data, launch, experiment
-tracking (Weights & Biases), checkpoints, and weight sharing. Cluster topology and the
-hard cautions live in `GPU_ACCESS.md`; environment setup in [ENVIRONMENT.md](ENVIRONMENT.md).
+tracking (Weights & Biases), checkpoints, and weight sharing. Cluster topology and hard
+cautions live in the private cluster runbook; environment setup is in
+[ENVIRONMENT.md](ENVIRONMENT.md).
 
 ## 0. Secrets (read first)
 
@@ -38,7 +39,7 @@ cluster login node alongside the checkout — it is not in git). If a key has be
 Training reads captured Redfish JSON from `~/.json_responses` (collected by `idrac_ctl`; the
 `.npy` map is the binding contract). There is **no shared filesystem** on the cluster, so stage the
 data (and the igc checkout) onto the target node's local NVMe, and pin the job to that node with
-`-w gb300-poc1-slotN`.
+the scheduler's node-selection flag.
 
 ## 3. Experiment tracking (Weights & Biases)
 
@@ -68,10 +69,14 @@ squeue --me ; tail -f igc-m1-*.out                              # watch
 ```
 
 [scripts/train_m1.sbatch](../scripts/train_m1.sbatch) runs `igc_main.py --train llm --llm latent`
-on 1 GPU with `NCCL_NVLS_ENABLE=0` and slots 2/15/16 excluded. **Start with the `gpt2` smoke** before
-spending a large model's time — it surfaces any remaining launch issues cheaply. A *large* model on
-one GPU needs LoRA — set `IGC_USE_PEFT=1` (LoRA via HF PEFT); full fine-tune is for the small
-validation model only.
+on 1 GPU with conservative fabric settings and unavailable nodes excluded by the launcher. **Start
+with the `gpt2` smoke** before spending a large model's time — it surfaces any remaining launch
+issues cheaply. A *large* model on one GPU needs LoRA — set `IGC_USE_PEFT=1` (LoRA via HF PEFT);
+full fine-tune is for the small validation model only.
+
+The code-improvement and GPU-efficiency roadmap for 3B/7B state-encoder training lives in
+[TRAINING_OPTIMIZATION_PLAN.md](TRAINING_OPTIMIZATION_PLAN.md). Keep this page as the runnable launch
+guide; put deeper optimization decisions in that roadmap.
 
 Knobs (env): `IGC_MODEL`, `EPOCHS`, `SEED`, `IGC_USE_PEFT` (+`LORA_R`/`LORA_ALPHA`), `IGC_DIR`, `DATA_DIR`, `NGC_IMAGE`, `IGC_REPORT`,
 `WANDB_PROJECT`, `WANDB_NAME`.
