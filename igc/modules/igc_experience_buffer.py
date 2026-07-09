@@ -77,12 +77,22 @@ class Buffer:
 
         Tolerates plain ``bool``/scalar done values (the ``add`` default) by
         broadcasting them to each sample's reward shape, so a terminal mask is
-        always available even for experiences added without one.
+        always available even for experiences added without one. Tensor done
+        flags whose shape differs from the reward (e.g. a scalar ``[]`` mixed
+        with a ``[1]``) are coerced to the reward shape so ``torch.stack`` never
+        fails on ragged entries.
         """
         done_items = []
         for sample, reward in zip(samples, reward_batch):
             done = sample[4] if len(sample) > 4 else False
             if not torch.is_tensor(done):
                 done = torch.full_like(reward, float(bool(done)))
+            elif done.shape != reward.shape:
+                done = done.to(reward.dtype)
+                done = (
+                    done.reshape(reward.shape)
+                    if done.numel() == reward.numel()
+                    else torch.full_like(reward, float(done.reshape(-1)[0]))
+                )
             done_items.append(done)
         return torch.stack(done_items, dim=0)
