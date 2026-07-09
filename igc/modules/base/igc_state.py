@@ -51,24 +51,26 @@ class IgcBaseState:
         self.rank = int(os.environ.get('LOCAL_RANK', -1))
 
         self.is_accelerator = False
-        if device is not None:
-            self._device = torch.device(device)
-
         self._accelerator = None
 
+        # Device resolution precedence: accelerator > explicit device arg > spec.device >
+        # get_device() fallback. The explicit arg must win over the spec default so a caller
+        # requesting e.g. CPU for a module load is honored even when the shared parser put a
+        # different device in the spec.
         if hasattr(spec, 'use_accelerator') and spec.use_accelerator:
             self._accelerator = build_accelerator(spec)
             self.is_accelerator = True
             # let accelerator choose device.
             self._device = self._accelerator.device
             self.logger.info(f"Rank {self.rank}, Running accelerator , accelerate selected device {self.device}")
-        elif hasattr(spec, "device"):
-            self._device = spec.device
+        elif device is not None:
+            self._device = torch.device(device)
+        elif getattr(spec, "device", None) is not None:
+            self._device = torch.device(spec.device)
         else:
+            # no explicit device and none in the spec: resolve a concrete one.
+            self._device = get_device(self.rank if self.rank != -1 else None)
             self.logger.info(f"Rank {self.rank}, Running on selected device {self.device}")
-            # if we are not using accelerator, we need to set device
-            self._device = get_device(self.rank) if device is None else device
-            raise
 
         self.scheduler = None
 
