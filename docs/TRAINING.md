@@ -56,9 +56,49 @@ You will see the usual training-loop curves in the wandb run: training/val **los
 token **accuracy**, **grad-norm**, **learning rate**, tokens/sec, and GPU memory. For the RL agent
 (later phases) the same logger reports reward, success-rate, and episode length.
 
-To use TensorBoard instead: `IGC_REPORT=tensorboard sbatch scripts/train_m1.sbatch`.
+To use TensorBoard instead, choose the variable for the launcher you are using:
+`IGC_METRIC_REPORT=tensorboard bash scripts/run_profile.sh` for the profile wrapper, or
+`IGC_REPORT=tensorboard sbatch scripts/train_m1.sbatch` for the sbatch smoke path.
 
 ## 4. Launch (first GPU loop — M1 state encoder)
+
+There are two launch routes today:
+
+- `scripts/train_m1.sbatch`, the Slurm smoke launcher, is the normal scheduled GPU path.
+- `scripts/run_profile.sh`, the profile-backed wrapper, is for direct named-profile execution.
+
+The profile registry, defined in `igc/modules/train/profiles.py`, is the committed source of truth
+for named M1 state-encoder runs. Inspect a profile locally before spending GPU time:
+
+```bash
+python -m igc.modules.train.launch --profile m1_gpt2_smoke
+python -m igc.modules.train.launch --profile m1_7b_rslora_r32 --print-argv
+```
+
+The smoke argv should include `--model_type gpt2` and `--max_train_steps 50`; the rsLoRA argv should
+include `--adapter_method rslora`, `--lora_r 32`, and `--lora_alpha 64`.
+
+The `scripts/run_profile.sh` wrapper, committed as the profile-name launcher, resolves `IGC_PROFILE`
+through `igc.modules.train.launch`, then supplies `--json_data_dir`, `--output_dir`, and
+`--metric_report` from `IGC_DATA_DIR`, `IGC_OUTPUT_DIR`, and `IGC_METRIC_REPORT`:
+
+```bash
+IGC_PROFILE=m1_gpt2_smoke \
+IGC_DATA_DIR=$HOME/.json_responses \
+IGC_OUTPUT_DIR=experiments/m1_gpt2_smoke \
+bash scripts/run_profile.sh
+```
+
+Use `IGC_SET`, read by `scripts/run_profile.sh` as profile-field overrides, for small controlled
+changes such as a shorter smoke or batch-size check:
+
+```bash
+IGC_PROFILE=m1_3b_lora IGC_SET="batch_size=16 lr=2e-4" bash scripts/run_profile.sh
+```
+
+`scripts/run_profile.sh` is the profile-backed local launcher. `scripts/train_m1.sbatch`, the older
+Slurm smoke launcher, does not read `IGC_PROFILE`; it still uses `IGC_MODEL`, `EPOCHS`, and
+`IGC_USE_PEFT`.
 
 ```bash
 # on a GB300 login node, with $HOME/igc and $HOME/.json_responses staged on the node
@@ -78,8 +118,8 @@ The code-improvement and GPU-efficiency roadmap for 3B/7B state-encoder training
 [TRAINING_OPTIMIZATION_PLAN.md](TRAINING_OPTIMIZATION_PLAN.md). Keep this page as the runnable launch
 guide; put deeper optimization decisions in that roadmap.
 
-Knobs (env): `IGC_MODEL`, `EPOCHS`, `SEED`, `IGC_USE_PEFT` (+`LORA_R`/`LORA_ALPHA`), `IGC_DIR`, `DATA_DIR`, `NGC_IMAGE`, `IGC_REPORT`,
-`WANDB_PROJECT`, `WANDB_NAME`.
+Knobs (env): `IGC_MODEL`, `EPOCHS`, `SEED`, `IGC_USE_PEFT` (+`LORA_R`/`LORA_ALPHA`), `IGC_DIR`,
+`DATA_DIR`, `NGC_IMAGE`, `IGC_REPORT`, `WANDB_PROJECT`, `WANDB_NAME`.
 
 ## 5. Checkpoints & weight sharing
 
@@ -102,6 +142,11 @@ other supported distribution path for published artifacts.
 
 - The exact parameters of every run are dumped to `parameters.json` (via `save_spec`) alongside the
   checkpoints — keep it with the weights.
+- `RunManifest`, `ResultBundle`, and `compare`, defined in `igc/modules/train/report.py`, are the
+  library contract for adapter comparisons, not automatic launcher output. Until a reporting command
+  exists, the eval/reporting caller creates each `ResultBundle` after metrics are computed, writes
+  `report.json` next to the checkpoint artifacts, and compares bundles across LoRA, rsLoRA, and
+  full-fine-tune arms.
 - `--seed` (default 42) is recorded; set it explicitly for a reproducible run.
 - Report results with evidence: the exact command, the logged metric (wandb run URL), and where the
   checkpoint landed — never paste secrets or raw auth responses.
