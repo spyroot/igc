@@ -746,6 +746,17 @@ def add_dataset_dataloader(parser):
         help="A location where we unpack or build a dataset.")
 
     group.add_argument(
+        "--recreate_dataset",
+        action="store_true", default=False,
+        help="Rebuild the pre-tokenized dataset caches from the raw captures "
+             "(required after switching --model_type to a different backbone).")
+
+    group.add_argument(
+        "--seq_len",
+        type=int, default=1024,
+        help="Maximum tokenized chunk length used when (re)building the dataset.")
+
+    group.add_argument(
         "--do_consistency_check",
         type=bool, default=False,
         help="Whether we perform dataset consistency check, "

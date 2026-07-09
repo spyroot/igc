@@ -16,6 +16,7 @@ Mus mbayramo@stanford.edu
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional
 
@@ -124,6 +125,13 @@ PROFILES: Dict[str, TrainingProfile] = {
         adapter=AdapterSpec(method="rslora", r=32, alpha=64, init="default"),
         batch_size=8, grad_accum=4, lr=1e-4, warmup_ratio=0.03,
     ),
+    "m1_local": TrainingProfile(
+        # local weights dir from the environment (e.g. the staged DeepSeek-V4-Flash or
+        # any node-local backbone) -- no path is baked into committed code.
+        name="m1_local", model="$IGC_MODEL_DIR",
+        adapter=AdapterSpec(method="lora", r=16, alpha=32),
+        batch_size=8, grad_accum=4, lr=1e-4, warmup_ratio=0.03,
+    ),
     "m1_3b_full": TrainingProfile(
         name="m1_3b_full", model="Qwen/Qwen2.5-3B-Instruct", use_peft=False, adapter=None,
         batch_size=4, grad_accum=8, lr=2e-5, sharding="zero3", warmup_ratio=0.03,
@@ -152,13 +160,22 @@ def resolve_profile(name: str, **overrides) -> TrainingProfile:
     if name not in PROFILES:
         raise KeyError(f"unknown profile {name!r}; choose from {profile_names()}")
     base = PROFILES[name]
-    if not overrides:
-        return base
-    valid = set(base.__dataclass_fields__)
-    bad = set(overrides) - valid
-    if bad:
-        raise ValueError(f"unknown profile override(s) {sorted(bad)}; valid: {sorted(valid)}")
-    return replace(base, **overrides)
+    if overrides:
+        valid = set(base.__dataclass_fields__)
+        bad = set(overrides) - valid
+        if bad:
+            raise ValueError(f"unknown profile override(s) {sorted(bad)}; valid: {sorted(valid)}")
+        base = replace(base, **overrides)
+    # expand $ENV_VAR model references (e.g. m1_local's $IGC_MODEL_DIR) at resolve
+    # time so the env decides the weights dir, never committed code.
+    if "$" in base.model:
+        expanded = os.path.expandvars(base.model)
+        if "$" in expanded:
+            raise ValueError(
+                f"profile {name!r} model {base.model!r} references an unset "
+                f"environment variable; export it or override model=...")
+        base = replace(base, model=expanded)
+    return base
 
 
 def apply_lora_kwargs(profile: TrainingProfile) -> dict:
