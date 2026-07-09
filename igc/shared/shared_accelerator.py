@@ -24,6 +24,13 @@ import argparse
 
 _ZERO_STAGE = {"zero2": 2, "zero3": 3, "zero3_offload": 3}
 
+# Sharding modes this builder knows how to wire. The CLI restricts ``--sharding`` to this
+# set (:mod:`igc.shared.shared_arg_parser`), but :func:`sharding_config` also runs on
+# Namespaces built directly (train profiles, config-driven launches, tests) that bypass the
+# parser, so it validates too — an unknown mode must fail fast rather than silently produce a
+# ``sharded`` run with ``zero_stage=None`` (a broken DeepSpeed plugin on a real GB300 job).
+_VALID_SHARDING = ("none", "ddp", "zero2", "zero3", "zero3_offload", "fsdp")
+
 
 def sharding_config(cmd: argparse.Namespace) -> dict:
     """Pure mapping of CLI flags to a sharding/precision config (no accelerate import).
@@ -34,8 +41,13 @@ def sharding_config(cmd: argparse.Namespace) -> dict:
         ``none``/``ddp`` (plain replication) and True for any ZeRO/FSDP mode; a sharded run
         defaults to ``bf16`` and disables Accelerate ``device_placement`` (DeepSpeed/FSDP
         place the model themselves).
+    :raises ValueError: if ``sharding`` is not one of :data:`_VALID_SHARDING`.
     """
     sharding = getattr(cmd, "sharding", "none") or "none"
+    if sharding not in _VALID_SHARDING:
+        raise ValueError(
+            f"Unsupported sharding mode {sharding!r}; expected one of {_VALID_SHARDING}"
+        )
     mixed_precision = getattr(cmd, "mixed_precision", None)
     sharded = sharding not in ("none", "ddp")
     if mixed_precision is None and sharded:

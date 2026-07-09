@@ -9,6 +9,8 @@ Mus mbayramo@stanford.edu
 """
 import argparse
 
+import pytest
+
 from igc.shared.shared_accelerator import sharding_config
 
 
@@ -60,6 +62,22 @@ def test_unsharded_run_keeps_user_precision():
     """A precision set on an unsharded run is honored (not overridden to bf16)."""
     c = sharding_config(_ns(sharding="none", mixed_precision="fp16"))
     assert c["sharded"] is False and c["mixed_precision"] == "fp16"
+
+
+def test_unknown_sharding_mode_raises():
+    """An unsupported mode (bypassing the CLI ``choices`` guard) fails fast, not silently.
+
+    Without the guard ``zero4`` would map to ``sharded=True, zero_stage=None`` and build a
+    broken DeepSpeed plugin at runtime; the guard rejects it with the offending value named.
+    """
+    with pytest.raises(ValueError, match="zero4"):
+        sharding_config(_ns(sharding="zero4"))
+
+
+def test_missing_sharding_attr_defaults_to_none():
+    """A Namespace without ``sharding`` at all defaults to the valid 'none' (no raise)."""
+    c = sharding_config(argparse.Namespace())
+    assert c["sharded"] is False and c["sharding"] == "none"
 
 
 # Author: Mus mbayramo@stanford.edu
