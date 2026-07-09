@@ -40,6 +40,7 @@ def profile_to_argv(profile: TrainingProfile) -> List[str]:
         "--num_workers", str(profile.num_workers),
         "--llm_learning_rate", str(profile.lr),
         "--llm_scheduler", profile.scheduler,
+        "--seq_len", str(profile.seq_len),
     ]
     if profile.max_steps is not None:
         argv += ["--max_train_steps", str(profile.max_steps)]

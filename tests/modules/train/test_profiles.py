@@ -17,11 +17,12 @@ from igc.modules.train.profiles import (
     resolve_profile,
 )
 
-_SIX = [
+_REGISTERED = [
     "m1_gpt2_smoke",
     "m1_3b_lora",
     "m1_7b_lora",
     "m1_7b_rslora_r32",
+    "m1_local",
     "m1_3b_full",
     "m1_7b_full_zero3",
 ]
@@ -51,10 +52,10 @@ _PROFILE_CASES = [
 ]
 
 
-def test_all_six_profiles_registered():
-    """Every named profile from the plan is present."""
+def test_all_registered_profiles_present():
+    """Every named profile from the plan (plus the env-driven m1_local) is present."""
     names = profile_names()
-    assert names == _SIX
+    assert names == _REGISTERED
 
 
 @pytest.mark.parametrize(
