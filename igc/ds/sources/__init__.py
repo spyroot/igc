@@ -5,7 +5,10 @@ Exposes the source contract (:class:`SourceAdapter`, :class:`SourceRecord`,
 :class:`TrustLevel`) and the offline filesystem adapter
 (:class:`RedfishFixtureSource`) that reads captured Redfish JSON corpora — real
 vendor captures, the DMTF mockup replay tree, or ``~/.json_responses`` — into a
-single trust-tagged record stream.
+single trust-tagged record stream, plus the enum-space extraction layer
+(:class:`EnumSpaceIndex` and friends) that turns captured BIOS registries,
+ActionInfo bodies, and inline allowable-value annotations into the per-slot
+``arg_schema`` enum spaces the stage-2 argument decoder scores over.
 
 Author:
 Mus mbayramo@stanford.edu
@@ -18,6 +21,17 @@ from igc.ds.sources.base import (
 )
 from igc.ds.sources.redfish_fixture_source import RedfishFixtureSource
 from igc.ds.sources.mixer import DataManifest, SourceMix, unit_hash
+from igc.ds.sources.redfish_enum_space import (
+    EnumSlot,
+    EnumSpaceIndex,
+    ResourceKind,
+    classify_resource,
+    normalize_enriched,
+    slots_from_action_info,
+    slots_from_attribute_registry,
+    slots_from_inline_annotations,
+    to_arg_schema,
+)
 from igc.ds.sources.training_object import (
     TrainingExample,
     compact_resource,
@@ -39,6 +53,15 @@ __all__ = [
     "SourceRecord",
     "TrustLevel",
     "RedfishFixtureSource",
+    "EnumSlot",
+    "EnumSpaceIndex",
+    "ResourceKind",
+    "classify_resource",
+    "normalize_enriched",
+    "slots_from_action_info",
+    "slots_from_attribute_registry",
+    "slots_from_inline_annotations",
+    "to_arg_schema",
     "SourceMix",
     "DataManifest",
     "unit_hash",
