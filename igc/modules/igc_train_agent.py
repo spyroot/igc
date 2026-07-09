@@ -1,8 +1,9 @@
 """
+Train the legacy Redfish DQN agent with HER relabeling.
 
-This class is used to train a RL agent.
-It consists two trainer, auto encoder used to
-reduce state encoder dimensionality , and RL trainer.
+This module owns rollout collection, replay-buffer updates, DQN targets, and
+target-network synchronization for ``IgcAgentTrainer``. Autoencoder setup is
+orchestrated outside this file by the RL module wiring.
 
 Author:Mus mbayramo@stanford.edu
 """
@@ -28,8 +29,12 @@ from igc.modules.rl.q_targets import q_learning_target, relabel_future
 
 def env_reward_function(state, goal):
     """
-    Reward function for the goal_all_4_trajectory_reward_state_goal_single_trajectory method.
-    Rewards +1 when at least one state matches the goal state, and -1 otherwise.
+    Return a binary reward for states that match the goal tensor.
+
+    :param state: Batched environment state tensor.
+    :param goal: Goal state tensor to compare against each row in ``state``.
+    :return: Reward vector with ``1.0`` when any state row matches the goal,
+        otherwise ``0.0``.
     """
     # print(f"state {state.shape} {goal.shape}")
     is_goal_reached = torch.any(torch.all(state == goal, dim=1), dim=0)
@@ -41,24 +46,10 @@ def env_reward_function(state, goal):
 
 class IgcAgentTrainer(RlBaseModule):
     """
-    A class representing the IGC Agent Trainer.
+    Collect goal-conditioned REST rollouts and train the legacy DQN policy.
 
-    :param module_name: The name of the module.
-    :type module_name: str
-    :param spec: The specifications for the trainer.
-    :type spec: argparse.Namespace
-    :param llm_model: The LLM model for training.
-    :type llm_model: torch.nn.Module
-    :param llm_tokenizer: The LLM tokenizer for training.
-    :type llm_tokenizer: PreTrainedTokenizer
-    :param env: The vectorized REST API environment.
-    :type env: VectorizedRestApiEnv
-    :param ds: The JSONDataset for training, if available.
-    :type ds: Optional[JSONDataset]
-    :param metric_logger: The metric logger for tracking training metrics, if available.
-    :type metric_logger: Optional[MetricLogger]
-    :param is_inference: Flag indicating whether the trainer is for inference.
-    :type is_inference: Optional[bool]
+    The trainer owns replay insertion, HER relabeling, target-network sync, and
+    epoch-level metric logging for the current one-hot action path.
     """
 
     def __init__(self,
@@ -72,13 +63,17 @@ class IgcAgentTrainer(RlBaseModule):
                  is_inference: Optional[bool] = False,
                  device=None):
         """
-        :param module_name:
-        :param spec:
-        :param llm_model:
-        :param llm_tokenizer:
-        :param ds:
-        :param metric_logger:
-        :param is_inference:
+        Initialize the DQN trainer, target network, and replay buffer.
+
+        :param module_name: Stable module name used for logging and checkpoint paths.
+        :param spec: Training configuration namespace parsed by the shared CLI.
+        :param llm_model: LLM module used by the base trainer contract.
+        :param llm_tokenizer: Tokenizer paired with ``llm_model``.
+        :param env: Vectorized REST environment used for rollout collection.
+        :param ds: Optional Redfish JSON dataset used for sampled REST actions.
+        :param metric_logger: Optional metric sink for training metrics.
+        :param is_inference: Whether the trainer is being built for inference.
+        :param device: Torch device for networks and sampled batches.
         """
         super().__init__(
             module_name,
@@ -184,7 +179,8 @@ class IgcAgentTrainer(RlBaseModule):
         """
         Create rest api action, that consists of one hot vector for rest api
         and one hot vector for http method.
-        :return:
+
+        :return: Tuple of encoded action tensor, REST API path, and supported methods.
         """
         rest_api, http_supported_method, one_hot_action = self.dataset.sample_rest_api()
         action = RestApiEnv.concat_rest_api_method(
@@ -194,9 +190,11 @@ class IgcAgentTrainer(RlBaseModule):
 
     def _create_goal(self, http_method: Optional[str] = "GET") -> dict:
         """
-        Sample a goal from the dataset.
+        Sample a goal from the vectorized REST environment.
 
-        :return:
+        :param http_method: HTTP method associated with the sampled goal.
+        :return: Goal dictionary with state, REST APIs, action vector, method,
+            and parameters fields consumed by the rollout loop.
         """
         goal_state, action_vector, rest_apis, supported_methods = self.env.sample_same_goal()
         goal = {
@@ -211,7 +209,10 @@ class IgcAgentTrainer(RlBaseModule):
 
     def train_goal(self, epsilon=0.0):
         """
-        :return:
+        Roll out one goal-conditioned episode with epsilon-greedy actions.
+
+        :param epsilon: Probability of sampling a random action instead of the policy action.
+        :return: Episode transitions, cumulative reward, and reached-goal count.
         """
         _state, info = self.env.reset(
             goal=self.current_goal["state"],
@@ -268,8 +269,6 @@ class IgcAgentTrainer(RlBaseModule):
                     num_classes=num_rest_api_methods
                 ).float().float().detach().cpu()
 
-                at_most_one_1_rest_api = torch.sum(rest_api_one_hot == 1) <= 1
-                at_most_one_1_rest_api_method = torch.sum(rest_api_method_one_hot == 1) <= 1
                 concatenated_vector = torch.cat([rest_api_one_hot, rest_api_method_one_hot], dim=1)
 
             next_state, rewards, done, truncated, info = self.env.step(concatenated_vector)
@@ -292,9 +291,9 @@ class IgcAgentTrainer(RlBaseModule):
 
     def update_replay_buffer(self, episode_experience):
         """
+        Insert episode transitions and HER relabeled transitions into replay.
 
-        :param episode_experience:
-        :return:
+        :param episode_experience: Sequence of rollout tuples from ``train_goal``.
         """
         num_experiences_added = 0
         for timestep in range(len(episode_experience)):
@@ -329,8 +328,7 @@ class IgcAgentTrainer(RlBaseModule):
 
     def train(self):
         """
-
-        :return:
+        Train the DQN policy with rollout collection, HER relabeling, and target updates.
         """
         # epsilon = 0
         epsilon = 0.98

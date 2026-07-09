@@ -1,18 +1,10 @@
 """
-This class is used to train a goal extractor from input query.
+Train the language-model state encoder on masked Redfish JSON examples.
 
-Given input text provided by the user, or external system.
-The goal is to extract a goal for the agent and parameters
-that agent need used.
-
-For example given input text: "Update raid with raid0"
-The goal here update raid configuration and the
-parameter is raid0.
-
-In downstream task the goal encoded as one hot vector.
-This what used to train RL agent.
-
-Parameters just passed to agent. i.e. we don't train on parameters.
+The ``MaskedJSONDataset`` provided by ``igc.ds.redfish_masked_dataset`` supplies
+tokenized REST response sequences and masking callbacks. This trainer applies a
+next-token objective, cycles the configured masking methods, and saves
+fine-tuned language-model checkpoints for downstream state encoding.
 
 Author:Mus mbayramo@stanford.edu
 """
@@ -97,8 +89,10 @@ def reached_max_steps(global_step: int, max_steps: Optional[int]) -> bool:
 
 class LlmEmbeddingsTrainer(LlmModule):
     """
-    Large language model trainer. Its main job train a language
-    model for fine-tuning a latent representation
+    Train a language model on masked Redfish JSON sequences.
+
+    The trainer fine-tunes the configured causal model with dataset-controlled
+    masking methods and reports loss, accuracy, perplexity, and scheduler state.
     """
 
     def __init__(self,
@@ -111,13 +105,16 @@ class LlmEmbeddingsTrainer(LlmModule):
                  is_inference=False,
                  device=None):
         """
-        Note that tokenizer must IGC since we extend it to support masking , JSON etc
+        Initialize model, optimizer, masking schedule, and training controls.
 
-        :param llm_model:
-        :param llm_tokenizer:
-        :param spec: specs for llm trainer
-        :param dataset: Union[JSONDataset, MaskedJSONDataset].
-        :param metric_logger:  a metric logger used to log training progress
+        :param module_name: Stable module name used for logging and checkpoints.
+        :param spec: Training configuration namespace parsed by the shared CLI.
+        :param llm_model: Causal language model to fine-tune.
+        :param llm_tokenizer: Tokenizer paired with ``llm_model`` and the dataset.
+        :param dataset: Masked JSON dataset that owns masking callbacks.
+        :param metric_logger: Optional metric sink for training and evaluation metrics.
+        :param is_inference: Whether to skip training-only setup in the base module.
+        :param device: Torch device used for model and batch tensors.
         """
         super().__init__(
             module_name,
@@ -193,14 +190,16 @@ class LlmEmbeddingsTrainer(LlmModule):
         self._masking_method_dispatcher = LlmEmbeddingsTrainer.create_masking_method(dataset)
 
     def get_model(self) -> PreTrainedModel:
-        """Return module model.
-        :return:
+        """Return the underlying language model.
+
+        :return: The model managed by this trainer.
         """
         return self.model
 
     def get_tokenizer(self) -> PreTrainedTokenizer:
-        """Return module model.
-        :return:
+        """Return the dataset tokenizer, loading it on demand when needed.
+
+        :return: Tokenizer used for Redfish JSON training examples.
         """
         if self.dataset.tokenizer is None:
             self.dataset.load_tokenizer()
@@ -209,9 +208,10 @@ class LlmEmbeddingsTrainer(LlmModule):
 
     @staticmethod
     def custom_collate_fn(samples):
-        """Collate data before we pass to the model.
-        :param samples:
-        :return:
+        """Stack tokenized samples into a model batch.
+
+        :param samples: Dataset rows containing ``input_ids`` and ``attention_mask``.
+        :return: Batch dictionary with tensor values stacked on the leading axis.
         """
         included_keys = ['input_ids', 'attention_mask']
         batch = {key: torch.stack([s[key] for s in samples]) for key in included_keys}
@@ -226,9 +226,11 @@ class LlmEmbeddingsTrainer(LlmModule):
     @staticmethod
     def get_batch(src: Tensor, idx: int, chunk_size=35) -> Tuple[Tensor, Tensor]:
         """
+        Slice a language-model training window and its shifted target.
+
         :param src: [full_seq_len, batch_size]
-        :param idx
-        :param chunk_size:
+        :param idx: Starting index in ``src``.
+        :param chunk_size: Maximum sequence length for the returned window.
         :return: tuple (data, target),  shape [seq_len, batch_size], [seq_len * batch_size]
         """
         seq_len = min(chunk_size, len(src) - 1 - idx)
@@ -238,7 +240,9 @@ class LlmEmbeddingsTrainer(LlmModule):
 
     def dataset_sampler(self):
         """
-        :return:
+        Build the optional dataset sampler configured by trainer arguments.
+
+        :return: ``RandomSampler`` when random sampling is enabled, otherwise ``None``.
         """
         if 'random_sampler_enabled' in self._trainer_args:
             sampler = RandomSampler(self.dataset) if self._trainer_args.random_sampler_enabled else None
@@ -260,10 +264,10 @@ class LlmEmbeddingsTrainer(LlmModule):
         return perplexity
 
     def validate(self, validation_dataset):
-        """ Perform validation on the emb llm model.
+        """Perform validation on the embedding language model.
 
-        :param validation_dataset: Dataset for validation
-        :return: Accuracy on the validation dataset
+        :param validation_dataset: Iterable validation dataloader of tokenized batches.
+        :return: Accuracy percentage on the validation dataset.
         """
 
         self.model.eval()
@@ -301,13 +305,17 @@ class LlmEmbeddingsTrainer(LlmModule):
 
     def is_distributed(self):
         """
-        :return:
+        Check whether this trainer is running under distributed execution.
+
+        :return: ``True`` when the local rank indicates distributed training.
         """
         return self.rank != -1
 
     def is_rank_zero(self):
         """
-        :return:
+        Check whether the current process should emit rank-zero side effects.
+
+        :return: ``True`` for single-process execution or distributed rank zero.
         """
         return self.rank == -1 or self.rank == 0
 
@@ -315,7 +323,9 @@ class LlmEmbeddingsTrainer(LlmModule):
     def create_masking_method(dataset: MaskedJSONDataset):
         """
         Return dict that store all callable masking methods.
-        :return:
+
+        :param dataset: Masked dataset that provides masking callbacks.
+        :return: Mapping from masking enum values to dataset callback methods.
         """
         masking_methods = {
             MaskingType.MASK_SECTION: dataset.mask_section,
@@ -339,7 +349,8 @@ class LlmEmbeddingsTrainer(LlmModule):
     ):
         """
         Receive mask enum and dispatch to its callback.
-        :param mask_type:
+
+        :param mask_type: Masking enum to activate for subsequent dataset samples.
         """
         if mask_type in self.masking_methods:
             print(f"Got mask type {mask_type}")
@@ -353,16 +364,15 @@ class LlmEmbeddingsTrainer(LlmModule):
             mask_type: List[Union[MaskingOption, MaskingType]] = None
     ):
         """
-        Switch to masking method to next masking method after every epoch freq
-        dictated by self._masked_freq.
+        Enable the next masking method at the configured epoch boundary.
 
-        For example if we have 2 masking method let say mask freq is 2
-        then we will switch to first method , on next epoch we will switch to off
-        on third epoch we will switch to second method.
+        A new method is activated only when ``(epoch + 1)`` is divisible by
+        ``self._masked_freq`` and the batch counter is reset. After
+        ``self._num_mask_passed`` batches, masking is disabled and the counter
+        is reset for the next cycle.
 
-        So we cycle between methods.
-
-        :return:
+        :param epoch: Zero-based epoch index used to decide when to swap masks.
+        :param mask_type: Ordered masking methods to cycle through.
         """
         if (epoch + 1) % self._masked_freq == 0 and self._current_mask_method_counter == 0:
             # switch to masking pass, mask freq how fast i.e after epoch
@@ -381,9 +391,9 @@ class LlmEmbeddingsTrainer(LlmModule):
             self,
             mask_type: List[Union[MaskingOption, MaskingType]] = None
     ):
-        """Train LLM model to map high level goal to redfish actions.
+        """Train the language model with shifted-token Redfish JSON targets.
 
-        :return:
+        :param mask_type: Masking methods active during the training schedule.
         """
 
         self.model.resize_token_embeddings(
@@ -818,8 +828,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         del self.optimizer
 
     def train(self):
-        """Train loop for the fine running.
-        :return:
+        """Run the fine-tuning loop with the configured masking schedule.
         """
 
         self._train(
@@ -832,9 +841,11 @@ class LlmEmbeddingsTrainer(LlmModule):
             attention_mask: torch.Tensor
     ):
         """
-        :param input_ids:
-        :param attention_mask:
-        :return:
+        Decode non-padding tokens for each sequence in a masked batch.
+
+        :param input_ids: Token id tensor shaped ``[batch, sequence]``.
+        :param attention_mask: Attention mask for the same batch, kept for API symmetry.
+        :return: List of decoded strings without padding tokens.
         """
         decoded_batch = []
         for batch_idx in range(input_ids.shape[0]):
@@ -852,6 +863,11 @@ class LlmEmbeddingsTrainer(LlmModule):
     def custom_loss(
             logits: torch.tensor, targets: torch.tensor) -> torch.tensor:
         """
+        Compute cross-entropy for classification or shifted token generation.
+
+        :param logits: Model output logits.
+        :param targets: Target labels aligned with ``logits``.
+        :return: Cross-entropy loss with ignored padding labels.
         """
         if logits.dim() == 2:
             return F.cross_entropy(logits, targets, ignore_index=-100)
@@ -872,12 +888,16 @@ class LlmEmbeddingsTrainer(LlmModule):
             original_mask: torch.Tensor
     ):
         """
-        Computes  accuracy for either sequence classification or generation.
+        Compute raw class or shifted-token accuracy.
 
-        :param logits:
-        :param targets:
-        :param original_mask:
-        :return:
+        The sequence path averages over all shifted positions produced by the
+        current implementation. ``original_mask`` is accepted for API
+        compatibility, but it is not applied inside this helper.
+
+        :param logits: Model output logits.
+        :param targets: Target ids or labels aligned with ``logits``.
+        :param original_mask: Original attention mask for the unshifted batch.
+        :return: Mean raw token or class accuracy.
         """
         if logits.dim() == 2:
             y = torch.argmax(logits, dim=-1) == targets
@@ -897,10 +917,9 @@ class LlmEmbeddingsTrainer(LlmModule):
 
     def test_inference(self):
         """
-          Does inference pass for entire dataset used for validation
-          and report all metrics.
+        Run inference over the validation split and report aggregate metrics.
 
-        :return:
+        :return: Tuple of accuracy percentage and perplexity.
         """
         train_data, eval_data = self.split_dataset()
         sampler = self.dataset_sampler()
