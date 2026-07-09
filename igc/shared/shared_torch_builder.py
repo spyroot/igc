@@ -53,6 +53,66 @@ class TorchBuilder:
                 'CosineAnnealingWarmRestarts']
 
     @staticmethod
+    def enable_perf_backends(tf32: bool = True) -> bool:
+        """Enable TF32 matmul/cuDNN paths for a free speedup on Ampere+ (incl. Blackwell/GB300).
+
+        Sets ``torch.backends.cuda.matmul.allow_tf32`` and
+        ``torch.backends.cudnn.allow_tf32`` and raises the float32 matmul precision to
+        ``"high"`` so fp32 GEMMs use tensor cores. Safe to call on CPU (the flags exist
+        regardless of device); a no-op when ``tf32`` is False.
+
+        :param tf32: whether to enable TF32 (typically ``--tf32``).
+        :return: True if TF32 was enabled, else False.
+        """
+        if not tf32:
+            return False
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        try:
+            torch.set_float32_matmul_precision("high")
+        except (AttributeError, RuntimeError):
+            pass
+        return True
+
+    @staticmethod
+    def maybe_compile(model: Module, enabled: bool = False):
+        """Wrap ``model`` in ``torch.compile`` when enabled and a CUDA device is present.
+
+        ``torch.compile`` (kernel fusion + CUDA graphs) is a large win on Blackwell/GB300
+        but pays a first-step compilation cost and needs CUDA, so it is opt-in
+        (``--compile``). A no-op that returns ``model`` unchanged when disabled, off-CUDA,
+        or if the running torch has no ``compile``; never raises.
+
+        :param model: the module to (optionally) compile.
+        :param enabled: whether compilation was requested (typically ``--compile``).
+        :return: the compiled model, or the original model unchanged.
+        """
+        if not enabled or not torch.cuda.is_available():
+            return model
+        compile_fn = getattr(torch, "compile", None)
+        if compile_fn is None:
+            return model
+        try:
+            return compile_fn(model)
+        except Exception:
+            return model
+
+    @staticmethod
+    def _fused_optimizer_kwargs(optimizer_key: str) -> dict:
+        """Return ``{"fused": True}`` for Adam/AdamW on CUDA, else ``{}``.
+
+        Fused AdamW is a near-free throughput win for large param counts on GB300, but
+        only exists for Adam/AdamW and only on CUDA; callers fall back to the plain
+        construction if the running torch rejects ``fused``.
+
+        :param optimizer_key: lower-cased optimizer name.
+        :return: perf kwargs to merge into the optimizer construction.
+        """
+        if optimizer_key in ("adam", "adamw") and torch.cuda.is_available():
+            return {"fused": True}
+        return {}
+
+    @staticmethod
     def get_args_for_func(func, args_namespace):
         """Given a function and an argument namespace,
         this function returns a dictionary with all arguments
@@ -129,11 +189,23 @@ class TorchBuilder:
         optimizer_args.pop('weight_decay', None)
 
         if optimizer == 'Adam'.lower():
-            return torch.optim.Adam(
-                model.parameters(), lr=lr, weight_decay=weight_decay, **optimizer_args)
+            merged = {**TorchBuilder._fused_optimizer_kwargs(optimizer), **optimizer_args}
+            try:
+                return torch.optim.Adam(
+                    model.parameters(), lr=lr, weight_decay=weight_decay, **merged)
+            except (TypeError, RuntimeError):
+                merged.pop("fused", None)
+                return torch.optim.Adam(
+                    model.parameters(), lr=lr, weight_decay=weight_decay, **merged)
         elif optimizer == 'AdamW'.lower():
-            return torch.optim.AdamW(
-                model.parameters(), lr=lr, weight_decay=weight_decay, **optimizer_args)
+            merged = {**TorchBuilder._fused_optimizer_kwargs(optimizer), **optimizer_args}
+            try:
+                return torch.optim.AdamW(
+                    model.parameters(), lr=lr, weight_decay=weight_decay, **merged)
+            except (TypeError, RuntimeError):
+                merged.pop("fused", None)
+                return torch.optim.AdamW(
+                    model.parameters(), lr=lr, weight_decay=weight_decay, **merged)
         elif optimizer == 'AdamW2'.lower():
             return transformers.AdamW(
                 model.parameters(), lr=lr, weight_decay=weight_decay, **optimizer_args)
@@ -322,6 +394,7 @@ class TorchBuilder:
             `torch.optim.lr_scheduler.LambdaLR` with the appropriate schedule.
         """
 
+        from transformers.optimization import _get_constant_schedule_with_warmup_lr_lambda
         lr_lambda = partial(_get_constant_schedule_with_warmup_lr_lambda, num_warmup_steps=num_warmup_steps)
         return LambdaLR(optimizer, lr_lambda, last_epoch=last_epoch)
 
