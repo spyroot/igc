@@ -5,6 +5,7 @@ from enum import Enum
 
 from igc.modules.igc_main import IgcMain
 from igc.shared.shared_main import shared_main
+from igc.shared.shared_torch_builder import TorchBuilder
 
 
 class EnumEncoder(json.JSONEncoder):
@@ -62,6 +63,8 @@ def main(cmd, parser_groups):
     """
     :return:
     """
+    # Enable TF32 tensor-core matmuls (free speedup on Ampere+/Blackwell) when --tf32.
+    TorchBuilder.enable_perf_backends(getattr(cmd, "tf32", False))
     save_spec(cmd, parser_groups)
     igc = IgcMain(cmd)
     igc.run()

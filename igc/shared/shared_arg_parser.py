@@ -581,9 +581,10 @@ def add_data_types_group(parser):
 
     data_types_group.add_argument(
         "--fp16", action='store_true',
-        default=True,
-        help="Whether to use fp16 16-bit (mixed) precision "
-             "training instead of 32-bit training.")
+        default=False,
+        help="Whether to use fp16 16-bit (mixed) precision training instead of "
+             "32-bit training. Off by default: on Blackwell/GB300 prefer bf16 "
+             "(``--mixed_precision bf16`` / a bf16 profile), not fp16.")
 
     data_types_group.add_argument(
         "--fp16_opt_level", type=str, default='O1',
@@ -616,6 +617,14 @@ def add_data_types_group(parser):
         action='store_true',
         help="Whether to enable the TF32 mode, available in Ampere and newer GPU architectures. "
              "This is an experimental API and it may change.")
+
+    data_types_group.add_argument(
+        "--compile",
+        action='store_true',
+        default=False,
+        help="Wrap the model in torch.compile before training (kernel fusion + CUDA "
+             "graphs). A large speedup on Blackwell/GB300; off by default because the "
+             "first step pays a compilation cost and it needs a CUDA device.")
 
     return parser
 
