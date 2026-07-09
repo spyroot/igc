@@ -8,6 +8,7 @@ import os
 import tempfile
 import unittest
 
+import pytest
 import torch
 
 from igc.ds.base_ds import RandomDataset
@@ -20,6 +21,7 @@ from igc.shared.modules_typing import SaveStrategy
 
 class TestRestApiEnv(unittest.TestCase):
 
+    @pytest.mark.dataset  # builds JSONDataset from the captured dataset
     def test_read_spec(self):
         """
         Test the test_read_spec method of RestApiEnv.
@@ -52,6 +54,7 @@ class TestRestApiEnv(unittest.TestCase):
         IgcModule.download()
         IgcModule.download()
 
+    @pytest.mark.dataset  # builds JSONDataset from the captured dataset
     def test_initialization(self):
         """
 
@@ -300,6 +303,7 @@ class TestRestApiEnv(unittest.TestCase):
             expected_checkpoint_file = f"{checkpoint_dir}/{module_name}_epoch_{epoch % num_checkpoints_to_keep}.pt"
             self.assertEqual(saved_checkpoint, expected_checkpoint_file)
 
+    @pytest.mark.dataset  # builds JSONDataset from the captured dataset
     def test_save_and_with_opt_sched(self):
         """
         Test saving and loading checkpoints with optimizer and scheduler.
@@ -359,6 +363,7 @@ class TestRestApiEnv(unittest.TestCase):
             for key in expected_sched_keys:
                 self.assertIn(key, loaded_checkpoint)
 
+    @pytest.mark.dataset  # builds JSONDataset from the captured dataset
     def test_save_and_load_and_with_opt_sched(self):
         """
         Test saving and loading checkpoints with optimizer and scheduler.
