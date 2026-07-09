@@ -247,6 +247,12 @@ class LlmEmbeddingsTrainer(LlmModule):
 
     @staticmethod
     def compute_perplexity(logits, labels):
+        """
+
+        :param logits:
+        :param labels:
+        :return:
+        """
         probabilities = F.softmax(logits, dim=-1)
         log_probabilities = torch.log(probabilities)
         loss = F.nll_loss(log_probabilities.view(-1, logits.size(-1)), labels.view(-1))
@@ -656,6 +662,160 @@ class LlmEmbeddingsTrainer(LlmModule):
         del self.optimizer
 
         print("Embedding extractor training complete.")
+
+    def cpu_train_pass(
+            self,
+            mask_type: List[Union[MaskingOption, MaskingType]] = None
+    ):
+        """Train LLM model to map high level goal to redfish actions.
+
+        :return:
+        """
+
+        self.model.resize_token_embeddings(
+            len(self.dataset.tokenizer)
+        )
+
+        self.logger.info(
+            f"Rank {self.rank} starting train, device {self.device}")
+
+        lr = self._lr if self._reset_lr else None
+        sampler = self.dataset_sampler()
+
+        self.logger.info(f"Creating dataloader "
+                         f"batch size {self.batch_size} "
+                         f"num worker {self._num_workers}")
+
+        train_data, eval_data = self.split_dataset()
+
+        train_dataloader = DataLoader(
+            train_data,
+            batch_size=self.batch_size,
+            sampler=sampler,
+            num_workers=self._num_workers,
+            shuffle=self._is_shuffle,
+            pin_memory=self._pin_memory,
+            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn
+        )
+
+        eval_dataloader = DataLoader(
+            eval_data,
+            batch_size=self.batch_size,
+            sampler=sampler,
+            num_workers=self._num_workers,
+            shuffle=False,
+            drop_last=True,
+            pin_memory=self._pin_memory,
+            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn,
+        )
+
+        last_epoch = 0
+        self._trainer_args.epochs = self.num_epochs - last_epoch
+        self._trainer_args.steps_per_epoch = len(train_dataloader)
+
+        print(self._trainer_args.epochs)
+        print(self._trainer_args.steps_per_epoch)
+
+        self.scheduler = TorchBuilder.create_scheduler(
+            self._trainer_args.llm_scheduler,
+            optimizer=self.optimizer,
+            **vars(self._trainer_args)
+        )
+
+        self.logger.info(f"Rank {self.rank}: "
+                         f"Memory utilization after we loaded model: "
+                         f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
+
+        if self._is_quantize:
+            self.model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+
+        total_batches = len(train_dataloader)
+        dataset_size = len(train_data)
+        calculated_total_batches = dataset_size // self.batch_size
+        batch_log_frequency = round(64 * 0.2)
+
+        if total_batches == calculated_total_batches:
+            print(f"Rank {self.rank}, Staring training, "
+                  f"total_batches: {total_batches} "
+                  f"train dataset size: {dataset_size} "
+                  f"batch_size {self.batch_size} "
+                  f"current lr {self._lr} "
+                  f"batch stats freq: {batch_log_frequency}.")
+
+        for epoch in range(last_epoch, self.num_epochs):
+            self.model.train()
+
+            total_loss = 0.0
+            num_batches = 0
+            batch_losses = np.zeros(total_batches)
+
+            # swap mask and pass a batch
+            self.swap_masking_method(epoch, mask_type)
+
+            for _, batch in enumerate(train_dataloader):
+
+                input_ids = batch['input_ids']
+                attention_mask = batch['attention_mask']
+
+                # Full-length labels; the HF CausalLM does the single internal shift.
+                # Pre-shifting here as well (the old target_ids = input_ids[:, 1:] +
+                # truncated input) double-shifts and trains for two-tokens-ahead — the
+                # same correction applied in _train via build_causal_lm_labels.
+                labels = build_causal_lm_labels(
+                    input_ids, attention_mask, self.tokenizer.pad_token_id)
+
+                batch_inputs = {
+                    'input_ids': input_ids,
+                    'attention_mask': attention_mask,
+                    'labels': labels,
+                }
+
+                outputs = self.model(**batch_inputs)
+                loss = outputs.loss
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+                self.scheduler.step()
+
+                current_lr = self.optimizer.param_groups[0]['lr']
+                self.metric_logger.log_metric("learning_rate", current_lr, epoch)
+
+                batch_losses[num_batches] = loss.item()
+                total_loss += loss.item()
+
+                # calculate the progress percentage
+                progress_percentage = int(round((num_batches + 1) / total_batches * 100))
+                if (num_batches % batch_log_frequency == 0) or (num_batches == total_batches - 1):
+                    lr = self.optimizer.param_groups[0]['lr']
+                    print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Batch "
+                          f"{num_batches + 1}/{total_batches} "
+                          f"- Progress: {progress_percentage:.2f}% - "
+                          f"Batch Loss mean: {batch_losses.mean():.4f} - lr: {lr:.5f}")
+                    self.metric_logger.log_metric("llm_emb_batch_loss", batch_losses.mean(), epoch)
+
+                num_batches += 1
+                self._current_mask_method_counter += 1
+
+            # validation on epoch or freq
+            if self.on_epoch_eval or ((epoch + 1) % self._eval_freq == 0):
+                validation_accuracy = self.validate(eval_dataloader)
+                if self.is_rank_zero():
+                    self.metric_logger.log_metric("llm_emb_accuracy", validation_accuracy, epoch)
+                    # self.metric_logger.log_metric("llm_emb_perplexity", perplexity, epoch)
+
+                print(f"Rank {self.rank} Epoch {epoch + 1} - Validation Accuracy: "
+                      f"{validation_accuracy} Best: {self._best_validation_metric}")
+
+            if num_batches > 0:
+                average_loss = total_loss / num_batches
+                if self.is_rank_zero():
+                    self.metric_logger.log_metric("llm_emb_epoch_loss", average_loss, epoch)
+                print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
+
+        del train_dataloader
+        del eval_dataloader
+        del self.optimizer
 
     def train(self):
         """Train loop for the fine running.
