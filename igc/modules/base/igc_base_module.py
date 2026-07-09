@@ -663,7 +663,7 @@ class IgcModule(IgcBaseState):
         """
 
         if self._module_checkpoint_dir is None:
-            return CheckpointState(0, None, 0, -float('-inf'), 0)
+            return CheckpointState(0, None, 0, float('-inf'), 0)
 
         scheduler = None
         map_to = {'cuda:1': 'cuda:0'} if map_location is None else map_location
@@ -671,7 +671,7 @@ class IgcModule(IgcBaseState):
         checkpoint_file = self.checkpoint_file(checkpoint_dir, resuming)
         if not checkpoint_file:
             self.logger.info(f"No checkpoint files found checkpoint dir {checkpoint_dir}")
-            return CheckpointState(0, None, 0, -float('-inf'), 0)
+            return CheckpointState(0, None, 0, float('-inf'), 0)
 
         self.logger.info(f"Found latest checkpoint, loading {checkpoint_file}.")
         checkpoint = torch.load(checkpoint_file)
@@ -693,7 +693,7 @@ class IgcModule(IgcBaseState):
 
         if not hasattr(self.model, 'load_state_dict'):
             warnings.warn("Model does not have load_state_dict method. ")
-            return CheckpointState(0, None, 0, -float('-inf'), 0)
+            return CheckpointState(0, None, 0, float('-inf'), 0)
 
         self.model.load_state_dict(checkpoint['model_state_dict'])
 
@@ -702,7 +702,7 @@ class IgcModule(IgcBaseState):
             if 'optimizer_state_dict' in checkpoint:
                 if not hasattr(self.optimizer, 'load_state_dict'):
                     warnings.warn("Optimizer does not have load_state_dict method. ")
-                    return CheckpointState(0, None, 0, -float('-inf'), 0)
+                    return CheckpointState(0, None, 0, float('-inf'), 0)
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
                 if lr is not None:
@@ -719,7 +719,7 @@ class IgcModule(IgcBaseState):
                     if self.scheduler is not None:
                         if not hasattr(self.scheduler, 'load_state_dict'):
                             warnings.warn("Scheduler does not have load_state_dict method. ")
-                            return CheckpointState(0, None, 0, -float('-inf'), 0)
+                            return CheckpointState(0, None, 0, float('-inf'), 0)
                         self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
                 elif 'scheduler_state_dicts' in checkpoint:
@@ -730,7 +730,7 @@ class IgcModule(IgcBaseState):
                                 checkpoint['scheduler_state_dicts']):
                             if not hasattr(self.scheduler[idx], 'load_state_dict'):
                                 warnings.warn("Scheduler does not have load_state_dict method. ")
-                                return CheckpointState(0, None, 0, -float('-inf'), 0)
+                                return CheckpointState(0, None, 0, float('-inf'), 0)
                             self.scheduler[idx].load_state_dict(scheduler_state_dict)
 
         last_accuracy = checkpoint['last_accuracy'] if "last_accuracy" in checkpoint else float('-inf')
