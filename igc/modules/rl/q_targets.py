@@ -36,13 +36,24 @@ def q_learning_target(
         (the goal was reached). This is NOT truncation: an episode cut for a time
         or step limit must keep bootstrapping, so its ``done`` stays 0.0.
     :param next_q: target-network Q-values for the next state, shape ``[B, A]``.
+        Illegal actions may be masked to ``-inf`` (the pointer-policy legality
+        convention). A row that is *entirely* ``-inf`` is a dead-end next state
+        with no legal action; it is treated as terminal — no bootstrap — so the
+        target stays finite (``max`` over an all-``-inf`` row is ``-inf``).
     :param gamma: discount factor.
-    :return: the target tensor, shape ``[B]``. At a terminal the bootstrap term is
-        masked out, so the target equals ``reward`` — a ``+1`` success is preserved
+    :return: the target tensor, shape ``[B]``. At a terminal (``done=1`` or a
+        dead-end next state with no legal action) the bootstrap term is masked
+        out, so the target equals ``reward`` — a ``+1`` success is preserved
         instead of being clipped to ``<= 0`` as the legacy code did.
     """
     done = done.to(reward.dtype)
     max_next_q = next_q.max(dim=-1).values
+    # A next state with no legal action (all actions masked to -inf) is a dead
+    # end: treat it as terminal so we don't bootstrap a non-finite value into
+    # the target. max_next_q is -inf exactly for those all-masked rows.
+    dead_end = ~torch.isfinite(max_next_q)
+    max_next_q = torch.where(dead_end, torch.zeros_like(max_next_q), max_next_q)
+    done = torch.where(dead_end, torch.ones_like(done), done)
     return reward + gamma * (1.0 - done) * max_next_q
 
 

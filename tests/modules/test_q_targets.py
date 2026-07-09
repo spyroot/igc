@@ -36,6 +36,23 @@ def test_truncation_keeps_bootstrapping():
     assert torch.isclose(target[0], torch.tensor(2.0))  # 0 + 0.5 * 4
 
 
+def test_all_masked_next_state_is_terminal_and_target_stays_finite():
+    """A next state whose legal-action mask leaves every action at -inf (a dead
+    end) is treated as terminal: the target equals reward and stays finite,
+    instead of maxing an all-(-inf) row into a non-finite -inf target."""
+    neg_inf = float("-inf")
+    reward = torch.tensor([1.0, 0.0])
+    done = torch.tensor([0.0, 0.0])
+    # row 0: every action illegal (dead end); row 1: one legal action (value 4)
+    next_q = torch.tensor([[neg_inf, neg_inf], [neg_inf, 4.0]])
+    target = q_learning_target(reward, done, next_q, gamma=0.9)
+    assert torch.isfinite(target).all()
+    # dead-end row 0: no bootstrap -> target == reward == 1.0
+    assert torch.isclose(target[0], torch.tensor(1.0))
+    # row 1 still bootstraps the single legal action: 0 + 0.9 * 4 == 3.6
+    assert torch.isclose(target[1], torch.tensor(3.6))
+
+
 def _reward_match(state, goal):
     """Toy env reward: 1.0 where state equals goal elementwise, else 0.0 (shape [B])."""
     return torch.all(state == goal, dim=1).to(torch.float32)
