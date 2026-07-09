@@ -194,7 +194,9 @@ class AutoencoderTrainer(IgcModule):
             f"Rank {self.rank} starting train, device {self.device}")
 
         if self._module_checkpoint_dir is not None:
-            last_epoch = self.load_checkpoint(self._module_checkpoint_dir)
+            # load_checkpoint returns a CheckpointState namedtuple; the resume epoch
+            # is its last_epoch field, not the state object itself.
+            last_epoch = self.load_checkpoint(self._module_checkpoint_dir).last_epoch
         else:
             last_epoch = 0
 
