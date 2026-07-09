@@ -7,6 +7,8 @@ Reinforce Learner).
 
 - [ENVIRONMENT.md](ENVIRONMENT.md) — the local CPU setup, current offline smoke gate, Docker test
   image, and GB300 NVL72 training surface.
+- [TRAINING.md](TRAINING.md) — the reproducible GPU training runbook: secret handling, data staging,
+  launch, experiment tracking, checkpoints, and reporting evidence.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the generic goal-conditioned tool-use framework design,
   simulator plugin plan, hierarchical workload model, model curriculum, backbone modernization, and
   Phase 0 stabilization notes.
