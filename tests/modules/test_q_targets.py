@@ -9,6 +9,7 @@ Mus mbayramo@stanford.edu
 """
 import numpy as np
 import torch
+import pytest
 
 from igc.modules.rl.q_targets import q_learning_target, relabel_future
 
@@ -51,6 +52,31 @@ def test_all_masked_next_state_is_terminal_and_target_stays_finite():
     assert torch.isclose(target[0], torch.tensor(1.0))
     # row 1 still bootstraps the single legal action: 0 + 0.9 * 4 == 3.6
     assert torch.isclose(target[1], torch.tensor(3.6))
+
+
+@pytest.mark.parametrize(
+    ("gamma", "expected"),
+    [
+        (0.0, torch.tensor([2.0, -1.0])),
+        (1.0, torch.tensor([7.0, -1.0])),
+    ],
+)
+def test_q_learning_target_handles_gamma_extremes(gamma, expected):
+    """Gamma at 0 ignores next_q; gamma at 1 fully bootstraps non-terminals."""
+    reward = torch.tensor([2.0, -1.0])
+    done = torch.tensor([False, True])
+    next_q = torch.tensor([[3.0, 5.0], [20.0, 30.0]])
+    target = q_learning_target(reward, done, next_q, gamma)
+    torch.testing.assert_close(target, expected)
+
+
+def test_q_learning_target_accepts_bool_done_mask():
+    """Boolean terminal masks are converted to reward dtype before arithmetic."""
+    reward = torch.tensor([0.5, 0.5], dtype=torch.float64)
+    done = torch.tensor([False, True])
+    next_q = torch.tensor([[2.0, 3.0], [9.0, 10.0]], dtype=torch.float64)
+    target = q_learning_target(reward, done, next_q, gamma=0.25)
+    torch.testing.assert_close(target, torch.tensor([1.25, 0.5], dtype=torch.float64))
 
 
 def _reward_match(state, goal):
@@ -101,6 +127,45 @@ def test_relabel_future_reward_and_done_consistent():
     (_, r0, d0), (_, r1, d1) = out
     assert float(r0.item()) == 1.0 and float(d0.item()) == 1.0   # goal == achieved
     assert float(r1.item()) == 0.0 and float(d1.item()) == 0.0   # goal != achieved
+
+
+def test_relabel_future_zero_k_returns_no_relabels():
+    """HER k=0 is a no-op and must not call the reward function or RNG."""
+    achieved = torch.ones(1, 2)
+    episode = [(torch.zeros(1, 2), None, None, achieved, None)]
+
+    class _NoCalls:
+        def integers(self, low, high):
+            raise AssertionError("rng should not be called when k=0")
+
+    def reward_fn(state, goal):
+        raise AssertionError("reward_fn should not be called when k=0")
+
+    out = relabel_future(episode, 0, achieved, num_relabeled=0,
+                         reward_fn=reward_fn, rng=_NoCalls())
+    assert out == []
+
+
+def test_relabel_future_at_last_timestep_samples_last_achieved_state():
+    """At the horizon edge, the only valid substituted goal is the last next-state."""
+    achieved = torch.full((1, 2), 9.0)
+    episode = [
+        (torch.zeros(1, 2), None, None, torch.full((1, 2), 3.0), None),
+        (torch.zeros(1, 2), None, None, achieved, None),
+    ]
+
+    class _BoundsCheckingRng:
+        def integers(self, low, high):
+            assert low == 1
+            assert high == 2
+            return 1
+
+    out = relabel_future(episode, 1, achieved, num_relabeled=1,
+                         reward_fn=_reward_match, rng=_BoundsCheckingRng())
+    [(goal, reward, done)] = out
+    torch.testing.assert_close(goal, achieved)
+    torch.testing.assert_close(reward, torch.tensor([1.0]))
+    torch.testing.assert_close(done, torch.tensor([1.0]))
 
 
 # Author: Mus mbayramo@stanford.edu
