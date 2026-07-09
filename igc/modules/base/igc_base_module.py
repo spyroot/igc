@@ -674,7 +674,7 @@ class IgcModule(IgcBaseState):
             return CheckpointState(0, None, 0, float('-inf'), 0)
 
         self.logger.info(f"Found latest checkpoint, loading {checkpoint_file}.")
-        checkpoint = torch.load(checkpoint_file)
+        checkpoint = torch.load(checkpoint_file, map_location=map_to)
 
         required_keys = ['model_state_dict', 'epoch']
         if resuming:
@@ -783,7 +783,7 @@ class IgcModule(IgcBaseState):
                 last_file = last_checkpoint_file
 
         if last_file is None:
-            print(f"No checkpoint or module file found")
+            print("No checkpoint or module file found")
             return 0, False
 
         print(f"Found model file {last_file} loading mapping to {map_to}")
@@ -865,7 +865,7 @@ class IgcModule(IgcBaseState):
             self.logger.debug("Memory allocated:", mem_get_info["allocated_bytes.all.current"] / 1024 ** 3, "GB")
             # additional CUDA statistics if available
             if hasattr(torch.cuda, 'utilization'):
-                self.logger.debug(f"CUDA utilization:", torch.cuda.utilization())
+                self.logger.debug("CUDA utilization:", torch.cuda.utilization())
             if hasattr(torch.cuda, 'memory_summary'):
                 torch.cuda.memory_summary()
 
