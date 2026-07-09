@@ -20,7 +20,10 @@ def shared_main(
     args.local_rank = int(os.environ.get('LOCAL_RANK', -1))
 
     if args.local_rank == -1:
-        if args.device is None:
+        # "auto" is the parser default and never a valid torch.device string; resolve
+        # it (and an unset device) to a concrete cuda/mps/cpu device before any module
+        # calls torch.device(args.device).
+        if args.device is None or args.device == "auto":
             args.device = get_device()
             # torch.cuda.set_device(args.device)
     # else:
