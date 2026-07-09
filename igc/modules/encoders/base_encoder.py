@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from igc.modules.encoders.backbone_utils import backbone_module, emb_shape
+from igc.modules.shared.llm_shared import safe_resize_token_embeddings
 
 
 class Conv1DLatent(nn.Module):
@@ -43,7 +44,7 @@ class BaseEncoder:
         self._encoder_model = backbone_module(model)
         self._encoder_model.eval()
         self._encoder_model.config.is_decoder = False
-        self._model.resize_token_embeddings(len(tokenizer))
+        safe_resize_token_embeddings(self._model, tokenizer)
 
         # (positions, hidden) from the backbone config — works for RoPE backbones with no
         # GPT-2 wpe positional table. Subtract 1 to exclude the padding index.

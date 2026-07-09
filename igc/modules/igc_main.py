@@ -17,6 +17,7 @@ from .base.igc_metric_logger import MetricLogger
 from igc.modules.llm.igc_llm_module import IgcLanguageModule
 from .igc_rl_module import IgcRlModule
 from .llm_train_state_encoder import LlmEmbeddingsTrainer
+from .shared.llm_shared import safe_resize_token_embeddings
 from .shared.llm_shared import (
     from_pretrained_default,
     load_pretrained_default,
@@ -151,8 +152,8 @@ class IgcMain:
         if self._specs.copy_llm:
             model, _ = from_pretrained_default(self._specs, only_model=True)
             model.to(torch.device("cpu"))
-            model.resize_token_embeddings(len(self._dataset.tokenizer))
-            model = model.to_bettertransformer()
+            safe_resize_token_embeddings(model, self._dataset.tokenizer)
+            # (BetterTransformer was removed in transformers 5.x; SDPA is native.)
             model, epoch, model_path = IgcModule.copy_checkpoint(self._specs, "state_encoder", model)
             print("Saved model to checkpoint file: ", model_path)
         elif self._specs.test_llm:

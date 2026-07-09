@@ -22,6 +22,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from igc.modules.base.igc_llm_base_module import LlmModule
 from igc.modules.base.igc_metric_logger import MetricLogger
+from igc.modules.shared.llm_shared import safe_resize_token_embeddings
 from igc.shared.shared_torch_builder import TorchBuilder
 
 from igc.ds.redfish_masked_dataset import (
@@ -396,9 +397,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         :param mask_type: Masking methods active during the training schedule.
         """
 
-        self.model.resize_token_embeddings(
-            len(self.dataset.tokenizer)
-        )
+        safe_resize_token_embeddings(self.model, self.dataset.tokenizer)
 
         self.logger.info(
             f"Rank {self.rank} starting train, device {self.device}")
@@ -682,9 +681,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         :return:
         """
 
-        self.model.resize_token_embeddings(
-            len(self.dataset.tokenizer)
-        )
+        safe_resize_token_embeddings(self.model, self.dataset.tokenizer)
 
         self.logger.info(
             f"Rank {self.rank} starting train, device {self.device}")

@@ -70,7 +70,7 @@ def from_pretrained_default(
     if not only_tokenizer:
         load_kwargs = {"trust_remote_code": trust_remote_code}
         if torch_dtype is not None:
-            load_kwargs["torch_dtype"] = torch_dtype
+            load_kwargs["dtype"] = torch_dtype
         model = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
 
     if not only_model:
@@ -84,6 +84,40 @@ def from_pretrained_default(
         model.config.pad_token = tokenizer.pad_token
 
     return model, tokenizer
+
+
+def safe_resize_token_embeddings(
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizer,
+        force_shrink: bool = False,
+) -> PreTrainedModel:
+    """Resize the model's token embeddings to the tokenizer, refusing silent shrinks.
+
+    ``resize_token_embeddings`` happily SHRINKS a pretrained vocabulary with no
+    warning (e.g. Qwen2.5's 151936 rows down to the cached igc tokenizer's 53147),
+    deleting pretrained embedding rows and then training foreign token ids against
+    the survivors. Growth (adding the igc JSON special tokens) is the only resize a
+    matched backbone/tokenizer pair ever needs, so a shrink means the tokenizer does
+    not belong to this backbone and is rejected loudly.
+
+    :param model: the causal-LM backbone.
+    :param tokenizer: the tokenizer the embeddings must cover.
+    :param force_shrink: explicitly allow a shrinking resize (expert use only).
+    :return: the (possibly resized) model, for call-site chaining.
+    :raises ValueError: when the resize would shrink the vocabulary and
+        ``force_shrink`` is False.
+    """
+    current = model.get_input_embeddings().num_embeddings
+    target = len(tokenizer)
+    if target < current and not force_shrink:
+        raise ValueError(
+            f"Refusing to shrink token embeddings from {current} to {target}: this "
+            f"tokenizer does not belong to the backbone (a shrink silently deletes "
+            f"pretrained embedding rows). Rebuild the dataset tokenizer for this "
+            f"backbone, or pass force_shrink=True to override.")
+    if target != current:
+        model.resize_token_embeddings(target)
+    return model
 
 
 def igc_base_dir():
@@ -139,8 +173,9 @@ def load_igc_tokenizer(
         raise ValueError(f"Tokenizer directory '{tok_dir}' does not exist.")
 
     tokenizer = AutoTokenizer.from_pretrained(tok_dir)
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.pad_token_id = tokenizer.eos_token_id
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
     return tokenizer
 
 
@@ -163,12 +198,12 @@ def save_pretrained_default(
     try:
         if only_tokenizer:
             tokenizer.save_pretrained(huggingface_dir)
-            tokenizer.pad_token_id = tokenizer.eos_token_id
         else:
-            tokenizer.pad_token = tokenizer.eos_token
-            tokenizer.pad_token_id = tokenizer.eos_token_id
-            model.config.pad_token_id = tokenizer.eos_token_id
-            model.config.pad_token = tokenizer.eos_token
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+                tokenizer.pad_token_id = tokenizer.eos_token_id
+            model.config.pad_token_id = tokenizer.pad_token_id
+            model.config.pad_token = tokenizer.pad_token
 
             model.save_pretrained(huggingface_dir)
             tokenizer.save_pretrained(huggingface_dir)
@@ -208,10 +243,7 @@ def load_pretrained_default(
         "output_loading_info":
             args.llm_output_loading_info
             if hasattr(args, "llm_output_loading_info") else False,
-        "_fast_init":
-            args.llm_fast_init
-            if hasattr(args, "llm_fast_init") else True,
-        "torch_dtype":
+        "dtype":
             args.llm_torch_dtype
             if hasattr(args, "llm_torch_dtype") else None,
         "device_map":

@@ -39,6 +39,7 @@ from sklearn.metrics import f1_score
 
 from .prompt_types import PromptType
 from ..nn.lora1d import LoRAConv1DWrapper
+from ..shared.llm_shared import safe_resize_token_embeddings
 from ..shared.llm_shared import (
     load_pretrained_default, save_pretrained_default
 )
@@ -89,8 +90,12 @@ class LlmModule(IgcModule):
             self.metric_logger.set_log_level(self._log_level)
 
         if hasattr(llm_model, 'resize_token_embeddings'):
-            llm_model.resize_token_embeddings(len(llm_tokenizer))
-            self.model.config.pad_token_id = self.model.config.eos_token_id
+            safe_resize_token_embeddings(llm_model, llm_tokenizer)
+            # keep the tokenizer's own pad id; only default to eos when it has none.
+            if llm_tokenizer.pad_token_id is not None:
+                self.model.config.pad_token_id = llm_tokenizer.pad_token_id
+            elif self.model.config.pad_token_id is None:
+                self.model.config.pad_token_id = self.model.config.eos_token_id
         else:
             warnings.warn("Model does not have the 'resize_token_embeddings' method.")
 
