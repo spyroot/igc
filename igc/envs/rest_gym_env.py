@@ -158,17 +158,17 @@ class RestApiEnv(gym.Env):
         :param action: The action to check.
         :return: True if the action is the goal action, False otherwise.
         """
-        if self.goal_type == GoalTypeState.State.value:
+        if self.goal_type == GoalTypeState.State:
             if response is not None:
                 observation = self.encoder.encode(response.json())
                 if torch.allclose(observation, self.goal_action) and 200 <= response.status_code <= 300:
                     return True
         # simple goal execute particular http api with particular method.
-        elif self.goal_type == GoalTypeState.Action.value:
+        elif self.goal_type == GoalTypeState.Action:
             if torch.allclose(action, self.goal_action):
                 return True
         # fixed state goal provided as a tensor
-        elif self.goal_type == GoalTypeState.FixedState.value:
+        elif self.goal_type == GoalTypeState.FixedState:
             if response is not None:
                 observation = self.encoder.encode(response.json())
                 if torch.allclose(observation, self.goal_action) and 200 <= response.status_code <= 300:
