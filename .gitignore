@@ -8,6 +8,14 @@ datasets/orig/*
 datasets/raw/*
 datasets/original/*
 datasets/modules/*
+
+# Local data/model artifacts — never commit.
+datasets/*.tar.gz
+datasets/dataset.json
+datasets/tokenizer/tokenizer.json
+test_datasets/
+tests/datasets/
+imgs/
 # C extensions
 *.so
 .idea
@@ -171,6 +179,7 @@ CODEX_*.md
 TEAM_GUIDE.md
 COORDINATION.md
 FLASH_BRAIN.md
+NV72_MODELS.md
 GPU_ACCESS.md
 IMPROVEMENT_PLAN.md
 ROADMAP*.md

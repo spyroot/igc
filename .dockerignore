@@ -18,6 +18,12 @@ backups/
 logs/
 *.log
 checkpoints/
+datasets/*.tar.gz
+datasets/dataset.json
+datasets/tokenizer/tokenizer.json
+test_datasets/
+tests/datasets/
+imgs/
 # submodule (not needed for the offline gate image)
 idrac_ctl/
 # local agent/coordination docs (gitignored already)
@@ -25,5 +31,6 @@ COORDINATION.md
 CLAUDE.md
 AGENTS.md
 FLASH_BRAIN.md
+NV72_MODELS.md
 GPU_ACCESS.md
 .codex/
