@@ -5,9 +5,15 @@ TODO: Update test.
 import os
 import tempfile
 import unittest
+
+import pytest
 import torch
 from transformers import GPT2Tokenizer
 from igc.ds.redfish_dataset import JSONDataset
+
+# Every test here builds JSONDataset from the captured ~/.json_responses dataset;
+# excluded from the offline gate via the dataset marker (see pytest.ini).
+pytestmark = pytest.mark.dataset
 
 j_data = {
     "@odata.context": "/redfish/v1/$metadata#MetricReportDefinitionCollection.MetricReportDefinitionCollection",

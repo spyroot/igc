@@ -175,7 +175,8 @@ def create_tar_gz(directory_path: str, output_file: str) -> Tuple[str, str]:
         f.write(hash_value)
 
     _logger.debug("Tar file created:", os.path.abspath(tar_file))
-    return os.path.abspath(output_file), hash_value
+    # return the hash FILE path (not the hash value) per the documented contract.
+    return os.path.abspath(output_file), os.path.abspath(hash_file)
 
 
 def do_http_head(
