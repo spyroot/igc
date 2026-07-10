@@ -509,6 +509,12 @@ class LlmEmbeddingsTrainer(LlmModule):
         max_steps = getattr(self._trainer_args, "max_train_steps", None)
         global_opt_steps = 0
 
+        # End-of-run report bookkeeping (emitted as report.json on rank zero).
+        run_started_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+        run_started_clock = time.time()
+        final_epoch_loss = None
+        epochs_done = last_epoch
+
         if total_batches == calculated_total_batches:
             print(f"Rank {self.rank}, Staring training, "
                   f"total_batches: {total_batches} "
@@ -625,9 +631,11 @@ class LlmEmbeddingsTrainer(LlmModule):
 
             if num_batches > 0:
                 average_loss = total_loss / num_batches
+                final_epoch_loss = average_loss
                 if self.is_rank_zero():
                     self.metric_logger.log_metric("train/epoch_loss", average_loss, epoch_step)
                 print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
+            epochs_done = epoch + 1
 
             # save best checkpoint
             if self.is_rank_zero():
@@ -665,6 +673,33 @@ class LlmEmbeddingsTrainer(LlmModule):
             self.model = self.accelerator.unwrap_model(self.model)
         self.save_model(self._module_checkpoint_dir)
         self.save_finetuned()
+
+        # Emit the self-describing run report (report.json) next to the checkpoint so
+        # every run is comparable through igc.modules.train.report.compare(). Emission
+        # must never take down a finished training run, hence the broad guard.
+        if self.is_rank_zero():
+            try:
+                from igc.modules.train.emit import build_run_bundle, emit_run_report
+                manifest_fields = getattr(self.dataset, "run_manifest_fields", None)
+                bundle = build_run_bundle(
+                    vars(self._trainer_args),
+                    training={
+                        "final_epoch_loss": final_epoch_loss,
+                        "epochs_done": epochs_done,
+                        "optimizer_steps": global_opt_steps,
+                        "best_eval": self._best_validation_metric,
+                    },
+                    metrics={"eval/accuracy": validation_accuracy},
+                    dataset_fields=manifest_fields() if callable(manifest_fields) else None,
+                    started_at=run_started_at,
+                    ended_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    wall_clock_sec=round(time.time() - run_started_clock, 1),
+                    checkpoint_path=str(self._module_checkpoint_dir or ""),
+                )
+                report_path = emit_run_report(bundle, str(self._module_checkpoint_dir or "."))
+                self.logger.info(f"Run report written: {report_path}")
+            except Exception as report_err:  # noqa: BLE001 — report loss < run loss
+                self.logger.warning(f"run-report emission failed: {report_err}")
 
         del train_dataloader
         del eval_dataloader
