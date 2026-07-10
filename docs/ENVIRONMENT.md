@@ -21,10 +21,14 @@ conda activate igc-dev
 ```
 
 On macOS, set the OpenMP guard before Torch/scientific-Python imports that can load duplicate OpenMP
-libraries:
+libraries. For unattended offline gates, also set the Hugging Face cached-only switches so tests do
+not attempt model or dataset downloads:
 
 ```bash
-export KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1
+export KMP_DUPLICATE_LIB_OK=TRUE
+export OMP_NUM_THREADS=1
+export TRANSFORMERS_OFFLINE=1
+export HF_DATASETS_OFFLINE=1
 ```
 
 Current Phase 0 smoke checks are explicit while the full offline harness is still being stabilized:
@@ -33,6 +37,9 @@ Current Phase 0 smoke checks are explicit while the full offline harness is stil
 python -m pytest -q tests/core
 ruff check igc/core tests/core
 ```
+
+A green local run currently ends with `29 passed` for `tests/core` and `All checks passed!` from
+`ruff`.
 
 The intended integration gate is `pytest -q` plus `ruff check <changed files>` after GPU/download/live
 tests are marked and the shared fixtures are in place. Until then, new tests should name their safe
@@ -59,11 +66,15 @@ Training runs on the cluster, not on the local CPU env. The training base is the
 pulled on the nodes; igc's extra training dependencies live in `docker/requirements-train.txt`.
 
 ```bash
-srun --partition=debug --gres=gpu:1 \
-     --exclude=gb300-poc1-slot2,gb300-poc1-slot15,gb300-poc1-slot16 \
-     --container-image=nvcr.io/nvidia/pytorch:26.03-py3 \
-     --container-mounts=$HOME/igc:/workspace/igc,$HOME/data:/data \
-     --time=02:00:00 --pty bash
+srun \
+  --partition=debug \
+  --gres=gpu:1 \
+  --exclude=gb300-poc1-slot2,gb300-poc1-slot15,gb300-poc1-slot16 \
+  --container-image=nvcr.io/nvidia/pytorch:26.03-py3 \
+  --container-mounts=$HOME/igc:/workspace/igc,$HOME/data:/data \
+  --time=02:00:00 \
+  --pty \
+  bash
 cd /workspace/igc && pip install -r docker/requirements-train.txt
 NCCL_NVLS_ENABLE=0 accelerate launch --num_processes 1 igc_main.py --train ...
 ```
