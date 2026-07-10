@@ -68,9 +68,10 @@ cd /workspace/igc && pip install -r docker/requirements-train.txt
 NCCL_NVLS_ENABLE=0 accelerate launch --num_processes 1 igc_main.py --train ...
 ```
 
-Start with one GPU. Always exclude slots 2, 15, and 16, set `NCCL_NVLS_ENABLE=0`, and stage data plus
-HuggingFace cache to node-local NVMe because there is no shared filesystem. Do not report a training
-run as successful without the exact command, logged metric, and artifact location.
+Start with one GPU. Always exclude slots 2, 15, and 16, set `NCCL_NVLS_ENABLE=0`, and stage large
+artifacts on the shared BeeGFS filesystem mounted at `/models` on every node. Use node-local NVMe only
+for short-lived scratch data. Do not report a training run as successful without the exact command,
+logged metric, and artifact location.
 
 ## Verification split
 
