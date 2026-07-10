@@ -38,13 +38,18 @@ if [[ "${AVAIL_GB}" -lt "${IGC_MIN_FREE_GB}" ]]; then
     exit 1
 fi
 
-# 1-GPU first: the NVLink fabric is flaky under multi-GPU (disable SHARP/multicast).
-export NCCL_NVLS_ENABLE=0
+# Fabric update (operator, 2026-07-10): NVLink/RoCE healthy — NVLS on by default;
+# override with IGC_NCCL_NVLS=0 if nccl_smoke (the R4 gate) says otherwise.
+export NCCL_NVLS_ENABLE="${IGC_NCCL_NVLS:-1}"
 export PYTHONUNBUFFERED=1
 
 # Overridable knobs (env). Stage code + captured data on the node's local NVMe.
 IGC_STAGE="${IGC_STAGE:-m1}"                     # m1|m2|m3|m3p|m6|all (see header)
-IGC_GPUS="${IGC_GPUS:-1}"                        # 1 = plain python; >1 = accelerate launch + FSDP2
+IGC_GPUS="${IGC_GPUS:-1}"                        # per-node GPUs; >1 or multi-node = accelerate+FSDP2
+# multi-node rendezvous: first job node is the accelerate main process host.
+MASTER_ADDR="$(scontrol show hostnames "${SLURM_JOB_NODELIST:-$(hostname)}" 2>/dev/null | head -n1 || hostname)"
+MASTER_PORT="${MASTER_PORT:-29500}"
+export MASTER_ADDR MASTER_PORT
 IGC_SHARDING="${IGC_SHARDING:-fsdp}"             # sharding mode for multi-GPU (fsdp = torch-native)
 IGC_MODEL="${IGC_MODEL:-gpt2}"                   # small for the smoke; large HF decoder to scale
 IGC_DIR="${IGC_DIR:-$HOME/igc}"                  # node-local igc checkout
@@ -94,7 +99,7 @@ fi
 echo "igc train | stage=${IGC_STAGE} args='${TRAIN_ARGS}' model=${IGC_MODEL} epochs=${EPOCHS} report=${IGC_REPORT} node=$(hostname)"
 
 # Export the few values the inner heredoc needs (avoids brittle nested quoting).
-export IGC_MODEL EPOCHS SEED IGC_REPORT TRAIN_ARGS EPOCH_FLAG EXTRA_ARGS RUN_NAME IGC_RUN RL_EPOCH_ARG IGC_GPUS IGC_SHARDING
+export IGC_MODEL EPOCHS SEED IGC_REPORT TRAIN_ARGS EPOCH_FLAG EXTRA_ARGS RUN_NAME IGC_RUN RL_EPOCH_ARG IGC_GPUS IGC_SHARDING MASTER_ADDR MASTER_PORT
 
 srun --container-image="${NGC_IMAGE}" \
      --container-mounts="${IGC_DIR}:/workspace/igc,${DATA_DIR}:/root/.json_responses" \
@@ -109,9 +114,17 @@ srun --container-image="${NGC_IMAGE}" \
         # 1 GPU: plain python. >1 GPU: accelerate launch with torch-native FSDP2
         # (per-rank device resolution + collective checkpoint gather are wired in igc);
         # a sharded config in a single-process launch fails loudly by design.
-        if [[ "${IGC_GPUS}" -gt 1 ]]; then
-            LAUNCH=(accelerate launch --num_processes "${IGC_GPUS}" igc_main.py
-                    --use_accelerator --sharding "${IGC_SHARDING}")
+        NNODES="${SLURM_NNODES:-1}"
+        NODE_RANK="${SLURM_NODEID:-0}"
+        TOTAL_PROCS=$(( IGC_GPUS * NNODES ))
+        if [[ "${TOTAL_PROCS}" -gt 1 ]]; then
+            LAUNCH=(accelerate launch
+                    --num_processes "${TOTAL_PROCS}"
+                    --num_machines "${NNODES}"
+                    --machine_rank "${NODE_RANK}"
+                    --main_process_ip "${MASTER_ADDR}"
+                    --main_process_port "${MASTER_PORT}"
+                    igc_main.py --use_accelerator --sharding "${IGC_SHARDING}")
         else
             LAUNCH=(python igc_main.py --device cuda:0)
         fi
