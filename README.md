@@ -5,10 +5,12 @@ goal-conditioned reinforcement-learning agent to operate Redfish-exposed infrast
 Decision Process. The agent observes Redfish GET/HEAD responses, chooses REST actions, and learns
 from captured Redfish data collected by the `idrac_ctl/` git submodule.
 
-## Start here: Phase 0 local development
+## Start here: local CPU smoke gate
 
-Use the CPU development environment first. `environment-dev.yaml`, the repo-local conda file, creates
-`igc-dev` with CPU PyTorch, pytest, ruff, and the mock-REST dependencies needed for the offline gate.
+Use the CPU development environment first. `environment-dev.yaml`, the repo-local conda file,
+creates `igc-dev` with CPU PyTorch, pytest, ruff, and the mock-REST dependencies needed for the
+offline gate.
+The local smoke gate is the first check before broader tests.
 
 ```bash
 conda env create -f environment-dev.yaml
@@ -22,29 +24,30 @@ packages:
 export KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1
 ```
 
-Run the current Phase 0 smoke checks:
+Run the current local smoke gate:
 
 ```bash
 python -m pytest -q tests/core
 ruff check igc/core tests/core
 ```
 
-The intended integration gate is `pytest -q` plus `ruff check <changed files>` once the Phase 0 test
-harness and markers are fully in place. Until then, keep new tests explicit, offline, and CPU-only.
-For Docker, GPU, and cluster details, see [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md), the runtime and
-verification guide.
+Success means `pytest` exits 0 for `tests/core` and `ruff` exits 0 for `igc/core` and `tests/core`.
+Until the broader harness and markers are fully in place, keep new tests explicit, offline, and
+CPU-only.
+For Docker, GPU, and cluster details, see [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md), the runtime
+and verification guide.
 
 ## What is in this repository
 
 - `igc/ds/` contains the Redfish dataset pipeline, including JSON response loading, tokenizer input
-  construction, masked datasets, and the `rest_api_map.npy` loader.
+  construction, masked datasets, and the `rest_api_map.npy` loader for the map written by
+  `idrac_ctl/` discovery.
 - `igc/envs/` contains the mock REST environment and Gym-style wrappers used for offline simulation.
 - `igc/interfaces/` contains the REST mapping interface that binds URLs to captured response files.
 - `igc/modules/` contains model and training code for the language model, state encoder, value head,
   and RL agent.
 - `igc/shared/` contains shared argument parsing and utility code.
-- `igc/core/` contains the Phase 0 typed contracts being introduced for the generic tool-use agent
-  architecture.
+- `igc/core/` contains typed contracts for the generic tool-use agent architecture.
 - `tests/` contains pytest coverage. Default tests must stay offline: no GPU, network, HuggingFace
   download, live Redfish host, or real `idrac_ctl` crawl.
 - `docs/` contains the deeper design and environment material. Start with
@@ -65,8 +68,8 @@ requires explicit current-task approval, an approved non-production host, creden
 environment variables or flags, and pacing. Never hardcode or print `IDRAC_IP`, `IDRAC_USERNAME`, or
 `IDRAC_PASSWORD` values.
 
-`HUGGINGFACE_TOKEN`, when set by the developer for opt-in model downloads, is not needed for Phase 0
-local smoke tests and must not be logged or committed.
+`HUGGINGFACE_TOKEN`, when set by the developer for opt-in model downloads, is not needed for the
+local smoke gate and must not be logged or committed.
 
 ## How the agent learns
 
@@ -95,5 +98,5 @@ representation. The full plan and model curriculum live in
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — local CPU env, Docker test image, and GB300/NVL72
   training surfaces.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — target architecture, simulator plugin model,
-  training curriculum, and Phase 0 stabilization work.
+  training curriculum, and current implementation status.
 - [docs/README.md](docs/README.md) — index for the docs directory and diagrams.
