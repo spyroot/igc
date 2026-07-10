@@ -19,6 +19,11 @@ def shared_main(
     args, parser_groups = shared_arg_parser()
     args.local_rank = int(os.environ.get('LOCAL_RANK', -1))
 
+    # The team docs standardize on HUGGINGFACE_TOKEN, but huggingface_hub reads
+    # HF_TOKEN — map it once (value never logged) so gated-model downloads work.
+    if os.environ.get("HUGGINGFACE_TOKEN") and not os.environ.get("HF_TOKEN"):
+        os.environ["HF_TOKEN"] = os.environ["HUGGINGFACE_TOKEN"]
+
     # "auto" is the parser default and never a valid torch.device string; resolve
     # it (and an unset device) to a concrete device before any module calls
     # torch.device(args.device). Under accelerate launch/torchrun (LOCAL_RANK set)
