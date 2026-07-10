@@ -56,8 +56,11 @@ fi
 
 set -x
 IGC_GPUS="${IGC_GPUS:-1}"
+IGC_NODES="${IGC_NODES:-1}"
 IGC_STAGE="${STAGE}" IGC_GPUS="${IGC_GPUS}" sbatch \
     --gres="gpu:${IGC_GPUS}" \
+    --nodes="${IGC_NODES}" \
+    --ntasks-per-node=1 \
     --job-name="igc-${STAGE}" \
     --exclude="${EXCLUDE}" \
     "${EXTRA_SBATCH_ARGS[@]}" \

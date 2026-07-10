@@ -4,7 +4,7 @@ The GB300 fabric has a documented history of NVLink flakiness, so a 4-GPU
 training job must not be the first thing to exercise collective comms. Run
 this first (30 seconds, R4 rung of docs/SMOKE_LADDER.md):
 
-    NCCL_NVLS_ENABLE=0 torchrun --nproc_per_node 4 scripts/nccl_smoke.py
+    torchrun --nproc_per_node 4 scripts/nccl_smoke.py   # IGC_NCCL_NVLS=0 only if this fails
 
 Each rank all-reduces a tensor repeatedly and rank 0 prints the effective
 bus bandwidth; any fabric fault surfaces here as a hang or NCCL error in

@@ -38,8 +38,9 @@ passes (no `safe_resize` refusal); loss decreases; checkpoint round-trips.
 
 ## R4 — 4 GPU, FSDP2 sharded
 
-`accelerate launch --num_processes 4` with `--sharding fsdp`. Run `NCCL_NVLS_ENABLE=0`
-per the fabric caution in the ops notes. Gates: an NCCL all-reduce microbench completes
+`accelerate launch --num_processes 4` with `--sharding fsdp` (multi-node: `IGC_NODES=N`,
+rendezvous via the first job node). The fabric is reported healthy (2026-07-10); NVLS is on
+by default and `IGC_NCCL_NVLS=0` is the fallback if the microbench disagrees. Gates: an NCCL all-reduce microbench completes
 first; the sharded run saves AND reloads a checkpoint (the collective-gather path);
 single-process launches of a sharded config must fail loudly (by design).
 
