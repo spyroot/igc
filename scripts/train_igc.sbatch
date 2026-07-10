@@ -20,6 +20,7 @@
 #SBATCH --partition=debug
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
+# NOTE: submit_train.sh overrides --gres to gpu:${IGC_GPUS} at submit time.
 #SBATCH --exclude=gb300-poc1-slot2,gb300-poc1-slot15,gb300-poc1-slot16
 #SBATCH --time=08:00:00
 #SBATCH --output=%x-%j.out
@@ -43,6 +44,8 @@ export PYTHONUNBUFFERED=1
 
 # Overridable knobs (env). Stage code + captured data on the node's local NVMe.
 IGC_STAGE="${IGC_STAGE:-m1}"                     # m1|m2|m3|m3p|m6|all (see header)
+IGC_GPUS="${IGC_GPUS:-1}"                        # 1 = plain python; >1 = accelerate launch + FSDP2
+IGC_SHARDING="${IGC_SHARDING:-fsdp}"             # sharding mode for multi-GPU (fsdp = torch-native)
 IGC_MODEL="${IGC_MODEL:-gpt2}"                   # small for the smoke; large HF decoder to scale
 IGC_DIR="${IGC_DIR:-$HOME/igc}"                  # node-local igc checkout
 DATA_DIR="${DATA_DIR:-$HOME/.json_responses}"    # node-local captured Redfish responses
@@ -91,7 +94,7 @@ fi
 echo "igc train | stage=${IGC_STAGE} args='${TRAIN_ARGS}' model=${IGC_MODEL} epochs=${EPOCHS} report=${IGC_REPORT} node=$(hostname)"
 
 # Export the few values the inner heredoc needs (avoids brittle nested quoting).
-export IGC_MODEL EPOCHS SEED IGC_REPORT TRAIN_ARGS EPOCH_FLAG EXTRA_ARGS RUN_NAME IGC_RUN RL_EPOCH_ARG
+export IGC_MODEL EPOCHS SEED IGC_REPORT TRAIN_ARGS EPOCH_FLAG EXTRA_ARGS RUN_NAME IGC_RUN RL_EPOCH_ARG IGC_GPUS IGC_SHARDING
 
 srun --container-image="${NGC_IMAGE}" \
      --container-mounts="${IGC_DIR}:/workspace/igc,${DATA_DIR}:/root/.json_responses" \
@@ -103,14 +106,23 @@ srun --container-image="${NGC_IMAGE}" \
         # Shared curriculum root so later stages find earlier checkpoints (per-module subdirs).
         OUT="/workspace/igc/experiments/${IGC_RUN}"
         mkdir -p "${OUT}"
+        # 1 GPU: plain python. >1 GPU: accelerate launch with torch-native FSDP2
+        # (per-rank device resolution + collective checkpoint gather are wired in igc);
+        # a sharded config in a single-process launch fails loudly by design.
+        if [[ "${IGC_GPUS}" -gt 1 ]]; then
+            LAUNCH=(accelerate launch --num_processes "${IGC_GPUS}" igc_main.py
+                    --use_accelerator --sharding "${IGC_SHARDING}")
+        else
+            LAUNCH=(python igc_main.py --device cuda:0)
+        fi
         # shellcheck disable=SC2086
-        python igc_main.py \
+        "${LAUNCH[@]}" \
             ${TRAIN_ARGS} \
             --model_type "${IGC_MODEL}" \
             ${EPOCH_FLAG} "${EPOCHS}" ${RL_EPOCH_ARG} \
             --json_data_dir /root/.json_responses \
             --output_dir "${OUT}" \
-            --device cuda:0 --seed "${SEED}" \
+            --tf32 --seed "${SEED}" \
             --metric_report "${IGC_REPORT}" \
             ${EXTRA_ARGS} \
             --log_level info --llm_log_level info
