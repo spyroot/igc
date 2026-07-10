@@ -4,4 +4,4 @@
 
 [submodule "idrac_ctl"]
     path = idrac_ctl
-    url = git@github.com:spyroot/idrac_ctl.git
+    url = git@github.com:spyroot/redfish_ctl.git
