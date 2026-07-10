@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
-# stage_node.sh — stage the igc checkout + captured data onto a GB300 node's local NVMe.
+# stage_node.sh — prepare a GB300 node for igc training WITHOUT bulk laptop uploads.
 #
-# The cluster schedules jobs wherever Slurm likes, but the data lives only where you
-# staged it — so stage first, then pin the job to that node (submit_train.sh -w <node>).
-# Everything node- or user-specific comes from the environment; nothing is hardcoded:
+# HARD RULE (operator, 2026-07-10): the VPN is a shared link — a multi-GB rsync from a
+# laptop saturates it and blocks SSH for EVERYONE. Nothing larger than tens of MB may
+# originate from the laptop:
+#   - CODE           -> the node pulls from GitHub (origin main is current; PR-only flow)
+#   - DATASET CACHES -> rebuilt ON the node (--recreate_dataset) or copied node-locally
+#                       from the shared /models filesystem at LAN speed
+#   - WEIGHTS        -> git-lfs weights repo or /models via publish_checkpoint.sh
+#   - CAPTURES       -> the only laptop upload (~tens of MB), bandwidth-capped
 #
-#   IGC_NODE=<hostname-or-ip>   # required: the target node (see your ops notes)
-#   IGC_NODE_USER=nvidia        # ssh user (default nvidia)
-#   IGC_DEST=igc                # remote checkout dir under $HOME (default igc)
-#   IGC_STAGE_DATA=1            # also rsync ~/.json_responses captures (default 1)
-#   IGC_STAGE_INTERNAL=0        # also rsync .internal/ (wandb env etc.; default 0)
-#
-# Usage:
-#   IGC_NODE=gb300-poc1-slotN ./scripts/stage_node.sh
-#   ./scripts/submit_train.sh m1 -w "${IGC_NODE}"     # then pin the job to it
-#
-# Excludes keep the transfer lean and internal files off the node image: no .git, no
-# tarballs/raw capture dumps from datasets/ (the built caches + tokenizer DO go), no
-# experiments/logs, and no agent/ops docs (gitignored but present locally).
+#   IGC_NODE=<hostname-or-ip>      # required
+#   IGC_NODE_USER=nvidia           # ssh user
+#   IGC_DEST=igc                   # remote checkout dir under $HOME
+#   IGC_REPO_URL=<git url>         # default: this checkout's origin remote
+#   IGC_BWLIMIT_KBPS=4000          # captures rsync cap (~4MB/s, link stays usable)
+#   IGC_STAGE_DATA=1               # rsync ~/.json_responses captures (small)
+#   IGC_STAGE_INTERNAL=0           # rsync .internal/ run config (tiny)
 set -euo pipefail
 
 : "${IGC_NODE:?set IGC_NODE to the staging target node (hostname or IP)}"
@@ -25,27 +24,25 @@ IGC_NODE_USER="${IGC_NODE_USER:-nvidia}"
 IGC_DEST="${IGC_DEST:-igc}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE="${IGC_NODE_USER}@${IGC_NODE}"
+IGC_REPO_URL="${IGC_REPO_URL:-$(git -C "${HERE}" remote get-url origin)}"
+BW="--bwlimit=${IGC_BWLIMIT_KBPS:-4000}"
 
-echo "staging ${HERE} -> ${REMOTE}:~/${IGC_DEST} (checkout, no .git/tarballs/experiments)"
-rsync -az \
-    --exclude '.git' --exclude '__pycache__' --exclude '*.pyc' \
-    --exclude 'experiments/' --exclude 'logs/' --exclude 'imgs/' \
-    --exclude '*.tar.gz' --exclude '*.tar' --exclude '*.md5' \
-    --exclude 'datasets/raw/' --exclude 'datasets/orig/' \
-    --exclude 'datasets/post/' --exclude 'datasets/pre/' \
-    --exclude 'CLAUDE.md' --exclude 'TEAM_GUIDE.md' --exclude 'COORDINATION.md' \
-    --exclude 'FLASH_BRAIN.md' --exclude 'GPU_ACCESS.md' --exclude 'NV72_MODELS.md' \
-    --exclude '.claude/' --exclude '.codex/' --exclude '.internal/' \
-    "${HERE}/" "${REMOTE}:${IGC_DEST}/"
+echo "code: ${REMOTE} pulls ${IGC_REPO_URL} (no laptop transfer)"
+ssh "${REMOTE}" "if [ -d '${IGC_DEST}/.git' ]; then git -C '${IGC_DEST}' fetch origin && git -C '${IGC_DEST}' reset --hard origin/main; else git clone '${IGC_REPO_URL}' '${IGC_DEST}'; fi"
 
 if [[ "${IGC_STAGE_DATA:-1}" == "1" ]]; then
-    echo "staging ~/.json_responses captures -> ${REMOTE}:~/.json_responses"
-    rsync -az "${HOME}/.json_responses/" "${REMOTE}:.json_responses/"
+    SIZE="$(du -sm "${HOME}/.json_responses" 2>/dev/null | cut -f1 || echo '?')"
+    echo "captures: ~${SIZE}MB -> ${REMOTE}:~/.json_responses (bwlimit ${IGC_BWLIMIT_KBPS:-4000}KB/s)"
+    rsync -az ${BW} --exclude '*.tar.gz' --exclude '*.tar' \
+        "${HOME}/.json_responses/" "${REMOTE}:.json_responses/"
 fi
 
 if [[ "${IGC_STAGE_INTERNAL:-0}" == "1" ]]; then
-    echo "staging .internal/ (run config; never printed)"
-    rsync -az "${HERE}/.internal/" "${REMOTE}:${IGC_DEST}/.internal/"
+    echo "run config: .internal/ (tiny; values never printed)"
+    rsync -az ${BW} "${HERE}/.internal/" "${REMOTE}:${IGC_DEST}/.internal/"
 fi
 
-echo "done. next: ./scripts/submit_train.sh <stage> -w ${IGC_NODE}"
+echo "dataset caches: NOT transferred — rebuild on the node:"
+echo "    ssh ${REMOTE} 'cd ${IGC_DEST} && python igc_main.py --recreate_dataset ...'"
+echo "  (or copy a published cache from the shared /models filesystem at LAN speed)"
+echo "done. next: ./scripts/submit_train.sh <stage> -w <node>"
