@@ -131,4 +131,24 @@ def build_accelerator(cmd: argparse.Namespace):
     return accelerator
 
 
+def broadcast_flag(accelerator, flag: bool) -> bool:
+    """Make a rank-0 boolean decision uniform across ranks.
+
+    Collective checkpoint operations (e.g. ``get_state_dict`` gathers under
+    ZeRO-3/FSDP) require every rank to take the same branch; a rank-local
+    verdict (like a validation-accuracy comparison) deadlocks the fleet when
+    ranks disagree. Single-process accelerators pass the flag through.
+
+    :param accelerator: the built ``accelerate.Accelerator``.
+    :param flag: this rank's local decision.
+    :return: rank 0's decision, uniform on every rank.
+    """
+    if getattr(accelerator, "num_processes", 1) <= 1:
+        return flag
+    import torch
+    from accelerate.utils import broadcast
+    verdict = torch.tensor([1 if flag else 0], device=accelerator.device)
+    return bool(broadcast(verdict, from_process=0).item())
+
+
 # Author: Mus mbayramo@stanford.edu

@@ -23,6 +23,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 from igc.modules.base.igc_llm_base_module import LlmModule
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.modules.shared.llm_shared import safe_resize_token_embeddings
+from igc.shared.shared_accelerator import broadcast_flag
 from igc.shared.shared_torch_builder import TorchBuilder
 
 from igc.ds.redfish_masked_dataset import (
@@ -638,9 +639,18 @@ class LlmEmbeddingsTrainer(LlmModule):
             epochs_done = epoch + 1
 
             # save best checkpoint
+            is_best_accuracy = validation_accuracy > self._best_validation_metric
+            should_save = is_best_accuracy or (epoch + 1) % self._save_freq == 0
+            gathered_state = None
+            if self.is_accelerator and self._module_checkpoint_dir is not None:
+                # rank 0's verdict must be uniform, and the state-dict gather is a
+                # COLLECTIVE under ZeRO-3/FSDP — every rank participates or the
+                # fleet deadlocks / rank 0 writes shards.
+                should_save = broadcast_flag(self.accelerator, should_save)
+                if should_save:
+                    gathered_state = self.accelerator.get_state_dict(self.model)
             if self.is_rank_zero():
-                is_best_accuracy = validation_accuracy > self._best_validation_metric
-                if is_best_accuracy or (epoch + 1) % self._save_freq == 0:
+                if should_save:
                     self._best_validation_metric = validation_accuracy
                     if self._module_checkpoint_dir is not None:
                         if self.is_accelerator:
@@ -651,6 +661,7 @@ class LlmEmbeddingsTrainer(LlmModule):
                                 self._module_checkpoint_dir,
                                 epoch + 1,
                                 model=model,
+                                model_state_dict=gathered_state,
                                 optimizer=opt,
                                 scheduler=shed,
                                 last_accuracy=validation_accuracy,
