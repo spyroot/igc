@@ -252,15 +252,17 @@ class RestApiEnv(gym.Env):
         self.step_count += 1
         info = {}
 
-        done = False
+        # standard gymnasium contract: terminated = real terminal state (goal or
+        # dead-end), truncated = time-limit. Previously position 3 conflated both
+        # and position 4 meant truncation — the exact inversion q_targets warns about.
         terminated = False
+        truncated = False
 
         if self.step_count >= self.max_steps:
-            done = True
-            terminated = True
+            truncated = True
             reward = -1.0
 
-        if not done:
+        if not truncated:
             self.extract_action_method(action)
             rest_api_one_hot, method_one_hot = RestApiEnv.extract_action_method(action)
             method = RestApiEnv.one_hot_to_method_string(method_one_hot)
@@ -277,19 +279,18 @@ class RestApiEnv(gym.Env):
                 # agent execute goal action
                 if self.is_goal_reached(action, response):
                     reward = 1.0
-                    done = True
+                    terminated = True
                     self.last_observation = self.encoder.encode(response.json())
                 elif 200 <= response.status_code <= 300:
                     print(f"status code {response.status_code}")
                     self.last_observation = self.encoder.encode(response.json())
                     reward = 0.1
-                    done = False
                     # Update the current observation with the successful observation
                 elif response.status_code == 500:
                     print(f"status code {response.status_code}")
                     reward = -0.5
-                    done = True
-                    terminated = False
+                    # a dead-end error state is a real terminal, not a truncation
+                    terminated = True
                     observation = self._mock_rest.generate_error_response()
                     self.last_observation = self.encoder.encode(observation)
                 else:
@@ -305,7 +306,7 @@ class RestApiEnv(gym.Env):
         #     reward = -0.1
 
         reward = np.clip(reward, -1.0, 1.0)
-        return self.last_observation, reward, done, terminated, info
+        return self.last_observation, reward, terminated, truncated, info
 
     def reset(
             self,

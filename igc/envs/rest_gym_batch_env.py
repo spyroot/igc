@@ -243,8 +243,8 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
                 self.rewards[i] = -0.2
             else:
                 self.rewards[i] = -0.5
+                # dead-end error state: real terminal
                 self.dones[i] = True
-                self.terminateds[i] = False
 
             # add response to list
             self.responses.append(response)
@@ -252,8 +252,7 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
             if self.step_count >= self.max_steps:
                 if not self.dones[i]:
                     self.rewards[i] = -1.0
-
-                self.dones[i] = True
+                # time-limit is a truncation, not a terminal state
                 self.terminateds[i] = True
 
     def step_wait(
@@ -262,8 +261,8 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         """
         Wait for the asynchronous actions to complete and return the results.
 
-        :return: Tuple containing the observations,
-                 rewards, done flags, terminated flags, and info dictionaries.
+        :return: Tuple of observations, rewards, terminated flags (goal or
+                 dead-end), truncated flags (time-limit), and info dictionaries.
         """
         observations = []
         info = [{}] * self.num_envs
@@ -279,9 +278,9 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
                 )
                 _responses += 1
 
-        done = torch.tensor(self.dones, dtype=torch.bool)
-        done_mask = torch.logical_not(done)
-        terminated = torch.tensor(self.terminateds, dtype=torch.bool)
+        terminated = torch.tensor(self.dones, dtype=torch.bool)
+        truncated = torch.tensor(self.terminateds, dtype=torch.bool)
+        active_mask = torch.logical_not(terminated | truncated)
 
         if len(observations) == 0:
             _observations = self.last_observation
@@ -290,28 +289,23 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
 
         rewards = torch.tensor(self.rewards, dtype=torch.float32)
         goal_reached = self.check_goal(_observations)
-        goal_reached_mask = torch.logical_and(goal_reached, done_mask)
+        goal_reached_mask = torch.logical_and(goal_reached, active_mask)
         rewards[goal_reached_mask] = 1.0
-        done[goal_reached_mask] = True
-        terminated[goal_reached_mask] = False
-
-        if self.step_count >= self.max_steps:
-            done.fill_(True)
-            terminated.fill_(True)
+        terminated[goal_reached_mask] = True
 
         info = [{'goal_reached': gr} for gr in goal_reached]
         self.last_observation = _observations
 
-        for i, done_val in enumerate(done.tolist()):
-            if not self.dones[i] and done_val:
-                self.dones[i] = done_val
-
         for i, terminated_val in enumerate(terminated.tolist()):
-            if not self.terminateds[i] and terminated_val:
-                self.terminateds[i] = terminated_val
+            if not self.dones[i] and terminated_val:
+                self.dones[i] = terminated_val
+
+        for i, truncated_val in enumerate(truncated.tolist()):
+            if not self.terminateds[i] and truncated_val:
+                self.terminateds[i] = truncated_val
 
         self.rewards = [0.0] * self._num_envs
-        return _observations, rewards, done, terminated, info
+        return _observations, rewards, terminated, truncated, info
 
     def simulate_goal_reached(self, batch_id: int):
         """Simulate that particular trajectory in batch reached a goal state.

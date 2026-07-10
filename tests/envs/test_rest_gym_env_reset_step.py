@@ -135,12 +135,12 @@ def test_step_get_known_resource_returns_success_observation(rest_env: RestApiEn
     _, info = rest_env.reset()
     action = _action(rest_env._discovered_rest_api, SYSTEM_URI, "GET")
 
-    observation, reward, done, terminated, step_info = rest_env.step(action)
+    observation, reward, terminated, truncated, step_info = rest_env.step(action)
 
     assert info == {"goal": None}
     assert reward == pytest.approx(0.1)
-    assert done is False
     assert terminated is False
+    assert truncated is False
     assert step_info == {}
     assert rest_env.step_count == 1
     assert torch.equal(observation, rest_env.encoder.encode(json.dumps(SYSTEM_PAYLOAD)))
@@ -153,12 +153,12 @@ def test_step_http_500_returns_terminal_error_observation(rest_env: RestApiEnv):
     rest_env.mock_server().set_simulate_http_500_error(True)
     action = _action(rest_env._discovered_rest_api, SYSTEM_URI, "GET")
 
-    observation, reward, done, terminated, info = rest_env.step(action)
+    observation, reward, terminated, truncated, info = rest_env.step(action)
 
     error_json = MockServer.generate_error_response()
     assert reward == pytest.approx(-0.5)
-    assert done is True
-    assert terminated is False
+    assert terminated is True  # dead-end error is a real terminal
+    assert truncated is False
     assert info == {}
     assert torch.equal(observation, rest_env.encoder.encode(error_json))
     assert torch.equal(rest_env.last_observation, observation)
@@ -171,3 +171,16 @@ def test_reset_rejects_fixed_state_goal_with_wrong_shape(rest_env: RestApiEnv):
 
 
 # Author: Mus mbayramo@stanford.edu
+
+
+def test_step_limit_truncates_without_terminating(rest_env: RestApiEnv):
+    """Hitting max_steps truncates (time-limit) and never marks terminal."""
+    rest_env.reset()
+    action = _action(rest_env._discovered_rest_api, SYSTEM_URI, "GET")
+    rest_env.step_count = rest_env.max_steps - 1
+
+    _, reward, terminated, truncated, _ = rest_env.step(action)
+
+    assert truncated is True
+    assert terminated is False
+    assert reward == pytest.approx(-1.0)

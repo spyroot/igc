@@ -231,13 +231,13 @@ class IgcAgentTrainer(RlBaseModule):
         rewards_per_trajectory = []
 
         i = 0
-        # VectorizedRestApiEnv.step returns ``done`` (goal reached or horizon truncation)
-        # as its third value. Stop the rollout as soon as any env reports the episode is
-        # over; previously ``terminated`` was never updated and the loop always ran to
-        # ``max_episode_len``, replaying past-terminal transitions under the same goal.
-        done = [False] * self.env.num_envs
+        # standard contract: position 3 = terminated (goal/dead-end), position 4 =
+        # truncated (time-limit). The rollout stops on either; replay bootstrapping
+        # distinguishes them downstream (q_targets masks on terminal-only dones).
+        terminated = torch.zeros(self.env.num_envs, dtype=torch.bool)
+        truncated = torch.zeros(self.env.num_envs, dtype=torch.bool)
 
-        while not any(done) and i < self.max_episode_len:
+        while not bool((terminated | truncated).any()) and i < self.max_episode_len:
 
             goal_state = self.current_goal["state"]
             state_flat = _state.view(_state.size(0), -1)
@@ -273,7 +273,7 @@ class IgcAgentTrainer(RlBaseModule):
 
                 concatenated_vector = torch.cat([rest_api_one_hot, rest_api_method_one_hot], dim=1)
 
-            next_state, rewards, done, terminated, info = self.env.step(concatenated_vector)
+            next_state, rewards, terminated, truncated, info = self.env.step(concatenated_vector)
             next_state_flat = next_state.view(next_state.size(0), -1).detach().cpu()
             episode_experience.append(
                 (state_flat, concatenated_vector, rewards, next_state_flat, goal_state_flat)
