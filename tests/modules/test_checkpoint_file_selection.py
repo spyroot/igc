@@ -7,7 +7,6 @@ resolved before a checkpoint is loaded.
 
 import argparse
 import os
-import time
 from pathlib import Path
 
 import loguru
@@ -52,10 +51,19 @@ def test_last_checkpoint_chooses_newest_resumable_epoch_file(
     older = tmp_path / "tmod_epoch_1.pt"
     newer = tmp_path / "tmod_epoch_2.pt"
     _write_checkpoint(older, model, epoch=1)
-    time.sleep(0.02)
     _write_checkpoint(newer, model, epoch=2)
+    os.utime(older, (10, 10))
+    os.utime(newer, (20, 20))
 
     assert IgcModule.last_checkpoint(str(tmp_path)) == str(newer)
+
+
+def test_last_checkpoint_returns_none_without_pt_candidates(
+        tmp_path: Path) -> None:
+    """Directories with no checkpoint candidates return ``None``."""
+    (tmp_path / "notes.txt").write_text("not a checkpoint", encoding="utf-8")
+
+    assert IgcModule.last_checkpoint(str(tmp_path)) is None
 
 
 def test_checkpoint_file_returns_explicit_file_path(tmp_path: Path) -> None:
@@ -104,7 +112,13 @@ def test_copy_checkpoint_uses_explicit_checkpoint_directory(
     assert epoch == 9
     assert last_model_path == str(tmp_path / "tmod_last.pt")
     assert os.path.exists(last_model_path)
+    assert torch.allclose(target.weight, source.weight)
+    assert torch.allclose(target.bias, source.bias)
+    assert target.training is False
     assert not any(param.requires_grad for param in target.parameters())
+    saved = torch.load(last_model_path, weights_only=True)
+    assert "optimizer_state_dict" not in saved
+    assert "scheduler_state_dict" not in saved
 
 
 def test_copy_checkpoint_discovers_module_subdir_checkpoint(
@@ -126,3 +140,22 @@ def test_copy_checkpoint_discovers_module_subdir_checkpoint(
     assert epoch == 3
     assert last_model_path == str(tmp_path / "tmod_last.pt")
     assert os.path.exists(last_model_path)
+    assert torch.allclose(target.weight, source.weight)
+    assert torch.allclose(target.bias, source.bias)
+    assert target.training is False
+
+
+def test_copy_checkpoint_returns_none_without_module_candidates(
+        tmp_path: Path) -> None:
+    """An empty ``<output>/<module>`` directory has no checkpoint to copy."""
+    (tmp_path / "tmod").mkdir()
+    target = nn.Linear(2, 2)
+    specs = argparse.Namespace(output_dir=str(tmp_path))
+
+    model_payload, epoch, last_model_path = IgcModule.copy_checkpoint(
+        specs, "tmod", target, device="cpu"
+    )
+
+    assert model_payload is None
+    assert epoch == 0
+    assert last_model_path == str(tmp_path / "tmod_last.pt")
