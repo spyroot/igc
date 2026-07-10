@@ -485,6 +485,11 @@ class LlmEmbeddingsTrainer(LlmModule):
                 self.model, self.optimizer, train_dataloader, eval_dataloader, self.scheduler
             )
 
+        # opt-in torch.compile AFTER final placement/wrapping (FSDP wrapping must
+        # precede compile); a safe no-op off-CUDA or when --compile is absent.
+        self.model = TorchBuilder.maybe_compile(
+            self.model, bool(getattr(self._trainer_args, "compile", False)))
+
         torch.cuda.empty_cache()
         self.logger.info(
             f"Rank {self.rank}: Memory utilization after we prepared : "

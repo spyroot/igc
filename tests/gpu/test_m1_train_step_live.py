@@ -142,6 +142,30 @@ def _plain_trainer(tmp_path):
     return trainer, recorder
 
 
+def test_plain_train_routes_model_through_maybe_compile(tmp_path, monkeypatch):
+    """_train hands the model to TorchBuilder.maybe_compile with the --compile flag."""
+    trainer, _ = _plain_trainer(tmp_path)
+    seen = {}
+
+    def fake_maybe_compile(model, enabled=False):
+        seen["enabled"] = enabled
+        return model
+
+    monkeypatch.setattr(TorchBuilder, "maybe_compile", staticmethod(fake_maybe_compile))
+    monkeypatch.setattr(
+        TorchBuilder,
+        "create_scheduler",
+        lambda *args, **kwargs: SimpleNamespace(
+            step=lambda: None,
+            load_state_dict=lambda state: None,
+        ),
+    )
+
+    trainer._train(mask_type=[])
+
+    assert seen["enabled"] is False  # flag absent -> routed through, disabled
+
+
 def test_plain_end_of_train_skips_accelerator_unwrap(tmp_path, monkeypatch):
     """A non-accelerator M1 train run reaches save_model with no unwrap_model access."""
     trainer, recorder = _plain_trainer(tmp_path)
