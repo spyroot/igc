@@ -567,6 +567,7 @@ class IgcModule(IgcBaseState):
             initial_lr: Optional[float] = None,
             is_best_accuracy: Optional[bool] = False,
             batch_idx: Optional[int] = None,
+            model_state_dict: Optional[Dict] = None,
     ) -> str:
         """
         Save model checkpoint.
@@ -601,7 +602,10 @@ class IgcModule(IgcBaseState):
         _optimizer = optimizer if optimizer is not None else self.optimizer
 
         checkpoint = {
-            'model_state_dict': _model.state_dict(),
+            # a caller that already gathered the full state dict (sharded runs use
+            # accelerator.get_state_dict, a collective) passes it here; calling
+            # state_dict() on a sharded model from rank 0 alone deadlocks.
+            'model_state_dict': model_state_dict if model_state_dict is not None else _model.state_dict(),
             'epoch': epoch,
             'is_trained': True,
         }
