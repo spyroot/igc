@@ -9,11 +9,8 @@ accelerate>=1.14,<2
 peft>=0.19,<1
 numpy>=1.26,<2
 
-# RL environments. gym stays only until igc/envs migrates to gymnasium
-# (rest_gym_base / rest_gym_env / rest_gym_batch_env still import gym).
+# RL environments (gymnasium; the legacy gym pin was removed with the env migration)
 gymnasium>=1.0,<2
-gym==0.26.2
-gym-notices==0.0.8
 
 # HuggingFace ecosystem
 huggingface_hub>=1.0

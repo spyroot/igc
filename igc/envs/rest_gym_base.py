@@ -2,10 +2,10 @@ import argparse
 from enum import Enum
 from typing import Optional, List
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
-from gym.vector.utils import spaces
+from gymnasium import spaces
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from igc.ds.redfish_dataset import JSONDataset
