@@ -177,15 +177,29 @@ class RestTrajectory(AbstractLogger):
         sub_directory = [f for f in os.listdir(self.rest_new_prefix)
                          if os.path.isdir(os.path.join(self.rest_new_prefix, f))]
 
+        loaded = []
         for s in sub_directory:
             dir_path = os.path.join(self.rest_new_prefix, s)
+            # capture roots also hold non-host dirs (orig/, post/, pre/) and hosts whose
+            # crawl produced no map; the pipeline must tolerate partial captures, so a
+            # subdirectory without a flat rest_api_map .npy is skipped, not fatal.
+            if not any(f.endswith('.npy') for f in os.listdir(dir_path)):
+                self.logger.warning(
+                    f"Skipping {dir_path}: no rest_api_map .npy at its top level.")
+                continue
             merged_url_file_mapping, merged_allowed_methods_mapping = RestTrajectory.load_url_file_mapping(dir_path)
             self._rest_map_data[s] = {
                 "rest_api_map": merged_url_file_mapping,
                 "merged_allowed_methods_mapping": merged_allowed_methods_mapping
             }
+            loaded.append(s)
 
-        for s in sub_directory:
+        if not loaded:
+            raise ValueError(
+                f"No host capture directory under {self.rest_new_prefix} contains a "
+                f"rest_api_map .npy — nothing to build from.")
+
+        for s in loaded:
             self.remap_respond_location(s)
 
         self._hosts = sub_directory
