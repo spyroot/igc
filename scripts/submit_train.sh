@@ -55,7 +55,9 @@ if [ "${WANDB_API_KEY:-}" = "" ] && [ ! -f "${HERE}/.internal/wandb.env" ]; then
 fi
 
 set -x
-IGC_STAGE="${STAGE}" sbatch \
+IGC_GPUS="${IGC_GPUS:-1}"
+IGC_STAGE="${STAGE}" IGC_GPUS="${IGC_GPUS}" sbatch \
+    --gres="gpu:${IGC_GPUS}" \
     --job-name="igc-${STAGE}" \
     --exclude="${EXCLUDE}" \
     "${EXTRA_SBATCH_ARGS[@]}" \
