@@ -38,7 +38,8 @@ def _fake_accelerate(monkeypatch):
             self.kwargs = kwargs
 
     class FakeFSDPPlugin:
-        pass
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
 
     accelerate = types.ModuleType("accelerate")
     accelerate_utils = types.ModuleType("accelerate.utils")
@@ -166,3 +167,64 @@ def test_build_accelerator_fsdp_uses_fsdp_plugin(monkeypatch):
 
 
 # Author: Mus mbayramo@stanford.edu
+
+
+def test_fsdp_plugin_is_fsdp2_configured(monkeypatch):
+    """fsdp builds an FSDP2 plugin: versioned, auto-wrapped, resharding, sharded saves."""
+    fake_accelerator, _, fake_fsdp = _fake_accelerate(monkeypatch)
+    build_accelerator(_ns(sharding="fsdp"))
+    kwargs = fake_accelerator.calls[-1]
+    plugin = kwargs["fsdp_plugin"]
+    assert isinstance(plugin, fake_fsdp)
+    assert plugin.kwargs["fsdp_version"] == 2
+    assert plugin.kwargs["auto_wrap_policy"] == "transformer_based_wrap"
+    assert plugin.kwargs["reshard_after_forward"] is True
+    assert plugin.kwargs["state_dict_type"] == "SHARDED_STATE_DICT"
+
+
+def test_zero_without_deepspeed_raises_before_accelerator(monkeypatch):
+    """zero3 without deepspeed installed fails with a clear message, not an env leak."""
+    import sys
+    import types
+
+    accelerate = types.ModuleType("accelerate")
+    accelerate_utils = types.ModuleType("accelerate.utils")
+
+    class _NeverAccelerator:
+        def __init__(self, **kwargs):
+            raise AssertionError("Accelerator must not be constructed")
+
+    accelerate.Accelerator = _NeverAccelerator
+    accelerate_utils.is_deepspeed_available = lambda: False
+    monkeypatch.setitem(sys.modules, "accelerate", accelerate)
+    monkeypatch.setitem(sys.modules, "accelerate.utils", accelerate_utils)
+
+    with pytest.raises(ValueError, match="--sharding fsdp"):
+        build_accelerator(_ns(sharding="zero3"))
+
+
+def test_sharded_single_process_launch_fails_loudly(monkeypatch):
+    """A sharded config resolving to distributed_type NO raises instead of training unsharded."""
+    import sys
+    import types
+
+    class _NoDistAccelerator:
+        calls = []
+
+        def __init__(self, **kwargs):
+            self.distributed_type = "DistributedType.NO"
+            type(self).calls.append(kwargs)
+
+    class _Plugin:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    accelerate = types.ModuleType("accelerate")
+    accelerate_utils = types.ModuleType("accelerate.utils")
+    accelerate.Accelerator = _NoDistAccelerator
+    accelerate_utils.FullyShardedDataParallelPlugin = _Plugin
+    monkeypatch.setitem(sys.modules, "accelerate", accelerate)
+    monkeypatch.setitem(sys.modules, "accelerate.utils", accelerate_utils)
+
+    with pytest.raises(RuntimeError, match="single-process"):
+        build_accelerator(_ns(sharding="fsdp"))

@@ -72,10 +72,26 @@ def _plugin_kwargs(cfg: dict) -> dict:
     """
     if not cfg["sharded"]:
         return {}
+    import importlib
+    _utils = importlib.import_module("accelerate.utils")
     if cfg["sharding"] == "fsdp":
-        from accelerate.utils import FullyShardedDataParallelPlugin
-        return {"fsdp_plugin": FullyShardedDataParallelPlugin()}
-    from accelerate.utils import DeepSpeedPlugin
+        # FSDP2 (torch-native): per-layer wrap via the model's _no_split_modules,
+        # resharding after forward, sharded state dicts for multi-rank saves.
+        return {"fsdp_plugin": _utils.FullyShardedDataParallelPlugin(
+            fsdp_version=2,
+            auto_wrap_policy="transformer_based_wrap",
+            reshard_after_forward=True,
+            state_dict_type="SHARDED_STATE_DICT",
+            cpu_ram_efficient_loading=True,
+        )}
+    # ZeRO needs deepspeed installed; fail with a clear message BEFORE Accelerator
+    # (whose failed init leaks ACCELERATE_USE_DEEPSPEED and poisons retries).
+    _ds_available = getattr(_utils, "is_deepspeed_available", None)
+    if _ds_available is not None and not _ds_available():
+        raise ValueError(
+            f"--sharding {cfg['sharding']} requires deepspeed, which is not "
+            f"installed; install deepspeed or use --sharding fsdp.")
+    DeepSpeedPlugin = _utils.DeepSpeedPlugin
     return {
         "deepspeed_plugin": DeepSpeedPlugin(
             zero_stage=cfg["zero_stage"],
@@ -103,7 +119,16 @@ def build_accelerator(cmd: argparse.Namespace):
     if cfg["gradient_accumulation_steps"] > 1:
         accelerator_args["gradient_accumulation_steps"] = cfg["gradient_accumulation_steps"]
     accelerator_args.update(_plugin_kwargs(cfg))
-    return Accelerator(**accelerator_args)
+    accelerator = Accelerator(**accelerator_args)
+    # a sharded config in a single-process launch silently trains UNSHARDED —
+    # fail loudly instead so a misconfigured GB300 job dies at startup.
+    dist_type = getattr(accelerator, "distributed_type", None)
+    if cfg["sharded"] and dist_type is not None and str(dist_type).endswith("NO"):
+        raise RuntimeError(
+            f"--sharding {cfg['sharding']} requested but this is a single-process "
+            f"launch (distributed_type=NO); start via accelerate launch/torchrun "
+            f"with --num_processes > 1 so sharding engages.")
+    return accelerator
 
 
 # Author: Mus mbayramo@stanford.edu
