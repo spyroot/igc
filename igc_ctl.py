@@ -20,15 +20,16 @@ import warnings
 import requests
 import urllib3
 
-from idrac_ctl import IDracManager, CustomArgumentDefaultsHelpFormatter, ApiRequestType
-from idrac_ctl.idrac_ctl.cmd_exceptions import AuthenticationFailed
-from idrac_ctl.idrac_ctl.idrac_main import console_error_printer
+# redfish_ctl is the renamed idrac_ctl; install with: pip install "redfish_ctl>=1.1.4"
+from redfish_ctl import IDracManager, CustomArgumentDefaultsHelpFormatter, ApiRequestType
+from redfish_ctl.cmd_exceptions import AuthenticationFailed
+from redfish_ctl.redfish_main import console_error_printer
 
 try:
     from urllib3.exceptions import InsecureRequestWarning
 
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-except ImportError as ir:
+    urllib3.disable_warnings(InsecureRequestWarning)
+except ImportError:
     warnings.warn("Failed import urllib3")
 
 logging.basicConfig(format='%(asctime)s,%(msecs)03d %(levelname)-8s '
