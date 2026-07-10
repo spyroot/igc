@@ -1506,6 +1506,30 @@ class JSONDataset(
         """
         self._masked_data = value
 
+    def __getstate__(self):
+        """Drop the unpicklable logger state so DataLoader workers can spawn.
+
+        ``self.logger`` (loguru with stdout + file sinks) and the build-time
+        ``RestTrajectory`` (which binds its own loguru logger) hold open file
+        handles that cannot pickle; workers only need ``__len__``/``__getitem__``
+        over ``self._data``, so both are dropped and the logger is rebuilt on
+        unpickle.
+
+        :return: the instance dict minus the unpicklable members.
+        """
+        state = self.__dict__.copy()
+        state["logger"] = None
+        state["_rest_trajectories"] = None
+        return state
+
+    def __setstate__(self, state):
+        """Restore the instance and rebuild a process-local logger.
+
+        :param state: the dict produced by :meth:`__getstate__`.
+        """
+        self.__dict__.update(state)
+        self.logger = AbstractLogger.create_logger(__name__)
+
     def __len__(self):
         """Return length of dataset"""
         return len(self._data["train_data"])
