@@ -24,6 +24,18 @@ case "${STAGE}" in
     *) echo "ERROR: stage '${STAGE}' is not one of m1|m2|m3|m3p|m6|all" >&2; exit 2 ;;
 esac
 
+# Fleet-health gate (TEAM_GUIDE blocker rule): never submit against an unhealthy fleet.
+# Requires NV72_FLEET_DASHBOARD_URL in the environment; IGC_SKIP_PREFLIGHT=1 is the
+# explicit, logged escape hatch for operator judgment calls.
+if [[ "${IGC_SKIP_PREFLIGHT:-0}" != "1" ]]; then
+    "${HERE}/scripts/preflight_nv72.sh" || {
+        echo "BLOCKER: fleet preflight failed — fix the fleet or set IGC_SKIP_PREFLIGHT=1 deliberately." >&2
+        exit 1
+    }
+else
+    echo "WARNING: IGC_SKIP_PREFLIGHT=1 — submitting without the fleet-health gate." >&2
+fi
+
 command -v sbatch >/dev/null || { echo "ERROR: sbatch not found — run this from a GB300 node (ssh nvidia@172.25.230.40)." >&2; exit 1; }
 [ -f "${SBATCH_FILE}" ] || { echo "ERROR: ${SBATCH_FILE} not found." >&2; exit 1; }
 
