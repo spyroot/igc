@@ -23,6 +23,7 @@ import os
 import random
 import shutil
 import sys
+import warnings
 import time
 import zlib
 from pathlib import Path
@@ -758,11 +759,20 @@ class JSONDataset(
         :raises ValueError: on a provenance mismatch, with a rebuild hint.
         """
         recorded_tokens = tokenizer_spec.get("num_tokens")
-        if recorded_tokens is not None and int(recorded_tokens) != int(num_tokens):
+        if recorded_tokens is not None and int(recorded_tokens) > int(num_tokens):
+            # cache token ids can exceed the live vocab -> corruption; refuse.
             raise ValueError(
                 f"Dataset caches were tokenized with a {recorded_tokens}-token tokenizer "
-                f"but the loaded tokenizer has {num_tokens} tokens. Rebuild the dataset "
-                f"for this backbone with --recreate_dataset.")
+                f"but the loaded tokenizer has only {num_tokens} tokens. Rebuild the "
+                f"dataset for this backbone with --recreate_dataset.")
+        if recorded_tokens is not None and int(recorded_tokens) < int(num_tokens):
+            # a tokenizer that grew (appended specials) keeps existing ids stable;
+            # loading is safe, but flag it so a rebuild is a conscious choice.
+            warnings.warn(
+                f"Dataset caches were built with a {recorded_tokens}-token tokenizer; "
+                f"the loaded one has {num_tokens} (grew by "
+                f"{int(num_tokens) - int(recorded_tokens)}). Existing ids remain valid; "
+                f"rebuild with --recreate_dataset to cover the new tokens.")
         recorded_model = tokenizer_spec.get("model_type")
         if recorded_model is not None and model_type is not None and recorded_model != model_type:
             raise ValueError(

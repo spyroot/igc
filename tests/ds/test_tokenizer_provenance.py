@@ -23,10 +23,16 @@ def test_matching_provenance_passes():
     )
 
 
-def test_token_count_mismatch_raises_with_rebuild_hint():
-    """A different live vocab size is refused loudly, naming the fix."""
+def test_cache_larger_than_live_vocab_raises_with_rebuild_hint():
+    """Caches whose ids can exceed the live vocab are refused loudly."""
     with pytest.raises(ValueError, match="--recreate_dataset"):
-        JSONDataset.check_tokenizer_provenance({"num_tokens": 53147}, 151936)
+        JSONDataset.check_tokenizer_provenance({"num_tokens": 151936}, 53147)
+
+
+def test_grown_tokenizer_warns_but_loads():
+    """A tokenizer that grew keeps ids valid: warn, do not refuse."""
+    with pytest.warns(UserWarning, match="grew by 7"):
+        JSONDataset.check_tokenizer_provenance({"num_tokens": 53140}, 53147)
 
 
 def test_model_type_mismatch_raises():
