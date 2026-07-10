@@ -41,7 +41,9 @@ def test_non_host_subdirs_are_skipped(tmp_path):
     (tmp_path / "orig" / "172.0.0.1").mkdir(parents=True)  # nested, no flat .npy
     (tmp_path / "post").mkdir()  # empty
 
-    trajectory = RestTrajectory(str(tmp_path), str(tmp_path / "orig"))
+    # ctor contract: load() iterates rest_new_prefix (the SECOND arg — the
+    # datasets/orig-style map root); raw_json_dir only anchors response remapping.
+    trajectory = RestTrajectory(str(tmp_path), str(tmp_path))
     trajectory.load()
 
     mapping, methods = trajectory.merged_view()
@@ -54,7 +56,7 @@ def test_all_subdirs_mapless_raises(tmp_path):
     (tmp_path / "orig").mkdir()
     (tmp_path / "post").mkdir()
 
-    trajectory = RestTrajectory(str(tmp_path), str(tmp_path / "orig"))
+    trajectory = RestTrajectory(str(tmp_path), str(tmp_path))
     with pytest.raises(ValueError, match="No host capture directory"):
         trajectory.load()
 
