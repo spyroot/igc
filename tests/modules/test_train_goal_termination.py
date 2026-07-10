@@ -39,11 +39,11 @@ class _FakeEnv:
     def step(self, _action):
         self.step_calls += 1
         is_done = self.step_calls >= self._done_after
-        done = torch.tensor([is_done])
         terminated = torch.tensor([is_done])
+        truncated = torch.tensor([False])
         rewards = torch.zeros(1)
         info = [{"goal_reached": torch.tensor(False)}]
-        return self._state.clone(), rewards, done, terminated, info
+        return self._state.clone(), rewards, terminated, truncated, info
 
 
 class _FakeDataset:
