@@ -41,8 +41,10 @@ values into repo files.
 ## 2. Data
 
 Training reads captured Redfish JSON from `~/.json_responses` (collected by `idrac_ctl`; the
-`.npy` map is the binding contract). There is **no shared filesystem** on the cluster, so stage the
-data (and the igc checkout) onto the target node's local NVMe, and pin the job to that node with
+`.npy` map is the binding contract). The cluster has a shared filesystem mounted at `/models` on
+every node — stage large shared artifacts (staged weights, checkpoints, built corpora) there, in
+packed form (tarballs, JSONL) rather than many small files. Keep per-run scratch (the igc checkout,
+a run's working dataset copy) on the target node's local NVMe, and pin the job to that node with
 the scheduler's node-selection flag.
 
 ## 3. Experiment tracking (Weights & Biases)
