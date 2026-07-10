@@ -153,9 +153,10 @@ class JsonPipeline:
         tokenizer.add_tokens(filtered_rests)
 
         for key, value in self._allowable_values.items():
-            tokenizer.add_tokens(key)
+            # newer transformers requires a list here; a bare str raises TypeError.
+            tokenizer.add_tokens([key])
             for item in value:
-                tokenizer.add_tokens(item)
+                tokenizer.add_tokens([item])
 
         tokenizer.add_tokens(list(self._target_names))
         tokenizer.add_tokens(list(self._primary_action.keys()))
