@@ -12,6 +12,9 @@ Reinforce Learner).
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the generic goal-conditioned tool-use framework design,
   simulator plugin plan, hierarchical workload model, model curriculum, backbone modernization, and
   Phase 0 stabilization notes.
+- [DECISIONS.md](DECISIONS.md) — the design-decision log: each entry records what was decided,
+  the alternatives weighed, binding implementation requirements, accepted risks, and the
+  experiment that validates it.
 - [MATH_CHECKS.md](MATH_CHECKS.md) — the math and optimization gate for Bellman targets, HER,
   replay masks, tensor shapes, finite-gradient checks, and trustworthy training claims.
 - [TRAINING_OPTIMIZATION_PLAN.md](TRAINING_OPTIMIZATION_PLAN.md) — the large-model training,
