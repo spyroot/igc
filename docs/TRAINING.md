@@ -161,11 +161,8 @@ the exact launch command and metrics before calling any sharded run successful.
 
 ### Profile launcher for tuning
 
-[scripts/run_profile.sh](../scripts/run_profile.sh) is the launcher for profile-based M1 tuning; it
-calls `igc.modules.train.launch`, which expands a named profile into `igc_main.py` flags and then
-passes trailing arguments through to the trainer. Use it when you need knobs that
-`scripts/train_m1.sbatch` does not expose directly. Its wrapper-specific environment variables are
-`IGC_PROFILE`, `IGC_DATA_DIR`, `IGC_OUTPUT_DIR`, and `IGC_METRIC_REPORT`.
+`scripts/run_profile.sh` (documented in §4 above) also passes trailing arguments through to the
+trainer — use it when you need knobs that `scripts/train_m1.sbatch` does not expose directly:
 
 ```bash
 IGC_PROFILE=m1_gpt2_smoke \
