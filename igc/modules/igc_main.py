@@ -81,13 +81,25 @@ class IgcMain:
         :return:
         """
         if self._dataset is None:
-            self._dataset = MaskedJSONDataset(
-                self._dataset_dir,
-                default_tokenize=self._specs.model_type,
-                max_len=self._specs.seq_len,
-                recreate_dataset=self._specs.recreate_dataset,
-                do_consistency_check=self._specs.do_consistency_check
-            )
+            corpus_dir = getattr(self._specs, "corpus_dir", "") or ""
+            if corpus_dir:
+                # --corpus_dir selects the provenance-tagged JSONL corpus written by
+                # igc.ds.sources.write_corpus (trust-tier split + manifest) instead of
+                # rebuilding from raw ~/.json_responses captures.
+                from igc.ds.corpus_dataset import CorpusJSONLDataset
+                self._dataset = CorpusJSONLDataset(
+                    corpus_dir,
+                    default_tokenize=self._specs.model_type,
+                    max_len=self._specs.seq_len,
+                )
+            else:
+                self._dataset = MaskedJSONDataset(
+                    self._dataset_dir,
+                    default_tokenize=self._specs.model_type,
+                    max_len=self._specs.seq_len,
+                    recreate_dataset=self._specs.recreate_dataset,
+                    do_consistency_check=self._specs.do_consistency_check
+                )
         return self._dataset
 
     def train(self):

@@ -734,6 +734,13 @@ def add_dataset_dataloader(parser):
              "This mainly need a node that build dataset")
 
     group.add_argument(
+        "--corpus_dir",
+        type=str, default="",
+        help="Directory holding a written training corpus (examples.jsonl + manifest.json "
+             "from igc.ds.sources.write_corpus). When set, training reads this "
+             "provenance-tagged corpus instead of building from --json_data_dir.")
+
+    group.add_argument(
         "--raw_data_dir",
         type=str, default="~/.json_responses",
         help="Raw captured Redfish responses the mock REST env serves; mirrors "
