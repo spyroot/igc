@@ -11,7 +11,6 @@ import os
 from functools import partial
 from typing import List, Any, Optional, Callable, Union
 import torch
-import transformers
 from torch import nn
 from torch.nn import Module
 from torch.optim import Optimizer
@@ -41,7 +40,8 @@ class TorchBuilder:
         """Get a list of supported optimizers.
         :return:
         """
-        return ['Adam', 'AdamW', 'AdamW2', 'Adagrad', 'Adamax', 'ASGD', 'RMSprop', 'Rprop', 'SGD']
+        # AdamW2 (transformers.AdamW) was removed upstream in transformers 5.x.
+        return ['Adam', 'AdamW', 'Adagrad', 'Adamax', 'ASGD', 'RMSprop', 'Rprop', 'SGD']
 
     @staticmethod
     def get_supported_schedulers() -> List[str]:
@@ -170,11 +170,7 @@ class TorchBuilder:
         optimizer_name = optimizer
         optimizer = optimizer.lower()
 
-        if optimizer == 'AdamW2'.lower():
-            # this a special case for AdamW2 in transformer pacakge.
-            optimizer_class = getattr(transformers, "AdamW", None)
-        else:
-            optimizer_class = getattr(torch.optim, optimizer_name, None)
+        optimizer_class = getattr(torch.optim, optimizer_name, None)
 
         if optimizer_class is None:
             raise ValueError(f"Optimizer '{optimizer}' not recognized")
@@ -206,9 +202,6 @@ class TorchBuilder:
                 merged.pop("fused", None)
                 return torch.optim.AdamW(
                     model.parameters(), lr=lr, weight_decay=weight_decay, **merged)
-        elif optimizer == 'AdamW2'.lower():
-            return transformers.AdamW(
-                model.parameters(), lr=lr, weight_decay=weight_decay, **optimizer_args)
         elif optimizer == 'Adagrad'.lower():
             return torch.optim.Adagrad(
                 model.parameters(), lr=lr, weight_decay=weight_decay, **optimizer_args)
