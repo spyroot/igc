@@ -19,13 +19,15 @@ def shared_main(
     args, parser_groups = shared_arg_parser()
     args.local_rank = int(os.environ.get('LOCAL_RANK', -1))
 
-    if args.local_rank == -1:
-        # "auto" is the parser default and never a valid torch.device string; resolve
-        # it (and an unset device) to a concrete cuda/mps/cpu device before any module
-        # calls torch.device(args.device).
-        if args.device is None or args.device == "auto":
+    # "auto" is the parser default and never a valid torch.device string; resolve
+    # it (and an unset device) to a concrete device before any module calls
+    # torch.device(args.device). Under accelerate launch/torchrun (LOCAL_RANK set)
+    # the rank picks the cuda ordinal; single-process keeps the plain resolution.
+    if args.device is None or args.device == "auto":
+        if args.local_rank == -1:
             args.device = get_device()
-            # torch.cuda.set_device(args.device)
+        else:
+            args.device = get_device(args.local_rank)
     # else:
     #     args.device = get_device(rank=args.local_rank)
     #     if is_deepspeed_dd_init:

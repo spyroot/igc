@@ -65,3 +65,25 @@ def test_resolved_device_is_a_valid_torch_device(monkeypatch, tmp_path):
 
 
 # Author: Mus mbayramo@stanford.edu
+
+
+def test_local_rank_launch_resolves_auto_via_rank(monkeypatch, tmp_path):
+    """Under accelerate launch/torchrun (LOCAL_RANK set), 'auto' resolves per-rank."""
+    seen = {}
+
+    def fake_get_device(rank=None):
+        seen["rank"] = rank
+        return torch.device("meta")
+
+    monkeypatch.setattr(shared_main_mod, "get_device", fake_get_device)
+    monkeypatch.setenv("LOCAL_RANK", "1")
+    args = _run(monkeypatch, tmp_path, [])
+    assert args.device == torch.device("meta")
+    assert seen["rank"] == 1
+
+
+def test_local_rank_launch_keeps_explicit_device(monkeypatch, tmp_path, resolved_device):
+    """An explicit --device cpu survives a distributed launch untouched."""
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    args = _run(monkeypatch, tmp_path, ["--device", "cpu"])
+    assert args.device == "cpu"
