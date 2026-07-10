@@ -31,7 +31,7 @@ dependencies:
       - tokenizers
       - safetensors
       # RL env
-      - gym==0.26.2
+      - gymnasium>=1.0,<2
       - gymnasium
       # mock REST server (igc/envs/rest_mock_server.py)
       - Flask

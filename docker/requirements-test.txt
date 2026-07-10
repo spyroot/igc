@@ -9,7 +9,7 @@ accelerate
 peft
 tokenizers
 safetensors
-gym==0.26.2
+gymnasium>=1.0,<2
 gymnasium
 # mock REST env
 Flask

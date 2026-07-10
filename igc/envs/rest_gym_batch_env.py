@@ -10,13 +10,14 @@ Mus mbayramo@stanfor.edu
 import argparse
 from typing import Optional, Tuple, List, Union
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 
-from gym.core import ObsType, ActType
-from gym.vector import VectorEnv
-from gym.vector.utils import spaces
+from gymnasium.core import ObsType, ActType
+from gymnasium.vector import VectorEnv
+from gymnasium.vector.utils import batch_space
+from gymnasium import spaces
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from igc.ds.redfish_dataset import JSONDataset
@@ -106,9 +107,12 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         self._simulate_goal_reward = False
         self._simulate_goal_reward_idx = None
 
-        VectorEnv.__init__(self, num_envs=num_envs,
-                           observation_space=self.observation_space,
-                           action_space=self.action_space)
+        VectorEnv.__init__(self)
+        self.num_envs = num_envs
+        self.single_observation_space = self.observation_space
+        self.single_action_space = self.action_space
+        self.observation_space = batch_space(self.single_observation_space, num_envs)
+        self.action_space = batch_space(self.single_action_space, num_envs)
 
     def _reset_state(self):
         """Reset the state of the environment.
@@ -203,6 +207,16 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         self.last_observation = observations_tensor
         # observations = super().reset(seed=seed, options=options)
         return self.last_observation, {}
+
+    def step(self, actions):
+        """Vector step: dispatch through the async/wait pair (gymnasium's
+        base ``step`` no longer does this itself).
+
+        :param actions: batch of actions, one per sub-environment.
+        :return: the ``step_wait`` result tuple.
+        """
+        self.step_async(actions)
+        return self.step_wait()
 
     def step_async(self, actions: List[ActType]) -> None:
         """Asynchronously execute a batch of actions.
