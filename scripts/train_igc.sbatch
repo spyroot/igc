@@ -28,6 +28,15 @@
 
 set -euo pipefail
 
+# Disk preflight: a run that starts on a nearly-full node-local NVMe dies mid-training
+# (HF pulls + dataset + checkpoints). Fail fast, with an explicit override knob.
+IGC_MIN_FREE_GB="${IGC_MIN_FREE_GB:-100}"
+AVAIL_GB="$(df -BG --output=avail "${HOME}" 2>/dev/null | tail -1 | tr -dc '0-9' || echo 0)"
+if [[ "${AVAIL_GB}" -lt "${IGC_MIN_FREE_GB}" ]]; then
+    echo "BLOCKER: only ${AVAIL_GB}G free under \$HOME (< IGC_MIN_FREE_GB=${IGC_MIN_FREE_GB}G) — clean up or lower the floor deliberately." >&2
+    exit 1
+fi
+
 # 1-GPU first: the NVLink fabric is flaky under multi-GPU (disable SHARP/multicast).
 export NCCL_NVLS_ENABLE=0
 export PYTHONUNBUFFERED=1
@@ -106,3 +115,13 @@ srun --container-image="${NGC_IMAGE}" \
             ${EXTRA_ARGS} \
             --log_level info --llm_log_level info
      '
+
+# End-of-job publish: node-local NVMe is not durable storage — when IGC_WEIGHTS_DEST is
+# set (e.g. a path under the shared /models filesystem), copy the run's artifacts off
+# the node with a sha256 manifest. Opt-in: publish_checkpoint.sh requires the dest.
+if [[ -n "${IGC_WEIGHTS_DEST:-}" ]]; then
+    "${IGC_DIR}/scripts/publish_checkpoint.sh" "${IGC_DIR}/experiments/${IGC_RUN}" \
+        || echo "WARNING: checkpoint publish failed — weights remain ONLY on this node" >&2
+else
+    echo "NOTE: IGC_WEIGHTS_DEST unset — weights stay on node-local NVMe (set it to publish, e.g. a /models path)." >&2
+fi
