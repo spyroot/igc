@@ -95,6 +95,27 @@ construction.
   `/Systems/Node0`) must not erase member identity where the goal targets a specific member —
   keep the raw id as a trailing token rather than deleting it.
 
+### Experiment result (2026-07-11) — NO-GO for the untrained encoder; learned projection required
+
+The go/no-go was run with the weakest instantiation first: a completely frozen character-trigram
+encoder and NO learned projection (pure cosine between state body text and candidate text), over
+the full walked trees, ground truth = each state's true graph neighbors
+(`igc/modules/eval/zero_shot_ranking.py` + `igc/ds/sources/resource_graph.py`):
+
+| Corpus | k=1 | k=5 | Bar (≥0.80 top-5) |
+|---|---|---|---|
+| Supermicro, in-domain, 1,499 nodes | 0.185 | **0.293** | NO-GO |
+| HPE iLO, held-out vendor, 167 nodes | 0.323 | **0.754** | NO-GO (near) |
+
+Interpretation: ~30× over the random baseline, but far under the bar on the large host — with
+hundreds of near-identical sensor leaves, global text similarity fills the top-5 with lookalike
+*siblings* rather than true transitions. Host size dominates difficulty (167-node HPE nearly
+passes; 1,499-node Supermicro fails hard). **Consequence: the learned bilinear projection
+`s^T W c` is load-bearing, not optional — representation similarity alone cannot rank
+transitions.** Next step (before any M6 training spend): behavioral-cloning-train `W` on
+in-domain graph transitions (Supermicro), then re-run this same harness zero-shot on the
+held-out vendor (HPE) for the real go/no-go.
+
 ---
 
 ## D-001 — M6 action-selection objective: hybrid pointer + argument decoder (2026-07-11)
