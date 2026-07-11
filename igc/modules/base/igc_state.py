@@ -88,10 +88,12 @@ class IgcBaseState:
         """Return ether cuda or cpu device or accelerator device.
         :return:
         """
-        if self._accelerator:
+        # getattr guards partially-constructed instances (e.g. checkpoint helpers
+        # built via __new__): _accelerator/_device may be unset, and .device must
+        # not itself raise AttributeError.
+        if getattr(self, "_accelerator", None):
             return self.accelerator.device
-        else:
-            return self._device
+        return getattr(self, "_device", None)
 
     def _prepare_checkpoint_dir(self):
         """
