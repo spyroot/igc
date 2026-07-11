@@ -8,6 +8,11 @@ graph neighbors (the walked tree's real transitions) appear in the top-k. No tra
 torch, no randomness — numpy and the standard library only. Go/no-go per D-001: top-5 hit
 rate >= 0.80 on a held-out vendor.
 
+Not wired into any training or eval runtime: consumed only by ``scripts/bench_hot_paths.py``
+(the embed + rank benchmark stages) and its unit/perf tests. This is a standalone one-off
+feasibility gate whose >= 0.80 top-5 number decides whether a zero-cost frozen encoder can
+recover true Redfish transitions before the D-001/D-002 ranking head is built.
+
 Author:
 Mus mbayramo@stanford.edu
 """
