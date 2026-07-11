@@ -56,6 +56,36 @@ def build_causal_lm_labels(input_ids, attention_mask, pad_token_id=None):
     return labels
 
 
+def optimizer_steps_per_epoch(num_micro_batches: int, accum_steps: int) -> int:
+    """Optimizer steps one epoch will actually take under gradient accumulation.
+
+    Schedulers like OneCycleLR consume ``steps_per_epoch`` as OPTIMIZER steps;
+    feeding them micro-batch counts under accumulation leaves most of the
+    one-cycle schedule unexecuted.
+
+    :param num_micro_batches: dataloader length for the epoch.
+    :param accum_steps: gradient accumulation steps (coerced to >= 1).
+    :return: ``ceil(num_micro_batches / accum_steps)``.
+    """
+    accum_steps = max(1, accum_steps)
+    return -(-num_micro_batches // accum_steps)
+
+
+def measure_grad_norm(model) -> float:
+    """Measure (never clip) the current global gradient norm.
+
+    Must run BEFORE ``optimizer.step()``/``zero_grad()`` — afterwards the
+    gradients are cleared and the measurement is 0.0 forever, which is exactly
+    the bug this helper exists to prevent regressing.
+
+    :param model: the module whose parameter gradients are measured.
+    :return: the global grad norm as a float.
+    """
+    import torch as _torch
+    return _torch.nn.utils.clip_grad_norm_(
+        model.parameters(), max_norm=float("inf")).item()
+
+
 def is_accum_boundary(micro_step_index: int, accum_steps: int, total_batches: int) -> bool:
     """Whether a manually-accumulated optimizer step should fire on this micro-batch.
 
@@ -457,7 +487,9 @@ class LlmEmbeddingsTrainer(LlmModule):
         # integer here would spuriously beat _best_validation_metric and corrupt best-checkpoint tracking.
         validation_accuracy = checkpoint_state.best_accuracy
         self._trainer_args.epochs = self.num_epochs - last_epoch
-        self._trainer_args.steps_per_epoch = len(train_dataloader)
+        _accum = max(1, int(getattr(self._trainer_args, "gradient_accumulation_steps", 1)))
+        self._trainer_args.steps_per_epoch = optimizer_steps_per_epoch(
+            len(train_dataloader), _accum)
 
         self.logger.info(
             f"Rank {self.rank}: Data loader created: "
@@ -510,6 +542,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         # accelerate the prepared optimizer/scheduler gate themselves and accelerator.backward()
         # scales the loss, so `accum` here only drives the manual (non-accelerator) path.
         accum = max(1, int(getattr(self._trainer_args, "gradient_accumulation_steps", 1)))
+        last_grad_norm = 0.0
         if self.is_rank_zero():
             self.logger.info(f"Gradient accumulation steps: {accum}")
 
@@ -573,6 +606,8 @@ class LlmEmbeddingsTrainer(LlmModule):
                         outputs = self.model(**batch_inputs)
                         loss = outputs.loss
                         self.accelerator.backward(loss)
+                        if self.accelerator.sync_gradients:
+                            last_grad_norm = measure_grad_norm(self.model)
                         self.optimizer.step()
                         self.scheduler.step()
                         self.optimizer.zero_grad()
@@ -586,6 +621,7 @@ class LlmEmbeddingsTrainer(LlmModule):
                     (loss / accum).backward()
                     is_step = is_accum_boundary(num_batches, accum, total_batches)
                     if is_step:
+                        last_grad_norm = measure_grad_norm(self.model)
                         self.optimizer.step()
                         self.scheduler.step()
                         self.optimizer.zero_grad()
@@ -595,11 +631,9 @@ class LlmEmbeddingsTrainer(LlmModule):
                 if is_step and self.is_rank_zero():
                     step = epoch * total_batches + num_batches
                     current_lr = self.optimizer.param_groups[0]['lr']
-                    grad_norm = torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(), max_norm=float('inf')).item()
                     self.metric_logger.log_metric("train/loss", loss.item(), step)
                     self.metric_logger.log_metric("train/lr", current_lr, step)
-                    self.metric_logger.log_metric("train/grad_norm", grad_norm, step)
+                    self.metric_logger.log_metric("train/grad_norm", last_grad_norm, step)
 
                 if is_step:
                     global_opt_steps += 1
