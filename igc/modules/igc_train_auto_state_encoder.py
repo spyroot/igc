@@ -177,7 +177,7 @@ class AutoencoderTrainer(IgcModule):
 
         with torch.no_grad():
             for batch in test_data:
-                batch = batch.to(self.device)
+                batch = self._to_autoencoder_dtype(batch.to(self.device))
                 reconstructed = self.model_autoencoder(batch)
                 batch = batch.view(batch.shape[0], -1)
                 loss = F.mse_loss(batch, reconstructed, reduction="mean")
@@ -185,6 +185,19 @@ class AutoencoderTrainer(IgcModule):
 
         average_loss = total_loss / len(test_data)
         return average_loss
+
+    def _to_autoencoder_dtype(self, tensor):
+        """Cast backbone hidden states to the autoencoder's parameter dtype.
+
+        A bf16 backbone (``--llm_torch_dtype bfloat16``) emits bf16 hidden
+        states, but the autoencoder is fp32, so feeding them directly raises
+        ``Input type (BFloat16) and bias type (float) should be the same``.
+
+        :param tensor: hidden-state tensor from the backbone.
+        :return: the tensor cast to the autoencoder's dtype.
+        """
+        param = next(self.model_autoencoder.parameters(), None)
+        return tensor if param is None else tensor.to(param.dtype)
 
     def train(self):
         """
@@ -233,6 +246,7 @@ class AutoencoderTrainer(IgcModule):
                 batch = {k: v.to(self.device) for k, v in batch.items()}
                 with torch.no_grad():
                     output = self._encoder_model(**batch).last_hidden_state.to(self.device)
+                output = self._to_autoencoder_dtype(output)
                 reconstructed = self.model_autoencoder(output)
                 output = output.view(output.shape[0], -1)
                 loss = F.mse_loss(output, reconstructed, reduction="none")
