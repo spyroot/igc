@@ -196,7 +196,8 @@ class AutoencoderTrainer(IgcModule):
         if self._module_checkpoint_dir is not None:
             # load_checkpoint returns a CheckpointState namedtuple; the resume epoch
             # is its last_epoch field, not the state object itself.
-            last_epoch = self.load_checkpoint(self._module_checkpoint_dir).last_epoch
+            last_epoch = self.load_checkpoint(
+                self._module_checkpoint_dir, model=self.model_autoencoder).last_epoch
         else:
             last_epoch = 0
 
@@ -264,6 +265,8 @@ class AutoencoderTrainer(IgcModule):
 
             # save best checkpoint
             if self.is_rank_zero() and epoch % 20 == 0:
-                self.save_checkpoint(self._module_checkpoint_dir, epoch + 1)
+                self.save_checkpoint(
+                    self._module_checkpoint_dir, epoch + 1,
+                    model=self.model_autoencoder, optimizer=self.optimizer)
 
-        self.save_model(self._module_checkpoint_dir)
+        self.save_model(self._module_checkpoint_dir, model=self.model_autoencoder)

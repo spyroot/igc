@@ -500,7 +500,7 @@ class IgcModule(IgcBaseState):
 
         return model, epoch, last_model_path
 
-    def save_model(self, checkpoint_dir):
+    def save_model(self, checkpoint_dir, model=None):
         """
 
         Save model, after we're done training,
@@ -513,10 +513,12 @@ class IgcModule(IgcBaseState):
         :return:
         """
         if self.is_rank_zero():
-            # weights
+            # weights. `model` lets a trainer whose self.model is a frozen backbone
+            # (e.g. the autoencoder) persist the model it actually trained.
+            _model = model if model is not None else self.model
             checkpoint_file = self._model_file(checkpoint_dir)
             torch.save({
-                'model_state_dict': self.model.state_dict(),
+                'model_state_dict': _model.state_dict(),
                 'is_trained': True,
             }, checkpoint_file)
 
@@ -665,6 +667,7 @@ class IgcModule(IgcBaseState):
             resuming: Optional[bool] = True,
             map_location: Optional[Union[str, Dict]] = None,
             lr: Optional[float] = None,
+            model=None,
     ) -> CheckpointState:
         """
         Load model checkpoint for resuming a training,  if resuming is False
@@ -706,11 +709,14 @@ class IgcModule(IgcBaseState):
         if missing_keys:
             warnings.warn("Optional key is missing from the checkpoint file. ")
 
-        if not hasattr(self.model, 'load_state_dict'):
+        # `model` restores into the trainer's actual trained model (the
+        # autoencoder) instead of the frozen backbone self.model.
+        _target = model if model is not None else self.model
+        if not hasattr(_target, 'load_state_dict'):
             warnings.warn("Model does not have load_state_dict method. ")
             return CheckpointState(0, None, 0, float('-inf'), 0)
 
-        self.model.load_state_dict(checkpoint['model_state_dict'])
+        _target.load_state_dict(checkpoint['model_state_dict'])
 
         if resuming:
 
