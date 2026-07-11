@@ -501,7 +501,7 @@ class IgcModule(IgcBaseState):
 
         return model, epoch, last_model_path
 
-    def save_model(self, checkpoint_dir, model=None):
+    def save_model(self, checkpoint_dir, model=None, model_state_dict=None):
         """
 
         Save model, after we're done training,
@@ -511,6 +511,12 @@ class IgcModule(IgcBaseState):
         Dataset need pull this.
 
         :param checkpoint_dir:
+        :param model: optional model whose weights to persist instead of self.model.
+        :param model_state_dict: optional pre-gathered state dict. Sharded runs
+            (ZeRO-3/FSDP) must pass the dict from ``accelerator.get_state_dict`` — a
+            COLLECTIVE every rank participated in — because calling ``state_dict()``
+            on rank 0 alone under sharding re-enters that gather with no peers and
+            deadlocks. Left ``None`` on the plain path, where ``state_dict()`` is local.
         :return:
         """
         if self.is_rank_zero():
@@ -519,7 +525,10 @@ class IgcModule(IgcBaseState):
             _model = model if model is not None else self.model
             checkpoint_file = self._model_file(checkpoint_dir)
             torch.save({
-                'model_state_dict': _model.state_dict(),
+                # Prefer the pre-gathered state dict on the sharded path; only fall
+                # back to a local state_dict() when no gather happened (plain run).
+                'model_state_dict':
+                    model_state_dict if model_state_dict is not None else _model.state_dict(),
                 'is_trained': True,
             }, checkpoint_file)
 

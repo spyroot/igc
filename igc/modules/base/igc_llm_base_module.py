@@ -110,9 +110,15 @@ class LlmModule(IgcModule):
         """
         return f"{self._module_checkpoint_dir}/fine_tuned"
 
-    def save_finetuned(self):
+    def save_finetuned(self, model_state_dict=None):
         """
         Save the fine-tuned model and tokenizer. This huggingface format.
+
+        :param model_state_dict: optional pre-gathered state dict. On the sharded
+            path (ZeRO-3/FSDP) pass the dict from ``accelerator.get_state_dict`` —
+            a COLLECTIVE every rank already ran — so ``save_pretrained`` writes it
+            directly instead of calling ``state_dict()`` on rank 0 alone, which
+            under sharding re-enters the gather with no peers and deadlocks.
         :return: None
         """
         if not self.is_rank_zero():
@@ -121,7 +127,9 @@ class LlmModule(IgcModule):
         fine_tuned = self.finetuned_dir()
         if not os.path.exists(fine_tuned):
             os.makedirs(fine_tuned)
-        save_pretrained_default(fine_tuned, self.model, self.tokenizer)
+        save_pretrained_default(
+            fine_tuned, self.model, self.tokenizer,
+            model_state_dict=model_state_dict)
 
     def load_finetuned(self, device_map="auto"):
         """

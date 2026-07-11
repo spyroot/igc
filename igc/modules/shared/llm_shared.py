@@ -235,7 +235,8 @@ def save_pretrained_default(
         huggingface_dir,
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizer,
-        only_tokenizer=False
+        only_tokenizer=False,
+        model_state_dict=None,
 ):
     """
       Save the default GPT2 model and tokenizer.
@@ -244,6 +245,11 @@ def save_pretrained_default(
     :param model: fine-tuned model
     :param tokenizer: tokenizer
     :param only_tokenizer:  will save only tokenizer
+    :param model_state_dict: optional pre-gathered state dict. On a sharded
+        (ZeRO-3/FSDP) run pass the dict from ``accelerator.get_state_dict`` — a
+        COLLECTIVE every rank already ran — so ``save_pretrained`` serializes it
+        directly. Without it ``save_pretrained`` calls ``model.state_dict()``
+        itself, which under sharding on rank 0 alone deadlocks in the gather.
     :return:
     """
 
@@ -257,7 +263,10 @@ def save_pretrained_default(
             model.config.pad_token_id = tokenizer.pad_token_id
             model.config.pad_token = tokenizer.pad_token
 
-            model.save_pretrained(huggingface_dir)
+            if model_state_dict is not None:
+                model.save_pretrained(huggingface_dir, state_dict=model_state_dict)
+            else:
+                model.save_pretrained(huggingface_dir)
             tokenizer.save_pretrained(huggingface_dir)
         return True
     except Exception as e:
