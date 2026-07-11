@@ -54,10 +54,18 @@ def _from_pretrained_best_attention(model_id: str, load_kwargs: dict):
     candidates.append("sdpa")
     for impl in candidates:
         try:
-            return AutoModelForCausalLM.from_pretrained(
+            model = AutoModelForCausalLM.from_pretrained(
                 model_id, attn_implementation=impl, **load_kwargs)
         except (ImportError, ValueError, RuntimeError, OSError):
             continue
+        if impl == "flash_attention_2" and not any(
+                isinstance(m, torch.nn.Linear) for m in model.modules()):
+            # transformers' FA2 dtype probe needs an nn.Linear; Conv1D-only
+            # backbones (GPT-2 family) load fine but StopIteration at the first
+            # forward — fall through to sdpa for them.
+            del model
+            continue
+        return model
     return AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
 
 
