@@ -384,12 +384,15 @@ class LlmEmbeddingsTrainer(LlmModule):
 
         :param mask_type: Masking enum to activate for subsequent dataset samples.
         """
-        if mask_type in self.masking_methods:
-            print(f"Got mask type {mask_type}")
-            callback = self.masking_methods[mask_type]
+        # dispatch through the method DICT — the enum list only orders the
+        # curriculum; indexing it with an enum was a TypeError, so no masking
+        # pass ever activated.
+        if mask_type in self._masking_method_dispatcher:
+            self.logger.info(f"Enabling masking method {mask_type}")
+            callback = self._masking_method_dispatcher[mask_type]
             callback()
         else:
-            raise ValueError("Unknown masking type")
+            raise ValueError(f"Unknown masking type {mask_type}")
 
     def swap_masking_method(
             self, epoch: int,
@@ -406,18 +409,21 @@ class LlmEmbeddingsTrainer(LlmModule):
         :param epoch: Zero-based epoch index used to decide when to swap masks.
         :param mask_type: Ordered masking methods to cycle through.
         """
-        if (epoch + 1) % self._masked_freq == 0 and self._current_mask_method_counter == 0:
-            # switch to masking pass, mask freq how fast i.e after epoch
-            # or after 10 epoch etc.
+        if not mask_type:
+            return
+        if (epoch + 1) % self._masked_freq == 0:
+            # activate the next mask in the curriculum for the coming epoch. The old
+            # `and counter == 0` guard compared against a per-micro-batch counter that
+            # was never reset, so after epoch one no mask could ever activate.
             _current_method = mask_type[self._current_mask_method_idx]
             self.enable_masking_method(_current_method)
             self._current_mask_method_idx = (self._current_mask_method_idx + 1) % len(mask_type)
-        else:
-            # reset back
-            if self._current_mask_method_counter == self._num_mask_passed:
-                self.dataset.disable_masking()
-                self._current_mask_method_counter = 0
-                self.dataset.disable_masking()
+            self._current_mask_method_counter = 0
+        elif self._current_mask_method_counter >= self._num_mask_passed:
+            # enough masked batches seen since activation: back to plain batches.
+            # (>= — the counter advances per micro-batch, an exact == is skipped over.)
+            self.dataset.disable_masking()
+            self._current_mask_method_counter = 0
 
     def _train(
             self,
