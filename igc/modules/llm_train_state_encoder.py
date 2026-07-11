@@ -452,7 +452,10 @@ class LlmEmbeddingsTrainer(LlmModule):
         )
 
         last_epoch = checkpoint_state.last_epoch
-        validation_accuracy = checkpoint_state.last_epoch
+        # Seed the pre-loop accuracy with the restored best, not the epoch number: on epochs
+        # where eval doesn't run, this value feeds `is_best_accuracy` below, so an epoch
+        # integer here would spuriously beat _best_validation_metric and corrupt best-checkpoint tracking.
+        validation_accuracy = checkpoint_state.best_accuracy
         self._trainer_args.epochs = self.num_epochs - last_epoch
         self._trainer_args.steps_per_epoch = len(train_dataloader)
 
