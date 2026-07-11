@@ -199,3 +199,8 @@ docs/internal/
 # Slurm job logs (training output) — never commit
 *.out
 slurm-*.out
+
+# generated metrics/coverage reports (CI artifacts, not committed)
+coverage.json
+coverage.xml
+metrics.json
