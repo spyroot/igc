@@ -34,6 +34,22 @@ def _resolve_dtype(name: Optional[str]):
     return getattr(torch, name)
 
 
+def _uses_conv1d_attention(model) -> bool:
+    """Whether a model uses transformers' Conv1D (GPT-2 family) anywhere.
+
+    Conv1D-based attention is the marker for backbones that break the
+    FlashAttention-2 dtype probe (which requires an ``nn.Linear``).
+
+    :param model: a loaded ``PreTrainedModel``.
+    :return: True if any submodule is a ``transformers`` ``Conv1D``.
+    """
+    try:
+        from transformers.pytorch_utils import Conv1D
+    except ImportError:
+        return False
+    return any(isinstance(m, Conv1D) for m in model.modules())
+
+
 def _from_pretrained_best_attention(model_id: str, load_kwargs: dict):
     """Load a causal LM preferring the fastest attention kernel the env supports.
 
@@ -58,11 +74,12 @@ def _from_pretrained_best_attention(model_id: str, load_kwargs: dict):
                 model_id, attn_implementation=impl, **load_kwargs)
         except (ImportError, ValueError, RuntimeError, OSError):
             continue
-        if impl == "flash_attention_2" and not any(
-                isinstance(m, torch.nn.Linear) for m in model.modules()):
-            # transformers' FA2 dtype probe needs an nn.Linear; Conv1D-only
-            # backbones (GPT-2 family) load fine but StopIteration at the first
-            # forward — fall through to sdpa for them.
+        if impl == "flash_attention_2" and _uses_conv1d_attention(model):
+            # GPT-2-family backbones use Conv1D (not nn.Linear) in attention; they
+            # load under FA2 but transformers' FA2 dtype probe walks for the first
+            # nn.Linear and StopIterations at the first forward — and the state
+            # encoder runs the Conv1D-only BODY (no lm_head Linear to mask it), so
+            # checking the whole model is not enough. Fall through to sdpa.
             del model
             continue
         return model
