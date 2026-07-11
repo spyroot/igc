@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Preflight + submit helper for igc training on the GB300 Slurm lab. Run this FROM a
-# cluster node (e.g. ssh nvidia@172.25.230.40). It checks the queue, finds a genuinely
+# cluster login node (see GPU_ACCESS.md for the address). It checks the queue, finds a genuinely
 # idle node that is NOT one of the hands-off nodes, warns if Flash is using its GPUs,
 # then submits scripts/train_igc.sbatch for the chosen stage. See GPU_ACCESS.md.
 #
@@ -8,7 +8,8 @@
 #   IGC_MODEL=<hf-id> IGC_USE_PEFT=1 EPOCHS=3 ./scripts/submit_train.sh m1
 #   ./scripts/submit_train.sh m6 -w gb300-poc1-slot7   # pin to a node where data is staged
 #
-# Never targets slot2 (Flash), slot15/.55 (Pro, TP=4 — busy), slot16 (down). slot1/.41 is also down.
+# Excludes the hands-off / model-serving / down nodes (the specific slots + why are in
+# GPU_ACCESS.md, gitignored); override EXCLUDE below if the fleet layout changes.
 
 set -euo pipefail
 
@@ -36,7 +37,7 @@ else
     echo "WARNING: IGC_SKIP_PREFLIGHT=1 — submitting without the fleet-health gate." >&2
 fi
 
-command -v sbatch >/dev/null || { echo "ERROR: sbatch not found — run this from a GB300 node (ssh nvidia@172.25.230.40)." >&2; exit 1; }
+command -v sbatch >/dev/null || { echo "ERROR: sbatch not found — run this from a GB300 login node (see GPU_ACCESS.md)." >&2; exit 1; }
 [ -f "${SBATCH_FILE}" ] || { echo "ERROR: ${SBATCH_FILE} not found." >&2; exit 1; }
 
 echo "== queue (empty = wide open) =="

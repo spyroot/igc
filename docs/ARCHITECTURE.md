@@ -571,7 +571,7 @@ held-out-API trial's cards never leak across trials. Fields: `effective_signatur
 `@Redfish.ActionInfo` allowable values), `expected_response` (field → type, distilled
 from observed 2xx bodies), `error_taxonomy` (`retriable | fatal | precondition_unmet`,
 each citing ≥1 `Transition`), `preconditions`/`usage_tips`, `provenance`
-(`deepseek-v4-flash | stub`, evidence ids, `k_observed`), `grounding` (`status ∈
+(`llm | stub`, evidence ids, `k_observed`), `grounding` (`status ∈
 {provisional, grounded, contradicted}` + confirm/contradict + M4 counters), `version`,
 `content_hash` (blake2b of the canonical learned content — excludes the volatile
 grounding tallies so a counter tick does not churn the embedding cache), and
