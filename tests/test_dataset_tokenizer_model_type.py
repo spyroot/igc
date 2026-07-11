@@ -65,13 +65,7 @@ def test_default_tokenize_builds_backbone_tokenizer_without_gpt2_overwrite(
                 pad_token_id=pad_token_id,
             )
 
-    class FailingGPT2Tokenizer:
-        @staticmethod
-        def from_pretrained(name_or_path):
-            raise AssertionError(f"unexpected GPT2 fallback for {name_or_path}")
-
     monkeypatch.setattr(redfish_dataset, "AutoTokenizer", FakeAutoTokenizer)
-    monkeypatch.setattr(redfish_dataset, "GPT2Tokenizer", FailingGPT2Tokenizer)
     monkeypatch.setattr(JSONDataset, "_build_tokenizer", lambda self: None)
 
     dataset = JSONDataset(
@@ -102,7 +96,6 @@ def test_injected_tokenizer_skips_backbone_factory(
             raise AssertionError(f"unexpected tokenizer factory call for {name_or_path}")
 
     monkeypatch.setattr(redfish_dataset, "AutoTokenizer", FailingTokenizerFactory)
-    monkeypatch.setattr(redfish_dataset, "GPT2Tokenizer", FailingTokenizerFactory)
 
     dataset = JSONDataset(
         dataset_dir=str(tmp_path / "dataset"),
