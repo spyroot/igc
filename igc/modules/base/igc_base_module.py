@@ -30,6 +30,7 @@ from ...ds import ds_utils as igc_util
 from ...ds.redfish_dataset import JSONDataset
 from ...modules.base.igc_abstract_logger import AbstractLogger
 from ...shared.modules_typing import SaveStrategy
+from ...shared.shared_torch_utils import move_optimizer_state_to_device
 
 BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
@@ -725,6 +726,9 @@ class IgcModule(IgcBaseState):
                     warnings.warn("Optimizer does not have load_state_dict method. ")
                     return CheckpointState(0, None, 0, float('-inf'), 0)
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                # relocate the resumed momentum buffers to the trainer device so the
+                # first step() does not mix cpu state with cuda params (fused Adam).
+                move_optimizer_state_to_device(self.optimizer, self.device)
 
                 if lr is not None:
                     self.logger.info(f"Resting learning rate to {lr}")

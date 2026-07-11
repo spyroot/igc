@@ -447,3 +447,21 @@ def stack_tensors(list_of_tensor_iterators: List) -> Tuple[torch.Tensor]:
     :return:
     """
     return tuple(torch.stack(tensors, 0) for tensors in zip(*list_of_tensor_iterators))
+
+
+def move_optimizer_state_to_device(optimizer, device) -> None:
+    """Move an optimizer's per-parameter state tensors onto ``device`` in place.
+
+    A resumed optimizer loads its momentum/variance buffers on whatever device
+    the checkpoint was mapped to (cpu by default), while the model params sit on
+    the training device — so the first ``optimizer.step()`` mixes cpu and cuda
+    tensors (fused Adam raises a device-mismatch RuntimeError). Call this after
+    ``load_state_dict`` + the model is on its device.
+
+    :param optimizer: the optimizer whose state should be relocated.
+    :param device: the target device (the trainer's device).
+    """
+    for state in optimizer.state.values():
+        for key, value in state.items():
+            if isinstance(value, torch.Tensor):
+                state[key] = value.to(device)
