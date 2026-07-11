@@ -955,14 +955,16 @@ class LlmEmbeddingsTrainer(LlmModule):
             y = y.type(torch.float)
             return torch.mean(y).item()
         elif logits.dim() == 3:
-            shifted_step_logits = logits[..., :-1, :].contiguous()
-            shift_step_labels = targets[..., 1:].contiguous()
-            masked_logits = shifted_step_logits.eq(-100)
-            logits_inf = shifted_step_logits.masked_fill_(masked_logits, float("-Inf"))
-            arg_maxed_idx = torch.argmax(logits_inf, dim=-1)
-            r = shift_step_labels == arg_maxed_idx
-            r = r.type(torch.float)
-            return r.mean().item()
+            # callers (validate/test_inference) already shift inputs vs targets by one,
+            # so logits[t] predicts targets[t]; shifting again here measured a
+            # two-tokens-ahead objective. The old -100 mask was applied to LOGIT VALUES
+            # (a no-op), so pad positions counted as wrong — restrict to real labels.
+            predictions = torch.argmax(logits, dim=-1)
+            valid = targets.ne(-100)
+            if valid.sum() == 0:
+                return 0.0
+            correct = (predictions == targets) & valid
+            return (correct.sum().float() / valid.sum().float()).item()
         else:
             raise ValueError("Invalid shape")
 
@@ -1025,7 +1027,9 @@ class LlmEmbeddingsTrainer(LlmModule):
                 loss = F.cross_entropy(logits.view(-1, logits.size(-1)),
                                        target_ids.view(-1).to(self.device),
                                        ignore_index=-100)
-                total_loss += loss.item() * target_ids.numel()
+                # cross_entropy averaged over NON-PAD tokens; weight by the same
+                # count so the final divide by total non-pad tokens is consistent.
+                total_loss += loss.item() * non_pad_tokens
 
         end_time = time.time()
         time_taken = end_time - start_time
