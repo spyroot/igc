@@ -85,6 +85,18 @@ HER relabeling then re-scores cached embeddings against the new goal-conditioned
 (one matmul) instead of re-encoding candidates. This resolves D-001 binding requirement #2 by
 construction.
 
+**Measured throughput consequence (2026-07-11, `scripts/bench_hot_paths.py --section rl`).** The
+pointer forward's ONLY expensive step is the candidate projection: projecting `[B, N, H]`
+embeddings through the `ActionProjector` MLP (GELU + two Linears over 76.8M elements at B=256,
+N=300, H=768) is 0.193s/step on CPU, while every other RL critical section — DQN target, HER
+relabel loop, replay data feed, done-stacking, the scoring einsum — is under 6ms. Because the
+projector weights are fixed within an optimizer step and a host's candidates are static, the
+correct pattern is to **project the host's UNIQUE candidate set once per step and score with
+`score_candidates` (einsum over cached keys)**, NOT call the full `Igc_PointerQNetwork.forward`
+per state (which re-projects duplicated candidates). Measured: **0.193s → 0.0038s, ~51x**. The
+key cache is not just a HER-relabel convenience — it is the per-step throughput lever for M6
+training, guarded by a machine-independent ratio tripwire in `tests/perf/`.
+
 ### Risks accepted
 
 - Text + shallow structural features may under-discriminate sibling endpoints that differ only
