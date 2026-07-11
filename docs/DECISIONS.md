@@ -354,6 +354,31 @@ vendor, which passes.
 — unblocking M6 training spend — *provided* `W` is anchored to cosine and trained multi-vendor (a
 free-form single-vendor `W` is a trap). Reproduce: `python scripts/exp_d002_bc_ranking.py`.
 
+### Experiment result 3 (2026-07-11) — a LARGE held-out host is NOT cleared by v1 features
+
+Result 2's GO used a *small* held-out vendor (HPE, 167 nodes). Re-running with the operator's real
+full **Dell walk** (the largest host directory under `datasets/orig/`, 2352 nodes — the project's largest single-host
+corpus, ~50x the `idrac_fixtures` overlay) held out of training exposes the host-size effect the
+original NO-GO warned about:
+
+| held-out host | baseline (cosine) | anchored multi-vendor `W` | verdict |
+|---|---|---|---|
+| HPE (167 nodes, small) | 0.754 | 0.862 | GO |
+| Dell (2352 nodes, LARGE) | 0.145 | 0.409 | **NO-GO** |
+
+The anchored multi-vendor recipe still helps massively on the large host (0.145 -> 0.409, ~3x), but
+v1 text + shallow structural features cannot discriminate the hundreds of near-identical sibling
+leaves (e.g. the Dell walk's ~326 IML log entries) that fill a large host's top-5 with lookalikes —
+exactly the risk this decision recorded ("text + shallow structural features may under-discriminate
+sibling endpoints ... v2 features are the planned response").
+
+**Consequence (corrects result 2's framing): GO on small held-out vendors, NO-GO on a large one with
+v1 alone.** The anchored-`W` + multi-vendor recipe is confirmed (large lift everywhere), but a large
+held-out host must be earned by the planned responses before M6 scaling: the D-002 **v2
+graph-neighborhood features**, the learned **M1 encoder** (vs the frozen trigram floor used here), and
+the trained **TD/HER pointer** (vs pure representation similarity). Reproduce:
+`python scripts/exp_d002_bc_ranking.py --holdout datasets/orig/<dell-host>`.
+
 ---
 
 ## D-001 — M6 action-selection objective: hybrid pointer + argument decoder (2026-07-11)
