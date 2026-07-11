@@ -13,6 +13,21 @@ import re
 from tqdm import tqdm
 
 
+
+def _as_token_list(values):
+    """Coerce capture-derived values into what add_tokens accepts.
+
+    Redfish JSON carries numbers/booleans/None among allowable values; the fast
+    tokenizer rejects any non-string list element. Numbers and booleans appear
+    as their text form in the serialized corpus, so they are coerced to str;
+    None is dropped.
+
+    :param values: any iterable of capture-derived scalars.
+    :return: list of strings safe for ``tokenizer.add_tokens``.
+    """
+    return [v if isinstance(v, str) else str(v) for v in values if v is not None]
+
+
 class JsonPipeline:
     def __init__(self, json_directory_path):
         """
@@ -148,19 +163,19 @@ class JsonPipeline:
         filtered_actions = [action for action in filtered_actions if "JID_" not in action]
         filtered_rests = [rest for rest in filtered_rests if "JID_" not in rest]
 
-        tokenizer.add_tokens(filtered_api_targets)
-        tokenizer.add_tokens(filtered_actions)
-        tokenizer.add_tokens(filtered_rests)
+        tokenizer.add_tokens(_as_token_list(filtered_api_targets))
+        tokenizer.add_tokens(_as_token_list(filtered_actions))
+        tokenizer.add_tokens(_as_token_list(filtered_rests))
 
         for key, value in self._allowable_values.items():
-            # newer transformers requires a list here; a bare str raises TypeError.
-            tokenizer.add_tokens([key])
-            for item in value:
-                tokenizer.add_tokens([item])
+            # list form + string coercion: captures carry numbers/booleans/None,
+            # which the fast tokenizer rejects as token inputs.
+            tokenizer.add_tokens(_as_token_list([key]))
+            tokenizer.add_tokens(_as_token_list(value))
 
-        tokenizer.add_tokens(list(self._target_names))
-        tokenizer.add_tokens(list(self._primary_action.keys()))
-        tokenizer.add_tokens(list(self._primary_action.values()))
-        tokenizer.add_tokens(list(self._all_odata_type))
-        tokenizer.add_tokens(list(self._all_odata_context))
-        tokenizer.add_tokens(list(self._all_settings_flat))
+        tokenizer.add_tokens(_as_token_list(self._target_names))
+        tokenizer.add_tokens(_as_token_list(self._primary_action.keys()))
+        tokenizer.add_tokens(_as_token_list(self._primary_action.values()))
+        tokenizer.add_tokens(_as_token_list(self._all_odata_type))
+        tokenizer.add_tokens(_as_token_list(self._all_odata_context))
+        tokenizer.add_tokens(_as_token_list(self._all_settings_flat))
