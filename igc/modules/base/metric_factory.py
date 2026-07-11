@@ -199,6 +199,30 @@ def _wandb_run_meta(kw: dict) -> dict:
     }
 
 
+class NullLogger(BaseLogger):
+    """No-op metric logger for non-main ranks.
+
+    Under multi-GPU (accelerate/torchrun) every rank constructs the
+    MetricLogger, so a network backend like W&B would open one run PER RANK
+    (four runs for a 4-GPU job). Non-main ranks get this no-op instead, so a
+    job produces exactly one clean W&B run driven by rank 0.
+    """
+
+    def log_scalar(self, tag: str, value: float, step: int):
+        pass
+
+
+def _is_main_process() -> bool:
+    """True on the main distributed rank (or a single-process run).
+
+    Reads ``RANK`` then ``LOCAL_RANK`` (set by accelerate/torchrun); absent =>
+    single process => main.
+
+    :return: whether this process should own the metric backend.
+    """
+    return int(os.environ.get("RANK") or os.environ.get("LOCAL_RANK") or 0) == 0
+
+
 def create_logger(report_to: str, **kwargs: Optional[str]):
     """
     Create logger
@@ -207,6 +231,9 @@ def create_logger(report_to: str, **kwargs: Optional[str]):
     :param kwargs:
     :return:
     """
+    # only the main rank owns the metric backend (one W&B run per job, not one per GPU).
+    if not _is_main_process():
+        return NullLogger()
     try:
         common_args = {key: kwargs[key] for key in [
             "api_key", "project_name", "workspace",

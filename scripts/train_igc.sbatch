@@ -106,6 +106,8 @@ srun --container-image="${NGC_IMAGE}" \
      bash -lc '
         set -euo pipefail
         cd /workspace/igc
+        # auto-load W&B creds (gitignored env file) so the run streams live
+        [ -f .internal/wandb.env ] && { set -a; . .internal/wandb.env; set +a; }
         pip install --no-cache-dir -r docker/requirements-train.txt
         nvidia-smi -L
         # Shared curriculum root so later stages find earlier checkpoints (per-module subdirs).
