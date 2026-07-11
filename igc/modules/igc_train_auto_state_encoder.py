@@ -216,6 +216,9 @@ class AutoencoderTrainer(IgcModule):
         self.model_autoencoder.eval()
         self.model_autoencoder.train()
         self.model_autoencoder.to(self.device)
+        # the frozen backbone must sit on the same device as its inputs; it was
+        # never placed, silently running the big forward on CPU on GPU nodes.
+        self._encoder_model.to(self.device)
 
         total_batches = len(train_dataloader)
         batch_log_frequency = round(32 * 0.2)
@@ -226,6 +229,7 @@ class AutoencoderTrainer(IgcModule):
 
             batch_losses = np.zeros(total_batches)
             for batch in train_dataloader:
+                batch = {k: v.to(self.device) for k, v in batch.items()}
                 with torch.no_grad():
                     output = self._encoder_model(**batch).last_hidden_state.to(self.device)
                 reconstructed = self.model_autoencoder(output)
