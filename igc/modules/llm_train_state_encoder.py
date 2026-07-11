@@ -425,6 +425,35 @@ class LlmEmbeddingsTrainer(LlmModule):
             self.dataset.disable_masking()
             self._current_mask_method_counter = 0
 
+    def _save_final_checkpoint(self):
+        """Persist the trained model once at end-of-train, collective-safe.
+
+        Under ZeRO-3/FSDP the state-dict gather is a COLLECTIVE: every rank must
+        reach ``accelerator.get_state_dict`` together. The previous end-of-train
+        path called ``save_model`` -> ``state_dict()`` behind ``is_rank_zero``, so
+        rank 0 entered the gather alone and deadlocked while ranks 1..N ran ahead
+        through ``save_finetuned`` and returned — the 4-GPU end-of-train hang where
+        only 3 of 4 ranks print "training complete". Gather on ALL ranks first,
+        hand the pre-gathered weights to the rank-0 writers, then barrier so no
+        rank tears down its process group mid-write. Mirrors the per-epoch save.
+        """
+        final_state = None
+        if self.is_accelerator:
+            # Collective — must run on EVERY rank, before any is_rank_zero gate.
+            # Gather on the still-wrapped model, exactly as the per-epoch save does.
+            if self._module_checkpoint_dir is not None:
+                final_state = self.accelerator.get_state_dict(self.model)
+            self.model = self.accelerator.unwrap_model(self.model)
+
+        # Rank-0 writers consume the pre-gathered dict (no second rank-0-only
+        # state_dict() collective); the plain path passes None and saves locally.
+        self.save_model(self._module_checkpoint_dir, model_state_dict=final_state)
+        self.save_finetuned(model_state_dict=final_state)
+
+        if self.is_accelerator:
+            # No rank returns (and drops its NCCL group) until every rank is done.
+            self.accelerator.wait_for_everyone()
+
     def _train(
             self,
             mask_type: List[Union[MaskingOption, MaskingType]] = None
@@ -728,10 +757,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         if self._is_quantize:
             self.model = convert(self.model)
 
-        if self.is_accelerator:
-            self.model = self.accelerator.unwrap_model(self.model)
-        self.save_model(self._module_checkpoint_dir)
-        self.save_finetuned()
+        self._save_final_checkpoint()
 
         # Emit the self-describing run report (report.json) next to the checkpoint so
         # every run is comparable through igc.modules.train.report.compare(). Emission

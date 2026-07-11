@@ -40,18 +40,27 @@ class _EmptyDataset:
 
 
 class _Recorder:
-    """Records whether save hooks were reached."""
+    """Records whether save hooks were reached.
+
+    The signatures mirror the real ``IgcModule.save_model`` /
+    ``LlmModule.save_finetuned`` (which gained a ``model_state_dict`` kwarg for
+    the sharded gather), so the double stays faithful. The plain path passes
+    ``model_state_dict=None`` — captured here so the offline test pins that no
+    ``get_state_dict`` gather leaks onto the non-accelerator path.
+    """
 
     def __init__(self):
         """Initialize counters for save assertions."""
         self.save_model_calls = 0
         self.save_finetuned_calls = 0
+        self.model_state_dicts_seen = []
 
-    def save_model(self, checkpoint_dir):
-        """Record a save_model call."""
+    def save_model(self, checkpoint_dir, model=None, model_state_dict=None):
+        """Record a save_model call and the state-dict override it was handed."""
         self.save_model_calls += 1
+        self.model_state_dicts_seen.append(model_state_dict)
 
-    def save_finetuned(self):
+    def save_finetuned(self, model_state_dict=None):
         """Record a save_finetuned call."""
         self.save_finetuned_calls += 1
 
@@ -184,6 +193,9 @@ def test_plain_end_of_train_skips_accelerator_unwrap(tmp_path, monkeypatch):
     assert trainer._accelerator is None
     assert recorder.save_model_calls == 1
     assert recorder.save_finetuned_calls == 1
+    # Plain path takes no collective gather: save_model receives no pre-gathered
+    # state dict, so it serializes the model locally as before.
+    assert recorder.model_state_dicts_seen == [None]
 
 
 @pytest.mark.gpu
