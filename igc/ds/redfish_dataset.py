@@ -896,7 +896,7 @@ class JSONDataset(
         self._masked_data = torch.load(self._dataset_masked_file_name)
         if 'train_data' not in self._masked_data:
             raise DatasetConsistencyError(
-                f"Loaded dataset has no mandatory key train_data")
+                "Loaded dataset has no mandatory key train_data")
 
         self._load_dicts_from_data()
         self._construct_action_space()
@@ -1999,7 +1999,7 @@ class JSONDataset(
                 raise FileNotFoundError(f"File does not exist: {ds_file}")
 
         if not self._is_tokenizer_consistency():
-            raise FileNotFoundError(f"Some tokenizer files not found.")
+            raise FileNotFoundError("Some tokenizer files not found.")
 
     @staticmethod
     def default_tokenizer_files():
