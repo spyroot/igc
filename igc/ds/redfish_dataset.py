@@ -779,6 +779,19 @@ class JSONDataset(
                 f"Dataset caches were built for --model_type {recorded_model!r} but the "
                 f"current run uses {model_type!r}. Rebuild with --recreate_dataset.")
 
+
+    def _should_verify_tarballs(self) -> bool:
+        """Whether distribution-tarball hashes should gate this load.
+
+        A fresh rebuild (``--recreate_dataset``) supersedes the recorded
+        distribution hashes — the tarballs are packaging artifacts, not build
+        inputs — so verifying them after rebuilding fails on any node that
+        lacks (or holds a partial download of) the tarball.
+
+        :return: True only when loading prebuilt artifacts without a rebuild.
+        """
+        return not self._recreate_dataset
+
     def _load_dataset_spec(self):
         """Read dataset spec and update mirror and resources.
         :return:
@@ -842,7 +855,8 @@ class JSONDataset(
         # load dataset json file, and
         # so we have all hash values for each file.
         self._load_dataset_spec()
-        self._check_tarball_hash()
+        if self._should_verify_tarballs():
+            self._check_tarball_hash()
 
         self.logger.debug(f"Loading dataset from {self._dataset_file_name}")
         self.logger.debug(f"Loading dataset from disk. {self._dataset_file_name}")
