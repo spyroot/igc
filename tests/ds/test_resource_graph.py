@@ -125,4 +125,34 @@ def test_candidate_cache_static_with_get_fallback_and_method_map():
     assert len({id(v) for v in cache.values()}) == len(cache)   # distinct dicts
 
 
+def test_children_returns_copy_index_not_mutated():
+    """Mutating the list children() returns must not corrupt the internal index."""
+    g = RedfishResourceGraph.from_records(_walk())
+    first = g.children("/redfish/v1/Systems")
+    first.append("/bogus")
+    assert g.children("/redfish/v1/Systems") == ["/redfish/v1/Systems/1"]
+
+
+def test_parent_falls_back_for_unwalked_urls():
+    """parent() resolves URLs that are not graph nodes via the segment walk-up."""
+    g = RedfishResourceGraph.from_records(_walk())
+    # never walked, but its prefix ancestor /redfish/v1/Systems/1 is a node
+    assert g.parent("/redfish/v1/Systems/1/Processors/CPU_0") == "/redfish/v1/Systems/1"
+    assert g.parent("/unrelated/path") is None
+
+
+def test_shared_collection_ref_map_keeps_per_child_relations():
+    """Two members of one collection each resolve their own relation from one parent walk."""
+    recs = _walk() + [
+        _rec("/redfish/v1/Systems/2", {"@odata.id": "/redfish/v1/Systems/2",
+                                       "@odata.type": "#ComputerSystem.v1.ComputerSystem"}),
+    ]
+    # parent collection references both members under Members
+    recs[1].response["Members"].append({"@odata.id": "/redfish/v1/Systems/2"})
+    g = RedfishResourceGraph.from_records(recs)
+    assert g.nodes["/redfish/v1/Systems/1"].child_relation == "Members"
+    assert g.nodes["/redfish/v1/Systems/2"].child_relation == "Members"
+    assert g.children("/redfish/v1/Systems") == ["/redfish/v1/Systems/1", "/redfish/v1/Systems/2"]
+
+
 # Author: Mus mbayramo@stanford.edu
