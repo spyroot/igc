@@ -27,7 +27,7 @@ def _make_trajectory(tmp_path: Path, host: str) -> RestTrajectory:
 
 def test_remap_cross_machine_absolute_paths(tmp_path: Path) -> None:
     """Capture-machine absolute paths are re-rooted to /<host>/<file> here."""
-    host = "172.25.230.37"
+    host = "192.0.2.10"
     rt = _make_trajectory(tmp_path, host)
     rt._rest_map_data[host] = {
         "rest_api_map": {
