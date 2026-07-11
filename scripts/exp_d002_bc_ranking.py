@@ -123,46 +123,48 @@ def train_W(train_hosts: List[Dict], steps: int, lr: float, l2i: float, seed: in
     return W.detach()
 
 
-DELL = "idrac_ctl/tests/idrac_fixtures"
+DELL_FIXT = "idrac_ctl/tests/idrac_fixtures"
+DELL_FIXT_NOTE = "point --holdout at a real full walk under datasets/orig/<host> for a large held-out host"
 GENERIC = "idrac_ctl/tests/generic_fixtures"
+
+DEFAULT_TRAIN = ",".join([SUPERMICRO, DELL_FIXT, GENERIC])
+DEFAULT_HOLDOUT = HPE                             # public fixture; pass --holdout <dir> for a large real walk
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--train", type=str, default=DEFAULT_TRAIN, help="comma-separated train corpora")
+    ap.add_argument("--holdout", type=str, default=DEFAULT_HOLDOUT, help="comma-separated held-out corpora")
     ap.add_argument("--steps", type=int, default=800)
     ap.add_argument("--lr", type=float, default=1e-2)
-    ap.add_argument("--l2i", type=float, default=1.0, help="||W-I||^2 anchor (0 = free-form W)")
+    ap.add_argument("--l2i", type=float, default=0.1, help="||W-I||^2 anchor (0 = free-form W)")
     ap.add_argument("--k", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     bar, k = 0.80, args.k
 
+    train_dirs = [d for d in args.train.split(",") if d]
+    holdout_dirs = [d for d in args.holdout.split(",") if d]
+
     print("loading corpora (frozen trigram embeddings)...")
-    corpora = {"Supermicro": SUPERMICRO, "Dell": DELL, "generic": GENERIC, "HPE": HPE}
-    data = {name: load_corpus(path) for name, path in corpora.items()}
-    for name, d in data.items():
-        print(f"  {name:11s} states={d['n_state']:5d} candidates={d['n_cand']}")
+    train = [load_corpus(d) for d in train_dirs]
+    holdout = [load_corpus(d) for d in holdout_dirs]
+    for d, h in zip(train_dirs, train):
+        print(f"  TRAIN   {d:45s} states={h['n_state']:5d} candidates={h['n_cand']}")
+    for d, h in zip(holdout_dirs, holdout):
+        print(f"  HOLDOUT {d:45s} states={h['n_state']:5d} candidates={h['n_cand']}")
 
-    W_id = torch.eye(data["HPE"]["S"].shape[1])
+    dim = holdout[0]["S"].shape[1]
+    W_id = torch.eye(dim)
+    print(f"\ntraining anchored multi-vendor W (l2i={args.l2i}, steps={args.steps}) on {len(train)} corpora ...")
+    W = train_W(train, args.steps, args.lr, args.l2i, args.seed)
 
-    def report(tag: str, W: torch.Tensor) -> None:
-        hpe = top_k_hit_rate(data["HPE"], W, k=k)
-        smc = top_k_hit_rate(data["Supermicro"], W, k=k)
-        verdict = "GO" if hpe >= bar else "NO-GO"
-        print(f"  {tag:32s} Supermicro top-{k}={smc:.3f}   HPE(held-out) top-{k}={hpe:.3f}   -> {verdict}")
-
-    print(f"\n=== top-{k} hit rate (held-out vendor = HPE; bar {bar:.2f}) ===")
-    report("BASELINE (W=I, cosine)", W_id)
-
-    print(f"\ntraining single-vendor (Supermicro), l2i={args.l2i} ...")
-    W1 = train_W([data["Supermicro"]], args.steps, args.lr, args.l2i, args.seed)
-    print(f"\ntraining multi-vendor (Supermicro+Dell+generic), l2i={args.l2i} ...")
-    Wm = train_W([data["Supermicro"], data["Dell"], data["generic"]], args.steps, args.lr, args.l2i, args.seed)
-
-    print(f"\n=== RESULTS (top-{k}; HPE held out of training) ===")
-    report("BASELINE (W=I, cosine)", W_id)
-    report(f"trained single-vendor l2i={args.l2i}", W1)
-    report(f"trained multi-vendor  l2i={args.l2i}", Wm)
+    print(f"\n=== held-out top-{k} hit rate (bar {bar:.2f}) ===")
+    for d, h in zip(holdout_dirs, holdout):
+        base = top_k_hit_rate(h, W_id, k=k)
+        trained = top_k_hit_rate(h, W, k=k)
+        verdict = "GO" if trained >= bar else "NO-GO"
+        print(f"  {d:45s} baseline={base:.3f}  trained={trained:.3f}  ({trained - base:+.3f})  -> {verdict}")
 
 
 if __name__ == "__main__":
