@@ -17,6 +17,10 @@ Reinforce Learner).
   experiment that validates it.
 - [MATH_CHECKS.md](MATH_CHECKS.md) — the math and optimization gate for Bellman targets, HER,
   replay masks, tensor shapes, finite-gradient checks, and trustworthy training claims.
+- [CRITICAL_SECTIONS.md](CRITICAL_SECTIONS.md) — the performance map: every hot path, its cost,
+  what we optimized (with numbers), and the budget tripwire that guards it.
+- [HOW_TO_PROFILE.md](HOW_TO_PROFILE.md) — the one-command way to measure hot paths, find the
+  critical section, and prove a change is faster; how CI runs it.
 - [TRAINING_OPTIMIZATION_PLAN.md](TRAINING_OPTIMIZATION_PLAN.md) — the large-model training,
   optimization, and GPU-efficiency roadmap for 3B/7B state-encoder work.
 
