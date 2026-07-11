@@ -7,6 +7,81 @@ Deeper design context lives in [ARCHITECTURE.md](ARCHITECTURE.md); training mech
 
 ---
 
+## D-004 — Mutation simulator: stateful sim in igc, mutation semantics as data from redfish_ctl (2026-07-11)
+
+**Status: ACCEPTED** (architecture + the redfish_ctl data contract; implementation phased).
+**Method:** four-perspective design review (architect, adversarial skeptic, ML researcher, pragmatic
+operator), grounded by a code + capability audit of `igc/envs/**` and redfish_ctl's mock.
+
+### Problem
+
+The RL agent must learn multi-step, order-dependent **mutation** plans (stage BIOS -> reset -> verify;
+set boot=PXE once -> power on): each write must **evolve the resource tree** so the next observation
+reflects it, or the agent learns a degenerate read-only policy. Today the shipped RL env returns 404
+for every POST/PATCH/DELETE — the stateful mechanism exists (`register_callback`/`new_state`/
+`callback_dispatcher` in `igc/envs/rest_mock_server.py`) but is wired only in tests, and there is no
+ordered mutation trace. Separately, `rest_mock_server.py` is a 769-line **home-grown Redfish client +
+mock** built when `idrac_ctl` was only a data collector: it re-implements Redfish HTTP transport,
+auth, captured-response serving, error modelling, and a **live-BMC proxy** — duplicating what the
+renamed, full multi-vendor **redfish_ctl** now provides, and putting a live-write path in the RL
+codebase that the safety contract says must go through redfish_ctl.
+
+### Decision
+
+1. **The stateful multi-step mutation simulator lives in igc.** RL is the only consumer and it needs
+   RL-specific reset / determinism / batching / journal that do not belong in a hardware CLI.
+2. **Mutation semantics live in redfish_ctl as DATA**: an **order-independent "mutation rules"**
+   sidecar that extends redfish_ctl's existing `write_traces` `state_transitions` vocabulary but matches
+   on `(method, path-pattern, precondition over current state)` instead of trace position. igc consumes
+   the rules; no vendor semantics are duplicated in igc.
+3. **Consolidate to redfish_ctl.** Retire igc's home-grown Redfish transport + captured-response
+   serving + error/fault modelling + live-BMC proxy. `rest_mock_server.py` shrinks to a thin
+   **RuleEngine adapter** over the existing `callback_dispatcher`/`new_state` plus a mutation journal;
+   the gym env / goal / reward / interfaces are untouched. This also removes a live-BMC write path from
+   the RL codebase (a safety cleanup, not just dedup).
+4. **The contract stays DATA, not code.** igc consumes redfish_ctl's corpus + `rest_api_map.npy` +
+   `mutation_rules` — the `.npy` format is unchanged (binding) and there is no runtime code dependency
+   on redfish_ctl.
+
+### Rock-solid requirements (from the review)
+
+- **Declarative rules, not hardcoded callbacks.**
+- **Faithful semantics**: pending-vs-current (apply-on-reset), async Task lifecycle **advanced by
+  polling** (the agent must learn to wait/check, not fire back-to-back), boot-once revert, collection
+  create/delete, power-state transitions.
+- **Snapshot-level mutation journal**: the full resource tree **before and after** each step (not just
+  the changed field), tied to the gym step index — required for HER / offline RL goal relabeling.
+- **Determinism + a seed-controlled latency/noise layer** so the policy does not overfit to fake timing.
+- **mock / sim / real parity** behind one env interface; a **live-BMC canary** for validation; start
+  with two vendors (Supermicro GB300 + HPE iLO ~= 80% of mutation patterns), Dell third.
+
+### Related decisions folded in
+
+- **PPA is optional, off the critical path.** The parallel RoPE research (Phase-Amplitude Attention)
+  is not required. Use current state-of-the-art long-context RoPE models now — the backbone is already
+  decoupled (`--model_type` + `--seq_len`, see D-003). PPA plugs in later via a per-layer
+  attention-adapter seam (eager path, native rotary disabled).
+- **Profiling gap**: `HOW_TO_PROFILE.md` covers CPU hot-paths only; add a CUDA-profiling section
+  (`torch.profiler` CUDA activities / Nsight Systems / memory) for the GPU training path.
+
+### Risks accepted
+
+- Semantics duplication if igc skips the exported rules (mitigated: the rules ARE the contract).
+- Async Task oversimplified -> agent never learns to wait (mitigated: poll-to-advance Task model).
+- Shallow (per-field) journal breaks HER (mitigated: snapshot-level before/after).
+- Sim/real drift teaches a wrong policy (mitigated: canary + before/after corpus tests; 2-3 vendors).
+
+### Build order
+
+1. **redfish_ctl** — order-independent mutation rules + boot-once revert, Supermicro GB300 first
+   (task specced and handed off).
+2. **igc** — RuleEngine adapter over the existing `MockServer` + the mutation journal; retire the
+   home-grown Redfish transport/mock.
+3. **RL env** — `mock`/`sim`/`real` backends, `reset(seed)`, batching.
+4. **Live canary + parity**; expand vendor coverage.
+
+---
+
 ## D-003 — Backbone migration: retire GPT-2 as the state-encoder default (2026-07-11)
 
 **Status: ACCEPTED** for the Phase 0 decoupling below; the *target default* and the
