@@ -7,6 +7,97 @@ Deeper design context lives in [ARCHITECTURE.md](ARCHITECTURE.md); training mech
 
 ---
 
+## D-003 — Backbone migration: retire GPT-2 as the state-encoder default (2026-07-11)
+
+**Status: ACCEPTED** for the Phase 0 decoupling below; the *target default* and the
+decoder-vs-encoder choice are the one open sub-decision, tracked in "The open fork".
+**Method:** four-perspective design review (architect, adversarial skeptic, ML researcher,
+pragmatic operator, run independently with full reasoning, then synthesized), grounded by a
+usage census over the code.
+
+### Problem
+
+GPT-2 (2019) is the default `--model_type` backbone: the model that encodes each Redfish response
+into the latent the M6 policy scores from. It is dated for this domain — a 1024-token window,
+learned *absolute* position embeddings, and a BPE tokenizer that splits JSON braces and URLs into
+many subtokens. The loader is *already* backbone-agnostic in its seams
+(`AutoModelForCausalLM`/`AutoTokenizer` keyed on `--model_type`, Conv1D-vs-Linear LoRA handling in
+`igc/modules/shared/llm_shared.py`, a Qwen fast-tokenizer path in `igc/ds/redfish_dataset.py`), but a
+handful of GPT-2 assumptions are still hard-wired into the core encode path and would break — or
+silently degrade — any modern backbone.
+
+### Grounding census — where GPT-2 is welded in (grep-verified)
+
+| Assumption (site) | What it does | Why it breaks a modern backbone | How it manifests |
+|---|---|---|---|
+| `wpe` positional indexing — `igc/modules/encoders/base_encoder.py`, `igc/envs/rest_encoder.py` (comment: "GPT-2 wpe positional table. Subtract 1…") | reaches into GPT-2's learned absolute-position table | RoPE models (Qwen, Llama, ModernBERT) have **no** `wpe` | `AttributeError` the moment a non-GPT-2 model loads |
+| Hard-coded `1024` — `redfish_dataset.py` (`max_len` default and `"max_length": 1024`), `shared_arg_parser.py` (default 1024) | caps sequence length at GPT-2's window | modern models allow 8k–128k tokens | a long-context model is throttled to 1024; the chunking workaround stays alive for no reason |
+| `GPT2Tokenizer.from_pretrained("gpt2")` — `redfish_dataset.py` (three fallbacks) | forces GPT-2's slow tokenizer | any other model needs its own tokenizer | **silent** quality collapse — the model receives token ids that are not its own (no crash) |
+| Decoder-only load — `AutoModelForCausalLM` in `llm_shared.py` | assumes a causal LM | a true encoder (BERT-family) needs `AutoModel` + an MLM objective | blocks the encoder option without a wider change |
+| `"gpt-2"` id — `igc/ds/ds_pairs.py` (untracked WIP) | invalid HF repo id (hyphen; the real id is `gpt2`) | — | load/download failure the first time that path runs |
+
+(`igc/rl.py`, also an untracked WIP file, hard-codes `GPT2LMHeadModel`/`GPT2Tokenizer` and belongs in
+the same sweep.)
+
+### The open fork (the one decision still to make)
+
+| Track | Move | Cost |
+|---|---|---|
+| **Decoder-as-encoder (keep the objective)** | swap GPT-2 for a modern *decoder* — e.g. SmolLM2-135M (Apache-2.0, RoPE, 8k context, code-aware tokenizer) | low: same causal-LM training; near drop-in once Phase 0 is done |
+| **True encoder** | move to ModernBERT-base (encoder, RoPE, 8192 context) | higher: changes the M1 objective from next-token (causal) to masked-LM |
+
+For *structured, passive* JSON a bidirectional encoder is the better representation, but it is not a
+drop-in — it recasts the M1 objective. **Recommendation: take the decoder track for the default
+(Phase 1), and evaluate the encoder as the GPU backbone (Phase 2) where the gain justifies the
+objective change.** This fork is recorded, not yet closed.
+
+### Decision — phased
+
+- **Phase 0 — decouple, do not dethrone (ACCEPTED; do first).** Remove the five GPT-2-isms above:
+  load via `AutoModel` and read `last_hidden_state`; drop the `wpe` access (guard it to
+  absolute-position models only); read the length cap from `config.max_position_embeddings`; replace
+  the hard-coded `GPT2Tokenizer` fallbacks with `AutoTokenizer`; fix the `"gpt-2"` id. **GPT-2 stays
+  the default**, so the offline CPU gate stays green. This is the prerequisite for any swap, and it
+  ships with a `scripts/bench_hot_paths.py` number plus a perf-budget update per the hot-path rule
+  (the encode path is a hot path).
+- **Phase 1 — a modern small default, opt-in first.** Add SmolLM2-135M as a benchmarked option; flip
+  the default only once it (a) beats GPT-2 on the zero-shot ranking harness
+  (`igc/modules/eval/zero_shot_ranking.py`) and (b) keeps the offline gate download-free and fast.
+  Keep `--model_type gpt2` as the pinned, reproducible baseline forever.
+- **Phase 2 — the real win.** ModernBERT-base (8192 context) as the GPU fine-tune backbone → removes
+  the chunking workaround; optionally distil a large on-cluster teacher into it (feature-level, on
+  last hidden states). Accepts the causal→MLM objective change.
+
+### Surfaced disagreement (kept, not averaged)
+
+The adversarial-skeptic perspective argued **not to move the default at all**: GPT-2 is frozen,
+permissively licensed, CPU-fast, and already cached; swapping it invalidates the tokenized dataset
+cache and the `@odata` special-token setup, and risks the `wpe`/Conv1D alignment. This is reconciled
+by phasing — Phase 0 *is* the skeptic's position (decouple, keep GPT-2 as the default); the default
+only moves in Phase 1, and only behind a measured gate.
+
+### Risks accepted
+
+- **Cache invalidation.** A new tokenizer changes every token id, so cached tokenized datasets and
+  the `@odata` special-token setup must be rebuilt. Keep GPT-2 pinned for regression.
+- **Conv temporal view.** Changing sequence length alters the 1D-conv over `last_hidden_state`;
+  re-validate the encode path (perf budget + an output-equivalence check on GPT-2 before/after
+  decoupling).
+- **Offline gate.** The default must stay download-free on CPU; a model that needs a download stays
+  opt-in, not the default.
+- **Objective change.** The encoder track (Phase 2) is *not* a drop-in — it recasts M1 training.
+
+### Validation / go-no-go
+
+- **Phase 0:** offline gate green with GPT-2 unchanged, and `bench_hot_paths` shows the decoupled
+  encode path is output-equivalent to the current one and within budget.
+- **Phase 1:** SmolLM2-135M ≥ GPT-2 top-5 on `zero_shot_ranking.py`, with the gate still fast and
+  download-free, before the default flips.
+- **Phase 2:** ModernBERT clears the D-001/D-002 held-out-vendor bar with the chunking workaround
+  removed.
+
+---
+
 ## D-002 — Action-candidate representation: text + graph features, v1 scoped (2026-07-11)
 
 **Status: ACCEPTED** (v1 scope; extends D-001).
