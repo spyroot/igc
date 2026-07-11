@@ -66,3 +66,10 @@ def test_non_namespace_spec_rejected(tmp_path):
 
 
 # Author: Mus mbayramo@stanford.edu
+
+
+def test_device_property_tolerates_partial_construction():
+    """A __new__-built instance (no _accelerator/_device) does not crash on .device."""
+    obj = IgcBaseState.__new__(IgcBaseState)
+    # neither _accelerator nor _device set — the property must return None, not raise.
+    assert obj.device is None
