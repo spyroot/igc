@@ -73,3 +73,25 @@ def test_reached_max_steps_stops_at_the_cap():
 
 
 # Author: Mus mbayramo@stanford.edu
+
+
+def test_optimizer_steps_per_epoch_scales_by_accum():
+    """Scheduler steps are optimizer steps: ceil(micro/accum)."""
+    from igc.modules.llm_train_state_encoder import optimizer_steps_per_epoch
+    assert optimizer_steps_per_epoch(100, 1) == 100
+    assert optimizer_steps_per_epoch(100, 4) == 25
+    assert optimizer_steps_per_epoch(101, 4) == 26
+    assert optimizer_steps_per_epoch(5, 0) == 5  # coerced accum
+
+
+def test_measure_grad_norm_before_and_after_zero_grad():
+    """Nonzero with live grads; 0.0 after zero_grad — the original bug's shape."""
+    import torch
+    from igc.modules.llm_train_state_encoder import measure_grad_norm
+
+    model = torch.nn.Linear(3, 3)
+    model(torch.ones(2, 3)).sum().backward()
+    assert measure_grad_norm(model) > 0.0
+
+    model.zero_grad()
+    assert measure_grad_norm(model) == 0.0
