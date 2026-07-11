@@ -51,7 +51,16 @@ codebase that the safety contract says must go through redfish_ctl.
   create/delete, power-state transitions.
 - **Snapshot-level mutation journal**: the full resource tree **before and after** each step (not just
   the changed field), tied to the gym step index — required for HER / offline RL goal relabeling.
-- **Determinism + a seed-controlled latency/noise layer** so the policy does not overfit to fake timing.
+- **Determinism + a seed-controlled STOCHASTIC layer** — not just latency noise but **failure
+  injection**: per action, sample success vs a realistic failure (BMC rejects `4xx`/`5xx`, `Task`
+  resolves `Exception`, or a silent no-op where state does not change despite a `2xx` — the reboot
+  "didn't take"). This is what makes the MDP genuinely stochastic and the reason a *learned* policy
+  is needed over a deterministic planner: the agent sees the symptom, not the cause (partial
+  observability), and must learn recovery (retry / wait / graceful-vs-forced / alternate path) — as a
+  human operator would. Deterministic *given a seed* (reproducible for offline RL/tests), random
+  across seeds; curriculum knob to ramp failure over training. Failure *shapes* come from
+  redfish_ctl (optional `failure` variant per rule); the injection *probabilities* are igc's RL config.
+  A failed action costs a step but does not end the episode; the evaluator still checks the goal state.
 - **mock / sim / real parity** behind one env interface; a **live-BMC canary** for validation; start
   with two vendors (Supermicro GB300 + HPE iLO ~= 80% of mutation patterns), Dell third.
 
