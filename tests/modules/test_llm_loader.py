@@ -161,10 +161,15 @@ def test_fa2_rejected_for_conv1d_only_backbones(monkeypatch):
 
     attempts = []
 
+    from transformers.pytorch_utils import Conv1D
+
     class _Conv1DOnly(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.weight = torch.nn.Parameter(torch.zeros(1))
+            # a GPT-2-style Conv1D "attention" plus an lm_head Linear: the whole
+            # model HAS a Linear, so only the Conv1D marker distinguishes it.
+            self.attn = Conv1D(2, 2)
+            self.lm_head = torch.nn.Linear(2, 2)
 
     class _LinearModel(torch.nn.Module):
         def __init__(self):
