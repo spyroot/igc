@@ -326,6 +326,34 @@ transitions.** Next step (before any M6 training spend): behavioral-cloning-trai
 in-domain graph transitions (Supermicro), then re-run this same harness zero-shot on the
 held-out vendor (HPE) for the real go/no-go.
 
+### Experiment result 2 (2026-07-11) — GO: a mildly-anchored, multi-vendor bilinear projection transfers
+
+Running that next step (`scripts/exp_d002_bc_ranking.py`; frozen trigram encoder, D-002 v1 features,
+top-5, HPE held out of training):
+
+| Ranker | Supermicro (in-domain) | HPE (held-out) | verdict |
+|---|---|---|---|
+| baseline `W=I` (cosine) | 0.293 | 0.754 | NO-GO (reproduces result 1 exactly) |
+| free-form `W`, single-vendor | 0.536 | 0.383 | NO-GO — **overfits**, transfers worse than cosine |
+| `W` anchored by `‖W−I‖²` (l2i 0.1), single-vendor | 0.554 | 0.832 | GO |
+| `W` anchored (l2i 0.1), multi-vendor (Supermicro+Dell+generic) | 0.456 | **0.862** | **GO** (seed-stable, seeds 0/1/2) |
+
+Findings: (a) a *free-form* bilinear `W` memorizes the training vendor and **destroys** zero-shot
+transfer — it must be a small perturbation of cosine (a mild `‖W−I‖²` anchor). (b) **multi-vendor
+training beats single-vendor** for held-out transfer (0.862 vs 0.832), as expected. (c) with both,
+held-out top-5 clears the 0.80 bar with margin and is seed-stable.
+
+Caveats — this is a conservative lower bound: the encoder is the frozen character-trigram stand-in,
+not the learned M1 backbone, and the features are D-002 v1 (shallow), so the learned encoder should do
+at least as well. The held-out vendor (HPE, 167 nodes) is small; a *large* held-out host is not
+covered (the only large corpus, Supermicro, is in training) and remains a follow-up. In-domain
+large-host ranking (Supermicro 0.456) is still the hard part, but the go/no-go bar is on the held-out
+vendor, which passes.
+
+**Consequence: GO.** The learned bilinear projection is confirmed both load-bearing *and* transferable
+— unblocking M6 training spend — *provided* `W` is anchored to cosine and trained multi-vendor (a
+free-form single-vendor `W` is a trap). Reproduce: `python scripts/exp_d002_bc_ranking.py`.
+
 ---
 
 ## D-001 — M6 action-selection objective: hybrid pointer + argument decoder (2026-07-11)
