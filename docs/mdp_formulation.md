@@ -78,6 +78,15 @@ probability 1 in the limit. So $s_\dagger$ is **not** a permanent trap — a con
 
 Therefore a proper policy exists. $\blacksquare$
 
+**Remark (in-band only; no god action).** The recovery procedure above uses only actions in
+$\mathcal{A}(s)$ — API calls with their true (stochastic) dynamics. It appeals to **no out-of-MDP
+intervention**. A physical power-cycle ("unplug it at the socket") is a *god action*: an omnipotent
+external reset of the state, outside $\mathcal{A}(s)$ by construction, because the MDP is defined at the
+management-API layer. Admitting god actions would make the existence claim **vacuous** — every system
+is trivially "recoverable" if an external agent may reset it to a clean state by fiat. The theorem is
+meaningful precisely because recovery is achieved *within* the action space: the controller resets
+**itself**.
+
 **Operational corroboration.** Operators do recover controllers in practice. If no in-band recovery
 path existed, any controller reaching $s_\dagger$ would be permanently unrecoverable — contradicting
 the observed reality that management controllers are routinely returned to service. The self-healing
@@ -86,8 +95,8 @@ argument is the mechanism behind that observation: **the controller can reset it
 ## 5. Boundary conditions (and why they do not weaken the result)
 
 1. **Unresponsive controller.** The one genuinely out-of-band case is a controller so wedged that it
-   does not answer the management API at all — `Manager.Reset` cannot be issued. This is a single
-   absorbing failure state $s_\perp \notin$ (responsive subset); it is often transient (a retry
+   does not answer the management API at all — `Manager.Reset` cannot be issued. Recovery there would demand a **god action** (a physical
+   power-cycle) outside the MDP, which the agent cannot invoke. This is a single absorbing failure state $s_\perp \notin$ (responsive subset); it is often transient (a retry
    restores responsiveness). It has no effect on properness over the responsive subset on which the
    agent operates, and is modelled as an absorbing terminal (or a retry-until-timeout transition).
 2. **Redfish-irrecoverable states.** If any state is reachable but not recoverable within the action
@@ -118,6 +127,48 @@ the controller, re-drive — **because such a strategy provably exists**. A fixe
 unknown, stochastic failure, and a language model prompted for the next call has no notion of the
 optimal recovery cost-to-go; the SSP formulation is what makes learned, verifiable recovery the right
 tool.
+
+## 8. Decidability and generalization
+
+### Decidability — halt states are not the Halting Problem
+
+The Halting Problem — does an arbitrary Turing machine halt on a given input — is undecidable because
+the machine's tape, and hence its state space, is **unbounded**. $\mathcal{M}$ is a **finite** MDP:
+under a task-relevant state abstraction (the finitely many properties that determine the goal predicate
+and reachability) $|\mathcal{S}| < \infty$ and $|\mathcal{A}(s)| < \infty$. For a finite MDP,
+reachability of $\mathcal{G}$ from any $s$ — and hence whether a state is a permanent trap, a "halt" —
+is **decidable** by finite graph analysis / value iteration. A halt state is an ordinary absorbing
+state, and identifying one is a well-posed, decidable computation, categorically unlike the Halting
+Problem. What makes the two *look* alike — reachability of a target under dynamics — is exactly what the
+finiteness of $\mathcal{S}$ dissolves.
+
+Two consequences, stated plainly:
+
+- **Decidable is not tractable.** $\mathcal{S}$ is finite but combinatorially enormous, so exact value
+  iteration is infeasible; the problem is solved by **learning with function approximation**, not exact
+  planning. Well-posedness (an optimum exists and is computable *given the model*) is what licenses
+  learning to approximate it.
+- **The agent has no model.** $P$ is unknown, so the agent does not *compute* reachability a priori — it
+  *discovers* it through exploration (model-free). Decidability is a property of the problem, not a
+  capability handed to the agent.
+
+### Generalization beyond Redfish
+
+Nothing in Sections 1-7 is Redfish-specific once stated abstractly. The argument transfers to operating
+any system exposed as a discoverable API — the target framework in [ARCHITECTURE.md](ARCHITECTURE.md) —
+under three conditions:
+
+1. **Bounded, readable state** — a finite, Markov-sufficient abstraction of the system's configuration
+   the agent can observe (not the raw byte space).
+2. **Bounded, discoverable action space** — the operations the API exposes from each state.
+3. **A proper policy exists** — a within-action-space recovery path to the goal (self-healing such as a
+   controller/service reset, or in-band reachability by other means). Where (3) fails for some states,
+   those states are decidably identified and the optimal policy is **avoidance**; no god action is assumed.
+
+Under (1)-(3), $\mathcal{M}$ is a well-posed SSP with a unique optimal cost-to-go and a convergent,
+Bellman-optimal, **autonomous** recovery policy — decidable in principle, intractable to solve exactly,
+and therefore learned. This is the formal license for "one agent, many systems": the guarantees are
+properties of the *shape* of the problem — finite state, finite actions, in-band recovery — not of Redfish.
 
 Author:
 Mus mbayramo@stanford.edu
