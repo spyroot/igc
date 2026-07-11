@@ -5,6 +5,11 @@ Writes :class:`TrainingExample` objects as JSONL (one ``to_dict()`` per line) wi
 :class:`DataManifest` sidecar, and reads them back as dicts. Offline only — this is the seam
 between the source/mixer/normalizer pipeline and a training run that consumes a fixed corpus.
 
+The read side (``iter_examples`` / ``read_manifest``) is used by ``CorpusJSONLDataset.__init__``
+(``igc/ds/corpus_dataset.py``), which ``IgcMain`` instantiates when ``--corpus_dir`` is set — so
+a run loads this corpus instead of rebuilding from raw captures. The write side is exercised by
+the data-build pipeline and its tests.
+
 Author:
 Mus mbayramo@stanford.edu
 """

@@ -12,6 +12,11 @@ The class duck-types the surface the trainer touches on ``MaskedJSONDataset``:
 ``tokenizer``/``load_tokenizer`` plus the masking-method hooks, which are no-ops here
 because a written corpus trains the plain causal-LM (NO_MASK) objective.
 
+Used by ``IgcMain.dataset`` (``igc/modules/igc_main.py``): when the ``--corpus_dir`` CLI flag
+is set, a run loads this class instead of rebuilding ``MaskedJSONDataset`` from
+``~/.json_responses``, so it trains on the pre-written trust-tier corpus. The trainer also
+reads ``run_manifest_fields`` to stamp the corpus hash / eval split into the run report.
+
 Author:
 Mus mbayramo@stanford.edu
 """

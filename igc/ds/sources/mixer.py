@@ -9,6 +9,11 @@ a stable hash of each resource URL rather than an RNG — so it reproduces acros
 stable as the corpus grows, and a serializable :class:`DataManifest` records the mix (for the
 training run manifest and as a fair-comparison key).
 
+The ``DataManifest`` produced here is serialized by ``corpus_io.write_corpus`` as the
+``manifest.json`` sidecar and read back by ``CorpusJSONLDataset.run_manifest_fields``
+(``igc/ds/corpus_dataset.py``) to stamp each run report's ``data_manifest`` / ``eval_split``
+fair-comparison keys — reached in production when ``--corpus_dir`` is set.
+
 Author:
 Mus mbayramo@stanford.edu
 """

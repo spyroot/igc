@@ -9,6 +9,11 @@ node carries the D-002 structural fields: resource type (from ``@odata.type``), 
 child-relation name by which it is reachable, and whether its body exposes an invokable
 action target. The graph is static per host and safe to build from a partial crawl.
 
+Used by ``candidate_features.build_candidate_cache``, which walks ``graph.nodes`` to emit the
+static per-host candidate cache, and by ``scripts/bench_hot_paths.py`` as a benchmarked
+hot-path stage. Without this typed tree the D-002 candidate cache — and the D-001 ranking
+that filters it — cannot be built.
+
 Author:
 Mus mbayramo@stanford.edu
 """

@@ -6,6 +6,11 @@ Each SourceRecord carries a full Redfish response body, provenance metadata, and
 This module compacts the resource representation for the state graph, constructs the
 (state, action, next_state, semantics) tuple, and preserves provenance end-to-end.
 
+Consumers live inside ``igc.ds.sources``, not the model code: ``corpus_io.write_corpus``
+serializes each ``TrainingExample.to_dict()`` to ``examples.jsonl``, and
+``redfish_enum_space.normalize_enriched`` calls ``normalize_record``. That corpus reaches M1
+training one hop downstream via ``CorpusJSONLDataset`` (the ``--corpus_dir`` path).
+
 Author:
 Mus mbayramo@stanford.edu
 """

@@ -1,6 +1,11 @@
 """
 D-002 v1 action-candidate featurizer with a static per-host cache.
 
+Used by ``scripts/bench_hot_paths.py`` (the candidate-cache benchmark stage), feeding
+``igc/modules/eval/zero_shot_ranking.py``. The candidate dict emitted here is a schema
+contract with that ranker's ``candidate_text`` / ``embed_candidates`` — renaming a field
+silently breaks ranking.
+
 Turns graph nodes into the accepted candidate schema — path tokens, HTTP method, resource
 type, child-relation name, action-target flag — for the D-001 pointer. Per D-002, every
 field is static per host: the cache is built once from the walked tree and only *filtered*

@@ -1,6 +1,11 @@
 """
 Run-report emission: turn a finished training run into a ResultBundle on disk.
 
+Called only from ``LlmEmbeddingsTrainer._train`` (``igc/modules/llm_train_state_encoder.py``)
+at end of run, on rank zero, inside a broad try/except so a report failure only warns and
+never fails a finished training run. It exists so every run leaves a machine-readable
+``report.json`` for the comparison tooling.
+
 The trainer calls :func:`build_run_bundle` with its parsed spec and end-of-run stats,
 then :func:`emit_run_report` writes ``report.json`` into the run's output directory —
 making every run self-describing (model, adapter, data manifest, environment, final
