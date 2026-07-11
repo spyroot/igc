@@ -21,6 +21,8 @@ Reinforce Learner).
   what we optimized (with numbers), and the budget tripwire that guards it.
 - [HOW_TO_PROFILE.md](HOW_TO_PROFILE.md) — the one-command way to measure hot paths, find the
   critical section, and prove a change is faster; how CI runs it.
+- [NODE_ARTIFACTS.md](NODE_ARTIFACTS.md) — pushing large LFS artifacts from a training node over
+  its own uplink (never the VPN), git-lfs without OS changes, and the Docker Hub image flow.
 - [TRAINING_OPTIMIZATION_PLAN.md](TRAINING_OPTIMIZATION_PLAN.md) — the large-model training,
   optimization, and GPU-efficiency roadmap for 3B/7B state-encoder work.
 
