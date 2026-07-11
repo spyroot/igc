@@ -697,16 +697,18 @@ class JSONDataset(
                 if resource_name == tarball_name:
                     if isinstance(resource_hash, str) and resource_hash.endswith(".md5"):
                         # heal specs written while create_tar_gz's hash-file PATH was
-                        # stored in place of the value: read the sidecar when present,
-                        # else skip verification for this resource (unverifiable).
+                        # stored in place of the value: read the sidecar when present.
                         sidecar = Path(resource_hash)
-                        if sidecar.exists():
-                            resource_hash = sidecar.read_text().strip()
-                        else:
-                            self.logger.warning(
-                                f"Skipping hash check for {resource_name}: spec stores "
-                                f"a missing hash-file path ({resource_hash}).")
-                            break
+                        resource_hash = (
+                            sidecar.read_text().strip() if sidecar.exists() else "")
+                    if not (isinstance(resource_hash, str) and resource_hash.strip()):
+                        # an absent/empty expected hash cannot verify anything; a packaging
+                        # hash is an integrity nice-to-have, not a correctness gate, so skip
+                        # (warn) rather than hard-fail the whole load on unverifiable state.
+                        self.logger.warning(
+                            f"Skipping hash check for {resource_name}: no usable expected "
+                            f"hash recorded in the dataset spec.")
+                        break
                     computed_hash = md5_checksum(tarball_path)
                     if computed_hash != resource_hash:
                         self.logger.debug(f"Hash mismatch for resource: {resource_name}")

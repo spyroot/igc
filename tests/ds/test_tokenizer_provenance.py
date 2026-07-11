@@ -96,3 +96,38 @@ def test_tarball_check_skips_missing_sidecar(tmp_path):
     ds._dataset_tarballs = [tarball]
     ds._resources = [("igc.tar.gz", hash_file, "x")]
     ds._check_tarball_hash()  # unverifiable -> skip, not fatal
+
+
+def test_tarball_check_skips_empty_expected_hash(tmp_path):
+    """An empty recorded hash is unverifiable — skip with a warning, don't crash."""
+    from igc.ds.ds_utils import create_tar_gz
+
+    src_dir = tmp_path / "payload"
+    src_dir.mkdir()
+    (src_dir / "a.json").write_text("{}")
+    tarball, _ = create_tar_gz(str(src_dir), str(tmp_path / "igc.tar.gz"))
+
+    ds = JSONDataset.__new__(JSONDataset)
+    ds.logger = __import__("loguru").logger
+    ds._dataset_tarballs = [tarball]
+    ds._resources = [("igc.tar.gz", "", "x")]  # empty expected hash
+    ds._check_tarball_hash()  # must not raise
+
+
+def test_tarball_check_still_fails_on_real_value_mismatch(tmp_path):
+    """A genuine value-vs-value mismatch is still a hard error."""
+    import pytest
+    from igc.ds.ds_utils import create_tar_gz
+    from igc.ds.redfish_dataset import DatasetConsistencyError
+
+    src_dir = tmp_path / "payload"
+    src_dir.mkdir()
+    (src_dir / "a.json").write_text("{}")
+    tarball, _ = create_tar_gz(str(src_dir), str(tmp_path / "igc.tar.gz"))
+
+    ds = JSONDataset.__new__(JSONDataset)
+    ds.logger = __import__("loguru").logger
+    ds._dataset_tarballs = [tarball]
+    ds._resources = [("igc.tar.gz", "deadbeef" * 4, "x")]  # wrong but present
+    with pytest.raises(DatasetConsistencyError):
+        ds._check_tarball_hash()
