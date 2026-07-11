@@ -34,7 +34,7 @@ import torch
 import torch.nn.functional as F
 from huggingface_hub.utils import HFValidationError
 from tqdm import tqdm
-from transformers import AutoTokenizer, GPT2Tokenizer, PreTrainedTokenizer
+from transformers import AutoTokenizer, PreTrainedTokenizer
 
 from igc.interfaces.rest_mapping_interface import RestMappingInterface
 from igc.interfaces.rest_one_hot_interface import RestActionEncoderInterface
@@ -365,7 +365,10 @@ class JSONDataset(
         if not os.path.exists(tok_dir):
             raise ValueError(f"Tokenizer directory '{tok_dir}' does not exist.")
 
-        tokenizer = GPT2Tokenizer.from_pretrained(tok_dir)
+        # Load the saved tokenizer with AutoTokenizer so a non-GPT-2 backbone
+        # (Qwen/Llama/etc., built from --model_type by _load_tokenizer) round-trips
+        # with its own tokenizer class instead of being forced into GPT-2's.
+        tokenizer = AutoTokenizer.from_pretrained(tok_dir)
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
         return tokenizer
@@ -1176,7 +1179,7 @@ class JSONDataset(
 
         Usage:
             target_key = "@odata.id"
-            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+            tokenizer = AutoTokenizer.from_pretrained("gpt2")
             json_lines = json.dumps(j_data)
             attention_mask = mask_specific_key_and_value(json_lines,
             target_key, tokenizer=tokenizer, debug=True)
@@ -1226,7 +1229,7 @@ class JSONDataset(
 
         Usage:
             target_key = "@odata.id"
-            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+            tokenizer = AutoTokenizer.from_pretrained("gpt2")
             json_lines = json.dumps(j_data)
             attention_mask = mask_specific_key_and_value(json_lines,
             target_key, tokenizer=tokenizer, debug=True)
@@ -1238,7 +1241,7 @@ class JSONDataset(
         :return:
         """
         tokenizer = tokenizer if tokenizer is not None \
-            else GPT2Tokenizer.from_pretrained("gpt2")
+            else AutoTokenizer.from_pretrained("gpt2")
 
         if isinstance(json_data, str):
             try:
