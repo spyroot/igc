@@ -54,3 +54,12 @@ def test_absent_model_type_only_checks_tokens():
 
 
 # Author: Mus mbayramo@stanford.edu
+
+
+def test_rebuild_skips_tarball_verification():
+    """--recreate_dataset supersedes stale distribution-tarball hashes."""
+    ds = JSONDataset.__new__(JSONDataset)
+    ds._recreate_dataset = True
+    assert ds._should_verify_tarballs() is False
+    ds._recreate_dataset = False
+    assert ds._should_verify_tarballs() is True
