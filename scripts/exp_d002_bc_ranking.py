@@ -32,15 +32,35 @@ from igc.modules.eval.zero_shot_ranking import candidate_text, trigram_embed
 SUPERMICRO = "idrac_ctl/tests/supermicro_fixtures"
 HPE = "idrac_ctl/tests/hpe_fixtures"
 
+# Non-operational metadata: the Redfish JSON-schema store, message/attribute registries, and metric
+# DEFINITIONS. An agent never navigates to these; a full "entire dump" walk is dominated by them and
+# they distort the ranking metric (they are the near-identical sibling leaves that fill top-k).
+_META_URL = ("/jsonschemas/", "/schemas/", "/schemastore/", "/registries/",
+             "/metricdefinitions/", "/messageregistry")
+_META_TYPE = {"jsonschemafile", "metricdefinition", "metricreportdefinition",
+              "messageregistryfile", "attributeregistry", "schemafile"}
 
-def load_corpus(corpus_dir: str, dim: int = 512) -> Dict:
+
+def _is_metadata(rec) -> bool:
+    """True for schema/registry/metric-definition resources (not part of the action space)."""
+    if any(seg in rec.url.lower() for seg in _META_URL):
+        return True
+    body = rec.response if isinstance(rec.response, dict) else {}
+    t = str(body.get("@odata.type", "")).split(".")[0].lstrip("#").lower()
+    return t in _META_TYPE
+
+
+def load_corpus(corpus_dir: str, dim: int = 512, filter_metadata: bool = False) -> Dict:
     """Load a fixture corpus into frozen state/candidate embeddings + truth masks.
 
     :param corpus_dir: fixture directory of captured Redfish JSON.
     :param dim: trigram embedding dimensionality.
+    :param filter_metadata: drop the schema/registry/metric-definition dump before building the graph.
     :return: dict with S (states x dim), C (candidates x dim), and boolean pos/self masks.
     """
     records = list(RedfishFixtureSource(corpus_dir, "exp", TrustLevel.REAL))
+    if filter_metadata:
+        records = [r for r in records if not _is_metadata(r)]
     graph = RedfishResourceGraph.from_records(records)
     candidates = list(build_candidate_cache(graph).values())
     cand_urls = [c["url"] for c in candidates]
@@ -140,15 +160,17 @@ def main() -> None:
     ap.add_argument("--l2i", type=float, default=0.1, help="||W-I||^2 anchor (0 = free-form W)")
     ap.add_argument("--k", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--filter", action="store_true",
+                    help="drop the schema/registry/metric-definition metadata dump (operational graph only)")
     args = ap.parse_args()
     bar, k = 0.80, args.k
 
     train_dirs = [d for d in args.train.split(",") if d]
     holdout_dirs = [d for d in args.holdout.split(",") if d]
 
-    print("loading corpora (frozen trigram embeddings)...")
-    train = [load_corpus(d) for d in train_dirs]
-    holdout = [load_corpus(d) for d in holdout_dirs]
+    print(f"loading corpora (frozen trigram embeddings; filter_metadata={args.filter})...")
+    train = [load_corpus(d, filter_metadata=args.filter) for d in train_dirs]
+    holdout = [load_corpus(d, filter_metadata=args.filter) for d in holdout_dirs]
     for d, h in zip(train_dirs, train):
         print(f"  TRAIN   {d:45s} states={h['n_state']:5d} candidates={h['n_cand']}")
     for d, h in zip(holdout_dirs, holdout):

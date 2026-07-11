@@ -379,6 +379,17 @@ graph-neighborhood features**, the learned **M1 encoder** (vs the frozen trigram
 the trained **TD/HER pointer** (vs pure representation similarity). Reproduce:
 `python scripts/exp_d002_bc_ranking.py --holdout datasets/orig/<dell-host>`.
 
+**Data-hygiene correction (same day).** The Dell walk is a full "entire dump": **~73% of its 2352
+nodes are the Redfish schema/metric registry** (`JsonSchemaFile`, `/Schemas`, `MetricDefinition`) —
+metadata an agent never navigates to. Re-running on the OPERATIONAL graph only (`--filter`, 625 nodes)
+lifts the large-host held-out score from **0.324 to 0.680** (baseline 0.145 -> 0.389). So the raw NO-GO
+was largely a **data artifact of the unsanitized dump**, not a fundamental ranking failure. It remains
+NO-GO (0.680 < 0.80) at the frozen-trigram + v1 floor, but the residual gap is now concentrated in
+genuine near-identical siblings — dozens of firmware-inventory, sensor, and slot resources — exactly
+the case the v2 graph-neighborhood features target. **Data-pipeline implication:** the schema/metric
+registry should be filtered from the action space upstream (it is not operational). Reproduce:
+`... --holdout datasets/orig/<dell-host> --filter`.
+
 ---
 
 ## D-001 — M6 action-selection objective: hybrid pointer + argument decoder (2026-07-11)
