@@ -77,6 +77,25 @@ make docker-test   # build the CPU test image and run pytest inside it
 
 So profiling is not a thing someone remembers to do — the budgets are part of the merge gate.
 
+## Comparing over time (tests, coverage, hot-path timings)
+
+Because the codebase keeps growing, each CI run archives a **per-commit snapshot** so any two
+points in history can be diffed instead of re-derived:
+
+- The `gate` job runs the suite **with coverage** (`--cov=igc`, producing `coverage.xml` /
+  `coverage.json`), then `scripts/metrics_snapshot.py` writes `metrics.json` —
+  `{commit, num_tests, coverage_pct, hot_paths_sec}` — and echoes a table into the run's
+  **summary page**. All three are uploaded as the `metrics-<sha>` artifact (90-day retention).
+- So "did coverage drop or a hot path get slower since last week?" is: download the two runs'
+  `metrics.json` and diff them.
+
+Locally:
+
+```bash
+make coverage   # run the gate with coverage (term + coverage.xml + coverage.json)
+make metrics    # coverage + write metrics.json and print the summary table
+```
+
 ## Workflow for a performance change
 
 1. `python scripts/bench_hot_paths.py --profile` → record the before number and the dominant

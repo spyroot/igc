@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: help gate test lint perf profile profile-rl docker-test docker-push clean
+.PHONY: help gate test lint perf coverage metrics profile profile-rl docker-test docker-push clean
 
 help: ## List available targets and their descriptions
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -15,6 +15,12 @@ lint: ## Run the ruff linter over igc and tests
 
 perf: ## Run the performance budget tripwires (pytest -m perf)
 	KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 $(PYTHON) -m pytest -m perf -q
+
+coverage: ## Run the offline gate with coverage (term + coverage.xml + coverage.json)
+	KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 $(PYTHON) -m pytest -q --cov=igc --cov-report=term --cov-report=xml --cov-report=json
+
+metrics: coverage ## Write a per-commit metrics snapshot (tests + coverage + hot-path timings) to metrics.json
+	$(PYTHON) scripts/metrics_snapshot.py --coverage-json coverage.json --out metrics.json
 
 profile: ## Profile all hot paths with cProfile critical sections
 	$(PYTHON) scripts/bench_hot_paths.py --profile
