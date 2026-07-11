@@ -29,11 +29,26 @@ jobs:
           pip install ruff
       - name: Lint
         run: ruff check igc tests
-      - name: Offline gate
+      - name: Offline gate with coverage
         shell: bash
         run: |
           set -o pipefail
-          KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 pytest -q
+          KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 \
+            pytest -q --cov=igc --cov-report=term --cov-report=xml --cov-report=json
+      - name: Metrics snapshot
+        shell: bash
+        run: |
+          python scripts/metrics_snapshot.py --coverage-json coverage.json --out metrics.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage and metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics-${{ github.sha }}
+          path: |
+            coverage.xml
+            coverage.json
+            metrics.json
+          retention-days: 90
 
   perf:
     needs: gate

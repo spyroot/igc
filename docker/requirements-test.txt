@@ -31,3 +31,7 @@ evaluate
 # dev / test
 pytest
 ruff
+
+# coverage reporting for the gate + metrics snapshot
+pytest-cov
+coverage
