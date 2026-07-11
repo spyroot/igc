@@ -39,6 +39,29 @@ silently degrade — any modern backbone.
 (`igc/rl.py`, also an untracked WIP file, hard-codes `GPT2LMHeadModel`/`GPT2Tokenizer` and belongs in
 the same sweep.)
 
+### Verified state on `main` (2026-07-11) — most of Phase 0 was already done
+
+A re-audit against the actual code (not the comments the census above was drawn from) found the
+decoupling **largely complete**, and corrects two overstatements in the census:
+
+- **`wpe` — already fixed.** `igc/modules/encoders/backbone_utils.py` (`backbone_module`,
+  `max_positions`, `emb_shape`) derives module + shapes from `config`; both encoders
+  (`base_encoder.py`, `rest_encoder.py`) use it and handle RoPE models with no positional table. The
+  census matched a *comment* that referenced the legacy behavior, not live `.wpe` access.
+- **The 1024 window and the tokenizer — already flags.** `igc_main.py` builds the dataset with
+  `default_tokenize=--model_type` (→ `AutoTokenizer`) and `max_len=--seq_len`; `_load_tokenizer`
+  rebuilds the cache on a backbone switch. So a modern long-context run is already
+  `--model_type <model> --seq_len <N> --recreate_dataset` — no refactor required.
+- **`AutoModelForCausalLM`** is the intended causal-LM track, already keyed on `--model_type`; not a
+  defect.
+
+**What genuinely remained (fixed in the follow-up PR):** the `JSONDataset.load_tokenizer` *classmethod*
+hard-coded `GPT2Tokenizer` on the saved-tokenizer reload path (wrong class for a non-GPT-2 saved
+tokenizer), one minor live fallback, and stale docstring examples — all moved to `AutoTokenizer`, with
+an offline regression test. The remaining GPT-2 literals are the untracked WIP files above and a
+standalone `chat_with_gpt2` demo helper. Net: Phase 0 is effectively closed; the open item is the
+Phase-1/2 model choice below.
+
 ### The open fork (the one decision still to make)
 
 | Track | Move | Cost |
