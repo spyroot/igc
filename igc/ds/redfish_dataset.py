@@ -312,8 +312,13 @@ class JSONDataset(
         """
         self.logger.info(f"Loading tokenizer from {self.tokenizer_dir()}")
         try:
-            # we do this only if tokenizer dir not present, and we are skipping download.
-            if not os.path.exists(self.tokenizer_dir()) and self._skip_download:
+            # Build the igc tokenizer from the current --model_type when the cache is
+            # absent (and offline), OR when rebuilding: --recreate_dataset must retokenize
+            # for the new backbone, otherwise a stale cache (e.g. gpt2) silently wins over
+            # a Qwen/DeepSeek run.
+            build = self._recreate_dataset or (
+                not os.path.exists(self.tokenizer_dir()) and self._skip_download)
+            if build:
                 self.tokenizer = AutoTokenizer.from_pretrained(self._default_tokenize_name)
                 self.logger.info(f"Creating backbone tokenizer: {self.tokenizer.name_or_path}")
                 self._build_tokenizer()
@@ -827,7 +832,8 @@ class JSONDataset(
         except Exception as e:
             self.logger.error(f"Error loading dataset spec: {e}")
         # outside the try so a provenance conflict is NOT swallowed by the log-only except
-        if self.tokenizer is not None:
+        if self.tokenizer is not None and not self._recreate_dataset:
+            # a rebuild supersedes the recorded provenance; only gate prebuilt loads.
             self.check_tokenizer_provenance(
                 tokenizer_spec, len(self.tokenizer), self._default_tokenize_name)
 

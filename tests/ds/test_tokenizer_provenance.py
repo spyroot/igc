@@ -131,3 +131,46 @@ def test_tarball_check_still_fails_on_real_value_mismatch(tmp_path):
     ds._resources = [("igc.tar.gz", "deadbeef" * 4, "x")]  # wrong but present
     with pytest.raises(DatasetConsistencyError):
         ds._check_tarball_hash()
+
+
+def test_provenance_check_skipped_on_recreate(tmp_path, monkeypatch):
+    """--recreate_dataset bypasses the provenance gate (the rebuild rewrites it)."""
+    import loguru
+    ds = JSONDataset.__new__(JSONDataset)
+    ds.logger = loguru.logger
+    ds._recreate_dataset = True
+    ds._default_tokenize_name = "Qwen/Qwen2.5-3B-Instruct"
+    ds._dataset_root_dir = str(tmp_path)
+    ds._default_dataset_spec = "dataset.json"
+
+    class _Tok:
+        def __len__(self):
+            return 151936
+    ds.tokenizer = _Tok()
+
+    # a gpt2 spec that WOULD mismatch — must not raise because recreate is set
+    (tmp_path / "dataset.json").write_text(
+        '{"mirrors": [], "resources": [], "tokenizer": {"num_tokens": 55664, "model_type": "gpt2"}}')
+    ds._load_dataset_spec()  # no ValueError
+
+
+def test_provenance_check_still_gates_prebuilt_loads(tmp_path):
+    """Without recreate, a real backbone mismatch still raises."""
+    import loguru
+    import pytest
+    ds = JSONDataset.__new__(JSONDataset)
+    ds.logger = loguru.logger
+    ds._recreate_dataset = False
+    ds._default_tokenize_name = "Qwen/Qwen2.5-3B-Instruct"
+    ds._dataset_root_dir = str(tmp_path)
+    ds._default_dataset_spec = "dataset.json"
+
+    class _Tok:
+        def __len__(self):
+            return 151936
+    ds.tokenizer = _Tok()
+
+    (tmp_path / "dataset.json").write_text(
+        '{"mirrors": [], "resources": [], "tokenizer": {"num_tokens": 55664, "model_type": "gpt2"}}')
+    with pytest.raises(ValueError, match="Rebuild with --recreate_dataset"):
+        ds._load_dataset_spec()
