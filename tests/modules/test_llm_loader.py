@@ -151,3 +151,36 @@ if __name__ == "__main__":
 
 
 # Author: Mus mbayramo@stanford.edu
+
+
+def test_fa2_rejected_for_conv1d_only_backbones(monkeypatch):
+    """A FA2 load with no nn.Linear falls through to the next kernel."""
+    import torch
+    import types
+    import igc.modules.shared.llm_shared as llm_shared
+
+    attempts = []
+
+    class _Conv1DOnly(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.zeros(1))
+
+    class _LinearModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(2, 2)
+
+    class _FakeAuto:
+        @staticmethod
+        def from_pretrained(model_id, attn_implementation=None, **kwargs):
+            attempts.append(attn_implementation)
+            return _Conv1DOnly() if attn_implementation == "flash_attention_2" else _LinearModel()
+
+    monkeypatch.setattr(llm_shared, "AutoModelForCausalLM", _FakeAuto)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+
+    model = llm_shared._from_pretrained_best_attention("any", {})
+
+    assert attempts == ["flash_attention_2", "sdpa"]
+    assert isinstance(model, _LinearModel)
