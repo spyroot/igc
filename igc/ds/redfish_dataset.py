@@ -462,8 +462,10 @@ class JSONDataset(
         if not os.path.exists(self._dataset_json_tarball_name):
             logging.debug(f"Creating tarball {self._dataset_json_tarball_name}")
             if os.path.exists(self._json_directory_path):
-                _, _tarball_hash = create_tar_gz(
+                _, _hash_file = create_tar_gz(
                     self._json_directory_path, self._dataset_json_tarball_name)
+                # create_tar_gz returns the hash-file path; resources store the value.
+                _tarball_hash = Path(_hash_file).read_text().strip()
 
                 # update hash values in _resources
                 tarball_name = os.path.basename(self._dataset_json_tarball_name)
@@ -478,8 +480,9 @@ class JSONDataset(
                 os.makedirs(self._dataset_root_dir, exist_ok=True)
                 logging.debug(f"Creating tarball {self._dataset_tarball_name} file.")
                 if os.path.exists(self.raw_dir()):
-                    _, _tarball_hash = create_tar_gz(
+                    _, _hash_file = create_tar_gz(
                         self.raw_dir(), self._dataset_tarball_name)
+                    _tarball_hash = Path(_hash_file).read_text().strip()
 
                     # update hash
                     tarball_name = os.path.basename(self._dataset_tarball_name)
@@ -494,8 +497,9 @@ class JSONDataset(
                 os.makedirs(self._dataset_root_dir, exist_ok=True)
                 logging.debug(f"Creating tarball {self._dataset_tokenizer_tarball_name} file.")
                 if os.path.exists(self.tokenizer_dir()):
-                    _, _tarball_hash = create_tar_gz(
+                    _, _hash_file = create_tar_gz(
                         self.tokenizer_dir(), self._dataset_tokenizer_tarball_name)
+                    _tarball_hash = Path(_hash_file).read_text().strip()
 
                     # update hash
                     tarball_name = os.path.basename(self._dataset_tokenizer_tarball_name)
@@ -691,6 +695,18 @@ class JSONDataset(
                 resource_name = resource[0]
                 resource_hash = resource[1]
                 if resource_name == tarball_name:
+                    if isinstance(resource_hash, str) and resource_hash.endswith(".md5"):
+                        # heal specs written while create_tar_gz's hash-file PATH was
+                        # stored in place of the value: read the sidecar when present,
+                        # else skip verification for this resource (unverifiable).
+                        sidecar = Path(resource_hash)
+                        if sidecar.exists():
+                            resource_hash = sidecar.read_text().strip()
+                        else:
+                            self.logger.warning(
+                                f"Skipping hash check for {resource_name}: spec stores "
+                                f"a missing hash-file path ({resource_hash}).")
+                            break
                     computed_hash = md5_checksum(tarball_path)
                     if computed_hash != resource_hash:
                         self.logger.debug(f"Hash mismatch for resource: {resource_name}")

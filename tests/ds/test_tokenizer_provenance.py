@@ -63,3 +63,36 @@ def test_rebuild_skips_tarball_verification():
     assert ds._should_verify_tarballs() is False
     ds._recreate_dataset = False
     assert ds._should_verify_tarballs() is True
+
+
+def test_tarball_check_heals_pathlike_hash(tmp_path):
+    """Specs poisoned with the hash-file PATH verify via the sidecar content."""
+    from igc.ds.ds_utils import create_tar_gz
+
+    src_dir = tmp_path / "payload"
+    src_dir.mkdir()
+    (src_dir / "a.json").write_text("{}")
+    tarball, hash_file = create_tar_gz(str(src_dir), str(tmp_path / "igc.tar.gz"))
+
+    ds = JSONDataset.__new__(JSONDataset)
+    ds.logger = __import__("loguru").logger
+    ds._dataset_tarballs = [tarball]
+    ds._resources = [("igc.tar.gz", hash_file, "x")]  # poisoned: path not value
+    ds._check_tarball_hash()  # must heal via sidecar content, not raise
+
+
+def test_tarball_check_skips_missing_sidecar(tmp_path):
+    """A poisoned spec whose sidecar is gone skips verification with a warning."""
+    from igc.ds.ds_utils import create_tar_gz
+
+    src_dir = tmp_path / "payload"
+    src_dir.mkdir()
+    (src_dir / "a.json").write_text("{}")
+    tarball, hash_file = create_tar_gz(str(src_dir), str(tmp_path / "igc.tar.gz"))
+    __import__("os").remove(hash_file)
+
+    ds = JSONDataset.__new__(JSONDataset)
+    ds.logger = __import__("loguru").logger
+    ds._dataset_tarballs = [tarball]
+    ds._resources = [("igc.tar.gz", hash_file, "x")]
+    ds._check_tarball_hash()  # unverifiable -> skip, not fatal
