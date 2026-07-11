@@ -96,6 +96,13 @@ class RedfishResourceGraph:
         # parent bodies are needed once, to resolve referencing keys; kept out of GraphNode
         # so downstream consumers of nodes stay light.
         self._bodies: Dict[str, Dict] = {}
+        # One-pass indexes: parent()/children()/neighbors() sit on the RL hot path (every
+        # decision step and every HER relabel), so they must be dict lookups, never node scans.
+        self._parent_index: Dict[str, Optional[str]] = {}
+        self._children_index: Dict[str, List[str]] = {}
+        # per-parent {referenced_url: top_level_key}, built by ONE walk of the parent body
+        # instead of one walk per child (collections reference every member).
+        self._ref_key_maps: Dict[str, Dict[str, str]] = {}
 
     @classmethod
     def from_records(cls, records: Iterable[SourceRecord]) -> "RedfishResourceGraph":
@@ -120,12 +127,21 @@ class RedfishResourceGraph:
                 has_action_target=has_action_target(body),
                 body_refs=harvest_refs(body, url),
             )
+        # Index pass: resolve every parent once (walk-up), invert into the children index,
+        # then resolve relations using one-walk-per-parent reference maps.
+        for url in graph.nodes:
+            parent_url = graph._walk_up_parent(url)
+            graph._parent_index[url] = parent_url
+            if parent_url is not None:
+                graph._children_index.setdefault(parent_url, []).append(url)
+        for child_list in graph._children_index.values():
+            child_list.sort()
         for node in graph.nodes.values():
             node.child_relation = graph._resolve_relation(node.url)
         return graph
 
-    def parent(self, url: str) -> Optional[str]:
-        """The longest walked URL-prefix parent of ``url``, or ``None``.
+    def _walk_up_parent(self, url: str) -> Optional[str]:
+        """Longest walked URL-prefix ancestor by segment walk-up (index-build helper).
 
         :param url: node URL.
         :return: parent URL when walked, else ``None``.
@@ -137,13 +153,28 @@ class RedfishResourceGraph:
                 return candidate
         return None
 
+    def parent(self, url: str) -> Optional[str]:
+        """The longest walked URL-prefix parent of ``url``, or ``None``.
+
+        O(1) for walked nodes (index built in :meth:`from_records`); unknown URLs fall back
+        to the segment walk-up so lookups against a partial crawl still resolve.
+
+        :param url: node URL.
+        :return: parent URL when walked, else ``None``.
+        """
+        if url in self._parent_index:
+            return self._parent_index[url]
+        return self._walk_up_parent(url)
+
     def children(self, url: str) -> List[str]:
         """Walked nodes whose nearest walked ancestor is ``url`` (containment children).
+
+        O(1) index lookup — a copy is returned so callers cannot mutate the index.
 
         :param url: node URL.
         :return: child URLs, sorted.
         """
-        return sorted(u for u in self.nodes if u != url and self.parent(u) == url)
+        return list(self._children_index.get(url, ()))
 
     def neighbors(self, url: str) -> List[str]:
         """True transition targets from ``url``: containment children, parent, and walked refs.
@@ -183,11 +214,19 @@ class RedfishResourceGraph:
     def _referencing_key(self, parent_url: str, child_url: str) -> str:
         """Top-level key of the parent body whose subtree references ``child_url``.
 
+        The parent body is walked ONCE (lazily) into a ``{referenced_url: key}`` map shared
+        by all of that parent's children — a collection body references every member, so a
+        per-child scan would be O(body x children).
+
         :param parent_url: walked parent URL.
         :param child_url: child URL to locate.
         :return: the referencing top-level key, or ``""``.
         """
-        return _top_level_ref_key(self._bodies.get(parent_url), child_url) or ""
+        ref_map = self._ref_key_maps.get(parent_url)
+        if ref_map is None:
+            ref_map = _ref_key_map(self._bodies.get(parent_url))
+            self._ref_key_maps[parent_url] = ref_map
+        return ref_map.get(child_url, "")
 
     @staticmethod
     def _looks_like_member_id(segment: str) -> bool:
@@ -199,32 +238,34 @@ class RedfishResourceGraph:
         return segment.isdigit() or any(ch.isdigit() for ch in segment)
 
 
-def _top_level_ref_key(body, child_url: str) -> Optional[str]:
-    """Top-level key of ``body`` whose subtree contains ``@odata.id == child_url``.
+def _ref_key_map(body) -> Dict[str, str]:
+    """Map every ``@odata.id`` referenced in ``body`` to its top-level key — in one walk.
+
+    First key wins when the same URL is referenced under several top-level keys, matching
+    the priority of a top-to-bottom scan.
 
     :param body: decoded parent JSON body (or ``None``).
-    :param child_url: URL to find.
-    :return: key name or ``None``.
+    :return: ``{referenced_url: top_level_key}`` (empty for non-dict bodies).
     """
     if not isinstance(body, dict):
-        return None
+        return {}
+    out: Dict[str, str] = {}
 
-    def _contains(obj) -> bool:
+    def _collect(obj, top_key: str) -> None:
         if isinstance(obj, dict):
             odata = obj.get("@odata.id")
-            if isinstance(odata, str) and odata.rstrip("/") == child_url:
-                return True
-            return any(_contains(v) for v in obj.values())
-        if isinstance(obj, list):
-            return any(_contains(i) for i in obj)
-        return False
+            if isinstance(odata, str) and odata:
+                out.setdefault(odata.rstrip("/") or odata, top_key)
+            for value in obj.values():
+                _collect(value, top_key)
+        elif isinstance(obj, list):
+            for item in obj:
+                _collect(item, top_key)
 
     for key, value in body.items():
-        if key.startswith("@"):
-            continue
-        if _contains(value):
-            return key
-    return None
+        if not key.startswith("@"):
+            _collect(value, key)
+    return out
 
 
 # Author: Mus mbayramo@stanford.edu
