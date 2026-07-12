@@ -22,16 +22,28 @@ FROM nvcr.io/nvidia/pytorch:${NGC_TAG}
 
 WORKDIR /workspace/igc
 
-# Extra deps on top of the NGC base (transformers / accelerate / peft / wandb /
+# OS tools on top of the NGC base. Already in the base: git, curl, wget, jq, numactl,
+# vim, less, ssh, ps. We add:
+#   git-lfs  — REQUIRED: the idrac_ctl submodule ships its Redfish walk maps
+#              (rest_api_map.npy) as git-LFS objects, so `git pull` / `git lfs pull`
+#              inside the container needs it (the pull-inside-container iteration loop).
+#   nvtop    — live per-GPU utilisation/memory view while a run trains.
+#   htop     — live CPU/RAM view (dataset build is CPU-heavy).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git-lfs nvtop htop \
+    && git lfs install --system \
+    && rm -rf /var/lib/apt/lists/*
+
+# Extra Python deps on top of the NGC base (transformers / accelerate / peft / wandb /
 # gymnasium / mock-REST-env, etc.). torch is intentionally absent — use the base's.
+# py-spy dumps a stuck rank's Python stack to diagnose a distributed hang WITHOUT NCCL
+# debug env (operator directive: no NCCL_DEBUG on our runs).
 COPY docker/requirements-train.txt /tmp/requirements-train.txt
 RUN pip install --no-cache-dir -r /tmp/requirements-train.txt \
-    # py-spy: dump a stuck rank's Python stack to diagnose a distributed hang WITHOUT
-    # NCCL debug env (operator directive: no NCCL_DEBUG on our runs). Non-fatal.
     && (pip install --no-cache-dir py-spy || echo "py-spy install skipped")
 
-# Conservative fabric default; override at run time (-e NCCL_NVLS_ENABLE=1) if the
-# NVLink SHARP/multicast fabric is confirmed healthy for the run.
-ENV NCCL_NVLS_ENABLE=0
+# NVLS left at the image default (ON): the fabric is healthy (operator, 2026-07-10) and
+# ppa runs without forcing it off. Override per-run with `-e NCCL_NVLS_ENABLE=0` if a
+# multi-GPU run shows NVLink SHARP/multicast trouble.
 ENV PYTHONUNBUFFERED=1
 CMD ["bash"]
