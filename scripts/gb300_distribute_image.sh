@@ -19,7 +19,16 @@ IMAGE="${IMAGE:-igc-train}"
 TAG="${TAG:-ngc26.03-py3}"
 REF="${IMAGE}:${TAG}"
 MODELS_IMAGES="${MODELS_IMAGES:-/models/images}"
-TARBALL="${MODELS_IMAGES}/${IMAGE}-${TAG}.tar.zst"
+# Compression: zstd is smaller/faster (9GB vs ~15GB) but must be on EVERY node for the
+# load; gzip is universal (coreutils) but bigger. Default zstd; COMPRESS=gzip when some
+# nodes lack zstd so the distribution never fails on a missing decompressor.
+COMPRESS="${COMPRESS:-zstd}"
+case "$COMPRESS" in
+    zstd) EXT="tar.zst"; COMP="zstd -T0 -q"; DECOMP="zstd -dc" ;;
+    gzip) EXT="tar.gz";  COMP="gzip";        DECOMP="gzip -dc" ;;
+    *) echo "BLOCKER: COMPRESS must be zstd or gzip (got $COMPRESS)" >&2; exit 3 ;;
+esac
+TARBALL="${MODELS_IMAGES}/${IMAGE}-${TAG}.${EXT}"
 # All 18 GB300 nodes: 172.25.230.40 .. .57
 # shellcheck disable=SC2206  # word-split the space-separated override on purpose
 NODES=(${DIST_NODES:-$(seq -f "172.25.230.%g" 40 57)})
@@ -27,7 +36,7 @@ SSH="ssh -o BatchMode=yes -o ConnectTimeout=8"
 
 log() { echo "=== [$(date -u '+%F %T')] $* ==="; }
 
-command -v zstd >/dev/null || { echo "BLOCKER: zstd missing on $(hostname) — install it (safe-apt-install.sh zstd)" >&2; exit 3; }
+command -v "${COMPRESS}" >/dev/null || { echo "BLOCKER: $COMPRESS missing on $(hostname) — install it (safe-apt-install.sh $COMPRESS) or use COMPRESS=gzip" >&2; exit 3; }
 
 # 1. build (unless already present) then save to /models (read by every node)
 if ! docker image inspect "$REF" >/dev/null 2>&1; then
@@ -36,8 +45,9 @@ if ! docker image inspect "$REF" >/dev/null 2>&1; then
 fi
 mkdir -p "$MODELS_IMAGES"
 if [ ! -f "$TARBALL" ] || [ "${FORCE_SAVE:-0}" = "1" ]; then
-    log "docker save $REF -> $TARBALL"
-    docker save "$REF" | zstd -T0 -q -o "$TARBALL" || { echo "BLOCKER: save failed" >&2; exit 3; }
+    log "docker save $REF -> $TARBALL ($COMPRESS)"
+    # shellcheck disable=SC2086  # COMP must word-split into "zstd -T0 -q" / "gzip"
+    docker save "$REF" | $COMP > "$TARBALL" || { echo "BLOCKER: save failed" >&2; exit 3; }
 fi
 log "tarball ready: $(du -h "$TARBALL" 2>/dev/null | cut -f1) at $TARBALL"
 
@@ -47,7 +57,7 @@ for ip in "${NODES[@]}"; do
     if $SSH "nvidia@$ip" "docker image inspect $REF >/dev/null 2>&1"; then
         echo "  $ip: already has $REF"; ok=$((ok + 1)); continue
     fi
-    if $SSH "nvidia@$ip" "test -f '$TARBALL' && zstd -dc '$TARBALL' | docker load >/dev/null 2>&1 && docker image inspect $REF >/dev/null 2>&1"; then
+    if $SSH "nvidia@$ip" "test -f '$TARBALL' && $DECOMP '$TARBALL' | docker load >/dev/null 2>&1 && docker image inspect $REF >/dev/null 2>&1"; then
         echo "  $ip: LOADED $REF"; ok=$((ok + 1))
     else
         echo "  $ip: FAILED (unreachable? /models unmounted? zstd missing?)" >&2; fail=$((fail + 1))
