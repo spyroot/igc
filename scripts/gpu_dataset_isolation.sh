@@ -26,7 +26,7 @@ CASES=(
   "odd_batch_drop|@|1000|7|1|PASS"
 )
 
-pass=0; fail=0; dead=0
+pass=0; fail=0; dead=0; mismatch=0
 printf "%-26s %-6s %-8s %-9s %s\n" CASE WORLD EXPECT GOT DETAIL
 for world in $WORLDS; do
   for spec in "${CASES[@]}"; do
@@ -40,6 +40,7 @@ for world in $WORLDS; do
     elif [ "$rc" -eq 0 ]; then got="PASS"
     else got="FAIL"; fi
     ok="ok"; [ "$got" != "$expect" ] && ok="MISMATCH"
+    [ "$ok" = "MISMATCH" ] && mismatch=$((mismatch+1))
     [ "$got" = "PASS" ] && pass=$((pass+1))
     [ "$got" = "DEADLOCK" ] && dead=$((dead+1))
     [ "$got" = "FAIL" ] && fail=$((fail+1))
@@ -50,5 +51,8 @@ for world in $WORLDS; do
   done
 done
 echo "----"
-echo "summary: PASS=$pass DEADLOCK(reproduced)=$dead FAIL=$fail"
+echo "summary: PASS=$pass DEADLOCK(reproduced)=$dead FAIL=$fail MISMATCH=$mismatch"
 # Exit nonzero only if an expectation was violated (a PASS-case deadlocked, or a bug-case passed).
+if [ "$mismatch" -ne 0 ]; then
+  exit 1
+fi

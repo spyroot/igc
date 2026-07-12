@@ -28,18 +28,19 @@ IGC_REPO_URL="${IGC_REPO_URL:-$(git -C "${HERE}" remote get-url origin)}"
 BW="--bwlimit=${IGC_BWLIMIT_KBPS:-4000}"
 
 echo "code: ${REMOTE} pulls ${IGC_REPO_URL} (no laptop transfer)"
+# shellcheck disable=SC2029  # Local values intentionally select the remote checkout command.
 ssh "${REMOTE}" "if [ -d '${IGC_DEST}/.git' ]; then git -C '${IGC_DEST}' fetch origin && git -C '${IGC_DEST}' reset --hard origin/main; else git clone '${IGC_REPO_URL}' '${IGC_DEST}'; fi"
 
 if [[ "${IGC_STAGE_DATA:-1}" == "1" ]]; then
     SIZE="$(du -sm "${HOME}/.json_responses" 2>/dev/null | cut -f1 || echo '?')"
     echo "captures: ~${SIZE}MB -> ${REMOTE}:~/.json_responses (bwlimit ${IGC_BWLIMIT_KBPS:-4000}KB/s)"
-    rsync -az ${BW} --exclude '*.tar.gz' --exclude '*.tar' \
+    rsync -az "${BW}" --exclude '*.tar.gz' --exclude '*.tar' \
         "${HOME}/.json_responses/" "${REMOTE}:.json_responses/"
 fi
 
 if [[ "${IGC_STAGE_INTERNAL:-0}" == "1" ]]; then
     echo "run config: .internal/ (tiny; values never printed)"
-    rsync -az ${BW} "${HERE}/.internal/" "${REMOTE}:${IGC_DEST}/.internal/"
+    rsync -az "${BW}" "${HERE}/.internal/" "${REMOTE}:${IGC_DEST}/.internal/"
 fi
 
 echo "dataset caches: NOT transferred — rebuild on the node:"

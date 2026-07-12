@@ -9,6 +9,7 @@ Author:
 Mus mbayramo@stanford.edu
 """
 import torch
+import pytest
 
 from igc.modules.policy.pointer_policy import (
     ActionProjector,
@@ -37,6 +38,18 @@ def test_mask_excludes_padding_even_if_highest():
     scores = score_candidates(query, keys, mask)
     assert scores[0, 2] == float("-inf")
     assert int(greedy_select(scores)[0]) == 0
+
+
+@pytest.mark.xfail(
+    reason="greedy_select currently argmaxes an all-masked row to candidate 0.",
+    strict=True,
+)
+def test_greedy_select_rejects_all_masked_rows():
+    """A row with no legal candidates must not emit a concrete candidate index."""
+    scores = torch.tensor([[float("-inf"), float("-inf")]])
+
+    with pytest.raises(ValueError, match="no legal candidates"):
+        greedy_select(scores)
 
 
 def test_output_width_tracks_num_candidates_not_global():

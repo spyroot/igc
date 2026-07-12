@@ -89,6 +89,7 @@ IGC_REPORT="${IGC_REPORT:-wandb}"
 RUN_NAME="${WANDB_NAME:-${IGC_STAGE}-${IGC_MODEL//\//_}-${SLURM_JOB_ID:-local}}"
 if [ "${IGC_REPORT}" = "wandb" ]; then
     # convenience: source a node-local gitignored key file if present (.internal/ is never committed)
+    # shellcheck source=/dev/null
     [ -f "${IGC_DIR}/.internal/wandb.env" ] && . "${IGC_DIR}/.internal/wandb.env"
     : "${WANDB_API_KEY:?set WANDB_API_KEY in your env or ${IGC_DIR}/.internal/wandb.env to use wandb}"
     export WANDB_API_KEY
@@ -101,6 +102,7 @@ echo "igc train | stage=${IGC_STAGE} args='${TRAIN_ARGS}' model=${IGC_MODEL} epo
 # Export the few values the inner heredoc needs (avoids brittle nested quoting).
 export IGC_MODEL EPOCHS SEED IGC_REPORT TRAIN_ARGS EPOCH_FLAG EXTRA_ARGS RUN_NAME IGC_RUN RL_EPOCH_ARG IGC_GPUS IGC_SHARDING MASTER_ADDR MASTER_PORT
 
+# shellcheck disable=SC2016  # The single-quoted payload is evaluated inside the container.
 srun --container-image="${NGC_IMAGE}" \
      --container-mounts="${IGC_DIR}:/workspace/igc,${DATA_DIR}:/root/.json_responses" \
      bash -lc '

@@ -58,4 +58,21 @@ def test_igc_train_dataloaders_use_drop_last():
             f"epoch-boundary save-collective deadlock")
 
 
+def test_autoencoder_train_dataloaders_use_drop_last():
+    """Autoencoder train/sample loaders also keep equal batch counts per rank."""
+    from igc.modules import igc_train_auto_state_encoder as auto_mod
+
+    src = inspect.getsource(auto_mod)
+    blocks = re.findall(
+        r"train_dataloader = DataLoader\((.*?)collate_fn=AutoencoderTrainer\.custom_collate_fn\)",
+        src,
+        re.S,
+    )
+    assert len(blocks) == 2, "expected sample_all() and train() train_dataloader blocks"
+    for i, block in enumerate(blocks):
+        assert "drop_last=True" in block, (
+            f"autoencoder train_dataloader #{i} is missing drop_last=True — this can "
+            f"create uneven epoch-boundary batch counts under distributed execution")
+
+
 # Author: Mus mbayramo@stanford.edu

@@ -27,7 +27,10 @@ METRIC_REPORT="${IGC_METRIC_REPORT:-wandb}"
 # The env file is gitignored (creds never committed); override the path via IGC_WANDB_ENV.
 WANDB_ENV="${IGC_WANDB_ENV:-.internal/wandb.env}"
 if [ -f "$WANDB_ENV" ]; then
-    set -a; . "$WANDB_ENV"; set +a
+    set -a
+    # shellcheck source=/dev/null
+    . "$WANDB_ENV"
+    set +a
     echo "== W&B: streaming to \${WANDB_ENTITY:-?}/\${WANDB_PROJECT:-?} (real-time) =="
 elif [ "$METRIC_REPORT" = "wandb" ]; then
     echo "== W&B: no \$WANDB_API_KEY and no $WANDB_ENV — set IGC_METRIC_REPORT=tensorboard or provide creds ==" >&2
@@ -45,6 +48,7 @@ ARGV=$(python -m igc.modules.train.launch --profile "$PROFILE" "${SET_ARGS[@]}" 
 
 mkdir -p "$OUT_DIR"
 echo "== launching igc_main.py (data=${DATA_DIR}, out=${OUT_DIR}) =="
+# shellcheck disable=SC2086  # ARGV is a shell-form argv emitted by the launcher.
 exec python igc_main.py $ARGV \
   --json_data_dir "$DATA_DIR" \
   --output_dir "$OUT_DIR" \

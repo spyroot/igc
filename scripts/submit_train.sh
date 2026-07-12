@@ -56,9 +56,10 @@ if [ "${WANDB_API_KEY:-}" = "" ] && [ ! -f "${HERE}/.internal/wandb.env" ]; then
 fi
 
 set -x
-IGC_GPUS="${IGC_GPUS:-1}"
-IGC_NODES="${IGC_NODES:-1}"
-IGC_STAGE="${STAGE}" IGC_GPUS="${IGC_GPUS}" sbatch \
+export IGC_GPUS="${IGC_GPUS:-1}"
+export IGC_NODES="${IGC_NODES:-1}"
+export IGC_STAGE="${STAGE}"
+sbatch \
     --gres="gpu:${IGC_GPUS}" \
     --nodes="${IGC_NODES}" \
     --ntasks-per-node=1 \
