@@ -40,6 +40,7 @@ IGC_CODE_DIR="${IGC_CODE_DIR:-$HOME/igc}"                   # igc checkout (node
 IGC_DATA_DIR="${IGC_DATA_DIR:-$HOME/.json_responses}"       # captured Redfish responses (mounted read-only)
 IGC_IMAGE="${IGC_IMAGE:-nvcr.io/nvidia/pytorch:26.03-py3}"  # bare NGC (runtime pip) or igc-train:ngc26.03 (deps baked)
 IGC_RUN="${IGC_RUN:-verify}"                                # experiment name / output subdir / container name
+IGC_MODELS_DIR="${IGC_MODELS_DIR:-/models}"                 # shared 240TB BeeGFS (large/durable artifacts)
 EPOCHS="${EPOCHS:-3}"
 IGC_MIN_FREE_GB="${IGC_MIN_FREE_GB:-100}"                   # HF pulls + dataset + checkpoints need headroom
 CONTAINER="igc-${IGC_RUN}"
@@ -74,10 +75,18 @@ COMMON="--train llm --llm latent --model_type ${IGC_MODEL} --json_data_dir /root
 [ "${IGC_USE_PEFT:-0}" = "1" ] && COMMON="${COMMON} --use_peft --lora_r ${LORA_R:-16} --lora_alpha ${LORA_ALPHA:-32}"
 
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-log "docker run ${IGC_IMAGE} | ${IGC_GPUS} GPU | code=${IGC_CODE_DIR} data=${IGC_DATA_DIR}"
-docker run --rm --gpus all --ipc=host --shm-size=32g --name "$CONTAINER" \
+log "docker run ${IGC_IMAGE} | ${IGC_GPUS} GPU | code=${IGC_CODE_DIR} data=${IGC_DATA_DIR} models=${IGC_MODELS_DIR}"
+# NVIDIA-recommended flags (NGC startup banner): --ipc=host + memlock/stack ulimits.
+# Dual mounts: node-local code/data + the shared /models (240TB) so a run can write big
+# durable artifacts (checkpoints, HF cache) to /models or scratch to local via --output_dir.
+MODELS_MOUNT=""
+[ -d "$IGC_MODELS_DIR" ] && MODELS_MOUNT="-v ${IGC_MODELS_DIR}:/models"
+# shellcheck disable=SC2086  # MODELS_MOUNT must word-split into a -v arg (or be empty)
+docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 \
+    --name "$CONTAINER" \
     -v "${IGC_CODE_DIR}:/workspace/igc" \
     -v "${IGC_DATA_DIR}:/root/.json_responses:ro" \
+    $MODELS_MOUNT \
     -w /workspace/igc \
     -e IGC_GPUS -e IGC_STAGE -e IGC_MODEL -e IGC_RUN -e EPOCHS -e COMMON \
     "$IGC_IMAGE" bash -lc '
