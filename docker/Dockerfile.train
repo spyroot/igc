@@ -30,7 +30,7 @@ WORKDIR /workspace/igc
 #   nvtop    — live per-GPU utilisation/memory view while a run trains.
 #   htop     — live CPU/RAM view (dataset build is CPU-heavy).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git-lfs nvtop htop \
+        wget git-lfs nvtop htop curl bash unzip zip gzip \
     && git lfs install --system \
     && rm -rf /var/lib/apt/lists/*
 
