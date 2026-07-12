@@ -24,6 +24,9 @@ IGC_CODE_DIR="${IGC_CODE_DIR:-$HOME/igc}"          # /models/igc for the multi-n
 MODELS_DIR="${MODELS_DIR:-/models}"
 GPUS_LADDER="${SANITY_GPUS:-1 4 8}"
 MODES="${SANITY_MODES:-ddp fsdp2}"                 # parallelism to confirm, one pass each
+SCRIPT="${SANITY_SCRIPT:-scripts/dist_sanity.py}"  # or scripts/dataset_sanity.py (dataset feed)
+IGC_MODEL="${IGC_MODEL:-gpt2}"                      # tokenizer key for the dataset pass
+IGC_DATASET_DIR="${IGC_DATASET_DIR:-/workspace/igc/datasets}"
 GPUS_PER_NODE="${GPUS_PER_NODE:-4}"
 PORT="${SANITY_PORT:-29511}"
 # shellcheck disable=SC2206  # word-split the space-separated node list on purpose
@@ -47,9 +50,10 @@ node_free() {  # ip -> 0 if no GPU compute process is running
 run_on() {  # node_ip nnodes node_rank master_ip nproc mode
     $SSH "nvidia@$1" \
         "docker run --rm --network host $NV_FLAGS $MOUNTS \
-             -e SANITY_MODE=$6 -e SANITY_STEPS=1 -w /workspace/igc $IMAGE \
+             -e SANITY_MODE=$6 -e SANITY_STEPS=1 -e IGC_MODEL=$IGC_MODEL -e IGC_DATASET_DIR=$IGC_DATASET_DIR \
+             -w /workspace/igc $IMAGE \
              torchrun --nnodes=$2 --node_rank=$3 --nproc_per_node=$5 \
-                      --master_addr=$4 --master_port=$PORT scripts/dist_sanity.py"
+                      --master_addr=$4 --master_port=$PORT $SCRIPT"
 }
 
 overall=0
