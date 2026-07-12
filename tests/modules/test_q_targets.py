@@ -94,6 +94,49 @@ def test_q_learning_target_accepts_bool_done_mask():
     torch.testing.assert_close(target, torch.tensor([1.25, 0.5], dtype=torch.float64))
 
 
+@pytest.mark.xfail(
+    reason="q_learning_target does not yet reject non-finite next_q rows except all -inf masks.",
+    strict=True,
+)
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf")])
+def test_q_learning_target_rejects_non_finite_next_q_values(bad_value):
+    """NaN/+inf Q-values should fail fast instead of being treated as dead ends."""
+    reward = torch.tensor([0.0])
+    done = torch.tensor([0.0])
+    next_q = torch.tensor([[bad_value, 1.0]])
+
+    with pytest.raises(ValueError, match="non-finite"):
+        q_learning_target(reward, done, next_q, gamma=0.99)
+
+
+@pytest.mark.xfail(
+    reason="q_learning_target does not yet validate reward/done rank against next_q batch.",
+    strict=True,
+)
+def test_q_learning_target_rejects_reward_done_shape_mismatch():
+    """Reward/done must be rank-1 [B], avoiding accidental [B, B] broadcasts."""
+    reward = torch.ones(2, 1)
+    done = torch.zeros(2, 1)
+    next_q = torch.ones(2, 3)
+
+    with pytest.raises(ValueError, match="shape"):
+        q_learning_target(reward, done, next_q, gamma=0.99)
+
+
+@pytest.mark.xfail(
+    reason="q_learning_target does not yet validate done as a binary terminal mask.",
+    strict=True,
+)
+def test_q_learning_target_rejects_non_binary_done_values():
+    """Done values outside {0, 1} can invert the bootstrap term and must be rejected."""
+    reward = torch.tensor([0.0])
+    done = torch.tensor([2.0])
+    next_q = torch.tensor([[3.0, 4.0]])
+
+    with pytest.raises(ValueError, match="done"):
+        q_learning_target(reward, done, next_q, gamma=0.99)
+
+
 def _reward_match(state, goal):
     """Toy env reward: 1.0 where state equals goal elementwise, else 0.0 (shape [B])."""
     return torch.all(state == goal, dim=1).to(torch.float32)
