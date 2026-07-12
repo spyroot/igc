@@ -1,13 +1,16 @@
 schema_version: m3.goal_planner.training.v1
-default_profile: m3_gpt2_full
+default_profile: m3_gpt2_smoke
+gpu_default_profile: m3_qwen2_5_7b_rslora
 
 datasets:
   redfish_ctl_real:
-    jsonl: /models/igc/datasets/m3/m3_goal_plans_real.jsonl
+    jsonl: /models/igc-m3-goal-planner/datasets/m3/m3_goal_plans_full.jsonl
     build:
-      json_root: /root/.json_responses
+      json_roots:
+        - /workspace/igc/datasets/orig
+        - /workspace/igc/idrac_ctl/tests/supermicro_gb300_corpus/json_responses
       rest_api_map_dir: null
-      templates_per_action: 2
+      templates_per_action: 3
 
 models:
   gpt2:

@@ -92,8 +92,8 @@ def main(argv: list[str] | None = None) -> int:
         "build-redfish-dataset",
         help="Build M3 JSONL from captured Redfish JSON and rest_api_map.npy.",
     )
-    build_redfish.add_argument("--json-root", required=True)
-    build_redfish.add_argument("--rest-api-map-dir", default=None)
+    build_redfish.add_argument("--json-root", action="append", required=True)
+    build_redfish.add_argument("--rest-api-map-dir", action="append", default=None)
     build_redfish.add_argument("--output-jsonl", required=True)
     build_redfish.add_argument("--templates-per-action", type=int, default=3)
     build_redfish.add_argument("--source", default="redfish_ctl_capture")
@@ -103,8 +103,8 @@ def main(argv: list[str] | None = None) -> int:
         "build-redfish-ctl-dataset",
         help="Build M3 JSONL directly from the redfish_ctl ~/.json_responses corpus.",
     )
-    build_redfish_ctl.add_argument("--json-root", required=True)
-    build_redfish_ctl.add_argument("--rest-api-map-dir", default=None)
+    build_redfish_ctl.add_argument("--json-root", action="append", required=True)
+    build_redfish_ctl.add_argument("--rest-api-map-dir", action="append", default=None)
     build_redfish_ctl.add_argument("--output-jsonl", required=True)
     build_redfish_ctl.add_argument("--templates-per-action", type=int, default=3)
     build_redfish_ctl.add_argument("--source", default="redfish_ctl_capture")

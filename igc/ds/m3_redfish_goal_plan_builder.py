@@ -29,8 +29,8 @@ from igc.ds.m3_goal_plan_dataset import M3GoalPlanJsonlDataset
 class M3RedfishActionCatalogBuilder:
     """Extract an M3 action catalog from offline ``redfish_ctl`` captures."""
 
-    json_root: str | Path
-    rest_api_map_dir: Optional[str | Path] = None
+    json_root: str | Path | Iterable[str | Path]
+    rest_api_map_dir: Optional[str | Path | Iterable[str | Path]] = None
     source: str = "redfish_ctl_capture"
     vendor: Optional[str] = None
 
@@ -73,15 +73,15 @@ class M3RedfishActionCatalogBuilder:
 
     def _iter_json_bodies(self) -> Iterable[tuple[Path, dict[str, Any]]]:
         """Yield parsed Redfish resource JSON objects."""
-        root = Path(os.path.expanduser(str(self.json_root)))
-        for path in sorted(root.rglob("*.json")):
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-                body = json.loads(text)
-            except (OSError, json.JSONDecodeError):
-                continue
-            if isinstance(body, dict) and _looks_like_redfish_resource(body):
-                yield path, body
+        for root in _roots(self.json_root):
+            for path in sorted(root.rglob("*.json")):
+                try:
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                    body = json.loads(text)
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if isinstance(body, dict) and _looks_like_redfish_resource(body):
+                    yield path, body
 
     def _load_allowed_methods(self) -> dict[str, list[str]]:
         """Load and merge ``allowed_methods_mapping`` from capture ``*.npy`` maps."""
@@ -89,21 +89,19 @@ class M3RedfishActionCatalogBuilder:
             import numpy as np
         except ImportError:
             return {}
-        map_root = self.rest_api_map_dir if self.rest_api_map_dir is not None else self.json_root
-        root = Path(os.path.expanduser(str(map_root)))
-        if not root.is_dir():
-            return {}
-        maps = sorted(root.rglob("*.npy"), key=lambda item: item.stat().st_mtime)
         merged: dict[str, list[str]] = {}
-        for mapping_path in maps:
-            try:
-                mapping = np.load(mapping_path, allow_pickle=True).item()
-            except (OSError, ValueError, EOFError):
-                continue
-            allowed = mapping.get("allowed_methods_mapping") or {}
-            for url, methods in allowed.items():
-                normalized_url = _normalize_url(str(url))
-                merged[normalized_url] = sorted({str(method).upper() for method in methods})
+        map_roots = self.rest_api_map_dir if self.rest_api_map_dir is not None else self.json_root
+        for root in _roots(map_roots):
+            maps = sorted(root.rglob("*.npy"), key=lambda item: item.stat().st_mtime)
+            for mapping_path in maps:
+                try:
+                    mapping = np.load(mapping_path, allow_pickle=True).item()
+                except (OSError, ValueError, EOFError):
+                    continue
+                allowed = mapping.get("allowed_methods_mapping") or {}
+                for url, methods in allowed.items():
+                    normalized_url = _normalize_url(str(url))
+                    merged[normalized_url] = sorted({str(method).upper() for method in methods})
         return merged
 
 
@@ -113,6 +111,20 @@ def _resource_url(body: dict[str, Any], path: Path) -> str:
     if isinstance(value, str) and value:
         return _normalize_url(value)
     return "/" + path.name[:-5].strip("_").replace("_", "/")
+
+
+def _roots(value: str | Path | Iterable[str | Path]) -> list[Path]:
+    """Normalize one or more corpus roots into existing paths."""
+    if isinstance(value, (str, Path)):
+        values = [value]
+    else:
+        values = list(value)
+    roots = []
+    for item in values:
+        root = Path(os.path.expanduser(str(item)))
+        if root.is_dir():
+            roots.append(root)
+    return roots
 
 
 def _looks_like_redfish_resource(body: dict[str, Any]) -> bool:
@@ -228,12 +240,14 @@ def _resource_name(url: str) -> str:
     return url.rstrip("/").rsplit("/", 1)[-1] or "resource"
 
 
-def _record_key(record: dict[str, Any]) -> tuple[str, str, str]:
+def _record_key(record: dict[str, Any]) -> tuple[str, str, str, str, str]:
     """Dedup key for action records."""
     return (
         str(record.get("action", "")),
         str(record.get("target", "")),
         str(record.get("method", "")),
+        str(record.get("resource_type", "")),
+        json.dumps(record.get("arguments") or {}, sort_keys=True),
     )
 
 
