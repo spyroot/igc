@@ -181,7 +181,6 @@ class M3GoalPlannerSFTTrainer:
                     self.config.log_every
                     and global_step > 0
                     and global_step % self.config.log_every == 0
-                    and self.distributed.is_main_process
                 ):
                     self._append_history(
                         history,
@@ -240,12 +239,12 @@ class M3GoalPlannerSFTTrainer:
         grad_norm: Optional[float],
     ) -> None:
         """Append rank-zero training metrics."""
-        if not self.distributed.is_main_process:
-            return
         elapsed = max(time.monotonic() - epoch_start, 1e-9)
         total_tokens = _sum_number_across_ranks(epoch_tokens, self.distributed)
         total_positions = _sum_number_across_ranks(epoch_positions, self.distributed)
         total_samples = _sum_number_across_ranks(epoch_samples, self.distributed)
+        if not self.distributed.is_main_process:
+            return
         loss = epoch_loss / max(epoch_steps, 1)
         lr = self.optimizer.param_groups[0]["lr"]
         record = {
