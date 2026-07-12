@@ -348,7 +348,9 @@ class LlmEmbeddingsTrainer(LlmModule):
                 correct_predictions += compute_accuracy * batch_size
                 total_predictions += batch_size
 
-        accuracy = correct_predictions / total_predictions * 100.0
+        # Guard: with drop_last + a small eval shard a rank can get 0 eval batches; a
+        # bare division would crash (and take the fleet down mid-epoch) — return 0.0.
+        accuracy = (correct_predictions / total_predictions * 100.0) if total_predictions else 0.0
         return accuracy
 
     def is_distributed(self):
@@ -771,6 +773,14 @@ class LlmEmbeddingsTrainer(LlmModule):
                                 initial_lr=self._lr,
                                 is_best_accuracy=is_best_accuracy,
                             )
+
+            # Epoch-boundary barrier: all ranks meet here AFTER the rank-0 checkpoint
+            # write, so no rank races into the next epoch's first FSDP collective (an
+            # all-gather) while rank 0 is still saving. Without it, rank 0 sits in the
+            # save while the others wait in the next collective -> the epoch-2 deadlock
+            # (ranks spinning, one idle). Collective — every rank must reach it.
+            if self.is_accelerator:
+                self.accelerator.wait_for_everyone()
 
         if self._is_quantize:
             self.model = convert(self.model)
