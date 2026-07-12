@@ -15,7 +15,38 @@ import os
 
 from igc.ds import redfish_dataset
 from igc.ds.igc_json_pipeline import JsonPipeline
-from igc.ds.redfish_dataset import JSONDataset
+from igc.ds.redfish_dataset import JSONDataset, read_capture_json
+
+
+def test_read_capture_json_tolerates_bad_empty_and_nonutf8(tmp_path):
+    """The shared tolerant reader parses good captures and skips unusable ones."""
+    (tmp_path / "good.json").write_text('{"a": 1}')
+    (tmp_path / "empty.json").write_text("")
+    (tmp_path / "malformed.json").write_text("<html>Gateway Timeout</html>")
+    (tmp_path / "nonutf8.json").write_bytes(b'{"vendor": "ACME \xa3"}')
+
+    assert read_capture_json(str(tmp_path / "good.json")) == ('{"a": 1}', {"a": 1})
+    assert read_capture_json(str(tmp_path / "empty.json")) == (None, None)
+    assert read_capture_json(str(tmp_path / "malformed.json")) == (None, None)
+    # the 0xa3 byte is replaced, the JSON still parses.
+    text, data = read_capture_json(str(tmp_path / "nonutf8.json"))
+    assert data is not None and "vendor" in data
+
+
+def test_filtered_api_iterator_skips_unreadable_captures(tmp_path):
+    """filtered_api_iterator drops empty/unreadable captures instead of crashing."""
+    good = tmp_path / "good.json"
+    good.write_text('{"@odata.context": "/redfish/v1/$metadata#ComputerSystem"}')
+    empty = tmp_path / "empty.json"
+    empty.write_text("")
+
+    ds = JSONDataset.__new__(JSONDataset)
+    ds._respond_to_api = {str(good): "/redfish/v1/Systems/1", str(empty): "/redfish/v1/Y"}
+
+    yielded = [fp for _, fp, _ in ds.filtered_api_iterator()]
+
+    assert str(empty) not in yielded  # skipped, no crash
+    assert str(good) in yielded
 
 
 def test_load_json_files_tolerates_non_utf8_bytes(tmp_path):

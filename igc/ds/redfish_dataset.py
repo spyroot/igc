@@ -48,6 +48,38 @@ from .igc_json_pipeline import JsonPipeline
 from . import JSON_TOK_TABLE_JSON
 from ..modules.base.igc_abstract_logger import AbstractLogger
 
+logger = logging.getLogger(__name__)
+
+
+def read_capture_json(path: str) -> Tuple[Optional[str], Optional[Any]]:
+    """Read one captured Redfish response file tolerantly.
+
+    A crawl corpus is not clean: responses carry non-UTF-8 bytes (latin-1
+    0xa3 "£", 0xb0 "°" in vendor/sensor strings), empty 204/HEAD bodies, and
+    truncated or non-JSON error pages. The dataset build reads every capture at
+    several sites; any strict read there aborts the whole build on the first bad
+    file. This decodes leniently (errors="replace") and returns ``(text, parsed)``,
+    or ``(None, None)`` when the file is empty / unreadable / not valid JSON so the
+    caller skips it instead of crashing.
+
+    :param path: path to a captured .json response file.
+    :return: ``(raw_text, json.loads(raw_text))`` for a usable capture, else ``(None, None)``.
+    """
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError as exc:
+        logger.warning(f"Skipping unreadable capture {path}: {exc}")
+        return None, None
+    if not text.strip():
+        logger.warning(f"Skipping empty capture: {path}")
+        return None, None
+    try:
+        return text, json.loads(text)
+    except json.JSONDecodeError as exc:
+        logger.warning(f"Skipping malformed capture {path}: {exc}")
+        return None, None
+
 
 class DatasetConsistencyError(Exception):
     """Base class for other exceptions"""
@@ -577,8 +609,9 @@ class JSONDataset(
         :return:
         """
         for i, (file_path, api) in enumerate(self._respond_to_api.items()):
-            with open(file_path, 'r') as f:
-                json_data = json.load(f)
+            _, json_data = read_capture_json(file_path)
+            if json_data is None:
+                continue
 
             if "$schema" not in json_data:
                 if "@odata.context" in json_data:
@@ -1299,10 +1332,13 @@ class JSONDataset(
         :param mask_target_key: a key:value that we want to mask
         :return:
         """
-        with open(json_file_path, "r") as json_file:
+        with open(json_file_path, "r", encoding="utf-8", errors="replace") as json_file:
             logging.debug(f"reading {json_file_name}")
 
             json_lines = json_file.read()
+            if not json_lines.strip():
+                logging.warning(f"Skipping empty capture for masking: {json_file_path}")
+                return
             json_lines += json_lines + "<|endoftext|>"
             token_out = self.tokenizer(
                 json_lines,
@@ -1381,12 +1417,17 @@ class JSONDataset(
             :param json_file_name:
             :return:
             """
-            with open(_file_path, "r") as json_file:
+            # Tolerant read (see read_capture_json): captures may carry non-UTF-8
+            # bytes, empty 204 bodies, or truncated writes; skip such files.
+            with open(_file_path, "r", encoding="utf-8", errors="replace") as json_file:
                 if self._verbose:
                     self.logger.debug(f"reading {json_file_name}")
 
                 # extract the extra file name it key so, we get rest api
                 json_lines = json_file.read()
+                if not json_lines.strip():
+                    self.logger.warning(f"Skipping empty capture: {_file_path}")
+                    return
                 if not self.respond_to_api_contains(_file_path):
                     # Tolerate partial captures: a response file with no entry in the
                     # rest_api_map is skipped, not fatal (idrac_ctl crawls can be partial,
@@ -1399,8 +1440,12 @@ class JSONDataset(
                 _rest_api = self.respond_to_api(file_path)
                 hash_value = zlib.adler32(_rest_api.encode())
 
-                # load JSON as a dictionary
-                json_data = json.loads(json_lines)
+                # load JSON as a dictionary; skip a capture that does not parse
+                try:
+                    json_data = json.loads(json_lines)
+                except json.JSONDecodeError as exc:
+                    self.logger.warning(f"Skipping malformed capture {_file_path}: {exc}")
+                    return
                 allowable_values = {}
                 targets = {}
 
