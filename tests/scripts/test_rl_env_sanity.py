@@ -78,6 +78,75 @@ def test_run_rollout_collects_replay_and_shape_stats(tmp_path):
     assert stats.sample_done_shape == (3, 2)
 
 
+def test_validate_transition_tensors_rejects_hidden_dtype_and_nan():
+    """The live harness fails fast on hidden dtype or non-finite rollout bugs."""
+    sanity = _load_sanity()
+    good = {
+        "next_obs": torch.zeros(2, 2, 3, dtype=torch.float32),
+        "actions": torch.zeros(2, 9, dtype=torch.float32),
+        "rewards": torch.zeros(2, dtype=torch.float32),
+        "terminated": torch.zeros(2, dtype=torch.bool),
+        "time_limited": torch.zeros(2, dtype=torch.bool),
+        "infos": [{}, {}],
+        "num_envs": 2,
+        "rank": 0,
+    }
+
+    sanity.validate_transition_tensors(**good)
+
+    bad_obs = dict(good)
+    bad_obs["next_obs"] = torch.tensor([[[float("nan")]]], dtype=torch.float32).expand(2, 2, 3)
+    with pytest.raises(RuntimeError, match="non-finite observation"):
+        sanity.validate_transition_tensors(**bad_obs)
+
+    bad_action = dict(good)
+    bad_action["actions"] = torch.zeros(2, 9, dtype=torch.int64)
+    with pytest.raises(RuntimeError, match="action dtype must be floating"):
+        sanity.validate_transition_tensors(**bad_action)
+
+    bad_reward = dict(good)
+    bad_reward["rewards"] = torch.tensor([0.0, float("inf")], dtype=torch.float32)
+    with pytest.raises(RuntimeError, match="non-finite reward"):
+        sanity.validate_transition_tensors(**bad_reward)
+
+    bad_flag = dict(good)
+    bad_flag["terminated"] = torch.zeros(2, dtype=torch.float32)
+    with pytest.raises(RuntimeError, match="terminal flags must be bool"):
+        sanity.validate_transition_tensors(**bad_flag)
+
+
+def test_validate_transition_tensors_rejects_terminal_axis_drift():
+    """Terminal/truncation metadata must keep one row per vector sub-env."""
+    sanity = _load_sanity()
+    good = {
+        "next_obs": torch.zeros(2, 2, 3, dtype=torch.float32),
+        "actions": torch.zeros(2, 9, dtype=torch.float32),
+        "rewards": torch.zeros(2, dtype=torch.float32),
+        "terminated": torch.tensor([True, False], dtype=torch.bool),
+        "time_limited": torch.tensor([False, True], dtype=torch.bool),
+        "infos": [{"goal_reached": True}, {"goal_reached": False}],
+        "num_envs": 2,
+        "rank": 0,
+    }
+
+    sanity.validate_transition_tensors(**good)
+
+    shrunk_obs = dict(good)
+    shrunk_obs["next_obs"] = torch.zeros(1, 2, 3, dtype=torch.float32)
+    with pytest.raises(RuntimeError, match="observation batch shrank"):
+        sanity.validate_transition_tensors(**shrunk_obs)
+
+    bad_flags = dict(good)
+    bad_flags["time_limited"] = torch.zeros(1, dtype=torch.bool)
+    with pytest.raises(RuntimeError, match="flag shape mismatch"):
+        sanity.validate_transition_tensors(**bad_flags)
+
+    bad_infos = dict(good)
+    bad_infos["infos"] = [{"goal_reached": True}]
+    with pytest.raises(RuntimeError, match="info rows mismatch"):
+        sanity.validate_transition_tensors(**bad_infos)
+
+
 def test_stats_and_shape_tensors_are_reduction_ready(tmp_path):
     """Stats pack into tensors suitable for distributed all_reduce."""
     sanity = _load_sanity()
@@ -118,6 +187,28 @@ def test_main_allow_cpu_runs_single_process_smoke(monkeypatch, capsys):
 
     assert sanity.main(["--allow-cpu", "--num-envs", "1", "--steps", "1"]) == 0
     assert "PASS world=1" in capsys.readouterr().out
+
+
+def test_main_can_emit_cpu_profiler_trace(monkeypatch, tmp_path, capsys):
+    """The optional profiler path writes a per-rank Chrome trace."""
+    sanity = _load_sanity()
+    monkeypatch.setattr(sanity.torch.cuda, "is_available", lambda: False)
+    monkeypatch.delenv("RANK", raising=False)
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    monkeypatch.delenv("LOCAL_RANK", raising=False)
+
+    assert sanity.main([
+        "--allow-cpu",
+        "--num-envs",
+        "1",
+        "--steps",
+        "1",
+        "--profile-dir",
+        str(tmp_path),
+    ]) == 0
+
+    assert (tmp_path / "rl_env_sanity_rank0.json").exists()
+    assert "profile=" in capsys.readouterr().out
 
 
 # Author: Mus mbayramo@stanford.edu

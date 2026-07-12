@@ -120,6 +120,36 @@ def test_vector_reset_and_step_preserve_batch_axes(vector_env: VectorizedRestApi
     assert len(infos) == 2
 
 
+def test_vector_step_limit_sets_truncated_not_terminal(vector_env: VectorizedRestApiEnv):
+    """Time-limit cuts keep bootstrap semantics: truncated true, terminal false."""
+    vector_env.max_steps = 1
+    vector_env.reset()
+    actions = torch.stack([_action(vector_env, ROOT_URI), _action(vector_env, SYSTEM_URI)])
+
+    next_obs, rewards, terminated, truncated, infos = vector_env.step(actions)
+
+    assert next_obs.shape == (2, *StubEncoder.emb_shape)
+    assert rewards.tolist() == [-1.0, -1.0]
+    assert terminated.tolist() == [False, False]
+    assert truncated.tolist() == [True, True]
+    assert len(infos) == 2
+
+
+def test_vector_http_500_sets_terminal_not_truncated(vector_env: VectorizedRestApiEnv):
+    """Dead-end server errors are true terminals and should stop bootstrapping."""
+    vector_env.reset()
+    vector_env.mock_server().set_simulate_http_500_error(True)
+    actions = torch.stack([_action(vector_env, ROOT_URI), _action(vector_env, SYSTEM_URI)])
+
+    next_obs, rewards, terminated, truncated, infos = vector_env.step(actions)
+
+    assert next_obs.shape == (2, *StubEncoder.emb_shape)
+    assert rewards.tolist() == [-0.5, -0.5]
+    assert terminated.tolist() == [True, True]
+    assert truncated.tolist() == [False, False]
+    assert len(infos) == 2
+
+
 @pytest.mark.xfail(
     reason="VectorizedRestApiEnv currently stacks only active responses after a prior done row.",
     strict=True,
