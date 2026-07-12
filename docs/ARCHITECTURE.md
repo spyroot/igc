@@ -1,5 +1,13 @@
 # IGC architecture & generalization plan
 
+> **⚠️ STATUS (2026-07-13, code audit).** This document is design **intent**, not a description of the
+> running system. Today the live agent is a legacy fixed-width one-hot DQN over the state encoder's
+> embedding of the **raw Redfish JSON**. The structured state (`RedfishStateV0`), resource graph,
+> pointer/action-selector, and candidate-ranking system described below are **coded-but-unwired,
+> offline-only, or absent** — audit found 13 of 41 designed objects actually live. Treat any
+> "landed / implemented / current RL path" phrasing here as **unverified until you check the code**
+> with `scripts/code_reality_check.py`.
+
 This document describes the target architecture for turning `igc` from a Redfish-specific
 goal-conditioned RL project into a **generic, pluggable goal-conditioned tool-use agent
 framework**, and the phased plan + training/MLOps roadmap to get there. Redfish becomes one
