@@ -1,6 +1,9 @@
-import random
 import collections
+import random
+
 import torch
+
+from igc.modules.rl.metrics import ORIGIN_ORIGINAL
 
 
 class Buffer:
@@ -17,7 +20,7 @@ class Buffer:
         self._sample_size = sample_size
         self._buffer = collections.deque(maxlen=self._size)
 
-    def add(self, state, action, reward, next_state, done=False):
+    def add(self, state, action, reward, next_state, done=False, origin=ORIGIN_ORIGINAL):
         """
         Add an experience tuple to the buffer.
 
@@ -28,13 +31,15 @@ class Buffer:
         :param done: done (tensor/bool): the ``terminated`` flag for this transition —
             1.0 at a true MDP terminal (goal reached), so the target stops bootstrapping.
             Truncation (a step/time-limit cut) is NOT terminal and must stay 0.0.
+        :param origin: replay source label, such as ``original`` or ``her``.
         :return:
         """
-        self._buffer.append((state, action, reward, next_state, done))
+        self._buffer.append((state, action, reward, next_state, done, origin))
 
-    def sample_batch(self):
+    def sample_batch(self, with_origin=False):
         """This method sample from the buffer, where buffer store batch for of experiences,
         and return a batch of experiences ``(state, action, reward, next_state, done)``.
+        :param with_origin: when true, append replay-origin labels to the return tuple.
         :return:
         """
         samples = self._buffer
@@ -46,6 +51,7 @@ class Buffer:
         reward_batch = torch.stack([sample[2] for sample in samples], dim=0)
         next_state_batch = torch.stack([sample[3] for sample in samples], dim=0)
         done_batch = self._stack_done(samples, reward_batch)
+        origin_batch = self._stack_origin(samples, reward_batch)
 
         state_batch = torch.reshape(state_batch, (-1, state_batch.size(-1)))
         action_batch = torch.reshape(action_batch, (-1, action_batch.size(-1)))
@@ -53,10 +59,20 @@ class Buffer:
         next_state_batch = torch.reshape(next_state_batch, (-1, next_state_batch.size(-1)))
         done_batch = torch.reshape(done_batch, (-1,))
 
+        if with_origin:
+            return (
+                state_batch,
+                action_batch,
+                reward_batch,
+                next_state_batch,
+                done_batch,
+                origin_batch,
+            )
         return state_batch, action_batch, reward_batch, next_state_batch, done_batch
 
-    def sample(self):
+    def sample(self, with_origin=False):
         """Randomly sample experiences from the replay buffer.
+        :param with_origin: when true, append replay-origin labels to the return tuple.
         Returns:
           (tuple): batch of experience (state, action, reward, next_state, done)
         """
@@ -69,6 +85,16 @@ class Buffer:
         reward_batch = torch.stack([sample[2] for sample in samples], dim=0)
         next_state_batch = torch.stack([sample[3] for sample in samples], dim=0)
         done_batch = self._stack_done(samples, reward_batch)
+        if with_origin:
+            origin_batch = self._stack_origin(samples, reward_batch)
+            return (
+                state_batch,
+                action_batch,
+                reward_batch,
+                next_state_batch,
+                done_batch,
+                origin_batch,
+            )
         return state_batch, action_batch, reward_batch, next_state_batch, done_batch
 
     @staticmethod
@@ -96,3 +122,12 @@ class Buffer:
                 )
             done_items.append(done)
         return torch.stack(done_items, dim=0)
+
+    @staticmethod
+    def _stack_origin(samples, reward_batch):
+        """Return one origin label for each flattened transition reward."""
+        origin_items = []
+        for sample, reward in zip(samples, reward_batch):
+            origin = sample[5] if len(sample) > 5 else ORIGIN_ORIGINAL
+            origin_items.extend([origin] * int(reward.numel()))
+        return tuple(origin_items)

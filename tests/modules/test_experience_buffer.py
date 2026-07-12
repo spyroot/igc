@@ -71,4 +71,15 @@ def test_sample_batch_returns_only_capacity_retained_experiences():
     assert done.tolist() == [1.0, 0.0]
 
 
+def test_sample_batch_can_return_transition_origins():
+    """Origin metadata lets DQN metrics split original replay from HER replay."""
+    buf = Buffer(size=5, sample_size=5)
+    buf.add(*_exp(False, value=1.0), origin="original")
+    buf.add(*_exp(True, value=2.0), origin="her")
+
+    *_, origins = buf.sample_batch(with_origin=True)
+
+    assert origins == ("original", "her")
+
+
 # Author: Mus mbayramo@stanford.edu

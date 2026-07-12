@@ -24,7 +24,17 @@ from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.modules.base.igc_rl_base_module import RlBaseModule
 from igc.modules.igc_experience_buffer import Buffer
 from igc.modules.igc_q_network import Igc_QNetwork
-from igc.modules.rl.q_targets import q_learning_target, relabel_future
+from igc.modules.rl.metrics import (
+    EVAL_HINDSIGHT_GOALS_METRIC_KEYS,
+    EVAL_ORIGINAL_GOALS_METRIC_KEYS,
+    ORIGIN_HER,
+    ORIGIN_ORIGINAL,
+    log_metric_dict,
+    mean_metric_dicts,
+    summarize_dqn_update_metrics,
+    summarize_her_metrics,
+)
+from igc.modules.rl.q_targets import q_learning_target, relabel_future_with_metadata
 
 
 def env_reward_function(state, goal):
@@ -294,8 +304,17 @@ class IgcAgentTrainer(RlBaseModule):
         Insert episode transitions and HER relabeled transitions into replay.
 
         :param episode_experience: Sequence of rollout tuples from ``train_goal``.
+        :return: HER metric summary for the inserted episode.
         """
-        num_experiences_added = 0
+        original_rewards = []
+        original_done = []
+        relabelled_rewards = []
+        relabelled_done = []
+        relabelled_goals = []
+        future_offsets = []
+        reward_recompute_error_count = 0
+        goal_termination_recompute_error_count = 0
+
         for timestep in range(len(episode_experience)):
             # copy experience from episode_experience to replay_buffer
             _state, action_one_hot, rewards, _next_state, goal = episode_experience[timestep]
@@ -304,27 +323,50 @@ class IgcAgentTrainer(RlBaseModule):
             # terminal iff the env goal was reached on this transition; truncation
             # (running out of steps) is not terminal and must keep bootstrapping.
             done = (rewards >= 1.0).to(rewards.dtype)
+            original_rewards.append(rewards.detach().cpu())
+            original_done.append(done.detach().cpu())
             self.replay_buffer.add(
                 combined_current_state, action_one_hot.clone(),
-                rewards.clone(), combined_next_state, done.clone())
+                rewards.clone(), combined_next_state, done.clone(), origin=ORIGIN_ORIGINAL)
 
             # HER "future" relabeling: substitute goals achieved at a sampled future
             # next-state and recompute the reward against this transition's own
             # achieved next-state (episode_experience tuple index 3 == next_state).
-            for relabeled_goal, relabeled_reward, relabeled_done in relabel_future(
+            for relabeled_goal, relabeled_reward, relabeled_done, future_idx in relabel_future_with_metadata(
                     episode_experience, timestep, _next_state,
                     self.num_relabeled, self.env_reward_function, self._rng):
                 relabeled_current_state = torch.cat([_state, relabeled_goal], dim=1).clone()
                 relabeled_next_state = torch.cat([_next_state, relabeled_goal], dim=1).clone()
+                recomputed_reward = self.env_reward_function(_next_state, relabeled_goal)
+                reward_matches = torch.isclose(recomputed_reward, relabeled_reward)
+                reward_recompute_error_count += int((~reward_matches).sum().item())
+                recomputed_done = (recomputed_reward >= 1.0).to(recomputed_reward.dtype)
+                done_matches = torch.isclose(recomputed_done, relabeled_done)
+                goal_termination_recompute_error_count += int((~done_matches).sum().item())
+
+                relabelled_rewards.append(relabeled_reward.detach().cpu())
+                relabelled_done.append(relabeled_done.detach().cpu())
+                relabelled_goals.append(relabeled_goal.detach().cpu())
+                future_offsets.extend([future_idx - timestep] * int(relabeled_reward.numel()))
                 self.replay_buffer.add(
                     relabeled_current_state,
                     action_one_hot.clone(),
                     relabeled_reward.clone(),
                     relabeled_next_state,
                     relabeled_done.clone(),
+                    origin=ORIGIN_HER,
                 )
 
-            num_experiences_added += 1
+        return summarize_her_metrics(
+            original_rewards=original_rewards,
+            original_done=original_done,
+            relabelled_rewards=relabelled_rewards,
+            relabelled_done=relabelled_done,
+            future_offsets_env_steps=future_offsets,
+            relabelled_goals=relabelled_goals,
+            reward_recompute_error_count=reward_recompute_error_count,
+            goal_termination_recompute_error_count=goal_termination_recompute_error_count,
+        )
 
     def train(self):
         """
@@ -346,6 +388,8 @@ class IgcAgentTrainer(RlBaseModule):
             goal_reached_counts = []
             mean_losses = []
             losses = []
+            her_metric_dicts = []
+            dqn_metric_dicts = []
 
             for _ in range(self.num_episodes):
                 # a fresh goal per episode: HER relabels alone do not vary the
@@ -353,11 +397,13 @@ class IgcAgentTrainer(RlBaseModule):
                 self.current_goal = self._create_goal()
                 episode_experience, rewards_sum_per_trajectory, goal_reached_count = self.train_goal(epsilon)
                 total_goal_reached += goal_reached_count
-                self.update_replay_buffer(episode_experience)
+                her_metric_dicts.append(self.update_replay_buffer(episode_experience))
                 total_reward += rewards_sum_per_trajectory.item()
 
             for _ in range(self.num_optimization_steps):
-                state, action_one_hot, reward, next_state, done = self.replay_buffer.sample_batch()
+                state, action_one_hot, reward, next_state, done, origins = (
+                    self.replay_buffer.sample_batch(with_origin=True)
+                )
                 self.optimizer.zero_grad()
                 next_state = next_state.to(self.device)
                 target_q_vals = self.target_model(next_state).detach()
@@ -376,10 +422,16 @@ class IgcAgentTrainer(RlBaseModule):
 
                 model_predict = self.agent_model(state)
                 q_val = torch.sum(model_predict * action_one_hot, dim=1)
-                criterion = nn.MSELoss()
 
-                loss = criterion(q_val, q_loss_target)
+                td_errors = q_val - q_loss_target
+                td_losses = td_errors.pow(2)
+                loss = td_losses.mean()
                 losses.append(loss.detach().cpu().numpy())
+                dqn_metric_dicts.append(summarize_dqn_update_metrics(
+                    td_errors=td_errors.detach().cpu(),
+                    td_losses=td_losses.detach().cpu(),
+                    origins=origins,
+                ))
                 loss.backward()
                 self.optimizer.step()
 
@@ -390,6 +442,30 @@ class IgcAgentTrainer(RlBaseModule):
             self.metric_logger.log_metric("epoch_mean_loss", np.mean(losses), epoch_idx)
             self.metric_logger.log_metric("epoch_cumulative_reward", total_reward, epoch_idx)
             self.metric_logger.log_metric("epoch_goal_reached_count", total_goal_reached, epoch_idx)
+
+            her_metrics = mean_metric_dicts(her_metric_dicts)
+            dqn_metrics = mean_metric_dicts(dqn_metric_dicts)
+            log_metric_dict(self.metric_logger, her_metrics, epoch_idx)
+            log_metric_dict(self.metric_logger, dqn_metrics, epoch_idx)
+
+            num_envs = int(getattr(self.env, "num_envs", 1))
+            trajectory_count = max(int(self.num_episodes) * num_envs, 1)
+            log_metric_dict(
+                self.metric_logger,
+                {
+                    EVAL_ORIGINAL_GOALS_METRIC_KEYS[0]: total_goal_reached / trajectory_count,
+                    EVAL_ORIGINAL_GOALS_METRIC_KEYS[1]: total_reward / trajectory_count,
+                    EVAL_HINDSIGHT_GOALS_METRIC_KEYS[0]: her_metrics.get(
+                        "03_m6_her/relabelled_success_ratio", 0.0
+                    ),
+                    EVAL_HINDSIGHT_GOALS_METRIC_KEYS[1]: her_metrics.get(
+                        "03_m6_her/relabelled_reward_mean", 0.0
+                    ),
+                    "03_m6_rl_train/epsilon": epsilon,
+                    "03_m6_rl_train/replay_buffer_size": len(self.replay_buffer._buffer),
+                },
+                epoch_idx,
+            )
 
             self.update_target(self.agent_model, self.target_model)
             print(

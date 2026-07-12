@@ -11,7 +11,11 @@ import numpy as np
 import torch
 import pytest
 
-from igc.modules.rl.q_targets import q_learning_target, relabel_future
+from igc.modules.rl.q_targets import (
+    q_learning_target,
+    relabel_future,
+    relabel_future_with_metadata,
+)
 
 
 def test_terminal_masks_bootstrap_and_keeps_success_reward():
@@ -181,6 +185,36 @@ def test_relabel_future_at_last_timestep_samples_last_achieved_state():
     torch.testing.assert_close(goal, achieved)
     torch.testing.assert_close(reward, torch.tensor([1.0]))
     torch.testing.assert_close(done, torch.tensor([1.0]))
+
+
+def test_relabel_future_with_metadata_reports_offsets():
+    """HER metric code can log how far into the future each substituted goal came from."""
+    achieved = torch.full((1, 2), 1.0)
+
+    def step(val):
+        s = torch.zeros(1, 2)
+        return (s, torch.zeros(1, 4), torch.zeros(1), torch.full((1, 2), float(val)), s)
+
+    episode = [step(1), step(5), step(9)]
+
+    class _FixedRng:
+        def __init__(self, vals):
+            self._vals = list(vals)
+
+        def integers(self, low, high):
+            return self._vals.pop(0)
+
+    out = relabel_future_with_metadata(
+        episode,
+        timestep=1,
+        achieved_next_state=achieved,
+        num_relabeled=2,
+        reward_fn=_reward_match,
+        rng=_FixedRng([1, 2]),
+    )
+
+    offsets = [future_idx - 1 for _, _, _, future_idx in out]
+    assert offsets == [0, 1]
 
 
 # Author: Mus mbayramo@stanford.edu

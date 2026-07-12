@@ -59,9 +59,21 @@ export WANDB_PROJECT=igc                 # optional; defaults to "igc"
 ```
 
 Current M1 state-encoder runs log `train/loss`, `train/lr`, `train/grad_norm`, `eval/accuracy`, and
-`train/epoch_loss`. Current RL-agent runs log `epoch_mean_loss`, `epoch_cumulative_reward`, and
-`epoch_goal_reached_count`. Treat perplexity, tokens/sec, GPU memory, and success-rate curves as
-planned instrumentation unless a later change adds those exact metric keys.
+`train/epoch_loss`. Current RL-agent runs keep the legacy `epoch_mean_loss`,
+`epoch_cumulative_reward`, and `epoch_goal_reached_count` scalars, then add
+explicit M6 RL namespaces:
+
+- `03_m6_her/*` tracks HER relabelled-vs-original ratios, future-goal
+  offsets, duplicate or invalid goals, and reward/termination recompute errors.
+- `03_m6_dqn_update/*` tracks separate original-replay and HER-replay TD
+  losses and TD-error percentiles.
+- `03_m6_eval_original_goals/*` tracks success and undiscounted return for the
+  original rollout goal.
+- `03_m6_eval_hindsight_goals/*` tracks the same view for hindsight goals
+  produced by HER relabeling.
+
+Treat perplexity, tokens/sec, and GPU memory curves as planned instrumentation
+unless a later change adds those exact metric keys.
 
 To use TensorBoard instead, choose the variable for the launcher you are using:
 `IGC_METRIC_REPORT=tensorboard bash scripts/run_profile.sh` for the profile wrapper, or

@@ -94,6 +94,47 @@ def relabel_future(
     :return: a list of ``(relabeled_goal, relabeled_reward, relabeled_done)``
         triples; ``relabeled_done`` is ``1.0`` where the substituted goal is met.
     """
+    return [
+        (relabeled_goal, relabeled_reward, relabeled_done)
+        for relabeled_goal, relabeled_reward, relabeled_done, _ in relabel_future_with_metadata(
+            episode,
+            timestep,
+            achieved_next_state,
+            num_relabeled,
+            reward_fn,
+            rng,
+            goal_index=goal_index,
+        )
+    ]
+
+
+def relabel_future_with_metadata(
+    episode: list,
+    timestep: int,
+    achieved_next_state: torch.Tensor,
+    num_relabeled: int,
+    reward_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+    rng,
+    *,
+    goal_index: int = 3,
+) -> list:
+    """HER "future" relabeling plus the sampled future index.
+
+    This is the instrumentation form of :func:`relabel_future`: it returns the
+    same relabeled transition fields plus ``future_idx`` so training metrics can
+    track how far into the future HER sampled each substituted goal.
+
+    :param episode: the episode experience, a list of per-step tuples whose
+        ``goal_index`` element is that step's achieved next-state.
+    :param timestep: index of the transition being relabeled.
+    :param achieved_next_state: ``s_{t+1}`` of this transition.
+    :param num_relabeled: how many future goals to sample (HER ``k``).
+    :param reward_fn: ``reward_fn(state, goal) -> reward``.
+    :param rng: a ``numpy`` ``Generator``-like object.
+    :param goal_index: tuple position of a step's achieved next-state.
+    :return: ``(relabeled_goal, relabeled_reward, relabeled_done, future_idx)``
+        tuples.
+    """
     out = []
     horizon = len(episode)
     for _ in range(num_relabeled):
@@ -101,7 +142,7 @@ def relabel_future(
         relabeled_goal = episode[future_idx][goal_index]
         relabeled_reward = reward_fn(achieved_next_state, relabeled_goal)
         relabeled_done = (relabeled_reward >= 1.0).to(relabeled_reward.dtype)
-        out.append((relabeled_goal, relabeled_reward, relabeled_done))
+        out.append((relabeled_goal, relabeled_reward, relabeled_done, future_idx))
     return out
 
 
