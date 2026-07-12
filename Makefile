@@ -1,9 +1,20 @@
 PYTHON ?= python3
 
-.PHONY: help gate test lint perf coverage metrics profile profile-rl docker-test docker-push clean
+# GB300 training image (docker/Dockerfile.train) — multi-arch build knobs.
+# The cluster is linux/arm64 (Grace) and so is an Apple-Silicon Mac; an x86 box or CI
+# is linux/amd64. The NGC base is published for both, so buildx targets either from any
+# host (native is fast; the other arch runs under QEMU — slow but portable).
+TRAIN_IMAGE ?= igc-train
+NGC_TAG     ?= 26.03-py3
+TRAIN_TAG   ?= ngc$(NGC_TAG)
+PLATFORM    ?= linux/arm64
+SAVE        ?= /models/images/$(TRAIN_IMAGE)-$(TRAIN_TAG).tar.zst
+
+.PHONY: help gate test lint perf coverage metrics profile profile-rl docker-test docker-push \
+        train-image train-image-arm64 train-image-amd64 train-image-multi train-image-save clean
 
 help: ## List available targets and their descriptions
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-22s %s\n", $$1, $$2}'
 
 gate: ## Lint and run the offline test gate (what CI runs)
 	bash -c 'set -o pipefail; ruff check igc tests && KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 $(PYTHON) -m pytest -q'
@@ -35,6 +46,26 @@ docker-push: ## Build and push the CPU test image (requires DOCKER_REPO=<user>/i
 	@test "$${DOCKER_REPO}" || (echo "ERROR: set DOCKER_REPO, e.g. DOCKER_REPO=youruser/igc-test make docker-push"; exit 1)
 	docker build -f docker/Dockerfile.test -t $${DOCKER_REPO}:latest .
 	docker push $${DOCKER_REPO}:latest
+
+train-image: ## Build the GB300 training image for PLATFORM (default linux/arm64), loaded into local docker
+	docker buildx build --platform $(PLATFORM) --build-arg NGC_TAG=$(NGC_TAG) \
+	    -f docker/Dockerfile.train -t $(TRAIN_IMAGE):$(TRAIN_TAG) --load .
+
+train-image-arm64: ## Build the training image for linux/arm64 (the GB300 / Grace cluster arch)
+	$(MAKE) train-image PLATFORM=linux/arm64
+
+train-image-amd64: ## Build the training image for linux/amd64 (x86; runs under QEMU on an arm64 host, slow)
+	$(MAKE) train-image PLATFORM=linux/amd64
+
+train-image-multi: ## Build+push a multi-arch arm64+amd64 manifest (set REGISTRY=<user>/igc-train)
+	@test "$(REGISTRY)" || (echo "ERROR: set REGISTRY, e.g. REGISTRY=youruser/igc-train make train-image-multi"; exit 1)
+	docker buildx build --platform linux/arm64,linux/amd64 --build-arg NGC_TAG=$(NGC_TAG) \
+	    -f docker/Dockerfile.train -t $(REGISTRY):$(TRAIN_TAG) --push .
+
+train-image-save: ## Save the built training image to a zstd tarball (override SAVE=/path) for offline docker load
+	@mkdir -p $(dir $(SAVE))
+	docker save $(TRAIN_IMAGE):$(TRAIN_TAG) | zstd -T0 > $(SAVE)
+	@echo "saved -> $(SAVE)"
 
 clean: ## Remove Python/pytest/ruff cache directories
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
