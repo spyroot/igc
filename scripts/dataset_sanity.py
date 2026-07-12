@@ -33,6 +33,12 @@ import torch.distributed as dist
 from torch.utils.data import DataLoader, DistributedSampler
 
 
+def _collate(samples):
+    """Match the trainer's custom_collate_fn: keep only input_ids + attention_mask,
+    dropping the dataset's other per-row keys (e.g. api_target) that default_collate chokes on."""
+    return {k: torch.stack([s[k] for s in samples]) for k in ("input_ids", "attention_mask")}
+
+
 def _upload(batch, device) -> int:
     """Move every tensor in the batch to the GPU (as the trainer does); return count moved."""
     moved = 0
@@ -89,9 +95,9 @@ def main() -> None:
     workers = int(os.environ.get("SANITY_WORKERS", "4"))
     if distributed and world > 1:
         sampler = DistributedSampler(ds, num_replicas=world, rank=rank, shuffle=True, drop_last=True)
-        loader = DataLoader(ds, batch_size=bs, sampler=sampler, num_workers=workers, pin_memory=True)
+        loader = DataLoader(ds, batch_size=bs, sampler=sampler, num_workers=workers, pin_memory=True, collate_fn=_collate)
     else:
-        loader = DataLoader(ds, batch_size=bs, shuffle=True, num_workers=workers, pin_memory=True)
+        loader = DataLoader(ds, batch_size=bs, shuffle=True, num_workers=workers, pin_memory=True, collate_fn=_collate)
 
     torch.cuda.synchronize()
     t0 = time.time()
