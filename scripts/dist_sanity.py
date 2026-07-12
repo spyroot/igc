@@ -13,7 +13,7 @@ before 72 GPUs, and it tells us which parallelism to commit to.
 Used by: scripts/gb300_sanity_check.sh (loops SANITY_MODE over ddp,fsdp2 × 1/4/8 GPU).
 
 Env knobs: SANITY_MODE=ddp|fsdp2 (default ddp), SANITY_STEPS (default 1 = single pass),
-SANITY_DIM, SANITY_BATCH.
+SANITY_DIM, SANITY_BATCH, SANITY_HUGE_GB (>0 builds a >1-GPU model, fsdp2 only).
 
 Author:
 Mus mbayramo@stanford.edu
@@ -61,12 +61,41 @@ def main() -> None:
     dim = int(os.environ.get("SANITY_DIM", "4096"))
     batch = int(os.environ.get("SANITY_BATCH", "32"))
     steps = int(os.environ.get("SANITY_STEPS", "1"))  # one pass confirms the mechanism
+    huge_gb = float(os.environ.get("SANITY_HUGE_GB", "0"))  # >0 = build a >1-GPU model
 
-    model = nn.Sequential(nn.Linear(dim, dim), nn.GELU(), nn.Linear(dim, dim)).to(device)
-    if mode == "ddp":
-        model = DDP(model, device_ids=[local_rank]) if distributed else model
-    else:  # fsdp2
-        model = _wrap_fsdp2(model)
+    if huge_gb > 0:
+        # Build a model LARGER than one GPU (fp32) so FSDP2 must ACTUALLY shard — the
+        # regime where FSDP2 earns its overhead (a model that would OOM under DDP).
+        # e.g. SANITY_HUGE_GB=400 on 4x 280GB GPU -> ~100GB shard/GPU. Meta-device init so
+        # no rank ever materialises the full model; fully_shard + to_empty materialises the
+        # per-rank shard. DDP cannot hold such a model, so this path is fsdp2-only.
+        import math
+        if mode != "fsdp2":
+            raise SystemExit("[sanity] SANITY_HUGE_GB requires SANITY_MODE=fsdp2 (DDP cannot hold a >1-GPU model)")
+        try:
+            from torch.distributed.fsdp import fully_shard
+        except ImportError:
+            from torch.distributed._composable.fsdp import fully_shard
+        n_layers = 8
+        dim = int(math.sqrt(huge_gb * 1e9 / 4 / n_layers))  # fp32: 4 bytes/param
+        with torch.device("meta"):
+            model = nn.Sequential(*[nn.Linear(dim, dim) for _ in range(n_layers)])
+        for layer in model:
+            fully_shard(layer)
+        fully_shard(model)
+        model.to_empty(device=device)          # materialise the per-rank shard
+        for p in model.parameters():
+            (nn.init.normal_ if p.dim() >= 2 else nn.init.zeros_)(p)
+        total_b = sum(p.numel() for p in model.parameters()) * world / 1e9
+        print(f"[sanity] HUGE model: {total_b:.0f}B params, ~{huge_gb:.0f}GB fp32 across {world} GPU "
+              f"(dim={dim}, {n_layers} layers) — FSDP2 sharding", flush=True)
+    else:
+        model = nn.Sequential(nn.Linear(dim, dim), nn.GELU(), nn.Linear(dim, dim)).to(device)
+        if mode == "ddp":
+            model = DDP(model, device_ids=[local_rank]) if distributed else model
+        else:  # fsdp2
+            model = _wrap_fsdp2(model)
+
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
     x = torch.randn(batch, dim, device=device)
 
