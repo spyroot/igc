@@ -519,6 +519,7 @@ class LlmEmbeddingsTrainer(LlmModule):
             sampler=sampler,
             num_workers=self._num_workers,
             shuffle=self._is_shuffle,
+            drop_last=True,  # equal batch count per rank -> no epoch-boundary save-collective deadlock
             pin_memory=self._pin_memory,
             collate_fn=LlmEmbeddingsTrainer.custom_collate_fn
         )
@@ -849,6 +850,7 @@ class LlmEmbeddingsTrainer(LlmModule):
             sampler=sampler,
             num_workers=self._num_workers,
             shuffle=self._is_shuffle,
+            drop_last=True,  # equal batch count per rank -> no epoch-boundary save-collective deadlock
             pin_memory=self._pin_memory,
             collate_fn=LlmEmbeddingsTrainer.custom_collate_fn
         )
