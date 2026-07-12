@@ -76,7 +76,17 @@ class AutoencoderTrainer(IgcModule):
         input_shape = emb_shape(self.model)
         self.emb_shape = (input_shape[0] - 1, input_shape[1])
 
-        self.model_autoencoder = AutoStateEncoder(input_shape=input_shape)
+        # AutoStateEncoder reconstructs backbone hidden states shaped
+        # (batch, seq_len, hidden_dim): hidden_dim is the backbone hidden size
+        # (input_shape[1]) and seq_len is the dataset chunk length every sample is
+        # padded to. Passing them keeps the encoder off the GPT-2 768/1024 defaults,
+        # which mismatch any modern backbone (e.g. Qwen2.5-3B, hidden 2048).
+        seq_len = self._resolve_seq_len(spec, input_shape)
+        self.model_autoencoder = AutoStateEncoder(
+            input_shape=input_shape,
+            seq_len=seq_len,
+            hidden_dim=input_shape[1],
+        )
 
         self.logger.info(f"Creating optimizer {spec.auto_encoder_optimizer} "
                          f"lr: {spec.auto_encoder_lr} "
@@ -90,6 +100,28 @@ class AutoencoderTrainer(IgcModule):
             spec.auto_encoder_weight_decay,
             **vars(spec)
         )
+
+    def _resolve_seq_len(self, spec, input_shape):
+        """Resolve the hidden-state sequence length the autoencoder reconstructs.
+
+        Every dataset chunk is padded to ``max_len`` (built from ``--seq_len``), so
+        the backbone emits hidden states of that length. Prefer the dataset's real
+        ``max_len`` (the ground truth for the tensors fed to the autoencoder), fall
+        back to the CLI ``seq_len``, then to the positional dimension for the legacy
+        GPT-2 path.
+
+        :param spec: training spec namespace (carries ``seq_len``).
+        :param input_shape: ``(positions, hidden)`` backbone shape from ``emb_shape``.
+        :return: the sequence length to build ``AutoStateEncoder`` with.
+        """
+        ds = getattr(self, "dataset", None)
+        ds_max_len = getattr(ds, "_max_len", None)
+        if isinstance(ds_max_len, int) and ds_max_len > 0:
+            return ds_max_len
+        spec_seq_len = getattr(spec, "seq_len", None)
+        if isinstance(spec_seq_len, int) and spec_seq_len > 0:
+            return spec_seq_len
+        return int(input_shape[0])
 
     def _get_reconstruction_loss(self, batch):
         """
