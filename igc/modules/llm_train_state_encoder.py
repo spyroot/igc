@@ -119,6 +119,22 @@ def reached_max_steps(global_step: int, max_steps: Optional[int]) -> bool:
     return max_steps is not None and max_steps > 0 and global_step >= max_steps
 
 
+def unwrap_accelerate(wrapped, inner_attr: str):
+    """Return the base optimizer/scheduler that accelerate wrapped, or ``wrapped``.
+
+    ``Accelerator.unwrap_model`` is for ``nn.Module``s only — in accelerate>=1.14 it
+    probes ``model._modules``, which an ``AcceleratedOptimizer`` / ``AcceleratedScheduler``
+    does not have, raising ``AttributeError('_modules')`` and killing the checkpoint
+    save on the multi-GPU (FSDP) path. accelerate exposes the inner object as
+    ``AcceleratedOptimizer.optimizer`` / ``AcceleratedScheduler.scheduler``, so read that.
+
+    :param wrapped: the (possibly accelerate-wrapped) optimizer or scheduler.
+    :param inner_attr: ``"optimizer"`` or ``"scheduler"`` — the wrapper's inner attribute.
+    :return: the unwrapped inner object, or ``wrapped`` if it is not wrapped.
+    """
+    return getattr(wrapped, inner_attr, wrapped)
+
+
 class LlmEmbeddingsTrainer(LlmModule):
     """
     Train a language model on masked Redfish JSON sequences.
@@ -732,8 +748,10 @@ class LlmEmbeddingsTrainer(LlmModule):
                     if self._module_checkpoint_dir is not None:
                         if self.is_accelerator:
                             model = self.accelerator.unwrap_model(self.model)
-                            opt = self.accelerator.unwrap_model(self.optimizer)
-                            shed = self.accelerator.unwrap_model(self.scheduler)
+                            # unwrap_model is for nn.Modules only; the optimizer/scheduler
+                            # are accelerate wrappers (see unwrap_accelerate).
+                            opt = unwrap_accelerate(self.optimizer, "optimizer")
+                            shed = unwrap_accelerate(self.scheduler, "scheduler")
                             self.save_checkpoint(
                                 self._module_checkpoint_dir,
                                 epoch + 1,
