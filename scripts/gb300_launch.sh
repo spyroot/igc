@@ -74,6 +74,11 @@ docker image inspect "$IGC_IMAGE" >/dev/null 2>&1 || blocker "image $IGC_IMAGE n
 COMMON="--train llm --llm latent --model_type ${IGC_MODEL} --json_data_dir /root/.json_responses --tf32 --seed 42 --log_level info --llm_log_level info"
 [ "${IGC_USE_PEFT:-0}" = "1" ] && COMMON="${COMMON} --use_peft --lora_r ${LORA_R:-16} --lora_alpha ${LORA_ALPHA:-32}"
 
+# Export so the bare `-e VAR` on `docker run` actually forwards them; otherwise a
+# non-exported shell var arrives empty and the container's `set -u` aborts (rc=127,
+# "COMMON: unbound variable").
+export IGC_GPUS IGC_STAGE IGC_MODEL IGC_RUN EPOCHS COMMON
+
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 log "docker run ${IGC_IMAGE} | ${IGC_GPUS} GPU | code=${IGC_CODE_DIR} data=${IGC_DATA_DIR} models=${IGC_MODELS_DIR}"
 # NVIDIA-recommended flags (NGC startup banner): --ipc=host + memlock/stack ulimits.
