@@ -27,6 +27,7 @@ import tempfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import torch
 
@@ -156,6 +157,49 @@ def rollout_actions(env: VectorizedRestApiEnv, step: int) -> torch.Tensor:
     return torch.stack(actions, dim=0)
 
 
+def validate_transition_tensors(
+    *,
+    next_obs: torch.Tensor,
+    actions: torch.Tensor,
+    rewards: torch.Tensor,
+    terminated: torch.Tensor,
+    time_limited: torch.Tensor,
+    infos: list[dict[str, object]],
+    num_envs: int,
+    rank: int,
+) -> None:
+    """Validate rollout tensor shapes, dtypes, and finite numeric values."""
+    if next_obs.shape[0] != num_envs:
+        raise RuntimeError(
+            f"rank {rank}: observation batch shrank from {num_envs} to {next_obs.shape[0]}"
+        )
+    if actions.shape[0] != num_envs:
+        raise RuntimeError(f"rank {rank}: action batch mismatch {tuple(actions.shape)}")
+    if rewards.shape != (num_envs,):
+        raise RuntimeError(f"rank {rank}: reward shape mismatch {tuple(rewards.shape)}")
+    if terminated.shape != (num_envs,) or time_limited.shape != (num_envs,):
+        raise RuntimeError(
+            f"rank {rank}: flag shape mismatch terminated={tuple(terminated.shape)} "
+            f"truncated={tuple(time_limited.shape)}"
+        )
+    if len(infos) != num_envs:
+        raise RuntimeError(f"rank {rank}: info rows mismatch {len(infos)}")
+    if not torch.is_floating_point(next_obs):
+        raise RuntimeError(f"rank {rank}: observation dtype must be floating, got {next_obs.dtype}")
+    if not torch.is_floating_point(actions):
+        raise RuntimeError(f"rank {rank}: action dtype must be floating, got {actions.dtype}")
+    if not torch.is_floating_point(rewards):
+        raise RuntimeError(f"rank {rank}: reward dtype must be floating, got {rewards.dtype}")
+    if terminated.dtype != torch.bool or time_limited.dtype != torch.bool:
+        raise RuntimeError(
+            f"rank {rank}: terminal flags must be bool, got "
+            f"{terminated.dtype}/{time_limited.dtype}"
+        )
+    for name, tensor in (("observation", next_obs), ("action", actions), ("reward", rewards)):
+        if not torch.isfinite(tensor).all():
+            raise RuntimeError(f"rank {rank}: non-finite {name} tensor")
+
+
 def build_env(base_dir: Path, rank: int, num_envs: int, max_episode: int) -> VectorizedRestApiEnv:
     """Build the tiny vector REST environment for one rank."""
     mapping = write_tiny_fixtures(base_dir, rank)
@@ -178,6 +222,7 @@ def run_rollout(
     rank: int,
     world: int,
     base_dir: Path,
+    profiler: Any = None,
 ) -> RolloutStats:
     """Run one local vector-env rollout and return shape/count stats."""
     env = build_env(base_dir, rank, num_envs, max_episode=steps + 10)
@@ -195,14 +240,16 @@ def run_rollout(
             env.simulate_goal_reached(rank % num_envs)
 
         next_obs, rewards, terminated, time_limited, infos = env.step(actions)
-        if next_obs.shape[0] != num_envs:
-            raise RuntimeError(
-                f"rank {rank}: observation batch shrank from {num_envs} to {next_obs.shape[0]}"
-            )
-        if rewards.shape != (num_envs,):
-            raise RuntimeError(f"rank {rank}: reward shape mismatch {tuple(rewards.shape)}")
-        if len(infos) != num_envs:
-            raise RuntimeError(f"rank {rank}: info rows mismatch {len(infos)}")
+        validate_transition_tensors(
+            next_obs=next_obs,
+            actions=actions,
+            rewards=rewards,
+            terminated=terminated,
+            time_limited=time_limited,
+            infos=infos,
+            num_envs=num_envs,
+            rank=rank,
+        )
 
         replay.add(obs, actions, rewards, next_obs, terminated)
 
@@ -216,6 +263,8 @@ def run_rollout(
         if device.type == "cuda":
             torch.cuda.synchronize(device)
         del uploaded
+        if profiler is not None:
+            profiler.step()
 
         transitions += num_envs
         terminals += int(terminated.sum().item())
@@ -259,7 +308,11 @@ def stats_tensor(stats: RolloutStats, device: torch.device) -> torch.Tensor:
 def shape_tensor(stats: RolloutStats, device: torch.device) -> torch.Tensor:
     """Pack shape stats that must match across ranks."""
     obs_tail = stats.obs_shape[1:] if len(stats.obs_shape) > 1 else stats.obs_shape
-    state_tail = stats.sample_state_shape[-2:] if len(stats.sample_state_shape) >= 2 else stats.sample_state_shape
+    state_tail = (
+        stats.sample_state_shape[-2:]
+        if len(stats.sample_state_shape) >= 2
+        else stats.sample_state_shape
+    )
     return torch.tensor(
         [
             stats.num_envs,
@@ -302,6 +355,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--num-envs", type=int, default=4, help="vector envs per rank")
     parser.add_argument("--steps", type=int, default=4, help="rollout steps per rank")
     parser.add_argument("--allow-cpu", action="store_true", help="permit CPU-only local development")
+    parser.add_argument(
+        "--profile-dir",
+        type=Path,
+        default=None,
+        help="optional directory for one torch profiler Chrome trace per rank",
+    )
     args = parser.parse_args(argv)
 
     rank, world, local_rank, device, distributed = resolve_runtime(args.allow_cpu)
@@ -310,14 +369,39 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         with tempfile.TemporaryDirectory(prefix=f"igc-rl-env-r{rank}-") as tmp:
-            stats = run_rollout(
-                num_envs=args.num_envs,
-                steps=args.steps,
-                device=device,
-                rank=rank,
-                world=world,
-                base_dir=Path(tmp),
-            )
+            if args.profile_dir is not None:
+                from torch.profiler import ProfilerActivity, profile
+
+                args.profile_dir.mkdir(parents=True, exist_ok=True)
+                activities = [ProfilerActivity.CPU]
+                if device.type == "cuda":
+                    activities.append(ProfilerActivity.CUDA)
+                with profile(
+                    activities=activities,
+                    record_shapes=True,
+                    profile_memory=True,
+                ) as prof:
+                    stats = run_rollout(
+                        num_envs=args.num_envs,
+                        steps=args.steps,
+                        device=device,
+                        rank=rank,
+                        world=world,
+                        base_dir=Path(tmp),
+                        profiler=prof,
+                    )
+                trace_path = args.profile_dir / f"rl_env_sanity_rank{rank}.json"
+                prof.export_chrome_trace(str(trace_path))
+                print(f"[rl-env] profile={trace_path}", flush=True)
+            else:
+                stats = run_rollout(
+                    num_envs=args.num_envs,
+                    steps=args.steps,
+                    device=device,
+                    rank=rank,
+                    world=world,
+                    base_dir=Path(tmp),
+                )
 
         print(
             f"[rl-env] rank={rank}/{world} local={local_rank} device={device} "
