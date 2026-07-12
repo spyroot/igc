@@ -1,0 +1,31 @@
+version: 1
+name: slurm-smoke
+backend: slurm
+image:
+  ref: igc-train:latest
+  pull_policy: if_missing
+runtime:
+  command:
+    - python
+    - igc_main.py
+    - --help
+paths:
+  code: ${IGC_CODE_DIR}
+  data: ${IGC_DATA_DIR}
+  output: ${IGC_OUTPUT_DIR}
+resources:
+  gpus: 1
+  nodes: 1
+  cpus_per_task: 4
+  wall_time: "00:05:00"
+slurm:
+  partition: ${IGC_SLURM_PARTITION}
+  account: ${IGC_SLURM_ACCOUNT}
+  output: ${IGC_OUTPUT_DIR}/slurm-%j.out
+sanity:
+  slurm:
+    enabled: true
+    command: "printf IGC_SLURM_SANITY_OK"
+    sentinel: IGC_SLURM_SANITY_OK
+    timeout_seconds: 120
+    poll_seconds: 5
