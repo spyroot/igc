@@ -1,0 +1,316 @@
+schema_version: m3.goal_planner.training.v1
+default_profile: m3_gpt2_full
+
+datasets:
+  redfish_ctl_real:
+    jsonl: /models/igc/datasets/m3/m3_goal_plans_real.jsonl
+    build:
+      json_root: /root/.json_responses
+      rest_api_map_dir: null
+      templates_per_action: 2
+
+models:
+  gpt2:
+    model_type: gpt2
+    trust_remote_code: false
+    torch_dtype: float32
+
+  qwen2_5_0_5b:
+    model_type: Qwen/Qwen2.5-0.5B-Instruct
+    trust_remote_code: true
+    torch_dtype: bfloat16
+
+  qwen2_5_7b:
+    model_type: Qwen/Qwen2.5-7B-Instruct
+    trust_remote_code: true
+    torch_dtype: bfloat16
+
+optimizers:
+  adamw_m3_default:
+    name: adamw_torch_fused
+    learning_rate: 0.00005
+    weight_decay: 0.01
+    betas: [0.9, 0.95]
+    eps: 0.00000001
+    max_grad_norm: 1.0
+    scheduler: cosine
+    warmup_ratio: 0.03
+
+  adamw_m3_lora:
+    name: adamw_torch_fused
+    learning_rate: 0.0002
+    weight_decay: 0.0
+    betas: [0.9, 0.95]
+    eps: 0.00000001
+    max_grad_norm: 1.0
+    scheduler: cosine
+    warmup_ratio: 0.03
+
+peft:
+  qwen_rslora_32:
+    enabled: true
+    method: rslora
+    r: 32
+    lora_alpha: 64
+    lora_dropout: 0.05
+    bias: none
+    use_rslora: true
+    use_dora: false
+    init_lora_weights: true
+    target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+
+metric_sets:
+  m3_default:
+    event_fields:
+      - record_index
+      - instruction
+      - target_goal_id
+      - goal_source
+      - model_profile
+      - dataset_jsonl
+      - state_fingerprint
+      - tool_catalog_count
+      - approved_image_count
+      - final_spec_key_count
+      - derived_requirement_count
+      - plan_step_count
+      - blocked
+      - blocked_reason_count
+      - prompt_token_count
+      - target_token_count
+      - total_token_count
+      - train_loss
+      - learning_rate
+      - grad_norm
+      - tokens_per_second
+      - samples_per_second
+      - padding_ratio
+      - gpu_memory_allocated_gb
+      - gpu_memory_reserved_gb
+      - json_valid
+      - schema_valid
+      - final_spec_exact_match
+      - goal_id_exact_match
+      - tool_action_exact_match
+      - target_endpoint_exact_match
+      - http_method_exact_match
+      - argument_schema_exact_match
+      - argument_enum_valid
+      - plan_step_exact_match
+      - op_sequence_exact_match
+      - op_sequence_edit_distance
+      - derived_requirement_f1
+      - blocked_decision_f1
+      - safety_constraint_recall
+      - blocked_reason_exact_match
+      - hallucinated_endpoint
+      - hallucinated_action
+      - no_guessed_image_uri
+      - executable_against_catalog
+      - text_interface_success
+      - inference_latency_ms
+    plot_names:
+      dataset_records: m3_dataset/record_count
+      dataset_unique_action_count: m3_dataset/unique_action_count
+      dataset_unique_target_endpoint_count: m3_dataset/unique_target_endpoint_count
+      dataset_method_get_rate: m3_dataset/method_get_rate
+      dataset_method_post_rate: m3_dataset/method_post_rate
+      dataset_method_patch_rate: m3_dataset/method_patch_rate
+      dataset_risk_level_read_only_rate: m3_dataset/risk_level_read_only_rate
+      dataset_risk_level_mutating_rate: m3_dataset/risk_level_mutating_rate
+      dataset_risk_level_destructive_rate: m3_dataset/risk_level_destructive_rate
+      dataset_blocked_plan_rate: m3_dataset/blocked_plan_rate
+      dataset_plan_steps_mean: m3_dataset/plan_step_count_mean
+      dataset_plan_steps_p95: m3_dataset/plan_step_count_p95
+      dataset_derived_requirement_count_mean: m3_dataset/derived_requirement_count_mean
+      dataset_prompt_tokens_mean: m3_dataset/prompt_token_count_mean
+      dataset_target_tokens_mean: m3_dataset/target_token_count_mean
+      dataset_total_tokens_p95: m3_dataset/total_token_count_p95
+      train_loss: m3_sft/train_loss
+      train_ppl: m3_sft/train_ppl
+      train_lr: m3_sft/learning_rate
+      train_grad_norm: m3_sft/grad_norm
+      train_tokens_per_second: m3_sft/tokens_per_second
+      train_samples_per_second: m3_sft/samples_per_second
+      train_padding_ratio: m3_sft/padding_ratio
+      train_gpu_memory_allocated_gb: m3_sft/gpu_memory_allocated_gb
+      train_gpu_memory_reserved_gb: m3_sft/gpu_memory_reserved_gb
+      train_optimizer_step: m3_sft/optimizer_step
+      train_epoch: m3_sft/epoch
+      eval_json_valid_rate: m3_eval/json_valid_rate
+      eval_schema_valid_rate: m3_eval/schema_valid_rate
+      eval_final_spec_exact_match: m3_eval/final_spec_exact_match
+      eval_goal_id_exact_match: m3_eval/goal_id_exact_match
+      eval_tool_action_exact_match: m3_eval/tool_action_exact_match
+      eval_target_endpoint_exact_match: m3_eval/target_endpoint_exact_match
+      eval_http_method_exact_match: m3_eval/http_method_exact_match
+      eval_argument_schema_exact_match: m3_eval/argument_schema_exact_match
+      eval_argument_enum_valid_rate: m3_eval/argument_enum_valid_rate
+      eval_plan_step_exact_match: m3_eval/plan_step_exact_match
+      eval_op_sequence_exact_match: m3_eval/op_sequence_exact_match
+      eval_op_sequence_edit_distance_mean: m3_eval/op_sequence_edit_distance_mean
+      eval_derived_requirement_f1: m3_eval/derived_requirement_f1
+      eval_blocked_decision_f1: m3_eval/blocked_decision_f1
+      eval_safety_constraint_recall: m3_eval/safety_constraint_recall
+      eval_blocked_reason_exact_match: m3_eval/blocked_reason_exact_match
+      eval_hallucinated_endpoint_rate: m3_eval/hallucinated_endpoint_rate
+      eval_hallucinated_action_rate: m3_eval/hallucinated_action_rate
+      eval_no_guessed_image_uri_rate: m3_eval/no_guessed_image_uri_rate
+      eval_executable_against_catalog_rate: m3_eval/executable_against_catalog_rate
+      eval_text_interface_success: m3_eval/text_interface_success
+      eval_ubuntu_fast_boot_success: m3_eval/ubuntu_fast_boot_success
+      interface_text_to_goal_success_rate: m3_interface/text_to_goal_success_rate
+      interface_ubuntu_fast_boot_success_rate: m3_interface/ubuntu_fast_boot_success_rate
+      interface_iso_mount_inference_success_rate: m3_interface/iso_mount_inference_success_rate
+      interface_bios_goal_extraction_success_rate: m3_interface/bios_goal_extraction_success_rate
+      interface_virtual_media_goal_extraction_success_rate: m3_interface/virtual_media_goal_extraction_success_rate
+      interface_parse_retry_rate: m3_interface/parse_retry_rate
+      interface_fallback_used_rate: m3_interface/fallback_used_rate
+      interface_inference_latency_ms_p50: m3_interface/inference_latency_ms_p50
+      interface_inference_latency_ms_p95: m3_interface/inference_latency_ms_p95
+
+profiles:
+  m3_gpt2_smoke:
+    description: CPU/GPU smoke over a small slice of the real redfish_ctl M3 JSONL.
+    tracking:
+      report_to: wandb
+      entity: spyroot
+      project: igc
+      metric_prefix: 03_m3_goal_planner
+      metric_set: m3_default
+    dataset:
+      ref: redfish_ctl_real
+      max_records: 64
+    model:
+      ref: gpt2
+    optimizer:
+      ref: adamw_m3_default
+    trainer:
+      output_dir: /models/igc/checkpoints/m3_goal_planner/gpt2_smoke
+      epochs: 1
+      batch_size: 1
+      gradient_accumulation_steps: 1
+      max_length: 1024
+      max_steps: 8
+      precision: fp32
+      dataloader_num_workers: 0
+      gradient_checkpointing: false
+      torch_compile: false
+      tf32: true
+      seed: 42
+      log_every: 1
+    distributed:
+      launcher: torchrun
+      nproc_per_node: 1
+      backend: nccl
+
+  m3_gpt2_full:
+    description: Full real-corpus M3 training with a small trainable decoder baseline.
+    tracking:
+      report_to: wandb
+      entity: spyroot
+      project: igc
+      metric_prefix: 03_m3_goal_planner
+      metric_set: m3_default
+    dataset:
+      ref: redfish_ctl_real
+      max_records: null
+    model:
+      ref: gpt2
+    optimizer:
+      ref: adamw_m3_default
+    trainer:
+      output_dir: /models/igc/checkpoints/m3_goal_planner/gpt2_full
+      epochs: 5
+      batch_size: 4
+      gradient_accumulation_steps: 4
+      max_length: 1024
+      max_steps: null
+      precision: bf16
+      dataloader_num_workers: 4
+      gradient_checkpointing: false
+      torch_compile: false
+      tf32: true
+      seed: 42
+      log_every: 20
+    distributed:
+      launcher: torchrun
+      nproc_per_node: 4
+      backend: nccl
+
+  m3_qwen2_5_0_5b_full:
+    description: Full real-corpus M3 training with a stronger small instruction backbone.
+    tracking:
+      report_to: wandb
+      entity: spyroot
+      project: igc
+      metric_prefix: 03_m3_goal_planner
+      metric_set: m3_default
+    dataset:
+      ref: redfish_ctl_real
+      max_records: null
+    model:
+      ref: qwen2_5_0_5b
+    optimizer:
+      ref: adamw_m3_default
+    trainer:
+      output_dir: /models/igc/checkpoints/m3_goal_planner/qwen2_5_0_5b_full
+      epochs: 3
+      batch_size: 2
+      gradient_accumulation_steps: 8
+      max_length: 1536
+      max_steps: null
+      precision: bf16
+      dataloader_num_workers: 4
+      gradient_checkpointing: true
+      torch_compile: false
+      tf32: true
+      seed: 42
+      log_every: 20
+    distributed:
+      launcher: torchrun
+      nproc_per_node: 4
+      backend: nccl
+
+  m3_qwen2_5_7b_rslora:
+    description: Full real-corpus M3 adapter training for the 7B candidate backbone.
+    tracking:
+      report_to: wandb
+      entity: spyroot
+      project: igc
+      metric_prefix: 03_m3_goal_planner
+      metric_set: m3_default
+    dataset:
+      ref: redfish_ctl_real
+      max_records: null
+    model:
+      ref: qwen2_5_7b
+    optimizer:
+      ref: adamw_m3_lora
+    peft:
+      ref: qwen_rslora_32
+    trainer:
+      output_dir: /models/igc/checkpoints/m3_goal_planner/qwen2_5_7b_rslora
+      epochs: 3
+      batch_size: 1
+      gradient_accumulation_steps: 16
+      max_length: 1536
+      max_steps: null
+      precision: bf16
+      dataloader_num_workers: 4
+      gradient_checkpointing: true
+      torch_compile: false
+      tf32: true
+      seed: 42
+      log_every: 20
+    distributed:
+      launcher: torchrun
+      nproc_per_node: 4
+      backend: nccl

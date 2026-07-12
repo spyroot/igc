@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import argparse
+import os
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,11 @@ from igc.modules.m3_goal_planner_train import (
     M3GoalPlannerSFTConfig,
     M3GoalPlannerSFTTrainer,
 )
+from igc.modules.base.igc_metric_logger import MetricLogger
+from igc.modules.m3_goal_planner_specs import (
+    DEFAULT_M3_GOAL_PLANNER_SPEC,
+    load_m3_goal_planner_profile,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -55,16 +61,23 @@ def main(argv: list[str] | None = None) -> int:
     infer.add_argument("--max-new-tokens", type=int, default=1024)
 
     train = sub.add_parser("train", help="Supervised fine-tune an M3 goal planner.")
-    train.add_argument("--model-type", default="gpt2")
-    train.add_argument("--dataset-jsonl", required=True)
-    train.add_argument("--output-dir", required=True)
-    train.add_argument("--epochs", type=int, default=1)
-    train.add_argument("--batch-size", type=int, default=1)
-    train.add_argument("--learning-rate", type=float, default=5e-5)
-    train.add_argument("--max-length", type=int, default=2048)
+    train.add_argument("--spec-file", default=str(DEFAULT_M3_GOAL_PLANNER_SPEC))
+    train.add_argument("--profile", default=None)
+    train.add_argument("--model-type", default=None)
+    train.add_argument("--dataset-jsonl", default=None)
+    train.add_argument("--output-dir", default=None)
+    train.add_argument("--epochs", type=int, default=None)
+    train.add_argument("--batch-size", type=int, default=None)
+    train.add_argument("--gradient-accumulation-steps", type=int, default=None)
+    train.add_argument("--learning-rate", type=float, default=None)
+    train.add_argument("--weight-decay", type=float, default=None)
+    train.add_argument("--max-length", type=int, default=None)
     train.add_argument("--max-records", type=int, default=None)
     train.add_argument("--max-steps", type=int, default=None)
+    train.add_argument("--precision", choices=["fp32", "bf16", "fp16"], default=None)
     train.add_argument("--device", default=None)
+    train.add_argument("--dataloader-num-workers", type=int, default=None)
+    train.add_argument("--metric-report", default=None)
     train.add_argument("--trust-remote-code", action="store_true")
 
     export_actions = sub.add_parser(
@@ -129,34 +142,105 @@ def _train(args: argparse.Namespace) -> int:
     """Train a model from JSONL records."""
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    dataset = load_m3_goal_plan_dataset(args.dataset_jsonl)
-    if args.max_records is not None:
-        dataset = M3GoalPlanJsonlDataset(dataset.records[:args.max_records])
+    profile = load_m3_goal_planner_profile(args.profile, args.spec_file)
+    dataset_cfg = profile.get("dataset") or {}
+    model_cfg = profile.get("model") or {}
+    optimizer_cfg = profile.get("optimizer") or {}
+    trainer_cfg = profile.get("trainer") or {}
+    tracking_cfg = profile.get("tracking") or {}
+    metric_names = (tracking_cfg.get("metrics") or {}).get("plot_names") or {}
+
+    dataset_jsonl = args.dataset_jsonl or dataset_cfg.get("jsonl")
+    if not dataset_jsonl:
+        raise ValueError("M3 training requires --dataset-jsonl or dataset.jsonl in the profile")
+    dataset = load_m3_goal_plan_dataset(dataset_jsonl)
+    max_records = _coalesce(args.max_records, dataset_cfg.get("max_records"))
+    if max_records is not None:
+        dataset = M3GoalPlanJsonlDataset(dataset.records[:int(max_records)])
+
+    model_type = args.model_type or model_cfg.get("model_type") or "gpt2"
+    trust_remote_code = bool(args.trust_remote_code or model_cfg.get("trust_remote_code", False))
+    torch_dtype = _torch_dtype(model_cfg.get("torch_dtype"))
     tokenizer = AutoTokenizer.from_pretrained(
-        args.model_type,
-        trust_remote_code=args.trust_remote_code,
+        model_type,
+        trust_remote_code=trust_remote_code,
     )
     model = AutoModelForCausalLM.from_pretrained(
-        args.model_type,
-        trust_remote_code=args.trust_remote_code,
+        model_type,
+        trust_remote_code=trust_remote_code,
+        torch_dtype=torch_dtype,
     )
+    model = _apply_peft_if_requested(model, profile.get("peft"))
+
+    output_dir = args.output_dir or trainer_cfg.get("output_dir") or "experiments/m3_goal_planner"
+    betas = tuple(optimizer_cfg.get("betas", (0.9, 0.999)))
+    metric_logger = _build_metric_logger(
+        args,
+        profile,
+        tracking_cfg,
+        model_type,
+        output_dir,
+        len(dataset),
+    )
+    if metric_logger is not None:
+        _log_dataset_metrics(metric_logger, metric_names, len(dataset))
     trainer = M3GoalPlannerSFTTrainer(
         model,
         tokenizer,
         dataset,
         M3GoalPlannerSFTConfig(
-            output_dir=args.output_dir,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            learning_rate=args.learning_rate,
-            max_length=args.max_length,
-            max_steps=args.max_steps,
+            output_dir=output_dir,
+            epochs=int(_coalesce(args.epochs, trainer_cfg.get("epochs"), 1)),
+            batch_size=int(_coalesce(args.batch_size, trainer_cfg.get("batch_size"), 1)),
+            gradient_accumulation_steps=int(_coalesce(
+                args.gradient_accumulation_steps,
+                trainer_cfg.get("gradient_accumulation_steps"),
+                1,
+            )),
+            learning_rate=float(_coalesce(
+                args.learning_rate,
+                optimizer_cfg.get("learning_rate"),
+                5e-5,
+            )),
+            weight_decay=float(_coalesce(args.weight_decay, optimizer_cfg.get("weight_decay"), 0.0)),
+            betas=(float(betas[0]), float(betas[1])),
+            eps=float(optimizer_cfg.get("eps", 1e-8)),
+            optimizer_name=str(optimizer_cfg.get("name", "adamw")),
+            scheduler=str(optimizer_cfg.get("scheduler", "constant")),
+            warmup_ratio=float(optimizer_cfg.get("warmup_ratio", 0.0)),
+            warmup_steps=int(optimizer_cfg.get("warmup_steps", 0) or 0),
+            max_grad_norm=optimizer_cfg.get("max_grad_norm"),
+            max_length=int(_coalesce(args.max_length, trainer_cfg.get("max_length"), 2048)),
+            max_steps=_optional_int(_coalesce(args.max_steps, trainer_cfg.get("max_steps"))),
+            precision=str(_coalesce(args.precision, trainer_cfg.get("precision"), "fp32")),
+            dataloader_num_workers=int(_coalesce(
+                args.dataloader_num_workers,
+                trainer_cfg.get("dataloader_num_workers"),
+                0,
+            )),
+            seed=int(trainer_cfg.get("seed", 42)),
+            log_every=int(trainer_cfg.get("log_every", 10)),
+            tf32=bool(trainer_cfg.get("tf32", True)),
+            gradient_checkpointing=bool(trainer_cfg.get("gradient_checkpointing", False)),
+            torch_compile=bool(trainer_cfg.get("torch_compile", False)),
+            metric_prefix=str(tracking_cfg.get("metric_prefix", "03_m3_goal_planner")),
+            metric_names=metric_names,
             device=args.device,
         ),
+        metric_logger=metric_logger,
     )
     history = trainer.train()
     trainer.save()
-    print(json.dumps({"history": history, "output_dir": args.output_dir}, indent=2))
+    if trainer.distributed.is_main_process:
+        history_path = Path(output_dir) / "training_history.json"
+        history_path.write_text(json.dumps(history, indent=2, sort_keys=True), encoding="utf-8")
+        print(json.dumps({
+            "history": history,
+            "output_dir": output_dir,
+            "profile": profile["name"],
+            "dataset_jsonl": dataset_jsonl,
+            "records": len(dataset),
+        }, indent=2))
     return 0
 
 
@@ -201,6 +285,105 @@ def _load_json_arg(value: str) -> dict[str, Any]:
     if value.startswith("@"):
         return json.loads(Path(value[1:]).read_text(encoding="utf-8"))
     return json.loads(value)
+
+
+def _coalesce(*values):
+    """Return the first value that is not ``None``."""
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _optional_int(value) -> int | None:
+    """Convert optional integer-like values."""
+    return None if value is None else int(value)
+
+
+def _torch_dtype(name: str | None):
+    """Return torch dtype for a profile string."""
+    if name is None:
+        return None
+    import torch
+
+    normalized = str(name).lower()
+    if normalized in {"float32", "fp32"}:
+        return torch.float32
+    if normalized in {"bfloat16", "bf16"}:
+        return torch.bfloat16
+    if normalized in {"float16", "fp16"}:
+        return torch.float16
+    raise ValueError(f"unsupported torch dtype: {name}")
+
+
+def _apply_peft_if_requested(model, peft_cfg: dict[str, Any] | None):
+    """Wrap a causal LM with PEFT LoRA/rsLoRA/DoRA when a profile asks for it."""
+    if not peft_cfg or not peft_cfg.get("enabled", False):
+        return model
+    from peft import LoraConfig, TaskType, get_peft_model
+
+    config = LoraConfig(
+        task_type=TaskType.CAUSAL_LM,
+        r=int(peft_cfg.get("r", 16)),
+        lora_alpha=int(peft_cfg.get("lora_alpha", 32)),
+        lora_dropout=float(peft_cfg.get("lora_dropout", 0.0)),
+        target_modules=list(peft_cfg.get("target_modules") or []),
+        bias=str(peft_cfg.get("bias", "none")),
+        use_rslora=bool(peft_cfg.get("use_rslora", False)),
+        use_dora=bool(peft_cfg.get("use_dora", False)),
+        init_lora_weights=peft_cfg.get("init_lora_weights", True),
+    )
+    return get_peft_model(model, config)
+
+
+def _build_metric_logger(
+    args: argparse.Namespace,
+    profile: dict[str, Any],
+    tracking_cfg: dict[str, Any],
+    model_type: str,
+    output_dir: str,
+    record_count: int,
+):
+    """Create the configured metric logger, or ``None`` when disabled."""
+    report_to = args.metric_report
+    if report_to is None:
+        report_to = tracking_cfg.get("report_to", "none")
+    if str(report_to).lower() in {"", "none", "off", "disabled", "false"}:
+        return None
+    trainer_cfg = profile.get("trainer") or {}
+    optimizer_cfg = profile.get("optimizer") or {}
+    peft_cfg = profile.get("peft") or {}
+    return MetricLogger(
+        str(report_to),
+        output_dir=output_dir,
+        project=tracking_cfg.get("project"),
+        entity=tracking_cfg.get("entity"),
+        train="llm",
+        llm="goal",
+        model_type=model_type,
+        num_train_epochs=trainer_cfg.get("epochs"),
+        per_device_train_batch_size=trainer_cfg.get("batch_size"),
+        num_workers=trainer_cfg.get("dataloader_num_workers"),
+        use_peft=bool(peft_cfg.get("enabled", False)),
+        lora_r=peft_cfg.get("r"),
+        lora_alpha=peft_cfg.get("lora_alpha"),
+        sharding="ddp" if int(os.environ.get("WORLD_SIZE", "1")) > 1 else "none",
+        llm_torch_dtype=(profile.get("model") or {}).get("torch_dtype"),
+        device=args.device,
+        m3_profile=profile.get("name"),
+        m3_record_count=record_count,
+        m3_optimizer=optimizer_cfg.get("name"),
+        m3_scheduler=optimizer_cfg.get("scheduler"),
+    )
+
+
+def _log_dataset_metrics(metric_logger, metric_names: dict[str, str], record_count: int) -> None:
+    """Log rank-zero dataset summary scalars before training starts."""
+    metric_logger.log_metric(
+        metric_names.get("dataset_records", "m3_dataset/record_count"),
+        float(record_count),
+        0,
+    )
 
 
 if __name__ == "__main__":
