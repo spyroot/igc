@@ -9,6 +9,15 @@ child-relation name it is reached by, and whether it exposes an invokable action
 policy can rank *which API call to make next*. This module turns every node of the walked
 Redfish graph into that feature dict.
 
+The problem it solves: a Redfish host exposes hundreds of endpoints and the RIGHT next call depends
+on where the agent is. Comparing raw URL strings is too weak — URLs look alike and a model cannot
+tell a power-reset action from a log page. Describing each candidate by *what it structurally is*
+(its type, the relation it is reached by, whether it is an invokable action) is what lets one policy
+generalize ACROSS vendors: a "power-on" action has the same shape on Dell and HPE even when the URL
+differs. Without it the agent is stuck with a flat, fixed action list that neither generalizes nor
+adapts to the per-resource legal set. Who needs it: the ranker (the feasibility check today, the
+pointer policy once wired).
+
 Used by ``scripts/bench_hot_paths.py`` (the candidate-cache benchmark stage), feeding
 ``igc/modules/eval/zero_shot_ranking.py``. The candidate dict emitted here is a schema
 contract with that ranker's ``candidate_text`` / ``embed_candidates`` — renaming a field
