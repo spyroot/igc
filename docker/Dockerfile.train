@@ -1,28 +1,49 @@
-# Training image for igc on the GB300 NVL72 (aarch64 Grace + Blackwell).
+# igc training image for the GB300 NVL72 (aarch64 Grace + Blackwell).
 #
-# Base = the NGC PyTorch image already pulled on the cluster nodes; it provides CUDA
-# and a torch build tuned for the hardware, so we do NOT install torch ourselves.
-# The igc source is bind-mounted at run time, so this image stays reusable across code
-# changes (nothing app-specific is baked in).
+# Base = the NGC PyTorch image already cached on every cluster node; it provides CUDA
+# and a torch build tuned for the hardware, so we NEVER install torch ourselves — only
+# the extra Python deps (docker/requirements-train.txt) are baked in.
 #
-# Build (on a node, or push to a registry / convert to an enroot .sqsh):
+# The igc SOURCE is NOT baked: it is bind-mounted at run time
+# (`-v <checkout>:/workspace/igc`), so a code fix is `git pull` + re-run with NO image
+# rebuild. This is what scripts/gb300_launch.sh does.
+#
+# Build (on a node; the base is cached, so this is just the pip layer, ~1-2 min):
 #   docker build -f docker/Dockerfile.train -t igc-train:ngc26.03 .
 #
-# Run via Slurm + pyxis/enroot (preferred on the cluster — see GPU_ACCESS.md):
-#   srun --partition=debug --gres=gpu:1 \
-#        --exclude=gb300-poc1-slot2,gb300-poc1-slot15,gb300-poc1-slot16 \
-#        --container-image=nvcr.io/nvidia/pytorch:26.03-py3 \
-#        --container-mounts=$HOME/igc:/workspace/igc,$HOME/data:/data \
-#        bash -lc 'cd /workspace/igc && pip install -r docker/requirements-train.txt && \
-#                  NCCL_NVLS_ENABLE=0 accelerate launch --num_processes 1 igc_main.py --train ...'
+# Run (via the launcher, which mounts code+data and guards the node):
+#   IGC_IMAGE=igc-train:ngc26.03 IGC_GPUS=4 IGC_MODEL=gpt2 scripts/gb300_launch.sh
+#
+# Share to all 18 nodes without rebuilding 18x (optional — big file, node uplink only):
+#   docker save igc-train:ngc26.03 | zstd > /models/images/igc-train-ngc26.03.tar.zst
+#   # then on each node:  zstd -d < /models/images/igc-train-ngc26.03.tar.zst | docker load
 ARG NGC_TAG=26.03-py3
 FROM nvcr.io/nvidia/pytorch:${NGC_TAG}
 
 WORKDIR /workspace/igc
-COPY docker/requirements-train.txt /tmp/requirements-train.txt
-RUN pip install --no-cache-dir -r /tmp/requirements-train.txt
 
-# Flaky NVLink fabric on this lab: disable NVLink SHARP/multicast by default; start 1-GPU.
-ENV NCCL_NVLS_ENABLE=0
+# OS tools on top of the NGC base. Already in the base: git, curl, wget, jq, numactl,
+# vim, less, ssh, ps. We add:
+#   git-lfs  — REQUIRED: the idrac_ctl submodule ships its Redfish walk maps
+#              (rest_api_map.npy) as git-LFS objects, so `git pull` / `git lfs pull`
+#              inside the container needs it (the pull-inside-container iteration loop).
+#   nvtop    — live per-GPU utilisation/memory view while a run trains.
+#   htop     — live CPU/RAM view (dataset build is CPU-heavy).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git-lfs nvtop htop \
+    && git lfs install --system \
+    && rm -rf /var/lib/apt/lists/*
+
+# Extra Python deps on top of the NGC base (transformers / accelerate / peft / wandb /
+# gymnasium / mock-REST-env, etc.). torch is intentionally absent — use the base's.
+# py-spy dumps a stuck rank's Python stack to diagnose a distributed hang WITHOUT NCCL
+# debug env (operator directive: no NCCL_DEBUG on our runs).
+COPY docker/requirements-train.txt /tmp/requirements-train.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-train.txt \
+    && (pip install --no-cache-dir py-spy || echo "py-spy install skipped")
+
+# NVLS left at the image default (ON): the fabric is healthy (operator, 2026-07-10) and
+# ppa runs without forcing it off. Override per-run with `-e NCCL_NVLS_ENABLE=0` if a
+# multi-GPU run shows NVLink SHARP/multicast trouble.
 ENV PYTHONUNBUFFERED=1
 CMD ["bash"]
