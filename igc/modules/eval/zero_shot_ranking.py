@@ -1,6 +1,12 @@
 """
 D-001/D-002 zero-shot go/no-go representation check.
 
+Names, for a human: "D-001" (Decision 001 in ``docs/DECISIONS.md``) is the plan to SELECT an
+action by ranking candidates with a pointer network and taking the top one; "D-002" is how
+those candidates are REPRESENTED (text + graph features). This module is the cheap feasibility
+test for both — with NO training, can a plain text-similarity ranker already put a resource's
+true next-hops in the top-5? If yes, the learned ranker is worth building.
+
 Deterministic zero-shot ranking of legal action candidates with a frozen character-trigram
 text encoder: for each resource (state) in a walked Redfish tree, all host candidates are
 ranked by similarity to the state text, and the module measures whether the state's TRUE

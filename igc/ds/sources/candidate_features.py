@@ -1,6 +1,14 @@
 """
 D-002 v1 action-candidate featurizer with a static per-host cache.
 
+In plain terms: a *candidate* is one action the agent could take next — a single
+(endpoint URL, HTTP method) pair. "D-002" is Decision 002 in ``docs/DECISIONS.md`` (the
+action-candidate representation decision); it chose to describe each candidate not by its raw
+URL text alone but by **text + graph features** (path tokens, HTTP method, resource type, the
+child-relation name it is reached by, and whether it exposes an invokable action), so the
+policy can rank *which API call to make next*. This module turns every node of the walked
+Redfish graph into that feature dict.
+
 Used by ``scripts/bench_hot_paths.py`` (the candidate-cache benchmark stage), feeding
 ``igc/modules/eval/zero_shot_ranking.py``. The candidate dict emitted here is a schema
 contract with that ranker's ``candidate_text`` / ``embed_candidates`` — renaming a field
