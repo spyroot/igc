@@ -85,10 +85,11 @@ def main() -> None:
         fully_shard(model)
         model.to_empty(device=device)          # materialise the per-rank shard
         for p in model.parameters():
-            (nn.init.normal_ if p.dim() >= 2 else nn.init.zeros_)(p)
-        total_b = sum(p.numel() for p in model.parameters()) * world / 1e9
-        print(f"[sanity] HUGE model: {total_b:.0f}B params, ~{huge_gb:.0f}GB fp32 across {world} GPU "
-              f"(dim={dim}, {n_layers} layers) — FSDP2 sharding", flush=True)
+            (lambda t: nn.init.normal_(t, std=0.02) if t.dim() >= 2 else nn.init.zeros_(t))(p)
+        total_b = n_layers * dim * dim / 1e9    # full (unsharded) param count
+        print(f"[sanity] HUGE model: {total_b:.0f}B params (~{huge_gb:.0f}GB fp32 weights, "
+              f"~{huge_gb*4:.0f}GB DDP footprint w/ AdamW) sharded across {world} GPU "
+              f"(dim={dim}, {n_layers} layers) — FSDP2", flush=True)
     else:
         model = nn.Sequential(nn.Linear(dim, dim), nn.GELU(), nn.Linear(dim, dim)).to(device)
         if mode == "ddp":
