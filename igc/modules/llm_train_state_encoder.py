@@ -352,7 +352,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         # ranks disagree on "best" and enter the epoch-boundary save collective asymmetrically — the
         # observed epoch-8 _ALLGATHER_BASE NCCL watchdog hang. Reduce the counts so EVERY rank
         # computes the SAME global accuracy (accelerate's reduce is an all-reduce: sum lands on all).
-        if self.is_accelerator:
+        if getattr(self, "is_accelerator", False) and getattr(self, "accelerator", None) is not None:
             stats = torch.tensor(
                 [float(correct_predictions), float(total_predictions)],
                 dtype=torch.float64, device=self.device)

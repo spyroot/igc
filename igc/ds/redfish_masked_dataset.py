@@ -192,10 +192,10 @@ class MaskedJSONDataset(JSONDataset, ABC):
 
         array_begin = special_tokens["["].item()
         array_end = special_tokens["]"].item()
-        array_end_coma = special_tokens["],"].tolist()
+        special_tokens["],"].tolist()
         self._object_beg_tok_id = special_tokens["{"].item()
         self._object_end_tok_id = special_tokens["}"].item()
-        value_terminate = special_tokens["\""].item()
+        special_tokens["\""].item()
         self._va_term_comma_tok_id = self.tokenizer("\",")
         self._comma_token_id = [special_tokens[","].item()]
         self._at_token_id = self.tokenizer.encode("@")
@@ -619,7 +619,7 @@ class MaskedJSONDataset(JSONDataset, ABC):
             start_index = indices[0]
             end_index = start_index + len(target_tokens)
             attention_mask[0, start_index:end_index] = 1
-            next_index = end_index + 1
+            end_index + 1
 
         selected_values = input_ids[0, attention_mask[0] == 1]
         indices = torch.where((input_ids[0] == selected_values[:, None]).all(dim=0))[0]

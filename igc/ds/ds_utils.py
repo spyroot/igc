@@ -290,7 +290,7 @@ def download_dataset(
 
     root_dir = Path(path).expanduser()
     if Path(root_dir).is_dir():
-        logger.debug("Creating directory structure.".format(str(root_dir)))
+        logger.debug(f"Creating directory structure at {root_dir}.")
         os.makedirs(root_dir, exist_ok=True)
 
     if not filename:
@@ -325,7 +325,7 @@ def download_dataset(
         fetch_content(final_url, str(full_path))
 
     except (urllib.error.URLError, OSError) as e:
-        warnings.warn("Failed to fetch".format(final_url))
+        warnings.warn("Failed to fetch")
         if is_strict:
             raise e
 

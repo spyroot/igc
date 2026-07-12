@@ -156,7 +156,6 @@ if __name__ == "__main__":
 def test_fa2_rejected_for_conv1d_only_backbones(monkeypatch):
     """A FA2 load with no nn.Linear falls through to the next kernel."""
     import torch
-    import types
     import igc.modules.shared.llm_shared as llm_shared
 
     attempts = []

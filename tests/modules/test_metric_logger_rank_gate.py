@@ -9,7 +9,6 @@ Author:
 Mus mbayramo@stanford.edu
 """
 
-import pytest
 
 from igc.modules.base.metric_factory import NullLogger, create_logger
 

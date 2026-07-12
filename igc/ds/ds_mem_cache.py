@@ -3,7 +3,6 @@ Mem cache wrapper around any dataset.
 Mus mbayramo@stanford.edu
 """
 import torch
-from torch.utils.data.dataset import random_split
 
 
 class IgcMemoryCache(torch.utils.data.Dataset):

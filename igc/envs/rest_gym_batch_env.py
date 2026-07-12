@@ -21,7 +21,6 @@ from gymnasium import spaces
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from igc.ds.redfish_dataset import JSONDataset
-from igc.envs.rest_encoder import RestBaseEncoder
 from igc.envs.rest_mock_server import MockServer
 from .rest_gym_base import (
     RestApiBaseEnv, GoalTypeState, HttpMethod
@@ -410,7 +409,7 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
 
         # stack and pass, so we compare with self.goal.
         reached_goal_states = torch.stack(reached_goal_states, dim=0)
-        check_goal = self.check_goal(reached_goal_states)
+        self.check_goal(reached_goal_states)
 
     def sample_same_goal(self, do_sanity_check=False):
         """Method sample the same goal for all the environments, batch size
