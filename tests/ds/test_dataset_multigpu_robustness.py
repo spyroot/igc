@@ -36,6 +36,23 @@ def test_load_json_files_tolerates_non_utf8_bytes(tmp_path):
     pipeline.load_json_files()
 
 
+def test_load_json_files_skips_empty_and_malformed(tmp_path):
+    """Empty (204) and non-JSON captures are skipped; valid ones still process."""
+    (tmp_path / "empty.json").write_text("")            # 204/empty body
+    (tmp_path / "truncated.json").write_text('{"Name": ')  # truncated write
+    (tmp_path / "errorpage.json").write_text("<html>Gateway Timeout</html>")
+    (tmp_path / "good.json").write_text('{"Name": "ok"}')
+
+    pipeline = JsonPipeline.__new__(JsonPipeline)
+    pipeline._json_directory_path = str(tmp_path)
+    pipeline._json_target = {}
+    pipeline._action_to_rest = {}
+    pipeline._target_names = set()
+
+    # Must not raise despite three unparseable files in the directory.
+    pipeline.load_json_files()
+
+
 def test_copy_json_responses_survives_concurrent_dir_creation(tmp_path, monkeypatch):
     """Simulate the multi-rank TOCTOU: the exist-guard says 'absent' but a peer rank
     already created the destination before copytree — must merge, not FileExistsError.

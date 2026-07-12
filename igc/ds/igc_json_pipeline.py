@@ -8,9 +8,12 @@ for example extract all rest api end points.
 Author: Mus mbayramo@stanford.edu
 """
 import json
+import logging
 import os
 import re
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -130,6 +133,11 @@ class JsonPipeline:
         def process_json_file(_file_path: str, json_file_name: str) -> None:
             """
             Process a JSON file.
+
+            A captured corpus is not guaranteed clean: 204/empty bodies, truncated
+            writes, and non-JSON error pages all appear among real responses. Skip
+            any file that is empty or does not parse rather than aborting the whole
+            build — one bad capture must not kill training.
             """
             # Captured Redfish responses can carry non-UTF-8 bytes (e.g. latin-1
             # 0xa3 "£", 0xb0 "°" in vendor/sensor strings), which crash a strict
@@ -137,11 +145,19 @@ class JsonPipeline:
             # json.loads still parses the structure; only the stray byte is replaced.
             with open(_file_path, "r", encoding="utf-8", errors="replace") as json_file:
                 json_lines = json_file.read()
-                json_data = json.loads(json_lines)
-                targets = {}
 
-                if "$schema" not in json_data:
-                    self.extract_recursive(json_data, targets)
+            if not json_lines.strip():
+                logger.warning(f"Skipping empty JSON capture: {_file_path}")
+                return
+            try:
+                json_data = json.loads(json_lines)
+            except json.JSONDecodeError as exc:
+                logger.warning(f"Skipping malformed JSON capture {_file_path}: {exc}")
+                return
+
+            targets = {}
+            if "$schema" not in json_data:
+                self.extract_recursive(json_data, targets)
 
         total_files = sum(len(files) for _, _, files in os.walk(self._json_directory_path))
         processed_files = 0
