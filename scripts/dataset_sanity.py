@@ -21,7 +21,12 @@ Mus mbayramo@stanford.edu
 """
 
 import os
+import sys
 import time
+
+# torchrun runs this from scripts/, so scripts/ (not the repo root) is on sys.path;
+# add the repo root so `import igc` resolves inside the container.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
 import torch.distributed as dist
