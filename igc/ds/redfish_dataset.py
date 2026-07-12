@@ -444,7 +444,11 @@ class JSONDataset(
                 raise Exception(f"No JSON files found inside the directory {self._unprocessed}.")
 
             logging.debug(f"Copy all discovered data to {self._json_directory_path}")
-            shutil.copytree(self._unprocessed, f"{self._json_directory_path}/")
+            # dirs_exist_ok: the os.path.exists guard above is check-then-act, so under
+            # multi-GPU (FSDP/DDP) every rank passes it before any rank creates the dir,
+            # then all-but-one crash with FileExistsError. Tolerate a peer having created
+            # it (identical source content) instead of racing.
+            shutil.copytree(self._unprocessed, f"{self._json_directory_path}/", dirs_exist_ok=True)
 
     @staticmethod
     def _update_hash_values(json_file_path, data):
