@@ -1,0 +1,31 @@
+version: 1
+name: docker-smoke
+backend: docker
+image:
+  ref: igc-train:latest
+  pull_policy: if_missing
+runtime:
+  command:
+    - python
+    - igc_main.py
+    - --help
+  env:
+    WANDB_PROJECT: igc
+    WANDB_API_KEY: ${WANDB_API_KEY}
+paths:
+  code: ${IGC_CODE_DIR}
+  data: ${IGC_DATA_DIR}
+  output: ${IGC_OUTPUT_DIR}
+resources:
+  gpus: 1
+docker:
+  env_files:
+    - ${IGC_DOCKER_ENV_FILE}
+  mounts:
+    - source: ${IGC_CODE_DIR}
+      target: /workspace/igc
+    - source: ${IGC_DATA_DIR}
+      target: /root/.json_responses
+      read_only: true
+sanity:
+  dry_run: true
