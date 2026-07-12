@@ -42,8 +42,10 @@ log() { echo "=== [$(date -u '+%F %T')] $* ==="; }
 
 node_free() {  # ip -> 0 if no GPU compute process is running
     local busy
-    busy=$($SSH "nvidia@$1" 'nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null | grep -c .' 2>/dev/null || echo 99)
-    [ "$busy" = "0" ]
+    # grep -c exits 1 on zero matches (a FREE node) while still printing "0", so `|| true`
+    # keeps that "0"; an empty result means the ssh itself failed -> treat as busy.
+    busy=$($SSH "nvidia@$1" 'nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null | grep -c . || true' 2>/dev/null)
+    [ -n "$busy" ] && [ "$busy" = "0" ]
 }
 
 # shellcheck disable=SC2086  # NV_FLAGS/MOUNTS must word-split into separate docker args
