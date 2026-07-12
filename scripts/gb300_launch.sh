@@ -42,6 +42,8 @@ IGC_IMAGE="${IGC_IMAGE:-nvcr.io/nvidia/pytorch:26.03-py3}"  # bare NGC (runtime 
 IGC_RUN="${IGC_RUN:-verify}"                                # experiment name / output subdir / container name
 IGC_MODELS_DIR="${IGC_MODELS_DIR:-/models}"                 # shared 240TB BeeGFS (large/durable artifacts)
 EPOCHS="${EPOCHS:-3}"
+IGC_BATCH="${IGC_BATCH:-256}"                               # per-GPU batch; default 4 used ~14/284GB HBM — sweep up to ~85%
+IGC_WORKERS="${IGC_WORKERS:-16}"                            # DataLoader workers; default 1 left 143/144 Grace cores idle
 IGC_MIN_FREE_GB="${IGC_MIN_FREE_GB:-100}"                   # HF pulls + dataset + checkpoints need headroom
 CONTAINER="igc-${IGC_RUN}"
 
@@ -71,7 +73,7 @@ docker image inspect "$IGC_IMAGE" >/dev/null 2>&1 || blocker "image $IGC_IMAGE n
 # --- 2. run in the container --------------------------------------------------
 # Shared igc_main.py flags for both phases (dataset args identical => pre-build's
 # cache is reused by the multi-GPU run instead of rebuilt).
-COMMON="--train llm --llm latent --model_type ${IGC_MODEL} --json_data_dir /root/.json_responses --tf32 --seed 42 --log_level info --llm_log_level info"
+COMMON="--train llm --llm latent --model_type ${IGC_MODEL} --json_data_dir /root/.json_responses --tf32 --seed 42 --log_level info --llm_log_level info --per_device_train_batch_size ${IGC_BATCH} --num_workers ${IGC_WORKERS}"
 [ "${IGC_USE_PEFT:-0}" = "1" ] && COMMON="${COMMON} --use_peft --lora_r ${LORA_R:-16} --lora_alpha ${LORA_ALPHA:-32}"
 
 # Export so the bare `-e VAR` on `docker run` actually forwards them; otherwise a
