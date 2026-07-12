@@ -23,6 +23,7 @@ IMAGE="${IGC_IMAGE:-nvcr.io/nvidia/pytorch:26.03-py3}"
 IGC_CODE_DIR="${IGC_CODE_DIR:-$HOME/igc}"          # /models/igc for the multi-node test
 MODELS_DIR="${MODELS_DIR:-/models}"
 GPUS_LADDER="${SANITY_GPUS:-1 4 8}"
+MODES="${SANITY_MODES:-ddp fsdp2}"                 # parallelism to confirm, one pass each
 GPUS_PER_NODE="${GPUS_PER_NODE:-4}"
 PORT="${SANITY_PORT:-29511}"
 # shellcheck disable=SC2206  # word-split the space-separated node list on purpose
@@ -43,9 +44,10 @@ node_free() {  # ip -> 0 if no GPU compute process is running
 }
 
 # shellcheck disable=SC2086  # NV_FLAGS/MOUNTS must word-split into separate docker args
-run_on() {  # node_ip nnodes node_rank master_ip nproc
+run_on() {  # node_ip nnodes node_rank master_ip nproc mode
     $SSH "nvidia@$1" \
-        "docker run --rm --network host $NV_FLAGS $MOUNTS -w /workspace/igc $IMAGE \
+        "docker run --rm --network host $NV_FLAGS $MOUNTS \
+             -e SANITY_MODE=$6 -e SANITY_STEPS=1 -w /workspace/igc $IMAGE \
              torchrun --nnodes=$2 --node_rank=$3 --nproc_per_node=$5 \
                       --master_addr=$4 --master_port=$PORT scripts/dist_sanity.py"
 }
@@ -54,7 +56,6 @@ overall=0
 for g in $GPUS_LADDER; do
     need=$(( (g + GPUS_PER_NODE - 1) / GPUS_PER_NODE ))   # nodes required
     nproc=$(( g < GPUS_PER_NODE ? g : GPUS_PER_NODE ))    # procs per node
-    log "sanity: ${g} GPU (${need} node(s), ${nproc}/node)"
 
     if [ "${#NODES[@]}" -lt "$need" ]; then
         echo "  SKIP ${g}-GPU: need ${need} node(s), have ${#NODES[@]} — set SANITY_NODES='ip1 ip2'" >&2
@@ -65,16 +66,20 @@ for g in $GPUS_LADDER; do
     busy=0
     for ip in "${use[@]}"; do node_free "$ip" || { echo "  BLOCKER: node $ip is busy — skipping ${g}-GPU" >&2; busy=1; }; done
     [ "$busy" = "0" ] || { overall=1; continue; }
-
     master="${use[0]}"
-    pids=(); rank=0
-    for ip in "${use[@]}"; do
-        run_on "$ip" "$need" "$rank" "$master" "$nproc" &
-        pids+=("$!"); rank=$((rank + 1))
+
+    # one SINGLE gradient pass per parallelism mode — confirm DDP and FSDP2 both work
+    for mode in $MODES; do
+        log "sanity: ${g} GPU  mode=${mode}  (${need} node(s), ${nproc}/node, 1 pass)"
+        pids=(); rank=0
+        for ip in "${use[@]}"; do
+            run_on "$ip" "$need" "$rank" "$master" "$nproc" "$mode" &
+            pids+=("$!"); rank=$((rank + 1))
+        done
+        rc=0
+        for p in "${pids[@]}"; do wait "$p" || rc=1; done
+        if [ "$rc" = "0" ]; then echo "  ${g}-GPU ${mode}: PASS"; else echo "  ${g}-GPU ${mode}: FAIL"; overall=1; fi
     done
-    rc=0
-    for p in "${pids[@]}"; do wait "$p" || rc=1; done
-    if [ "$rc" = "0" ]; then echo "  ${g}-GPU: PASS"; else echo "  ${g}-GPU: FAIL"; overall=1; fi
 done
 
 if [ "$overall" = "0" ]; then
