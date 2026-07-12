@@ -14,7 +14,9 @@ Mus mbayramo@stanford.edu
 
 import pickle
 
+import pytest
 import torch
+from torch.utils.data import DataLoader
 
 from igc.ds.redfish_dataset import JSONDataset
 
@@ -52,6 +54,28 @@ def test_original_instance_unchanged_by_getstate(tmp_path):
     pickle.dumps(ds)
     assert ds.logger is not None
     assert hasattr(ds.logger, "write")  # still the original handle
+
+
+def test_spawn_worker_dataloader_reads_pickled_dataset(tmp_path):
+    """A spawn DataLoader can pickle the dataset and read every tiny item."""
+    ds = _dataset_like(tmp_path)
+    loader = DataLoader(
+        ds,
+        batch_size=1,
+        num_workers=2,
+        multiprocessing_context="spawn",
+    )
+
+    try:
+        rows = [batch.squeeze(0) for batch in loader]
+    except RuntimeError as exc:
+        if "torch_shm_manager" in str(exc):
+            pytest.skip("shared-memory manager unavailable for spawn workers")
+        raise
+
+    assert len(rows) == 2
+    assert torch.equal(rows[0], torch.tensor([1]))
+    assert torch.equal(rows[1], torch.tensor([2]))
 
 
 # Author: Mus mbayramo@stanford.edu

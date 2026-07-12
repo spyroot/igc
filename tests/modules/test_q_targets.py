@@ -54,6 +54,21 @@ def test_all_masked_next_state_is_terminal_and_target_stays_finite():
     assert torch.isclose(target[1], torch.tensor(3.6))
 
 
+@pytest.mark.xfail(
+    reason="q_learning_target does not yet handle next_q with zero legal-action width.",
+    strict=True,
+)
+def test_zero_width_next_q_is_terminal_and_target_stays_finite():
+    """A true zero-candidate next state should behave like a terminal dead end."""
+    reward = torch.tensor([0.25, -0.5])
+    done = torch.tensor([0.0, 0.0])
+    next_q = torch.empty(2, 0)
+
+    target = q_learning_target(reward, done, next_q, gamma=0.99)
+
+    torch.testing.assert_close(target, reward)
+
+
 @pytest.mark.parametrize(
     ("gamma", "expected"),
     [
