@@ -25,6 +25,8 @@ Reinforce Learner).
   its own uplink (never the VPN), git-lfs without OS changes, and the Docker Hub image flow.
 - [RUN_ORCHESTRATION_PLAN.md](RUN_ORCHESTRATION_PLAN.md) — the spec-driven Docker and Slurm
   launcher automation roadmap: image reuse, storage, checkpoints, dry-runs, sanity checks, and CI.
+- [RL_SCALING_PLAN.md](RL_SCALING_PLAN.md) — RL scaling plan: DQN/HER safety,
+  rollout/learner split, freshness, batching, parity, and profiling gates.
 - [TRAINING_OPTIMIZATION_PLAN.md](TRAINING_OPTIMIZATION_PLAN.md) — the large-model training,
   optimization, and GPU-efficiency roadmap for 3B/7B state-encoder work.
 
