@@ -348,6 +348,17 @@ class LlmEmbeddingsTrainer(LlmModule):
                 correct_predictions += compute_accuracy * batch_size
                 total_predictions += batch_size
 
+        # Global metric: each rank validates only its own eval shard, so a rank-LOCAL accuracy makes
+        # ranks disagree on "best" and enter the epoch-boundary save collective asymmetrically — the
+        # observed epoch-8 _ALLGATHER_BASE NCCL watchdog hang. Reduce the counts so EVERY rank
+        # computes the SAME global accuracy (accelerate's reduce is an all-reduce: sum lands on all).
+        if self.is_accelerator:
+            stats = torch.tensor(
+                [float(correct_predictions), float(total_predictions)],
+                dtype=torch.float64, device=self.device)
+            stats = self.accelerator.reduce(stats, reduction="sum")
+            correct_predictions, total_predictions = stats[0].item(), stats[1].item()
+
         # Guard: with drop_last + a small eval shard a rank can get 0 eval batches; a
         # bare division would crash (and take the fleet down mid-epoch) — return 0.0.
         accuracy = (correct_predictions / total_predictions * 100.0) if total_predictions else 0.0
@@ -745,9 +756,13 @@ class LlmEmbeddingsTrainer(LlmModule):
                 should_save = broadcast_flag(self.accelerator, should_save)
                 if should_save:
                     gathered_state = self.accelerator.get_state_dict(self.model)
+            # Every rank tracks the SAME best now that validation_accuracy is a global metric, so
+            # is_best_accuracy is computed identically across ranks next epoch and no rank diverges
+            # into the save collective alone (the _ALLGATHER_BASE hang). Update on improvement only.
+            if is_best_accuracy:
+                self._best_validation_metric = validation_accuracy
             if self.is_rank_zero():
                 if should_save:
-                    self._best_validation_metric = validation_accuracy
                     if self._module_checkpoint_dir is not None:
                         if self.is_accelerator:
                             model = self.accelerator.unwrap_model(self.model)
