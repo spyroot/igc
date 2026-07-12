@@ -131,7 +131,11 @@ class JsonPipeline:
             """
             Process a JSON file.
             """
-            with open(_file_path, "r") as json_file:
+            # Captured Redfish responses can carry non-UTF-8 bytes (e.g. latin-1
+            # 0xa3 "£", 0xb0 "°" in vendor/sensor strings), which crash a strict
+            # UTF-8 read on the first on-node dataset build. Decode leniently:
+            # json.loads still parses the structure; only the stray byte is replaced.
+            with open(_file_path, "r", encoding="utf-8", errors="replace") as json_file:
                 json_lines = json_file.read()
                 json_data = json.loads(json_lines)
                 targets = {}
