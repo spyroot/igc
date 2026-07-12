@@ -1,1 +1,4 @@
-python -m torch.distributed.launch --nproc_per_node 2 llm_trainer.py --model_type gpt2-large
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec python -m torch.distributed.launch --nproc_per_node 2 llm_trainer.py --model_type gpt2-large

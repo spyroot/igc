@@ -41,6 +41,7 @@ export EXTRA_ARGS=""
 IGC_REPORT="${IGC_REPORT:-wandb}"
 if [ "${IGC_REPORT}" = "wandb" ]; then
     # convenience: source a node-local gitignored key file if present (.internal/ is never committed)
+    # shellcheck source=/dev/null
     [ -f "${IGC_DIR}/.internal/wandb.env" ] && . "${IGC_DIR}/.internal/wandb.env"
     : "${WANDB_API_KEY:?set WANDB_API_KEY in your env or ${IGC_DIR}/.internal/wandb.env to use wandb}"
     export WANDB_API_KEY
@@ -50,6 +51,7 @@ fi
 
 echo "igc M1 SFT | model=${IGC_MODEL} epochs=${EPOCHS} report=${IGC_REPORT} node=$(hostname)"
 
+# shellcheck disable=SC2016  # The single-quoted payload is evaluated inside the container.
 srun --container-image="${NGC_IMAGE}" \
      --container-mounts="${IGC_DIR}:/workspace/igc,${DATA_DIR}:/root/.json_responses" \
      bash -lc '

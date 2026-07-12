@@ -11,8 +11,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: true
+      - name: Install shell test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats shellcheck
+      - name: Bash syntax
+        shell: bash
+        run: bash -n scripts/*.sh scripts/*.sbatch tests/bats/*.bats
+      - name: ShellCheck
+        shell: bash
+        run: shellcheck scripts/*.sh scripts/*.sbatch tests/bats/*.bats
+      - name: Bats
+        shell: bash
+        run: bats tests/bats
+
   gate:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,7 +45,7 @@ jobs:
           lfs: true
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install dependencies
         run: |
@@ -43,7 +68,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: metrics-${{ github.sha }}
+          name: metrics-py${{ matrix.python-version }}-${{ github.sha }}
           path: |
             coverage.xml
             coverage.json
@@ -51,7 +76,7 @@ jobs:
           retention-days: 90
 
   perf:
-    needs: gate
+    needs: [shell, gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -73,7 +98,7 @@ jobs:
           KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 pytest -m perf -q
 
   docker:
-    needs: gate
+    needs: [shell, gate]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     # secrets are NOT available in `if:` conditionals; surface them as env, then gate on env.
