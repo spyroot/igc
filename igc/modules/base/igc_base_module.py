@@ -1025,7 +1025,7 @@ class IgcModule(IgcBaseState):
 
         root_dir = Path(path).expanduser()
         if Path(root_dir).is_dir():
-            logger.debug("Creating directory structure.".format(str(root_dir)))
+            logger.debug("Creating directory structure %s", str(root_dir))
             os.makedirs(root_dir, exist_ok=True)
 
         if not filename:
@@ -1061,7 +1061,7 @@ class IgcModule(IgcBaseState):
             igc_util.fetch_content(final_url, str(full_path))
 
         except (urllib.error.URLError, OSError) as e:
-            warnings.warn("Failed to fetch".format(final_url))
+            warnings.warn(f"Failed to fetch {final_url}")
             if is_strict:
                 raise e
 
