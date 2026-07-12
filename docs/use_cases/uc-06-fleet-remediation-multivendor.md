@@ -1,5 +1,11 @@
 # UC-06 — Fleet remediation across vendors
 
+> **⚠️ STATUS (2026-07-13, code audit).** Illustrative of the **target** loop, not shipped code. The
+> running agent observes a **raw-JSON encoder embedding, not a structured `RedfishStateV0`** (which
+> does not exist in the code), and selects actions with a legacy one-hot DQN, not the pointer. The
+> structured candidate features described here are offline-only. Verify with
+> `scripts/code_reality_check.py`.
+
 > Target-loop status: this describes IGC's end-to-end target behavior, grounded in
 > `docs/ARCHITECTURE.md` and `docs/DECISIONS.md` (esp. D-002). Today the code is a Phase-0
 > Redfish MDP shell — captured-data replay, a legacy one-hot action space, and smoke-only
