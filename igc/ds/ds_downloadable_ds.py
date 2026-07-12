@@ -242,9 +242,9 @@ class DownloadableDataset(Dataset, AbstractLogger):
         # ensure that each mirror properly.
         for mirror in _mirrors:
             if not isinstance(mirror, dict):
-                raise DatasetError(f"The mirror is not a dictionary.")
+                raise DatasetError("The mirror is not a dictionary.")
             if not isinstance(data_types, list):
-                raise DatasetError(f"The dataset types must a list.")
+                raise DatasetError("The dataset types must a list.")
 
         if len(data_types) == 0:
             self.logger.debug("There is no dataset data types.")
@@ -409,7 +409,7 @@ class DownloadableDataset(Dataset, AbstractLogger):
             if checksum is not None:
                 logger.debug(f"Using checksum: {checksum}")
             else:
-                logger.debug(f"No checksum provided.")
+                logger.debug("No checksum provided.")
 
             if checksum is not None:
                 if check_integrity(f"{self.root_dir()}/{_filename}", md5=checksum):

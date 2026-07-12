@@ -196,7 +196,7 @@ class GoalExtractorTrainer(LlmModule):
         prefix = len("RedfishGoal: ")
         max_length = max(len(goal) for goal in goals)
         max_seq_length = max(len(seq) for seq in input_seqs)
-        max_total_len = max_seq_length + max_length + prefix + 10
+        max_seq_length + max_length + prefix + 10
 
         correct_predictions = 0.0
         for i, seq in enumerate(input_seqs):
@@ -357,7 +357,7 @@ class GoalExtractorTrainer(LlmModule):
         prefix = len("RedfishGoal: ")
         max_length = max(len(goal) for goal in goals)
         max_seq_length = max(len(seq) for seq in input_seqs)
-        max_total_len = max_seq_length + max_length + prefix + 10
+        max_seq_length + max_length + prefix + 10
 
         correct_predictions = 0.0
         for i, seq in enumerate(input_seqs):
@@ -508,7 +508,7 @@ class GoalExtractorTrainer(LlmModule):
                     self.metric_logger.add_scalar("Parameters extractor batch Loss", loss.item(), epoch * num_batches + i)
 
                     if (i + 1) % self.batch_log == 0:
-                        formatted_loss = "{:.4f}".format(loss.item())
+                        "{:.4f}".format(loss.item())
                         # print(f"Parameters extractor batch Loss [{i + 1}/{num_batches}]: {formatted_loss}")
 
                     # report batch loss it percentage, from total epochs

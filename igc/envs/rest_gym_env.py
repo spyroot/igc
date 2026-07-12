@@ -197,7 +197,7 @@ class RestApiEnv(gym.Env):
         if self.step_count >= self.max_steps:
             done = [True] * batch_size
             terminated = [True] * batch_size
-            reward = [-1.0] * batch_size
+            [-1.0] * batch_size
 
         observations = []
         rewards = []

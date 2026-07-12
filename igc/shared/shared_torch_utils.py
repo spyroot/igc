@@ -9,7 +9,8 @@ from torch.cuda import nccl
 import numpy as np
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from tabulate import tabulate
-from pynvml import *
+import os
+from pynvml import nvmlInit, nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo
 # for nccl to figure interface we need
 import socket
 
@@ -66,7 +67,7 @@ def mask_random_span(self, input_ids, attention_mask):
     """
     batch_size = input_ids.shape[0]
     labels = input_ids.clone()
-    input_ids_clone = input_ids.clone()
+    input_ids.clone()
 
     for i in range(batch_size):
         input_length = input_ids[i].size(0)
@@ -337,11 +338,12 @@ def generate_observation(model, dataset):
     print(embeddings.shape)
     print(embeddings)
 
-    data_collator = lambda data: {
-        'input_ids': torch.stack([item['input_ids'] for item in data]),
-        'attention_mask': torch.stack([item['attention_mask'] for item in data]),
-        'labels': torch.stack([item['labels'] for item in data])
-    }
+    def data_collator(data):
+        return {
+            'input_ids': torch.stack([item['input_ids'] for item in data]),
+            'attention_mask': torch.stack([item['attention_mask'] for item in data]),
+            'labels': torch.stack([item['labels'] for item in data])
+        }
 
     sample_batch = [dataset[i] for i in range(3)]  # Get a sample batch of size 3 from the dataset
     data_sample = data_collator(sample_batch)
