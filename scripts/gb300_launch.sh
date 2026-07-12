@@ -43,6 +43,11 @@ IGC_RUN="${IGC_RUN:-verify}"                                # experiment name / 
 IGC_MODELS_DIR="${IGC_MODELS_DIR:-/models}"                 # shared 240TB BeeGFS (large/durable artifacts)
 EPOCHS="${EPOCHS:-3}"
 IGC_MIN_FREE_GB="${IGC_MIN_FREE_GB:-100}"                   # HF pulls + dataset + checkpoints need headroom
+HF_HOME="${HF_HOME:-/models/hf-cache}"
+HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
+HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-${HF_HOME}/hub}"
+NCCL_MNNVL_ENABLE="${NCCL_MNNVL_ENABLE:-1}"
+NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
 CONTAINER="igc-${IGC_RUN}"
 
 log() { echo "=== [$(date -u '+%F %T')] $* ==="; }
@@ -78,6 +83,7 @@ COMMON="--train llm --llm latent --model_type ${IGC_MODEL} --json_data_dir /root
 # non-exported shell var arrives empty and the container's `set -u` aborts (rc=127,
 # "COMMON: unbound variable").
 export IGC_GPUS IGC_STAGE IGC_MODEL IGC_RUN EPOCHS COMMON
+export HF_HOME HF_HUB_CACHE HUGGINGFACE_HUB_CACHE NCCL_MNNVL_ENABLE NCCL_CUMEM_ENABLE
 
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 log "docker run ${IGC_IMAGE} | ${IGC_GPUS} GPU | code=${IGC_CODE_DIR} data=${IGC_DATA_DIR} models=${IGC_MODELS_DIR}"
@@ -94,9 +100,17 @@ docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=6710886
     $MODELS_MOUNT \
     -w /workspace/igc \
     -e IGC_GPUS -e IGC_STAGE -e IGC_MODEL -e IGC_RUN -e EPOCHS -e COMMON \
+    -e HF_HOME -e HF_HUB_CACHE -e HUGGINGFACE_HUB_CACHE \
+    -e NCCL_MNNVL_ENABLE -e NCCL_CUMEM_ENABLE \
     "$IGC_IMAGE" bash -lc '
         set -uo pipefail
         cd /workspace/igc
+        [ -f .internal/hf.env ] && { set -a; . .internal/hf.env; set +a; }
+        export HF_HOME="${HF_HOME:-/models/hf-cache}"
+        export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
+        export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-${HF_HOME}/hub}"
+        export NCCL_MNNVL_ENABLE="${NCCL_MNNVL_ENABLE:-1}"
+        export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
         # deps are baked into igc-train:ngc26.03; only the bare NGC image needs runtime pip.
         python -c "import transformers, accelerate, wandb" 2>/dev/null \
             || pip install --no-cache-dir -r docker/requirements-train.txt 2>&1 | tail -3

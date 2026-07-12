@@ -187,6 +187,15 @@ def _wandb_run_meta(kw: dict) -> dict:
         "model_type", "train", "llm", "rl", "num_train_epochs",
         "per_device_train_batch_size", "num_workers", "use_peft",
         "lora_r", "lora_alpha", "sharding", "llm_torch_dtype", "device",
+        "lora_dropout", "lora_method", "use_rslora", "use_dora",
+        "m3_profile", "m3_record_count", "m3_optimizer", "m3_scheduler",
+        "m3_learning_rate", "m3_weight_decay", "m3_warmup_ratio",
+        "m3_gradient_accumulation_steps", "m3_max_length", "m3_max_steps",
+        "m3_precision", "m3_gradient_checkpointing", "m3_torch_compile",
+        "m3_dataloader_num_workers", "m3_total_parameters",
+        "m3_trainable_parameters", "m3_trainable_parameter_ratio",
+        "hf_home", "hf_hub_cache", "hf_token_available",
+        "nccl_mnnvl_enable", "nccl_cumem_enable", "nccl_nvls_enable",
     ]
     config = {k: kw[k] for k in config_keys if k in kw}
 

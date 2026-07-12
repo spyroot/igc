@@ -174,6 +174,7 @@ def _train(args: argparse.Namespace) -> int:
 
     output_dir = args.output_dir or trainer_cfg.get("output_dir") or "experiments/m3_goal_planner"
     betas = tuple(optimizer_cfg.get("betas", (0.9, 0.999)))
+    param_counts = _parameter_counts(model)
     metric_logger = _build_metric_logger(
         args,
         profile,
@@ -181,6 +182,7 @@ def _train(args: argparse.Namespace) -> int:
         model_type,
         output_dir,
         len(dataset),
+        param_counts,
     )
     if metric_logger is not None:
         _log_dataset_metrics(metric_logger, metric_names, len(dataset))
@@ -343,6 +345,7 @@ def _build_metric_logger(
     model_type: str,
     output_dir: str,
     record_count: int,
+    param_counts: dict[str, float],
 ):
     """Create the configured metric logger, or ``None`` when disabled."""
     report_to = args.metric_report
@@ -367,6 +370,10 @@ def _build_metric_logger(
         use_peft=bool(peft_cfg.get("enabled", False)),
         lora_r=peft_cfg.get("r"),
         lora_alpha=peft_cfg.get("lora_alpha"),
+        lora_dropout=peft_cfg.get("lora_dropout"),
+        lora_method=peft_cfg.get("method"),
+        use_rslora=peft_cfg.get("use_rslora"),
+        use_dora=peft_cfg.get("use_dora"),
         sharding="ddp" if int(os.environ.get("WORLD_SIZE", "1")) > 1 else "none",
         llm_torch_dtype=(profile.get("model") or {}).get("torch_dtype"),
         device=args.device,
@@ -374,7 +381,40 @@ def _build_metric_logger(
         m3_record_count=record_count,
         m3_optimizer=optimizer_cfg.get("name"),
         m3_scheduler=optimizer_cfg.get("scheduler"),
+        m3_learning_rate=optimizer_cfg.get("learning_rate"),
+        m3_weight_decay=optimizer_cfg.get("weight_decay"),
+        m3_warmup_ratio=optimizer_cfg.get("warmup_ratio"),
+        m3_gradient_accumulation_steps=trainer_cfg.get("gradient_accumulation_steps"),
+        m3_max_length=trainer_cfg.get("max_length"),
+        m3_max_steps=trainer_cfg.get("max_steps"),
+        m3_precision=trainer_cfg.get("precision"),
+        m3_gradient_checkpointing=trainer_cfg.get("gradient_checkpointing"),
+        m3_torch_compile=trainer_cfg.get("torch_compile"),
+        m3_dataloader_num_workers=trainer_cfg.get("dataloader_num_workers"),
+        m3_total_parameters=param_counts["total"],
+        m3_trainable_parameters=param_counts["trainable"],
+        m3_trainable_parameter_ratio=param_counts["trainable_ratio"],
+        hf_home=os.environ.get("HF_HOME"),
+        hf_hub_cache=os.environ.get("HF_HUB_CACHE") or os.environ.get("HUGGINGFACE_HUB_CACHE"),
+        hf_token_available=bool(
+            os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        ),
+        nccl_mnnvl_enable=os.environ.get("NCCL_MNNVL_ENABLE"),
+        nccl_cumem_enable=os.environ.get("NCCL_CUMEM_ENABLE"),
+        nccl_nvls_enable=os.environ.get("NCCL_NVLS_ENABLE"),
     )
+
+
+def _parameter_counts(model) -> dict[str, float]:
+    """Return total/trainable parameter counts for run metadata."""
+    total = sum(parameter.numel() for parameter in model.parameters())
+    trainable = sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
+    ratio = float(trainable / total) if total else 0.0
+    return {
+        "total": float(total),
+        "trainable": float(trainable),
+        "trainable_ratio": ratio,
+    }
 
 
 def _log_dataset_metrics(metric_logger, metric_names: dict[str, str], record_count: int) -> None:

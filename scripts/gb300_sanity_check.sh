@@ -53,7 +53,8 @@ run_on() {  # node_ip nnodes node_rank master_ip nproc mode
     $SSH "nvidia@$1" \
         "docker run --rm --network host $NV_FLAGS $MOUNTS \
              -e SANITY_MODE=$6 -e SANITY_STEPS=1 -e SANITY_HUGE_GB=${SANITY_HUGE_GB:-0} \
-             -e NCCL_MNNVL_ENABLE=${NCCL_MNNVL_ENABLE:-0} -e IGC_MODEL=$IGC_MODEL -e IGC_DATASET_DIR=$IGC_DATASET_DIR \
+             -e NCCL_MNNVL_ENABLE=${NCCL_MNNVL_ENABLE:-1} -e NCCL_CUMEM_ENABLE=${NCCL_CUMEM_ENABLE:-1} \
+             -e IGC_MODEL=$IGC_MODEL -e IGC_DATASET_DIR=$IGC_DATASET_DIR \
              -w /workspace/igc $IMAGE \
              torchrun --nnodes=$2 --node_rank=$3 --nproc_per_node=$5 \
                       --master_addr=$4 --master_port=$PORT $SCRIPT"

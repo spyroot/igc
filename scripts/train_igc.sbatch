@@ -41,6 +41,11 @@ fi
 # Fabric update (operator, 2026-07-10): NVLink/RoCE healthy — NVLS on by default;
 # override with IGC_NCCL_NVLS=0 if nccl_smoke (the R4 gate) says otherwise.
 export NCCL_NVLS_ENABLE="${IGC_NCCL_NVLS:-1}"
+export NCCL_MNNVL_ENABLE="${NCCL_MNNVL_ENABLE:-1}"
+export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
+export HF_HOME="${HF_HOME:-/models/hf-cache}"
+export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
+export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-${HF_HOME}/hub}"
 export PYTHONUNBUFFERED=1
 
 # Overridable knobs (env). Stage code + captured data on the node's local NVMe.
@@ -88,6 +93,8 @@ EXTRA_ARGS=""
 IGC_REPORT="${IGC_REPORT:-wandb}"
 RUN_NAME="${WANDB_NAME:-${IGC_STAGE}-${IGC_MODEL//\//_}-${SLURM_JOB_ID:-local}}"
 if [ "${IGC_REPORT}" = "wandb" ]; then
+    # shellcheck source=/dev/null
+    [ -f "${IGC_DIR}/.internal/hf.env" ] && . "${IGC_DIR}/.internal/hf.env"
     # convenience: source a node-local gitignored key file if present (.internal/ is never committed)
     # shellcheck source=/dev/null
     [ -f "${IGC_DIR}/.internal/wandb.env" ] && . "${IGC_DIR}/.internal/wandb.env"
@@ -108,6 +115,12 @@ srun --container-image="${NGC_IMAGE}" \
      bash -lc '
         set -euo pipefail
         cd /workspace/igc
+        [ -f .internal/hf.env ] && { set -a; . .internal/hf.env; set +a; }
+        export HF_HOME="${HF_HOME:-/models/hf-cache}"
+        export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
+        export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-${HF_HOME}/hub}"
+        export NCCL_MNNVL_ENABLE="${NCCL_MNNVL_ENABLE:-1}"
+        export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
         # auto-load W&B creds (gitignored env file) so the run streams live
         [ -f .internal/wandb.env ] && { set -a; . .internal/wandb.env; set +a; }
         pip install --no-cache-dir -r docker/requirements-train.txt
