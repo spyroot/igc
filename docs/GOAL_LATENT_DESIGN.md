@@ -201,6 +201,15 @@ The generated `goal_surfaces.jsonl`, `goal_text_examples.jsonl`, and `goal_datas
 are private dataset artifacts. They are not public documentation and should not be committed to this
 repository.
 
+To inspect a built dataset locally, use the sampler without loading models or calling any endpoint:
+
+```bash
+python scripts/sample_goal_dataset.py \
+  --dataset-dir /path/to/goal_dataset \
+  --limit 5 \
+  --family power
+```
+
 ## Initial Goal Families
 
 Power goals come from `#ComputerSystem` resources:
