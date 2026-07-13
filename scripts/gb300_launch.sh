@@ -269,7 +269,9 @@ fi
 export WANDB_PROJECT="${WANDB_PROJECT}"
 export WANDB_NAME="${WANDB_NAME}"
 export WANDB_MODE="${RUN_WANDB_MODE}"
-echo "run: W&B project=\${WANDB_PROJECT} name=\${WANDB_NAME} mode=\${WANDB_MODE} | HF cache=\${HF_HOME:-<default>} token=\$([ -n "\${HF_TOKEN:-}" ] && echo available || echo none)"
+HF_TOKEN_STATUS=none
+[ -n "\${HF_TOKEN:-}" ] && HF_TOKEN_STATUS=available
+echo "run: W&B project=\${WANDB_PROJECT} name=\${WANDB_NAME} mode=\${WANDB_MODE} | HF cache=\${HF_HOME:-<default>} token=\${HF_TOKEN_STATUS}"
 mkdir -p "${IGC_OUTPUT_DIR}"
 nvidia-smi -L
 INNEREOF
