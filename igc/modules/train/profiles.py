@@ -18,7 +18,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, replace
+from functools import lru_cache
+from pathlib import Path
 from typing import Dict, List, Optional
+
+import yaml
 
 # Qwen/Llama-family decoder linear projections — the plan's target-module list; also the
 # default in igc.modules.llm.peft_lora.default_target_modules (kept in sync here).
@@ -71,6 +75,10 @@ class TrainingProfile:
 
     name: str
     model: str
+    stage: str = "m1"
+    llm_stage: str = "latent"
+    implemented: bool = True
+    purpose: str = ""
     use_peft: bool = True
     adapter: Optional[AdapterSpec] = field(default_factory=AdapterSpec)
     precision: str = "bf16"          # accelerate mixed_precision
@@ -85,16 +93,35 @@ class TrainingProfile:
     sharding: str = "none"           # none | zero3 | fsdp
     seq_len: int = 1024
     num_workers: int = 8
+    auto_encoder_lr: float = 1e-3
+    auto_encoder_optimizer: str = "Adam"
+    auto_encoder_weight_decay: float = 0.0
+    metric_prefix: str = "m1/state_encoder"
+    data_contract: str = "captured_redfish_json"
+    live_redfish_allowed: bool = False
+    nccl_mnnvl_enable: str = "0"
+    nccl_cumem_enable: str = "1"
+    source_path: Optional[str] = None
 
     def describe(self) -> dict:
         """Flat, log-safe dict of the resolved config (for stdout + W&B config)."""
         d = {
-            "profile": self.name, "model": self.model, "use_peft": self.use_peft,
+            "profile": self.name, "stage": self.stage, "llm_stage": self.llm_stage,
+            "implemented": self.implemented, "purpose": self.purpose,
+            "model": self.model, "use_peft": self.use_peft,
             "precision": self.precision, "torch_dtype": self.torch_dtype,
             "batch_size": self.batch_size, "grad_accum": self.grad_accum, "lr": self.lr,
             "scheduler": self.scheduler, "warmup_ratio": self.warmup_ratio,
             "epochs": self.epochs, "max_steps": self.max_steps, "sharding": self.sharding,
             "seq_len": self.seq_len, "num_workers": self.num_workers,
+            "auto_encoder_lr": self.auto_encoder_lr,
+            "auto_encoder_optimizer": self.auto_encoder_optimizer,
+            "auto_encoder_weight_decay": self.auto_encoder_weight_decay,
+            "metric_prefix": self.metric_prefix,
+            "data_contract": self.data_contract,
+            "live_redfish_allowed": self.live_redfish_allowed,
+            "runtime_env": self.runtime_env(),
+            "source_path": self.source_path,
         }
         if self.use_peft and self.adapter is not None:
             d["adapter"] = self.adapter.to_dict()
@@ -102,9 +129,16 @@ class TrainingProfile:
             d["adapter"] = {"method": "full_finetune"}
         return d
 
+    def runtime_env(self) -> dict:
+        """Public-safe runtime environment defaults for this profile."""
+        return {
+            "NCCL_MNNVL_ENABLE": self.nccl_mnnvl_enable,
+            "NCCL_CUMEM_ENABLE": self.nccl_cumem_enable,
+        }
+
 
 # The named profiles of docs/TRAINING_OPTIMIZATION_PLAN.md §Target Training Profiles.
-PROFILES: Dict[str, TrainingProfile] = {
+_LEGACY_PROFILES: Dict[str, TrainingProfile] = {
     "m1_gpt2_smoke": TrainingProfile(
         name="m1_gpt2_smoke", model="gpt2", use_peft=False, adapter=None,
         precision="no", torch_dtype="float32", batch_size=8, lr=5e-5,
@@ -143,9 +177,121 @@ PROFILES: Dict[str, TrainingProfile] = {
 }
 
 
+def specs_dir() -> Path:
+    """Directory containing committed YAML training profiles."""
+    return Path("configs/training/profiles")
+
+
+def _yaml_paths(root: Path | None = None) -> list[Path]:
+    root = specs_dir() if root is None else root
+    return sorted(root.glob("*.yaml")) if root.exists() else []
+
+
+def _load_profile_file(path: Path) -> dict[str, TrainingProfile]:
+    """Load one public-safe YAML profile file and any aliases."""
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: profile spec must be a YAML mapping")
+
+    profile = _profile_from_mapping(raw, source_path=str(path))
+    out = {profile.name: profile}
+    for alias in raw.get("aliases", []) or []:
+        out[str(alias)] = replace(profile, name=str(alias))
+    return out
+
+
+def _profile_from_mapping(raw: dict, source_path: str | None = None) -> TrainingProfile:
+    name = str(raw.get("name") or "").strip()
+    stage = str(raw.get("stage") or "").strip()
+    if not name:
+        raise ValueError(f"{source_path or '<profile>'}: missing profile name")
+    if stage not in {"m1", "m2"}:
+        raise ValueError(f"{name}: stage must be m1 or m2")
+
+    implemented = bool(raw.get("implemented", False))
+    if not implemented:
+        raise ValueError(f"{name}: profile is marked unimplemented")
+
+    backbone = _mapping(raw, "backbone", name)
+    adapter = _mapping(raw, "adapter", name)
+    optimizer = _mapping(raw, "optimizer", name)
+    dataloader = _mapping(raw, "dataloader", name)
+    training = _mapping(raw, "training", name)
+    data = _mapping(raw, "data", name)
+    runtime = _mapping(raw, "runtime", name)
+
+    live_allowed = bool(data.get("live_redfish_allowed", False))
+    if live_allowed:
+        raise ValueError(f"{name}: live Redfish defaults are not allowed in training profiles")
+
+    use_peft = bool(adapter.get("use_peft", False))
+    adapter_spec = None
+    if use_peft:
+        adapter_spec = AdapterSpec(
+            method=str(adapter.get("method", "lora")),
+            r=int(adapter.get("r", 16)),
+            alpha=int(adapter.get("alpha", 32)),
+            dropout=float(adapter.get("dropout", 0.05)),
+            init=str(adapter.get("init", "default")),
+            target_modules=tuple(adapter.get("target_modules", DECODER_TARGETS)),
+        )
+
+    return TrainingProfile(
+        name=name,
+        model=str(backbone.get("model", "gpt2")),
+        stage=stage,
+        llm_stage=str(raw.get("llm_stage", "latent" if stage == "m1" else "encoder")),
+        implemented=implemented,
+        purpose=str(raw.get("purpose", "")),
+        use_peft=use_peft,
+        adapter=adapter_spec,
+        precision=str(training.get("precision", "bf16")),
+        torch_dtype=str(backbone.get("torch_dtype", "bfloat16")),
+        batch_size=int(dataloader.get("batch_size", 8)),
+        grad_accum=int(dataloader.get("grad_accum", 1)),
+        lr=float(optimizer.get("llm_learning_rate", 1e-4)),
+        scheduler=str(optimizer.get("llm_scheduler", "OneCycleLR")),
+        epochs=int(training.get("epochs", 3)),
+        max_steps=_optional_int(training.get("max_steps")),
+        sharding=str(training.get("sharding", "none")),
+        seq_len=int(dataloader.get("seq_len", 1024)),
+        num_workers=int(dataloader.get("num_workers", 8)),
+        auto_encoder_lr=float(optimizer.get("auto_encoder_lr", 1e-3)),
+        auto_encoder_optimizer=str(optimizer.get("auto_encoder_optimizer", "Adam")),
+        auto_encoder_weight_decay=float(optimizer.get("auto_encoder_weight_decay", 0.0)),
+        metric_prefix=str(training.get("metric_prefix", "m1/state_encoder")),
+        data_contract=str(data.get("contract", "captured_redfish_json")),
+        live_redfish_allowed=live_allowed,
+        nccl_mnnvl_enable=str(runtime.get("nccl_mnnvl_enable", "0")),
+        nccl_cumem_enable=str(runtime.get("nccl_cumem_enable", "1")),
+        source_path=source_path,
+    )
+
+
+def _mapping(raw: dict, key: str, profile_name: str) -> dict:
+    value = raw.get(key, {})
+    if not isinstance(value, dict):
+        raise ValueError(f"{profile_name}: {key} must be a mapping")
+    return value
+
+
+def _optional_int(value) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    return int(value)
+
+
+@lru_cache(maxsize=1)
+def _profiles() -> Dict[str, TrainingProfile]:
+    profiles = dict(_LEGACY_PROFILES)
+    for path in _yaml_paths():
+        profiles.update(_load_profile_file(path))
+    return profiles
+
+
 def profile_names() -> List[str]:
     """The registered profile names."""
-    return list(PROFILES)
+    return list(_profiles())
 
 
 def resolve_profile(name: str, **overrides) -> TrainingProfile:
@@ -157,9 +303,20 @@ def resolve_profile(name: str, **overrides) -> TrainingProfile:
         no-op.
     :return: the resolved (immutable) profile.
     """
-    if name not in PROFILES:
-        raise KeyError(f"unknown profile {name!r}; choose from {profile_names()}")
-    base = PROFILES[name]
+    if str(name).endswith((".yaml", ".yml")):
+        profiles = _load_profile_file(Path(name))
+        base = next(iter(profiles.values()))
+    else:
+        profiles = _profiles()
+        if name not in profiles:
+            raise KeyError(f"unknown profile {name!r}; choose from {profile_names()}")
+        base = profiles[name]
+
+    if not base.implemented:
+        raise ValueError(f"profile {name!r} is marked unimplemented")
+    if base.live_redfish_allowed:
+        raise ValueError(f"profile {name!r} enables live Redfish by default")
+
     if overrides:
         valid = set(base.__dataclass_fields__)
         bad = set(overrides) - valid

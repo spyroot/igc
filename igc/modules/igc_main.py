@@ -156,19 +156,13 @@ class IgcMain:
 
         :return:
         """
-        self._dataset = MaskedJSONDataset(
-            self._dataset_dir,
-            default_tokenize=self._specs.model_type,
-            max_len=self._specs.seq_len,
-            recreate_dataset=self._specs.recreate_dataset,
-            do_consistency_check=self._specs.do_consistency_check
-        )
+        dataset = self.dataset
 
         # copy last checkpoint as last model with opt etc. so we can use it.
         if self._specs.copy_llm:
             model, _ = from_pretrained_default(self._specs, only_model=True)
             model.to(torch.device("cpu"))
-            safe_resize_token_embeddings(model, self._dataset.tokenizer)
+            safe_resize_token_embeddings(model, dataset.tokenizer)
             # (BetterTransformer was removed in transformers 5.x; SDPA is native.)
             model, epoch, model_path = IgcModule.copy_checkpoint(self._specs, "state_encoder", model)
             print("Saved model to checkpoint file: ", model_path)

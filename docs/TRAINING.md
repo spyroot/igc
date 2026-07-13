@@ -47,6 +47,72 @@ packed form (tarballs, JSONL) rather than many small files. Keep per-run scratch
 a run's working dataset copy) on the target node's local NVMe, and pin the job to that node with
 the scheduler's node-selection flag.
 
+For provenance-tagged corpus runs, pass `--corpus_dir <dir>` where `<dir>` contains
+`examples.jsonl`, the JSONL file written by `igc.ds.sources.corpus_io.write_corpus`, and
+`manifest.json`, the sidecar written by the same corpus build step. Each `TrainingExample` is
+converted into a structured State record before tokenization:
+
+- `state_id` / `state_fingerprint` from a deterministic hash of graph, action, metadata, and goal
+  context.
+- `source_snapshot` from redaction-safe provenance such as a capture id or source file label.
+- `resource_graph` with compact resource nodes, reference/action-capability edges, relation labels,
+  and stable integer ids.
+- `resource_text`, a deterministic LM-compatible rendering of the selected resource node's canonical
+  JSON/body plus local typed features. It is not the whole host dump.
+- `action_affordances`, including allowed methods, candidate count, templates, and mutating/read-only
+  summaries for later M6 action ranking.
+- `metadata` with vendor, trust level, schema version, source, and partition tags.
+
+The model-produced `state_latent` is intentionally created by the M1/M2 forward path, not stored in
+the public corpus. M1 encodes the per-resource JSON/text; M2 pools or aggregates the set/graph of
+resource-node embeddings and graph features into the compact observation latent. Unit tests pin that
+graph/action fields are carried through the dataset and collators instead of being decorative JSON,
+and that unrelated resources outside the selected local graph do not perturb the per-resource text.
+
+The explicit tensor modules live in `igc.modules.policy.state_encoder`:
+
+- `ResourceTextPooler` pools backbone token hidden states within one resource JSON sequence.
+- `GraphFeatureEncoder` embeds typed IDs, booleans, masks, path hashes, and local-state summaries.
+- `NodeFusion` fuses per-resource JSON embedding and typed feature embedding.
+- `StatePooler` pools the selected observation scope with a mask to produce `state_latent`.
+- `CandidateEncoder` combines action text, endpoint node embedding, and candidate graph features.
+
+Each legal endpoint/method candidate also carries typed pointer-policy features for the planned M6
+candidate scorer: `resource_type_id`, `parent_type_id`, `relation_name_id`, `depth_bucket`,
+`method_id`, `has_action_target`, `is_collection`, `is_oem`, `path_segment_hashes`,
+`allowed_method_mask`, and a small `local_state_summary`. These are emitted as fixed-size tensors by
+`CorpusJSONLDataset`, while the existing canonical action text remains available for the
+`ActionCodec` path.
+
+M3 links to this path through typed goal conditioning, not by replacing state. `Goal`, the public type
+defined in `igc.core.types`, carries the natural-language instruction, machine-checkable `spec`,
+optional constraints, and optional ordered `ToolAction` plan. `GoalEncoder`, defined in
+`igc.modules.policy.goal_conditioning`, accepts typed `Goal` objects or equivalent M3 dictionaries
+only; it does not accept current resource state. It canonicalizes the `spec`/constraints/plan for
+`goal_latent`, while keeping the instruction in the serializable audit text. M6 then combines
+`state_latent = M2(M1(resource_text), graph_features)` with `goal_latent = GoalEncoder(Goal)` and
+scores the legal candidate tensors with the pointer policy.
+
+Goal training stages are separate:
+
+1. M3 structured extraction: operator text to canonical `Goal` JSON; metrics are exact/field-level
+   spec match, plan-step match, and argument validity.
+2. GoalEncoder baseline: canonical `Goal` render through the shared/small encoder and pooling;
+   initially frozen/no extra training.
+3. GoalEncoder representation training: contrastive/triplet/retrieval positives are paraphrases or
+   equivalent renderings of the same Goal; negatives differ by target state, apply time, risk,
+   resource, or arguments.
+4. Later RL-facing updates: `goal_latent` can update through BC pointer warm-start and DQN/HER only
+   after the typed goal baseline is stable.
+
+In short:
+
+```text
+M3: instruction -> Goal(instruction, spec, constraints, plan)
+M1/M2: RedfishStateV0/resource_text/graph features -> state_latent
+M6: (state_latent, goal_latent, legal candidate features) -> Q(s, candidate_i)
+```
+
 ## 3. Experiment tracking (Weights & Biases)
 
 The metric backend is selected by `--metric_report` (the run wires `igc.modules` `MetricLogger`).
@@ -72,27 +138,29 @@ To use TensorBoard instead, choose the variable for the launcher you are using:
 There are two launch routes today:
 
 - `scripts/train_m1.sbatch`, the Slurm smoke launcher, is the normal scheduled GPU path.
-- `scripts/run_profile.sh`, the profile-backed wrapper, is for direct named-profile execution.
+- `scripts/run_profile.sh`, the profile-backed wrapper, is for direct named-profile execution of M1
+  state-encoder and M2 state-autoencoder profiles.
 
-The profile registry, defined in `igc/modules/train/profiles.py`, is the committed source of truth
-for named M1 state-encoder runs. Inspect a profile locally before spending GPU time:
+The profile registry, defined in `igc/modules/train/profiles.py`, loads public-safe YAML specs from
+`configs/training/profiles`. Inspect a profile locally before spending GPU time:
 
 ```bash
-python -m igc.modules.train.launch --profile m1_gpt2_smoke
-python -m igc.modules.train.launch --profile m1_7b_rslora_r32 --print-argv
+python -m igc.modules.train.launch --profile m1_cpu_smoke
+python -m igc.modules.train.launch --profile m2_cpu_smoke --print-argv
 ```
 
-The smoke argv should include `--model_type gpt2` and `--max_train_steps 50`; the rsLoRA argv should
-include `--adapter_method rslora`, `--lora_r 32`, and `--lora_alpha 64`.
+The M1 smoke argv should include `--llm latent`, `--model_type gpt2`, and `--max_train_steps 50`.
+The M2 smoke argv should include `--llm encoder`, `--auto_encoder_train_steps 5`, and
+`--metric_prefix m2/state_autoencoder`.
 
 The `scripts/run_profile.sh` wrapper, committed as the profile-name launcher, resolves `IGC_PROFILE`
 through `igc.modules.train.launch`, then supplies `--json_data_dir`, `--output_dir`, and
 `--metric_report` from `IGC_DATA_DIR`, `IGC_OUTPUT_DIR`, and `IGC_METRIC_REPORT`:
 
 ```bash
-IGC_PROFILE=m1_gpt2_smoke \
+IGC_PROFILE=m1_cpu_smoke \
 IGC_DATA_DIR=$HOME/.json_responses \
-IGC_OUTPUT_DIR=experiments/m1_gpt2_smoke \
+IGC_OUTPUT_DIR=experiments/m1_cpu_smoke \
 bash scripts/run_profile.sh
 ```
 
@@ -100,8 +168,21 @@ Use `IGC_SET`, read by `scripts/run_profile.sh` as profile-field overrides, for 
 changes such as a shorter smoke or batch-size check:
 
 ```bash
-IGC_PROFILE=m1_3b_lora IGC_SET="batch_size=16 lr=2e-4" bash scripts/run_profile.sh
+IGC_PROFILE=m1_gb300_3b_lora IGC_SET="batch_size=16 lr=2e-4" bash scripts/run_profile.sh
 ```
+
+Run the M2 smoke the same way after an M1 checkpoint exists in the selected output tree:
+
+```bash
+IGC_PROFILE=m2_cpu_smoke \
+IGC_DATA_DIR=$HOME/.json_responses \
+IGC_OUTPUT_DIR=experiments/m2_cpu_smoke \
+IGC_METRIC_REPORT=tensorboard \
+bash scripts/run_profile.sh
+```
+
+Fabric defaults in the profile wrappers keep `NCCL_MNNVL_ENABLE=0` and `NCCL_CUMEM_ENABLE=1`.
+Override only after an IMEX/MNNVL preflight proves MNNVL is safe for the selected run.
 
 `scripts/run_profile.sh` is the profile-backed local launcher. `scripts/train_m1.sbatch`, the older
 Slurm smoke launcher, does not read `IGC_PROFILE`; it still uses `IGC_MODEL`, `EPOCHS`, and

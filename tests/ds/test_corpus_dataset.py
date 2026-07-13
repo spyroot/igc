@@ -29,8 +29,12 @@ class _FakeTokenizer:
     pad_token = "<pad>"
     eos_token = "<eos>"
 
+    def __init__(self):
+        self.texts = []
+
     def __call__(self, text, padding=None, max_length=None, truncation=None,
                  return_tensors=None):
+        self.texts.append(text)
         ids = [ord(c) % 1000 + 1 for c in text][:max_length]
         mask = [1] * len(ids)
         while len(ids) < max_length:
@@ -54,9 +58,15 @@ class _FakeSource:
 def _corpus_dir(tmp_path: Path, n=4) -> str:
     """Write a small normalized corpus (examples.jsonl + manifest.json)."""
     recs = [SourceRecord(url=f"/redfish/v1/S/{i}",
-                         response={"@odata.id": f"/redfish/v1/S/{i}", "Id": str(i)},
+                         response={
+                             "@odata.id": f"/redfish/v1/S/{i}",
+                             "@odata.type": "#ComputerSystem.v1.ComputerSystem",
+                             "Id": str(i),
+                             "Status": {"Health": "OK", "State": "Enabled"},
+                             "Actions": {"#ComputerSystem.Reset": {"target": f"/redfish/v1/S/{i}/Actions/Reset"}},
+                         },
                          source="real_dell", trust_level=TrustLevel.REAL,
-                         allowed_methods=["GET"], vendor="dell") for i in range(n)]
+                         allowed_methods=["GET", "PATCH"], vendor="dell") for i in range(n)]
     mix = SourceMix([_FakeSource(recs)], eval_fraction=0.25, seed=0)
     train, _ = mix.split()
     out = tmp_path / "corpus"
@@ -69,8 +79,20 @@ def test_items_are_fixed_length_tensor_dicts(tmp_path: Path):
     ds = CorpusJSONLDataset(_corpus_dir(tmp_path), max_len=64, tokenizer=_FakeTokenizer())
     assert len(ds) > 0
     item = ds[0]
-    assert set(item) == {"input_ids", "attention_mask"}
+    assert {"input_ids", "attention_mask", "graph_node_count", "graph_edge_count",
+            "action_candidate_count", "candidate_mask", "candidate_resource_type_id",
+            "candidate_parent_type_id", "candidate_relation_name_id",
+            "candidate_depth_bucket", "candidate_method_id",
+            "candidate_has_action_target", "candidate_is_collection", "candidate_is_oem",
+            "candidate_path_segment_hashes", "candidate_allowed_method_mask",
+            "candidate_local_state_summary", "state_fingerprint", "state_id"} <= set(item)
     assert item["input_ids"].shape == (64,) and item["attention_mask"].shape == (64,)
+    assert item["graph_node_count"].item() >= 1
+    assert item["action_candidate_count"].item() >= 1
+    assert item["candidate_mask"].shape == (16,)
+    assert item["candidate_path_segment_hashes"].shape == (16, 8)
+    assert item["candidate_allowed_method_mask"].shape == (16, 6)
+    assert item["candidate_local_state_summary"].shape == (16, 4)
 
 
 def test_items_stack_like_the_trainer_collate(tmp_path: Path):
@@ -79,6 +101,100 @@ def test_items_stack_like_the_trainer_collate(tmp_path: Path):
     batch = {k: torch.stack([ds[i][k] for i in range(len(ds))]) for k in ("input_ids", "attention_mask")}
     assert batch["input_ids"].shape == (len(ds), 32)
     assert batch["attention_mask"].dtype == torch.int64
+
+
+def test_training_example_graph_contract_is_tokenized(tmp_path: Path):
+    """M1/M2 consume TrainingExample graph/state fields through the tokenized text."""
+    tokenizer = _FakeTokenizer()
+    ds = CorpusJSONLDataset(_corpus_dir(tmp_path), max_len=512, tokenizer=tokenizer)
+    _ = ds[0]
+
+    rendered = tokenizer.texts[0]
+    assert "STATE_FINGERPRINT" not in rendered
+    assert "RESOURCE_GRAPH" not in rendered
+    assert "RESOURCE_NODE" in rendered
+    assert "RESOURCE_JSON" in rendered
+    assert "LEGAL_ACTION_SUMMARY" in rendered
+    assert "EXPECTED_SEMANTICS" in rendered
+    assert "/redfish/v1/S/" in rendered
+    assert "GET" in rendered
+
+
+def test_state_record_exposes_structured_contract(tmp_path: Path):
+    """The dataset preserves the typed State contract next to token tensors."""
+    ds = CorpusJSONLDataset(_corpus_dir(tmp_path), max_len=256, tokenizer=_FakeTokenizer())
+    record = ds.state_record(0)
+    assert record["state_id"].startswith("state:")
+    assert len(record["state_fingerprint"]) == 32
+    assert record["resource_graph"]["node_count"] >= 1
+    assert record["resource_node"]["uri"].startswith("/redfish/v1/S/")
+    assert record["resource_graph"]["edges"][0]["relation"] == "action_capability"
+    assert record["action_affordances"]["candidate_count"] >= 1
+    candidate = record["action_affordances"]["templates"][0]
+    assert {"resource_type_id", "parent_type_id", "relation_name_id", "depth_bucket",
+            "method_id", "has_action_target", "is_collection", "is_oem",
+            "path_segment_hashes", "allowed_method_mask", "local_state_summary"} <= set(candidate)
+    assert candidate["method_id"] == 1
+    assert candidate["has_action_target"] is True
+    assert record["action_affordances"]["candidate_count"] == 2
+    assert record["action_affordances"]["templates"][1]["method_id"] == 4
+    assert len(candidate["path_segment_hashes"]) == 8
+    assert len(candidate["allowed_method_mask"]) == 6
+    assert record["state_latent"] is None
+    assert record["metadata"]["vendor"] == "dell"
+
+
+def test_unrelated_graph_nodes_do_not_perturb_resource_text(tmp_path: Path):
+    """M1 text is per-resource; unrelated graph nodes affect structured graph only."""
+    example = {
+        "source": "real_dell",
+        "trust_level": "REAL",
+        "schema_version": "#ComputerSystem.v1.ComputerSystem",
+        "resource_graph_before": {
+            "/redfish/v1/S/0": {
+                "@odata.id": "/redfish/v1/S/0",
+                "@odata.type": "#ComputerSystem.v1.ComputerSystem",
+                "keys": ["Actions", "Id", "Status"],
+            },
+            "/redfish/v1/Chassis/9": {
+                "@odata.id": "/redfish/v1/Chassis/9",
+                "@odata.type": "#Chassis.v1.Chassis",
+                "keys": ["Id"],
+            },
+        },
+        "request_or_action": {"method": "GET", "url": "/redfish/v1/S/0", "body": None},
+        "response": {
+            "@odata.id": "/redfish/v1/S/0",
+            "@odata.type": "#ComputerSystem.v1.ComputerSystem",
+            "Id": "0",
+            "Status": {"Health": "OK", "State": "Enabled"},
+            "Actions": {"#ComputerSystem.Reset": {"target": "/redfish/v1/S/0/Actions/Reset"}},
+        },
+        "resource_graph_after": {},
+        "allowed_methods": ["GET", "PATCH"],
+        "expected_semantics": {
+            "method": "GET",
+            "mutating": False,
+            "read_only": True,
+            "idempotent": True,
+            "expected_status": 200,
+            "mutable_endpoint": True,
+        },
+        "vendor": "dell",
+        "provenance": {},
+    }
+    from igc.ds.state_graph import build_state_record
+
+    base_example = {
+        **example,
+        "resource_graph_before": {
+            "/redfish/v1/S/0": example["resource_graph_before"]["/redfish/v1/S/0"],
+        },
+    }
+    base = build_state_record(base_example)
+    with_unrelated = build_state_record(example)
+    assert with_unrelated.resource_text == base.resource_text
+    assert with_unrelated.resource_graph["node_count"] == 2
 
 
 def test_trainer_duck_type_surface(tmp_path: Path):

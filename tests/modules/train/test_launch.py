@@ -95,4 +95,24 @@ def test_main_rejects_unknown_set_override():
         main(["--profile", "m1_3b_lora", "--set", "btch_size=16"])
 
 
+def test_m2_cpu_smoke_renders_autoencoder_entrypoint():
+    """The M2 smoke renders the state-autoencoder CLI, not the M1 latent trainer."""
+    argv = profile_to_argv(resolve_profile("m2_cpu_smoke"))
+    assert _val(argv, "--train") == "llm"
+    assert _val(argv, "--llm") == "encoder"
+    assert _val(argv, "--model_type") == "gpt2"
+    assert _val(argv, "--auto_encoder_train_steps") == "5"
+    assert _val(argv, "--auto_encoder_lr") == "0.001"
+    assert "--live" not in argv
+    assert "--redfish-ip" not in argv
+
+
+def test_nv72_profiles_default_to_safe_fabric_flags():
+    """NV72 profiles carry the DDP/FSDP default learned from the cluster smoke failures."""
+    profile = resolve_profile("m1_nv72_7b_rslora_r32")
+    env = profile.runtime_env()
+    assert env["NCCL_MNNVL_ENABLE"] == "0"
+    assert env["NCCL_CUMEM_ENABLE"] == "1"
+
+
 # Author: Mus mbayramo@stanford.edu

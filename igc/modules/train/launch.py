@@ -32,7 +32,7 @@ def profile_to_argv(profile: TrainingProfile) -> List[str]:
     :return: the argv list (train stage, model, optimization, adapter, sharding).
     """
     argv = [
-        "--train", "llm", "--llm", "latent",
+        "--train", "llm", "--llm", profile.llm_stage,
         "--model_type", profile.model,
         "--llm_torch_dtype", profile.torch_dtype,
         "--per_device_train_batch_size", str(profile.batch_size),
@@ -41,8 +41,19 @@ def profile_to_argv(profile: TrainingProfile) -> List[str]:
         "--llm_learning_rate", str(profile.lr),
         "--llm_scheduler", profile.scheduler,
         "--seq_len", str(profile.seq_len),
+        "--metric_prefix", profile.metric_prefix,
     ]
-    if profile.max_steps is not None:
+    if profile.stage == "m2":
+        argv += [
+            "--auto_encoder_lr", str(profile.auto_encoder_lr),
+            "--auto_encoder_optimizer", profile.auto_encoder_optimizer,
+            "--auto_encoder_weight_decay", str(profile.auto_encoder_weight_decay),
+        ]
+        if profile.max_steps is not None:
+            argv += ["--auto_encoder_train_steps", str(profile.max_steps)]
+        else:
+            argv += ["--num_train_epochs", str(profile.epochs)]
+    elif profile.max_steps is not None:
         argv += ["--max_train_steps", str(profile.max_steps)]
     else:
         argv += ["--num_train_epochs", str(profile.epochs)]

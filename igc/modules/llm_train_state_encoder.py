@@ -261,8 +261,46 @@ class LlmEmbeddingsTrainer(LlmModule):
         :param samples: Dataset rows containing ``input_ids`` and ``attention_mask``.
         :return: Batch dictionary with tensor values stacked on the leading axis.
         """
-        included_keys = ['input_ids', 'attention_mask']
-        batch = {key: torch.stack([s[key] for s in samples]) for key in included_keys}
+        included_keys = [
+            'input_ids',
+            'attention_mask',
+            'graph_node_count',
+            'graph_edge_count',
+            'action_candidate_count',
+            'candidate_mask',
+            'candidate_resource_type_id',
+            'candidate_parent_type_id',
+            'candidate_relation_name_id',
+            'candidate_depth_bucket',
+            'candidate_method_id',
+            'candidate_has_action_target',
+            'candidate_is_collection',
+            'candidate_is_oem',
+            'candidate_path_segment_hashes',
+            'candidate_allowed_method_mask',
+            'candidate_local_state_summary',
+            'scope_mask',
+            'scope_resource_type_id',
+            'scope_parent_type_id',
+            'scope_relation_name_id',
+            'scope_depth_bucket',
+            'scope_method_id',
+            'scope_has_action_target',
+            'scope_is_collection',
+            'scope_is_oem',
+            'scope_path_segment_hashes',
+            'scope_allowed_method_mask',
+            'scope_local_state_summary',
+            'candidate_endpoint_scope_index',
+        ]
+        batch = {
+            key: torch.stack([s[key] for s in samples])
+            for key in included_keys
+            if key in samples[0]
+        }
+        for key in ("state_fingerprint", "state_id"):
+            if key in samples[0]:
+                batch[key] = [s[key] for s in samples]
 
         return batch
 
@@ -379,6 +417,11 @@ class LlmEmbeddingsTrainer(LlmModule):
         :return: ``True`` for single-process execution or distributed rank zero.
         """
         return self.rank == -1 or self.rank == 0
+
+    def metric_name(self, name: str) -> str:
+        """Return the purpose-qualified metric key for M1 state-encoder training."""
+        prefix = getattr(self._trainer_args, "metric_prefix", None) or "m1/state_encoder"
+        return f"{prefix}/{name}"
 
     @staticmethod
     def create_masking_method(dataset: MaskedJSONDataset):
@@ -696,6 +739,40 @@ class LlmEmbeddingsTrainer(LlmModule):
                 if is_step and self.is_rank_zero():
                     step = epoch * total_batches + num_batches
                     current_lr = self.optimizer.param_groups[0]['lr']
+                    graph_nodes = batch.get("graph_node_count")
+                    graph_edges = batch.get("graph_edge_count")
+                    action_candidates = batch.get("action_candidate_count")
+                    candidate_mask = batch.get("candidate_mask")
+                    self.metric_logger.log_metric(self.metric_name("train/loss"), loss.item(), step)
+                    self.metric_logger.log_metric(self.metric_name("train/lr"), current_lr, step)
+                    self.metric_logger.log_metric(
+                        self.metric_name("train/grad_norm"), last_grad_norm, step)
+                    self.metric_logger.log_metric(
+                        self.metric_name("train/optimizer_step"), float(global_opt_steps + 1), step)
+                    if graph_nodes is not None:
+                        self.metric_logger.log_metric(
+                            self.metric_name("state/graph_nodes_per_batch"),
+                            float(graph_nodes.float().mean().item()),
+                            step,
+                        )
+                    if graph_edges is not None:
+                        self.metric_logger.log_metric(
+                            self.metric_name("state/graph_edges_per_batch"),
+                            float(graph_edges.float().mean().item()),
+                            step,
+                        )
+                    if action_candidates is not None:
+                        self.metric_logger.log_metric(
+                            self.metric_name("state/action_candidates_per_batch"),
+                            float(action_candidates.float().mean().item()),
+                            step,
+                        )
+                    if candidate_mask is not None:
+                        self.metric_logger.log_metric(
+                            self.metric_name("state/legal_candidate_slots"),
+                            float(candidate_mask.float().sum(dim=1).mean().item()),
+                            step,
+                        )
                     self.metric_logger.log_metric("train/loss", loss.item(), step)
                     self.metric_logger.log_metric("train/lr", current_lr, step)
                     self.metric_logger.log_metric("train/grad_norm", last_grad_norm, step)
@@ -732,6 +809,8 @@ class LlmEmbeddingsTrainer(LlmModule):
             if self.on_epoch_eval or ((epoch + 1) % self._eval_freq == 0):
                 validation_accuracy = self.validate(eval_dataloader)
                 if self.is_rank_zero():
+                    self.metric_logger.log_metric(
+                        self.metric_name("eval/token_accuracy"), validation_accuracy, epoch_step)
                     self.metric_logger.log_metric("eval/accuracy", validation_accuracy, epoch_step)
 
                 print(f"Rank {self.rank} Epoch {epoch + 1} - Validation Accuracy: "
@@ -741,6 +820,12 @@ class LlmEmbeddingsTrainer(LlmModule):
                 average_loss = total_loss / num_batches
                 final_epoch_loss = average_loss
                 if self.is_rank_zero():
+                    self.metric_logger.log_metric(
+                        self.metric_name("train/epoch_loss"), average_loss, epoch_step)
+                    self.metric_logger.log_metric(
+                        self.metric_name("dataset/train_count"), float(dataset_size), epoch_step)
+                    self.metric_logger.log_metric(
+                        self.metric_name("dataset/train_batches"), float(total_batches), epoch_step)
                     self.metric_logger.log_metric("train/epoch_loss", average_loss, epoch_step)
                 print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
             epochs_done = epoch + 1

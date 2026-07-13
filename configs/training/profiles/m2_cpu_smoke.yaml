@@ -1,0 +1,32 @@
+version: 1
+name: m2_cpu_smoke
+stage: m2
+implemented: true
+purpose: "Local CPU/state-autoencoder smoke over captured Redfish JSON."
+llm_stage: encoder
+backbone:
+  model: gpt2
+  torch_dtype: float32
+adapter:
+  use_peft: false
+optimizer:
+  auto_encoder_lr: 0.001
+  auto_encoder_optimizer: Adam
+  auto_encoder_weight_decay: 0.0
+dataloader:
+  batch_size: 2
+  grad_accum: 1
+  num_workers: 0
+  seq_len: 64
+training:
+  epochs: 1
+  max_steps: 5
+  sharding: none
+  precision: "no"
+  metric_prefix: m2/state_autoencoder
+data:
+  contract: captured_redfish_json
+  live_redfish_allowed: false
+runtime:
+  nccl_mnnvl_enable: "0"
+  nccl_cumem_enable: "1"

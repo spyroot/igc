@@ -408,6 +408,12 @@ def add_trainer_group(parser):
              " If provided, overrides num_train_epochs.")
 
     trainer_group.add_argument(
+        "--metric_prefix",
+        type=str, default=None,
+        help="Purpose-specific metric namespace, for example m1/state_encoder or "
+             "m2/state_autoencoder.")
+
+    trainer_group.add_argument(
         "--output_dir",
         type=str, default=None,
         help="Where to store the model.")

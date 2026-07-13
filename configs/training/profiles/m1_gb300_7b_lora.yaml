@@ -1,0 +1,37 @@
+version: 1
+name: m1_gb300_7b_lora
+aliases: [m1_7b_lora]
+stage: m1
+implemented: true
+purpose: "One-GPU GB300 7B LoRA state-encoder target."
+llm_stage: latent
+backbone:
+  model: Qwen/Qwen2.5-7B-Instruct
+  torch_dtype: bfloat16
+adapter:
+  use_peft: true
+  method: lora
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  init: default
+optimizer:
+  llm_learning_rate: 0.0001
+  llm_scheduler: OneCycleLR
+dataloader:
+  batch_size: 8
+  grad_accum: 4
+  num_workers: 8
+  seq_len: 1024
+training:
+  epochs: 3
+  max_steps:
+  sharding: none
+  precision: bf16
+  metric_prefix: m1/state_encoder
+data:
+  contract: captured_redfish_json
+  live_redfish_allowed: false
+runtime:
+  nccl_mnnvl_enable: "0"
+  nccl_cumem_enable: "1"

@@ -41,6 +41,8 @@ fi
 # Fabric update (operator, 2026-07-10): NVLink/RoCE healthy — NVLS on by default;
 # override with IGC_NCCL_NVLS=0 if nccl_smoke (the R4 gate) says otherwise.
 export NCCL_NVLS_ENABLE="${IGC_NCCL_NVLS:-1}"
+export NCCL_MNNVL_ENABLE="${IGC_NCCL_MNNVL:-0}"
+export NCCL_CUMEM_ENABLE="${IGC_NCCL_CUMEM:-1}"
 export PYTHONUNBUFFERED=1
 
 # Overridable knobs (env). Stage code + captured data on the node's local NVMe.

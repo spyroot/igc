@@ -1,0 +1,36 @@
+version: 1
+name: m1_nv72_7b_rslora_r32
+stage: m1
+implemented: true
+purpose: "NV72-safe 7B rsLoRA r32 M1 state-encoder profile."
+llm_stage: latent
+backbone:
+  model: Qwen/Qwen2.5-7B-Instruct
+  torch_dtype: bfloat16
+adapter:
+  use_peft: true
+  method: rslora
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  init: default
+optimizer:
+  llm_learning_rate: 0.0001
+  llm_scheduler: OneCycleLR
+dataloader:
+  batch_size: 8
+  grad_accum: 4
+  num_workers: 8
+  seq_len: 1024
+training:
+  epochs: 3
+  max_steps:
+  sharding: fsdp
+  precision: bf16
+  metric_prefix: m1/state_encoder
+data:
+  contract: captured_redfish_json
+  live_redfish_allowed: false
+runtime:
+  nccl_mnnvl_enable: "0"
+  nccl_cumem_enable: "1"

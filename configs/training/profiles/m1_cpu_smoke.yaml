@@ -1,0 +1,32 @@
+version: 1
+name: m1_cpu_smoke
+aliases: [m1_gpt2_smoke]
+stage: m1
+implemented: true
+purpose: "Local CPU/state-encoder smoke over captured Redfish JSON."
+llm_stage: latent
+backbone:
+  model: gpt2
+  torch_dtype: float32
+adapter:
+  use_peft: false
+optimizer:
+  llm_learning_rate: 0.00005
+  llm_scheduler: OneCycleLR
+dataloader:
+  batch_size: 8
+  grad_accum: 1
+  num_workers: 0
+  seq_len: 256
+training:
+  epochs: 1
+  max_steps: 50
+  sharding: none
+  precision: "no"
+  metric_prefix: m1/state_encoder
+data:
+  contract: captured_redfish_json
+  live_redfish_allowed: false
+runtime:
+  nccl_mnnvl_enable: "0"
+  nccl_cumem_enable: "1"

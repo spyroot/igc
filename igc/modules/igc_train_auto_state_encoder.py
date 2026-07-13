@@ -9,6 +9,7 @@ tensor. The trainer keeps backbone access shape-driven through
 Author:Mus mbayramo@stanford.edu
 """
 import argparse
+import time
 from typing import Optional
 
 import numpy as np
@@ -63,6 +64,7 @@ class AutoencoderTrainer(IgcModule):
         self._input_dim = self.model.config.hidden_size
         self._latent_dim = self.model.config.hidden_size
         self._learning_rate = spec.auto_encoder_lr
+        self._max_train_steps = getattr(spec, "auto_encoder_train_steps", None)
 
         self.logger.info(f"Creating auto-encoder input dim"
                          f" {self._input_dim} {self._latent_dim} batch_size: {self.batch_size}")
@@ -155,8 +157,46 @@ class AutoencoderTrainer(IgcModule):
         :param samples: Dataset rows containing ``input_ids`` and ``attention_mask``.
         :return: Batch dictionary with tensor values stacked on the leading axis.
         """
-        included_keys = ['input_ids', 'attention_mask']
-        batch = {key: torch.stack([s[key] for s in samples]) for key in included_keys}
+        included_keys = [
+            'input_ids',
+            'attention_mask',
+            'graph_node_count',
+            'graph_edge_count',
+            'action_candidate_count',
+            'candidate_mask',
+            'candidate_resource_type_id',
+            'candidate_parent_type_id',
+            'candidate_relation_name_id',
+            'candidate_depth_bucket',
+            'candidate_method_id',
+            'candidate_has_action_target',
+            'candidate_is_collection',
+            'candidate_is_oem',
+            'candidate_path_segment_hashes',
+            'candidate_allowed_method_mask',
+            'candidate_local_state_summary',
+            'scope_mask',
+            'scope_resource_type_id',
+            'scope_parent_type_id',
+            'scope_relation_name_id',
+            'scope_depth_bucket',
+            'scope_method_id',
+            'scope_has_action_target',
+            'scope_is_collection',
+            'scope_is_oem',
+            'scope_path_segment_hashes',
+            'scope_allowed_method_mask',
+            'scope_local_state_summary',
+            'candidate_endpoint_scope_index',
+        ]
+        batch = {
+            key: torch.stack([s[key] for s in samples])
+            for key in included_keys
+            if key in samples[0]
+        }
+        for key in ("state_fingerprint", "state_id"):
+            if key in samples[0]:
+                batch[key] = [s[key] for s in samples]
         return batch
 
     @torch.no_grad()
@@ -168,8 +208,13 @@ class AutoencoderTrainer(IgcModule):
         :return: Last hidden state tensor on the trainer device.
         """
         with torch.no_grad():
-            output = self._encoder_model(**batch)
+            output = self._encoder_model(**self._model_inputs(batch))
         return output.last_hidden_state.to(self.device)
+
+    @staticmethod
+    def _model_inputs(batch):
+        """Return only the Hugging Face model input tensors from a structured batch."""
+        return {k: batch[k] for k in ("input_ids", "attention_mask") if k in batch}
 
     @torch.no_grad()
     def sample_all(self):
@@ -192,7 +237,7 @@ class AutoencoderTrainer(IgcModule):
         tensors = []
         with torch.no_grad():
             for batch in train_dataloader:
-                hidden_state = self._encoder_model(**batch).last_hidden_state
+                hidden_state = self._encoder_model(**self._model_inputs(batch)).last_hidden_state
                 tensors.append(hidden_state.detach().cpu())
 
         return tensors
@@ -231,6 +276,16 @@ class AutoencoderTrainer(IgcModule):
         param = next(self.model_autoencoder.parameters(), None)
         return tensor if param is None else tensor.to(param.dtype)
 
+    def metric_name(self, name: str) -> str:
+        """Return the purpose-qualified metric key for M2 autoencoder training."""
+        prefix = getattr(self._trainer_args, "metric_prefix", None) or "m2/state_autoencoder"
+        return f"{prefix}/{name}"
+
+    @staticmethod
+    def reached_max_steps(global_step: int, max_steps: Optional[int]) -> bool:
+        """Whether the M2 optimizer-step cap has been reached."""
+        return max_steps is not None and max_steps > 0 and global_step >= max_steps
+
     def train(self):
         """
         Train the autoencoder and save the resulting model.
@@ -268,16 +323,23 @@ class AutoencoderTrainer(IgcModule):
 
         total_batches = len(train_dataloader)
         batch_log_frequency = round(32 * 0.2)
+        global_opt_steps = 0
+        run_started_clock = time.time()
 
         for epoch in range(last_epoch, self.num_epochs):
+            if self.reached_max_steps(global_opt_steps, self._max_train_steps):
+                break
             total_loss = 0.0
             num_batches = 0
 
             batch_losses = np.zeros(total_batches)
             for batch in train_dataloader:
-                batch = {k: v.to(self.device) for k, v in batch.items()}
+                batch = {
+                    k: v.to(self.device) if torch.is_tensor(v) else v
+                    for k, v in batch.items()
+                }
                 with torch.no_grad():
-                    output = self._encoder_model(**batch).last_hidden_state.to(self.device)
+                    output = self._encoder_model(**self._model_inputs(batch)).last_hidden_state.to(self.device)
                 output = self._to_autoencoder_dtype(output)
                 reconstructed = self.model_autoencoder(output)
                 output = output.view(output.shape[0], -1)
@@ -288,6 +350,7 @@ class AutoencoderTrainer(IgcModule):
                 # self.accelerator.backward(loss)
                 loss.backward()
                 self.optimizer.step()
+                global_opt_steps += 1
 
                 batch_losses[num_batches] = loss.item()
                 total_loss += loss.item()
@@ -298,14 +361,79 @@ class AutoencoderTrainer(IgcModule):
                     print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Batch "
                           f"{num_batches + 1}/{total_batches} "
                           f"- Progress: {progress_percentage:.2f}% - Batch Loss mean: {batch_losses.mean():.4f}")
+                    if self.is_rank_zero():
+                        step = epoch * total_batches + num_batches
+                        graph_nodes = batch.get("graph_node_count")
+                        graph_edges = batch.get("graph_edge_count")
+                        action_candidates = batch.get("action_candidate_count")
+                        candidate_mask = batch.get("candidate_mask")
+                        self.metric_logger.log_metric(
+                            self.metric_name("train/reconstruction_loss"),
+                            batch_losses.mean(),
+                            step,
+                        )
+                        self.metric_logger.log_metric(
+                            self.metric_name("train/optimizer_step"),
+                            float(global_opt_steps),
+                            step,
+                        )
+                        if graph_nodes is not None:
+                            self.metric_logger.log_metric(
+                                self.metric_name("state/graph_nodes_per_batch"),
+                                float(graph_nodes.float().mean().item()),
+                                step,
+                            )
+                        if graph_edges is not None:
+                            self.metric_logger.log_metric(
+                                self.metric_name("state/graph_edges_per_batch"),
+                                float(graph_edges.float().mean().item()),
+                                step,
+                            )
+                        if action_candidates is not None:
+                            self.metric_logger.log_metric(
+                                self.metric_name("state/action_candidates_per_batch"),
+                                float(action_candidates.float().mean().item()),
+                                step,
+                            )
+                        if candidate_mask is not None:
+                            self.metric_logger.log_metric(
+                                self.metric_name("state/legal_candidate_slots"),
+                                float(candidate_mask.float().sum(dim=1).mean().item()),
+                                step,
+                            )
                     self.metric_logger.log_metric("state_auto_encoder_batch", batch_losses.mean(), epoch)
 
                 num_batches += 1
+                if self.reached_max_steps(global_opt_steps, self._max_train_steps):
+                    break
 
             # epoch end
             if num_batches > 0:
                 average_loss = total_loss / num_batches
                 if self.is_rank_zero():
+                    epoch_step = (epoch + 1) * total_batches - 1
+                    elapsed = max(time.time() - run_started_clock, 1e-9)
+                    samples_seen = float(global_opt_steps * self.batch_size)
+                    self.metric_logger.log_metric(
+                        self.metric_name("train/epoch_reconstruction_loss"),
+                        average_loss,
+                        epoch_step,
+                    )
+                    self.metric_logger.log_metric(
+                        self.metric_name("throughput/samples_per_sec"),
+                        samples_seen / elapsed,
+                        epoch_step,
+                    )
+                    self.metric_logger.log_metric(
+                        self.metric_name("dataset/train_count"),
+                        float(len(self.dataset)),
+                        epoch_step,
+                    )
+                    self.metric_logger.log_metric(
+                        self.metric_name("dataset/train_batches"),
+                        float(total_batches),
+                        epoch_step,
+                    )
                     self.metric_logger.log_metric("state_auto_encoder_epoch", average_loss, epoch)
                 print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
 

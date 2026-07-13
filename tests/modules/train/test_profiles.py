@@ -25,6 +25,13 @@ _REGISTERED = [
     "m1_local",
     "m1_3b_full",
     "m1_7b_full_zero3",
+    "m1_cpu_smoke",
+    "m1_gb300_3b_lora",
+    "m1_gb300_7b_lora",
+    "m1_nv72_7b_rslora_r32",
+    "m2_cpu_smoke",
+    "m2_gb300_autoencoder",
+    "m2_nv72_autoencoder",
 ]
 
 _PROFILE_CASES = [

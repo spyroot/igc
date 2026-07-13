@@ -1,0 +1,32 @@
+version: 1
+name: m2_gb300_autoencoder
+stage: m2
+implemented: true
+purpose: "One-GPU GB300 M2 state-autoencoder over the M1 backbone."
+llm_stage: encoder
+backbone:
+  model: Qwen/Qwen2.5-3B-Instruct
+  torch_dtype: bfloat16
+adapter:
+  use_peft: false
+optimizer:
+  auto_encoder_lr: 0.0005
+  auto_encoder_optimizer: AdamW
+  auto_encoder_weight_decay: 0.01
+dataloader:
+  batch_size: 4
+  grad_accum: 1
+  num_workers: 8
+  seq_len: 1024
+training:
+  epochs: 3
+  max_steps:
+  sharding: none
+  precision: bf16
+  metric_prefix: m2/state_autoencoder
+data:
+  contract: captured_redfish_json
+  live_redfish_allowed: false
+runtime:
+  nccl_mnnvl_enable: "0"
+  nccl_cumem_enable: "1"

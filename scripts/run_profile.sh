@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run an M1 state-encoder experiment by PROFILE NAME.
+# Run an M1 state-encoder or M2 state-autoencoder experiment by PROFILE NAME.
 #
 # Public-safe: this script contains no endpoints, hosts, credentials, or private
 # paths. Data and output locations come from the environment, and the training flags
@@ -15,13 +15,17 @@
 #   # override a profile field, or pass extra igc_main flags after --:
 #   IGC_PROFILE=m1_3b_lora IGC_SET="batch_size=16 lr=2e-4" bash scripts/run_profile.sh -- --recreate_dataset
 #
-# Profiles: m1_gpt2_smoke m1_3b_lora m1_7b_lora m1_7b_rslora_r32 m1_3b_full m1_7b_full_zero3
+# Profiles include M1 state-encoder and M2 state-autoencoder specs:
+#   m1_cpu_smoke m1_gb300_3b_lora m1_gb300_7b_lora m1_nv72_7b_rslora_r32
+#   m2_cpu_smoke m2_gb300_autoencoder m2_nv72_autoencoder
 set -euo pipefail
 
 PROFILE="${IGC_PROFILE:?set IGC_PROFILE (e.g. m1_7b_rslora_r32)}"
 DATA_DIR="${IGC_DATA_DIR:-$HOME/.json_responses}"
 OUT_DIR="${IGC_OUTPUT_DIR:-experiments/${PROFILE}}"
 METRIC_REPORT="${IGC_METRIC_REPORT:-wandb}"
+export NCCL_MNNVL_ENABLE="${IGC_NCCL_MNNVL:-0}"
+export NCCL_CUMEM_ENABLE="${IGC_NCCL_CUMEM:-1}"
 
 # Auto-load W&B credentials so the run streams to the dashboard with no manual export.
 # The env file is gitignored (creds never committed); override the path via IGC_WANDB_ENV.
