@@ -46,9 +46,10 @@ IGC_MIN_FREE_GB="${IGC_MIN_FREE_GB:-100}"                   # HF pulls + dataset
 HF_HOME="${HF_HOME:-/models/hf-cache}"
 HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
 HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-${HF_HOME}/hub}"
-# MNNVL needs working IMEX channels. Slot11 currently reports MNNVL available
-# but unusable unless this is 0, so keep it opt-in until the node preflight
-# proves IMEX is configured.
+# DDP and FSDP need a healthy NCCL process group, but they do not need MNNVL
+# for correctness. MNNVL is only an optional fast path and needs working IMEX
+# channels. Slot11 currently reports MNNVL available but unusable unless this
+# is 0, so keep it opt-in until the node preflight proves IMEX is configured.
 IGC_NCCL_MNNVL="${IGC_NCCL_MNNVL:-${NCCL_MNNVL_ENABLE:-0}}"
 NCCL_MNNVL_ENABLE="${IGC_NCCL_MNNVL}"
 NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"

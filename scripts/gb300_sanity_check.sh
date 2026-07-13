@@ -50,6 +50,9 @@ node_free() {  # ip -> 0 if no GPU compute process is running
 
 # shellcheck disable=SC2086  # NV_FLAGS/MOUNTS must word-split into separate docker args
 run_on() {  # node_ip nnodes node_rank master_ip nproc mode
+    # DDP/FSDP sanity validates NCCL collectives, not the optional MNNVL fast
+    # path. Keep MNNVL off by default; opt in only after IMEX/MNNVL preflight
+    # passes on the target nodes.
     $SSH "nvidia@$1" \
         "docker run --rm --network host $NV_FLAGS $MOUNTS \
              -e SANITY_MODE=$6 -e SANITY_STEPS=1 -e SANITY_HUGE_GB=${SANITY_HUGE_GB:-0} \

@@ -41,8 +41,10 @@ fi
 # Fabric update (operator, 2026-07-10): NVLink/RoCE healthy — NVLS on by default;
 # override with IGC_NCCL_NVLS=0 if nccl_smoke (the R4 gate) says otherwise.
 export NCCL_NVLS_ENABLE="${IGC_NCCL_NVLS:-1}"
-# MNNVL needs working IMEX channels. Keep it opt-in until the node preflight
-# proves IMEX is configured; CUMEM remains on by default.
+# DDP and FSDP need a healthy NCCL process group, but they do not need MNNVL
+# for correctness. MNNVL is only an optional fast path and needs working IMEX
+# channels; keep it opt-in until the node preflight proves IMEX is configured.
+# CUMEM remains on by default.
 export IGC_NCCL_MNNVL="${IGC_NCCL_MNNVL:-${NCCL_MNNVL_ENABLE:-0}}"
 export NCCL_MNNVL_ENABLE="${IGC_NCCL_MNNVL}"
 export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
