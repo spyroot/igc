@@ -67,7 +67,7 @@ jobs:
         run: |
           set -o pipefail
           KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 \
-            pytest -q --cov=igc --cov-report=term --cov-report=xml --cov-report=json
+            python -m pytest -q --cov=igc --cov-report=term --cov-report=xml --cov-report=json
       - name: Metrics snapshot
         shell: bash
         run: |
@@ -103,7 +103,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 pytest -m perf -q
+          KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 python -m pytest -m perf -q
 
   docker:
     needs: [shell, gate]

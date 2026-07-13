@@ -7,6 +7,8 @@ import argparse
 import os
 import tempfile
 import unittest
+
+import pytest
 from transformers import (
     GPT2LMHeadModel, GPT2Tokenizer
 )
@@ -20,6 +22,7 @@ from igc.modules.shared.llm_shared import (
 
 class TestFromPretrainedDefault(unittest.TestCase):
 
+    @pytest.mark.download  # from_pretrained_default("gpt2") pulls the model from HF
     def test_from_pretrained_default_with_string(self):
         """Test we can create from string
         :return:
@@ -41,6 +44,7 @@ class TestFromPretrainedDefault(unittest.TestCase):
         self.assertIsInstance(model, GPT2LMHeadModel)
         self.assertIsInstance(tokenizer, GPT2Tokenizer)
 
+    @pytest.mark.download  # loads the gpt2 tokenizer from HF
     def test_from_pretrained_default_with_namespace(self):
         """Test we can create from argparse.Namespace
         :return:
@@ -62,6 +66,7 @@ class TestFromPretrainedDefault(unittest.TestCase):
         self.assertIsNone(model)
         self.assertIsInstance(tokenizer, GPT2Tokenizer)
 
+    @pytest.mark.download  # GPT2LMHeadModel.from_pretrained("gpt2") pulls from HF
     def test_save_and_load_pretrained_default(self):
         """Test pre-trained model saving and loading
         :return:
