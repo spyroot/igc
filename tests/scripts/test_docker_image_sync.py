@@ -23,11 +23,16 @@ def _load_module():
     return module
 
 
-def _write_spec(tmp_path, pull_policy="if_missing"):
+def _write_spec(
+        tmp_path,
+        pull_policy="if_missing",
+        dockerfile="docker/Dockerfile.train",
+        context=".",
+):
     path = tmp_path / "docker.yaml"
     image_extra = ""
     if pull_policy == "build":
-        image_extra = "  dockerfile: docker/Dockerfile.train\n  context: .\n"
+        image_extra = f"  dockerfile: {dockerfile!r}\n  context: {context!r}\n"
     path.write_text(
         textwrap.dedent(
             f"""
@@ -109,6 +114,23 @@ def test_build_policy_builds_and_optionally_pushes(tmp_path):
     assert module.sync_image(_write_spec(tmp_path, pull_policy="build"), runner=runner, push=True) == 0
     assert any(call[:2] == ["docker", "build"] for call in runner.calls)
     assert any(call[:2] == ["docker", "push"] for call in runner.calls)
+
+
+def test_build_policy_dry_run_quotes_build_paths(tmp_path):
+    """Dry-run build commands keep metacharacters inside quoted arguments."""
+    module = _load_module()
+    spec_path = _write_spec(
+        tmp_path,
+        pull_policy="build",
+        dockerfile="docker/Dockerfile.train; echo BAD",
+        context="build context",
+    )
+
+    rendered = module.render_sync_plan(spec_path)
+
+    assert "docker/Dockerfile.train; echo BAD" in rendered
+    assert "docker build -f 'docker/Dockerfile.train; echo BAD'" in rendered
+    assert "'build context'" in rendered
 
 
 def test_locked_digest_fails_when_image_is_absent(tmp_path, capsys):
