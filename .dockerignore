@@ -7,6 +7,13 @@ __pycache__/
 .idea/
 # datasets, captures, tarballs, numpy maps — never bake into an image
 datasets/
+# ...but keep the small committed fixtures the offline gate loads: the slow
+# tokenizer (igc_default_tokenizer_dir() -> datasets/tokenizer: vocab.json/
+# merges.txt/…) and the model-specs file (igc_base_module -> datasets/models.json).
+# These are the only git-tracked files under datasets/; the heavy untracked data
+# (tarballs/*.npy/raw/*.pt and the big tokenizer.json) stays excluded.
+!datasets/tokenizer/
+!datasets/models.json
 test_datasets/
 tests/datasets/
 *.tar.gz
