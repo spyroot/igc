@@ -30,6 +30,16 @@ from igc.ds.goal_paraphrases import (
 )
 from igc.ds.sources import RedfishFixtureSource, TrustLevel
 
+_VENDOR_ROOT_MARKERS = (
+    ("idrac_fixtures", "dell"),
+    ("dell", "dell"),
+    ("hpe_fixtures", "hpe"),
+    ("ilo", "hpe"),
+    ("supermicro_gb300_corpus", "supermicro"),
+    ("supermicro_fixtures", "supermicro"),
+    ("supermicro", "supermicro"),
+)
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments."""
@@ -109,15 +119,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _infer_vendor_from_root(root: str) -> str:
+    """Infer vendor provenance from known redfish_ctl corpus root names."""
+    normalized = [part.lower() for part in Path(root).parts]
+    for marker, vendor in _VENDOR_ROOT_MARKERS:
+        if marker in normalized:
+            return vendor
+    return ""
+
+
 def _load_records(args: argparse.Namespace):
     """Load all capture roots into SourceRecord rows."""
     records = []
     for root in args.capture_root:
+        vendor = args.vendor or _infer_vendor_from_root(root) or None
         source = RedfishFixtureSource(
             root,
             source=args.source,
             trust_level=TrustLevel.REAL,
-            vendor=args.vendor or None,
+            vendor=vendor,
             glob_pattern=args.glob_pattern,
         )
         records.extend(source.iter_records())

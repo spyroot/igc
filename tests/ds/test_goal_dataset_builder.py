@@ -121,6 +121,21 @@ def test_computer_system_record_yields_atomic_power_boot_and_reset_surfaces() ->
     assert reset.goal_ref.arguments == {"ResetType": "GracefulRestart"}
 
 
+def test_same_semantic_goal_keeps_vendor_specific_surfaces() -> None:
+    """Cross-vendor positives must not collapse during surface dedupe."""
+    surfaces = build_goal_surfaces([
+        _record("/redfish/v1/Systems/1", _system_body(), vendor="dell"),
+        _record("/redfish/v1/Systems/1", _system_body(), vendor="hpe"),
+    ])
+
+    power_on_surfaces = [
+        surface for surface in surfaces
+        if surface.goal_ref.goal_id == "power.computer_system.PowerState.eq.On"
+    ]
+
+    assert {surface.vendor for surface in power_on_surfaces} == {"dell", "hpe"}
+
+
 def test_generic_redfish_record_yields_nested_state_and_action_surfaces() -> None:
     """Unknown Redfish resource types still produce state and transition labels."""
     surfaces = build_goal_surfaces([

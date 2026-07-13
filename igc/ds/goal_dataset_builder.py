@@ -608,10 +608,12 @@ def build_goal_surfaces(records: Iterable[SourceRecord]) -> tuple[GoalSurface, .
             surfaces.extend(_bios_surfaces(record))
 
     deduped: list[GoalSurface] = []
-    seen: set[tuple[str, str, str, str]] = set()
+    seen: set[tuple[str, str, str, str, str, str]] = set()
     for surface in surfaces:
         key = (
             surface.goal_ref.goal_id,
+            surface.vendor,
+            surface.source,
             surface.resource_uri,
             surface.fact_path,
             _id_part(surface.target_value),

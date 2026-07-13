@@ -24,7 +24,7 @@ def _load_script():
 
 def _write_capture(root: Path) -> None:
     """Write tiny ComputerSystem and ManagerNetworkProtocol captures."""
-    root.mkdir()
+    root.mkdir(parents=True)
     (root / "_redfish_v1_Systems_1.json").write_text(json.dumps({
         "@odata.id": "/redfish/v1/Systems/1",
         "@odata.type": "#ComputerSystem.v1_20_0.ComputerSystem",
@@ -110,3 +110,38 @@ def test_build_goal_dataset_can_generate_text_for_every_atomic_goal(
     assert manifest["capture_records"] == 2
     assert manifest["unique_goal_ids"] == len(unique_goal_ids)
     assert manifest["text_examples"] == len(unique_goal_ids)
+
+
+def test_build_goal_dataset_infers_vendor_from_known_redfish_ctl_roots(
+    tmp_path: Path,
+) -> None:
+    """Multi-root lab builds keep vendor provenance for held-out splits."""
+    script = _load_script()
+    redfish_ctl = tmp_path / "redfish_ctl" / "tests"
+    dell = redfish_ctl / "idrac_fixtures"
+    supermicro = redfish_ctl / "supermicro_fixtures"
+    hpe = redfish_ctl / "hpe_fixtures"
+    for root in (dell, supermicro, hpe):
+        _write_capture(root)
+
+    surfaces_out = tmp_path / "goal_surfaces.jsonl"
+    manifest_out = tmp_path / "manifest.json"
+
+    code = script.main([
+        "--capture-root", str(dell),
+        "--capture-root", str(supermicro),
+        "--capture-root", str(hpe),
+        "--source", "full_redfish_corpus",
+        "--surfaces-out", str(surfaces_out),
+        "--manifest-out", str(manifest_out),
+    ])
+
+    assert code == 0
+    manifest = json.loads(manifest_out.read_text())
+    assert manifest["vendors"] == ["dell", "hpe", "supermicro"]
+    surfaces = read_goal_surfaces(surfaces_out)
+    assert {surface.vendor for surface in surfaces} == {
+        "dell",
+        "hpe",
+        "supermicro",
+    }
