@@ -41,7 +41,10 @@ fi
 # Fabric update (operator, 2026-07-10): NVLink/RoCE healthy — NVLS on by default;
 # override with IGC_NCCL_NVLS=0 if nccl_smoke (the R4 gate) says otherwise.
 export NCCL_NVLS_ENABLE="${IGC_NCCL_NVLS:-1}"
-export NCCL_MNNVL_ENABLE="${NCCL_MNNVL_ENABLE:-1}"
+# MNNVL needs working IMEX channels. Keep it opt-in until the node preflight
+# proves IMEX is configured; CUMEM remains on by default.
+export IGC_NCCL_MNNVL="${IGC_NCCL_MNNVL:-${NCCL_MNNVL_ENABLE:-0}}"
+export NCCL_MNNVL_ENABLE="${IGC_NCCL_MNNVL}"
 export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
 export HF_HOME="${HF_HOME:-/models/hf-cache}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
@@ -95,6 +98,7 @@ RUN_NAME="${WANDB_NAME:-${IGC_STAGE}-${IGC_MODEL//\//_}-${SLURM_JOB_ID:-local}}"
 if [ "${IGC_REPORT}" = "wandb" ]; then
     # shellcheck source=/dev/null
     [ -f "${IGC_DIR}/.internal/hf.env" ] && . "${IGC_DIR}/.internal/hf.env"
+    export NCCL_MNNVL_ENABLE="${IGC_NCCL_MNNVL}"
     # convenience: source a node-local gitignored key file if present (.internal/ is never committed)
     # shellcheck source=/dev/null
     [ -f "${IGC_DIR}/.internal/wandb.env" ] && . "${IGC_DIR}/.internal/wandb.env"
@@ -115,11 +119,12 @@ srun --container-image="${NGC_IMAGE}" \
      bash -lc '
         set -euo pipefail
         cd /workspace/igc
+        _igc_nccl_mnnvl="${IGC_NCCL_MNNVL:-${NCCL_MNNVL_ENABLE:-0}}"
         [ -f .internal/hf.env ] && { set -a; . .internal/hf.env; set +a; }
         export HF_HOME="${HF_HOME:-/models/hf-cache}"
         export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
         export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-${HF_HOME}/hub}"
-        export NCCL_MNNVL_ENABLE="${NCCL_MNNVL_ENABLE:-1}"
+        export NCCL_MNNVL_ENABLE="${_igc_nccl_mnnvl}"
         export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
         # auto-load W&B creds (gitignored env file) so the run streams live
         [ -f .internal/wandb.env ] && { set -a; . .internal/wandb.env; set +a; }
