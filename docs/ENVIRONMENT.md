@@ -47,7 +47,7 @@ A green local run currently ends with `29 passed` for `tests/core` and `All chec
 The intended integration gate is `pytest -q` plus `ruff check <changed files>` after GPU/download/live
 tests are marked and the shared fixtures are in place. Until then, new tests should name their safe
 node ids or files directly and must not require a GPU, network, HuggingFace download, live Redfish
-host, or real `idrac_ctl` crawl.
+host, or real `redfish_ctl` crawl.
 
 ## 2. Reproducible test image
 
@@ -61,7 +61,7 @@ docker run --rm igc-test:cpu ruff check igc/core tests/core
 ```
 
 The Docker build context is trimmed by `.dockerignore`, which excludes datasets, tarballs, `.npy`
-files, checkpoints, the `idrac_ctl` submodule, and local-only coordination files.
+files, checkpoints, and local-only coordination files.
 
 ## 3. Training on the GB300 NVL72
 

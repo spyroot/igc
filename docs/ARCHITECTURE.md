@@ -250,7 +250,7 @@ The design makes the hypothesis concrete, layer by layer:
 1. **Extract the goal.** The planner (the "casting" layer) maps a high-level instruction to a `Goal`
    and an ordered sub-goal `plan` (the hierarchical decomposition above).
 2. **Discover the action space.** A new backend exposes its tools/ops through `ToolCatalog` +
-   `available_actions(obs)` (for Redfish, derived from the `idrac_ctl` crawl + the `.npy` map). The
+   `available_actions(obs)` (for Redfish, derived from the `redfish_ctl` crawl + the `.npy` map). The
    agent never needs a fixed, pre-enumerated action set — it reads what is legal *now*.
 3. **Act zero/few-shot.** Because the policy is the **pointer / candidate-scoring** head (§1), a tool
    it has never seen is still scorable: its `tool_name/op/schema` text is embedded by the shared
@@ -371,8 +371,8 @@ Found in-tree during design review:
    reward). `truncated` is a budget/time cut → bootstrapping continues. The DQN mask
    is `(1 - terminated)` only; a transition is terminal iff the env goal was reached.
 3. **legal-action source of truth** — merged catalog. The `.npy`
-   `allowed_methods_mapping` is authoritative for *verb legality* per URL (the binding
-   `idrac_ctl` contract); the JSON `Actions` / `@Redfish.ActionInfo` blocks supply the
+   `allowed_methods_mapping` is authoritative for *verb legality* per URL (the binding legacy
+   `redfish_ctl` discovery contract); the JSON `Actions` / `@Redfish.ActionInfo` blocks supply the
    *parameter space* (enums) consumed by the stage-2 argument decoder. CSDL schema is a
    later enrichment.
 4. **credential logging** — redacted before any live canary

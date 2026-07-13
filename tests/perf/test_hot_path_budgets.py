@@ -5,7 +5,7 @@ Each budget is ~50-100x looser than the measured number on the reference corpus,
 never depends on machine speed — only an algorithmic regression (e.g. the O(V^2) neighbor
 scan this suite was born from: 0.71s measured, budget 0.5s per 1,000 nodes) trips it.
 Excluded from the default offline gate; run explicitly with `pytest -m perf` (the fixture
-corpus lives in the data-collection submodule, so a checkout without submodules skips).
+corpus is local to this checkout, so a minimal checkout without fixtures skips).
 
 Author:
 Mus mbayramo@stanford.edu
@@ -22,12 +22,12 @@ from igc.ds.sources.candidate_features import build_candidate_cache
 from igc.ds.sources.resource_graph import RedfishResourceGraph
 from igc.modules.eval.zero_shot_ranking import embed_candidates
 
-_CORPUS = "idrac_ctl/tests/supermicro_fixtures"
+_CORPUS = "tests/supermicro_fixtures"
 
 pytestmark = [
     pytest.mark.perf,
     pytest.mark.skipif(not os.path.isdir(_CORPUS),
-                       reason="fixture corpus not present (submodule not initialized)"),
+                       reason="fixture corpus not present"),
 ]
 
 

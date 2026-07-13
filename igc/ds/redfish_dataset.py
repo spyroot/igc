@@ -1430,7 +1430,7 @@ class JSONDataset(
                     return
                 if not self.respond_to_api_contains(_file_path):
                     # Tolerate partial captures: a response file with no entry in the
-                    # rest_api_map is skipped, not fatal (idrac_ctl crawls can be partial,
+                    # rest_api_map is skipped, not fatal (redfish_ctl crawls can be partial,
                     # e.g. a Settings.json whose parent URL was not recorded in the .npy map).
                     self.logger.warning(
                         f"Skipping {_file_path}: no corresponding rest api in the map "

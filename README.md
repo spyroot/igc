@@ -3,7 +3,7 @@
 Infrastructure Goal-Condition Reinforce Learner (`igc`) is a Python research project for training a
 goal-conditioned reinforcement-learning agent to operate Redfish-exposed infrastructure as a Markov
 Decision Process. The agent observes Redfish GET/HEAD responses, chooses REST actions, and learns
-from captured Redfish data collected by the `idrac_ctl/` git submodule.
+from captured Redfish data produced by `redfish_ctl`.
 
 ## Start here: local CPU smoke gate
 
@@ -41,7 +41,7 @@ and verification guide.
 
 - `igc/ds/` contains the Redfish dataset pipeline, including JSON response loading, tokenizer input
   construction, masked datasets, and the `rest_api_map.npy` loader for the map written by
-  `idrac_ctl/` discovery.
+  `redfish_ctl` discovery.
 - `igc/envs/` contains the mock REST environment and Gym-style wrappers used for offline simulation.
 - `igc/interfaces/` contains the REST mapping interface that binds URLs to captured response files.
 - `igc/modules/` contains model and training code for the language model, state encoder, value head,
@@ -49,24 +49,37 @@ and verification guide.
 - `igc/shared/` contains shared argument parsing and utility code.
 - `igc/core/` contains typed contracts for the generic tool-use agent architecture.
 - `tests/` contains pytest coverage. Default tests must stay offline: no GPU, network, HuggingFace
-  download, live Redfish host, or real `idrac_ctl` crawl.
+  download, live Redfish host, or real `redfish_ctl` crawl.
 - `docs/` contains the deeper design and environment material. Start with
   [docs/README.md](docs/README.md).
-- `idrac_ctl/` is a git submodule for Redfish data collection. Do not edit it from this repository.
 
 ## Data flow
 
-`idrac_ctl/`, the pinned data-collection submodule, discovers Redfish resources and writes captured
-JSON to `~/.json_responses/<host>/...`. The same discovery step writes `rest_api_map.npy`, a numpy map
-with `url_file_mapping` and `allowed_methods_mapping`. `igc/ds/ds_rest_trajectories.py` loads that map
-with `np.load(..., allow_pickle=True).item()`; those keys are the binding contract between the two
-repositories.
+The preferred input is a materialized `redfish_ctl` dataset artifact. Pull and verify the selected
+dataset archives in `redfish_ctl`, then materialize them into a stable vendor/model/capture layout:
+
+```bash
+git lfs install
+python tools/corpus.py pull --kind dataset --vendor dell --model xr8620t
+python tools/corpus.py verify --kind dataset --vendor dell --model xr8620t --require-materialized
+python tools/corpus.py materialize --kind dataset --vendor dell --model xr8620t --dest ./build/corpus
+python -m igc.ds.sources.redfish_fixture_source \
+  --corpus-manifest ./corpora/manifest.v1.json \
+  --corpus-root ./build/corpus
+```
+
+The legacy compatibility input is still supported: `redfish_ctl discovery` writes captured JSON to
+`~/.json_responses/<host>/...` and writes `rest_api_map.npy`, a NumPy map with `url_file_mapping` and
+`allowed_methods_mapping`. `igc/ds/ds_rest_trajectories.py` loads that map with
+`np.load(..., allow_pickle=True).item()`; those keys are the binding legacy contract between the two
+repositories. New dataset consumers should prefer `rest_api_map.v1.json`, whose file paths are
+relative to the materialized capture root.
 
 The default development path does not run discovery. Use captured data or the mock REST server in
 `igc/envs/` for offline tests. A live Redfish crawl can affect real management controllers, so it
 requires explicit current-task approval, an approved non-production host, credentials passed through
-environment variables or flags, and pacing. Never hardcode or print `IDRAC_IP`, `IDRAC_USERNAME`, or
-`IDRAC_PASSWORD` values.
+environment variables or flags, and pacing. Never hardcode or print `REDFISH_IP`,
+`REDFISH_USERNAME`, or `REDFISH_PASSWORD` values.
 
 `HUGGINGFACE_TOKEN`, when set by the developer for opt-in model downloads, is not needed for the
 local smoke gate and must not be logged or committed.
@@ -90,8 +103,8 @@ representation. The full plan and model curriculum live in
 - Mark GPU, HuggingFace download, slow, or live Redfish tests so they skip by default.
 - Do not commit credentials, captured responses, datasets, checkpoints, tokenizers, tarballs, or
   generated raw model output.
-- Do not edit `idrac_ctl/` here. Changes to that tool belong in the `spyroot/idrac_ctl` repository,
-  followed by a deliberate submodule bump in `igc`.
+- Changes to the capture tool belong in the `spyroot/redfish_ctl` repository and should be consumed
+  here through a released artifact or an explicit dataset materialization step.
 
 ## Next reading
 

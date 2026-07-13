@@ -1,13 +1,13 @@
 """
 Data-source contracts for the IGC training pipeline.
 
-A :class:`SourceAdapter` turns a corpus of Redfish observations — real captures
-under ``~/.json_responses`` (written by ``idrac_ctl`` discovery), the DMTF
-mockup replay tree, a vendor emulator, or a synthetic generator — into a stream
-of provenance-tagged :class:`SourceRecord` objects. Every record carries where
-it came from (``source``) and how much it can be trusted (:class:`TrustLevel`),
-so the training/eval split can hold out real data as ground truth and weight or
-filter the more synthetic tiers.
+A :class:`SourceAdapter` turns a corpus of Redfish observations — materialized
+``redfish_ctl`` dataset artifacts, legacy captures under ``~/.json_responses``,
+the DMTF mockup replay tree, a vendor emulator, or a synthetic generator — into
+a stream of provenance-tagged :class:`SourceRecord` objects. Every record
+carries where it came from (``source``) and how much it can be trusted
+(:class:`TrustLevel`), so the training/eval split can hold out real data as
+ground truth and weight or filter the more synthetic tiers.
 
 The trust ordering (real > replay > sim-vendor > sim-generic > sim-drift)
 mirrors the data-provenance design: real captures validate semantics, while the

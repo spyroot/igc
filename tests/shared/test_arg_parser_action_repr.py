@@ -47,6 +47,24 @@ def test_raw_data_dir_is_defined(monkeypatch):
     assert args.raw_data_dir == "~/.json_responses"
 
 
+def test_redfish_corpus_manifest_flags_are_defined(monkeypatch):
+    """Materialized redfish_ctl dataset inputs can be passed without path assumptions."""
+    args = _parse(
+        monkeypatch,
+        [
+            "--corpus_manifest",
+            "corpora/manifest.v1.json",
+            "--corpus_root",
+            "build/corpus",
+            "--corpus_kind",
+            "dataset",
+        ],
+    )
+    assert args.corpus_manifest == "corpora/manifest.v1.json"
+    assert args.corpus_root == "build/corpus"
+    assert args.corpus_kind == "dataset"
+
+
 def test_rl_sizes_are_ints(monkeypatch):
     """rl batch/buffer sizes parse as ints, not floats."""
     args = _parse(monkeypatch, [])
