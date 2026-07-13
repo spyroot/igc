@@ -11,7 +11,6 @@ import torch
 import transformers
 from transformers import TrainerCallback
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
-import deepspeed
 import accelerate
 
 
@@ -43,6 +42,9 @@ def hugging_face_info():
     """
     print(transformers.__version__)
     print(transformers.__file__)
+    # lazy: deepspeed is a cluster-only training dep, kept out of the offline
+    # import path so the CPU test/import path does not require it
+    import deepspeed
     print(f"Deepspeed version: {deepspeed.__version__}")
     print(f"Deepspeed location: {deepspeed.__file__}")
     print(f"Accelerate version: {accelerate.__version__}")
