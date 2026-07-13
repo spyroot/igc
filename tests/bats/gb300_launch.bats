@@ -254,3 +254,50 @@ setup() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"DRY RUN — nothing launched"* ]]
 }
+
+@test "live path passes a syntactically valid inner script to docker" {
+    fake_bin="${BATS_TEST_TMPDIR}/bin"
+    mkdir -p "$fake_bin" "$IGC_CODE_DIR" "$IGC_DATA_DIR"
+    touch "${IGC_CODE_DIR}/igc_main.py"
+
+    cat > "${fake_bin}/nvidia-smi" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"--query-compute-apps=pid"*) exit 0 ;;
+  "-L"*) printf 'GPU 0\nGPU 1\nGPU 2\nGPU 3\n' ;;
+  *) printf 'GPU 0, 0 %, 0 MiB\nGPU 1, 0 %, 0 MiB\nGPU 2, 0 %, 0 MiB\nGPU 3, 0 %, 0 MiB\n' ;;
+esac
+EOF
+    cat > "${fake_bin}/df" <<'EOF'
+#!/usr/bin/env bash
+printf 'Avail\n200G\n'
+EOF
+    cat > "${fake_bin}/docker" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "image inspect") exit 0 ;;
+  "rm -f") exit 0 ;;
+esac
+if [ "$1" = "run" ]; then
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = "bash" ] && [ "${2:-}" = "-lc" ]; then
+      bash -n -c "${3:-}"
+      exit $?
+    fi
+    shift
+  done
+  echo "missing bash -lc payload" >&2
+  exit 9
+fi
+echo "unexpected docker invocation: $*" >&2
+exit 8
+EOF
+    chmod +x "${fake_bin}/nvidia-smi" "${fake_bin}/df" "${fake_bin}/docker"
+
+    run env -u IGC_DRY_RUN IGC_RUNG=smoke1 IGC_IMAGE=igc-train:ngc26.03 \
+        IGC_CODE_DIR="$IGC_CODE_DIR" IGC_DATA_DIR="$IGC_DATA_DIR" \
+        PATH="${fake_bin}:/usr/bin:/bin" bash "$LAUNCH"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"launch: rung=smoke1"* ]]
+    [[ "$output" == *"run exited rc=0"* ]]
+}
