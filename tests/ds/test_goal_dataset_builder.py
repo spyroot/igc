@@ -265,6 +265,38 @@ def test_sensitive_identity_leaves_do_not_become_prompt_labels() -> None:
     assert all(surface.goal_ref.action_name != "Bios.ChangePassword" for surface in surfaces)
 
 
+def test_schema_and_registry_documents_do_not_become_goal_surfaces() -> None:
+    """Schema/registry corpus JSON is metadata, not an RL goal surface."""
+    schema_body = {
+        "@odata.id": "/redfish/v1/JsonSchemas/ComputerSystem",
+        "@odata.type": "#JsonSchemaFile.v1_0_0.JsonSchemaFile",
+        "Definitions": {
+            "PowerState": {
+                "enum": ["On", "Off"],
+                "description": "Power state documentation",
+            }
+        },
+    }
+    registry_body = {
+        "@odata.id": "/redfish/v1/Registries/Base",
+        "@odata.type": "#MessageRegistry.v1_6_0.MessageRegistry",
+        "RegistryPrefix": "Base",
+        "Messages": {
+            "Success": {
+                "Description": "Operation succeeded",
+                "Severity": "OK",
+            }
+        },
+    }
+
+    surfaces = build_goal_surfaces([
+        _record("/redfish/v1/JsonSchemas/ComputerSystem", schema_body),
+        _record("/redfish/v1/Registries/Base", registry_body),
+    ])
+
+    assert surfaces == ()
+
+
 def test_boot_server_and_set_ntp_text_has_two_unordered_sub_goals() -> None:
     """The example x maps to true_y as a set of atomic z_sub_goal targets."""
     surfaces = build_goal_surfaces([

@@ -39,6 +39,8 @@ make_redfish_ctl_corpus() {
 		>"${root}/tests/idrac_fixtures/system.json"
 	printf '{"@odata.id":"/redfish/v1/Managers/1/NetworkProtocol","@odata.type":"#ManagerNetworkProtocol.v1_10_0.ManagerNetworkProtocol","NTP":{"ProtocolEnabled":false}}\n' \
 		>"${root}/tests/supermicro_fixtures/ntp.json"
+	printf '{"@odata.id":"/redfish/v1/Systems/1/Bios","@odata.type":"#Bios.v1_2_0.Bios","Attributes":{"BootMode":"Uefi"}}\n' \
+		>"${root}/tests/hpe_fixtures/bios.json"
 }
 
 @test "lab wrapper requires a private output directory" {
@@ -76,6 +78,9 @@ make_redfish_ctl_corpus() {
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"pulling redfish_ctl Git LFS objects"* ]]
+	[[ "$output" == *"required corpus: Dell iDRAC full discovery pass"* ]]
+	[[ "$output" == *"required corpus: Supermicro GB300/HGX full discovery pass"* ]]
+	[[ "$output" == *"required corpus: HPE iLO full discovery pass"* ]]
 	[[ "$output" == *"--generate-all-goals"* ]]
 	[[ "$output" == *"--capture-root ${corpus}/tests/idrac_fixtures"* ]]
 	[[ "$output" == *"--capture-root ${corpus}/tests/supermicro_fixtures"* ]]
@@ -99,5 +104,5 @@ make_redfish_ctl_corpus() {
 		bash "${REPO_ROOT}/scripts/build_goal_dataset_lab.sh"
 
 	[ "$status" -eq 1 ]
-	[[ "$output" == *"no JSON files after git lfs pull"* ]]
+	[[ "$output" == *"missing required redfish_ctl LFS JSON corpus"* ]]
 }

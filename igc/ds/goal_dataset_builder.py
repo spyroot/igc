@@ -72,6 +72,16 @@ _SENSITIVE_NAME_SUBSTRINGS = (
     "token",
     "uuid",
 )
+_METADATA_RESOURCE_TYPES = frozenset({
+    "AttributeRegistry",
+    "JsonSchemaFile",
+    "MessageRegistry",
+    "PrivilegeRegistry",
+})
+_METADATA_URI_PARTS = (
+    "/jsonschemas/",
+    "/registries/",
+)
 
 
 def _bool_title(value: bool) -> str:
@@ -125,6 +135,27 @@ def _resource_type_id(odata_type: str) -> str:
         if tail and not tail.startswith("v"):
             return _snake(tail)
     return "resource"
+
+
+def _is_metadata_document(record: SourceRecord) -> bool:
+    """Return whether a corpus record documents schema, not mutable state."""
+    body = record.response
+    if not isinstance(body, Mapping):
+        return False
+
+    odata = str(body.get("@odata.type", record.schema_version))
+    if any(resource_type in odata for resource_type in _METADATA_RESOURCE_TYPES):
+        return True
+
+    normalized_uri = record.url.lower()
+    if any(uri_part in normalized_uri for uri_part in _METADATA_URI_PARTS):
+        return True
+
+    if "$schema" in body or "Definitions" in body or "definitions" in body:
+        return True
+    return "RegistryPrefix" in body and (
+        "Messages" in body or "RegistryEntries" in body
+    )
 
 
 def _get_path(body: Mapping[str, Any], path: str) -> Any:
@@ -563,6 +594,8 @@ def build_goal_surfaces(records: Iterable[SourceRecord]) -> tuple[GoalSurface, .
     surfaces: list[GoalSurface] = []
     for record in records:
         if not isinstance(record.response, Mapping):
+            continue
+        if _is_metadata_document(record):
             continue
         odata = str(record.response.get("@odata.type", record.schema_version))
         surfaces.extend(_generic_state_surfaces(record))
