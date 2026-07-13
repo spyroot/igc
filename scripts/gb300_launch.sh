@@ -88,6 +88,12 @@ IGC_ALLOW_RUNTIME_PIP="${IGC_ALLOW_RUNTIME_PIP:-0}"        # 1 => allow in-conta
 log()     { echo "=== [$(date -u '+%F %T')] $* ==="; }
 blocker() { echo "BLOCKER: $*" >&2; exit 3; }
 is_int()  { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+is_decimal() { [[ "${1:-}" =~ ^[0-9]+([.][0-9]+)?$ ]]; }
+is_safe_shell_atom() { case "${1:-}" in ''|*[!A-Za-z0-9_./:@+=,-]*) return 1 ;; *) return 0 ;; esac; }
+require_safe_shell_atom() {
+    local name="$1" value="${!1}"
+    is_safe_shell_atom "$value" || blocker "$name contains whitespace or shell-control characters (got '${value}')"
+}
 
 # --- 1. resolve the ladder rung (a preset is just defaults; explicit knobs win) ----
 case "$IGC_RUNG" in
@@ -107,14 +113,24 @@ if [ "$IGC_GPUS" -gt 1 ] 2>/dev/null; then : "${IGC_SHARDING:=ddp}"; else : "${I
 for v in IGC_BATCH IGC_GRAD_ACCUM IGC_WORKERS EPOCHS; do
     { is_int "${!v}" && [ "${!v}" -ge 1 ]; } || blocker "$v must be a positive integer (got '${!v}')"
 done
+for v in IGC_RUN IGC_MODEL IGC_OUTPUT_DIR IGC_IMAGE IGC_CODE_DIR IGC_DATA_DIR IGC_MODELS_DIR IGC_WANDB_ENV IGC_HF_ENV; do
+    require_safe_shell_atom "$v"
+done
 [ -z "$IGC_MAX_STEPS" ] || { is_int "$IGC_MAX_STEPS" && [ "$IGC_MAX_STEPS" -ge 1 ]; } || blocker "IGC_MAX_STEPS must be empty or a positive integer (got '${IGC_MAX_STEPS}')"
+{ is_int "$IGC_MASTER_PORT" && [ "$IGC_MASTER_PORT" -ge 1 ] && [ "$IGC_MASTER_PORT" -le 65535 ]; } || blocker "IGC_MASTER_PORT must be an integer TCP port 1-65535 (got '${IGC_MASTER_PORT}')"
 case "$IGC_SHARDING" in none|ddp|zero2|zero3|zero3_offload|fsdp) ;; *) blocker "IGC_SHARDING='${IGC_SHARDING}' invalid (none|ddp|zero2|zero3|zero3_offload|fsdp)" ;; esac
 case "$IGC_PRECISION" in no|fp16|bf16|fp8) ;; *) blocker "IGC_PRECISION='${IGC_PRECISION}' invalid (no|fp16|bf16|fp8)" ;; esac
 case "$IGC_ADAPTER" in lora|rslora|dora) ;; *) blocker "IGC_ADAPTER='${IGC_ADAPTER}' invalid (lora|rslora|dora)" ;; esac
 case "$IGC_USE_PEFT" in 0|1) ;; *) blocker "IGC_USE_PEFT must be 0 or 1 (got '${IGC_USE_PEFT}')" ;; esac
-# IGC_RUN / IGC_MODEL flow unquoted into --output_dir / --model_type, so a space would split the argv
-case "$IGC_RUN" in   *[![:graph:]]*|*' '*) blocker "IGC_RUN must contain no whitespace (got '${IGC_RUN}')" ;; esac
-case "$IGC_MODEL" in *[![:graph:]]*|*' '*) blocker "IGC_MODEL must contain no whitespace (got '${IGC_MODEL}')" ;; esac
+case "$IGC_SMOKE" in 0|1) ;; *) blocker "IGC_SMOKE must be 0 or 1 (got '${IGC_SMOKE}')" ;; esac
+case "$IGC_PREBUILD" in ''|0|1) ;; *) blocker "IGC_PREBUILD must be empty, 0, or 1 (got '${IGC_PREBUILD}')" ;; esac
+case "$IGC_DRY_RUN" in 0|1) ;; *) blocker "IGC_DRY_RUN must be 0 or 1 (got '${IGC_DRY_RUN}')" ;; esac
+case "$WANDB_MODE" in ''|online|offline|disabled) ;; *) blocker "WANDB_MODE must be empty, online, offline, or disabled (got '${WANDB_MODE}')" ;; esac
+case "$NCCL_CUMEM_ENABLE" in 0|1) ;; *) blocker "NCCL_CUMEM_ENABLE must be 0 or 1 (got '${NCCL_CUMEM_ENABLE}')" ;; esac
+case "$NCCL_MNNVL_ENABLE" in 0|1) ;; *) blocker "NCCL_MNNVL_ENABLE must be 0 or 1 (got '${NCCL_MNNVL_ENABLE}')" ;; esac
+{ is_int "$LORA_R" && [ "$LORA_R" -ge 1 ]; } || blocker "LORA_R must be a positive integer (got '${LORA_R}')"
+{ is_int "$LORA_ALPHA" && [ "$LORA_ALPHA" -ge 1 ]; } || blocker "LORA_ALPHA must be a positive integer (got '${LORA_ALPHA}')"
+is_decimal "$LORA_DROPOUT" || blocker "LORA_DROPOUT must be a decimal value (got '${LORA_DROPOUT}')"
 
 # resolve the LLM curriculum stage -> the real --train/--llm flags (scripts/train_igc.sbatch is the
 # source of truth). This launcher covers the LLM stages; the RL/combined stages have a different

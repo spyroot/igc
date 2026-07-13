@@ -204,16 +204,37 @@ setup() {
     [[ "$output" != *"PHASE A"* ]]
 }
 
-# --- fail-fast on argv-breaking whitespace ----------------------------------
+# --- fail-fast on argv-breaking shell text ----------------------------------
 
-@test "whitespace in IGC_RUN or IGC_MODEL is rejected" {
+@test "whitespace or shell control characters in command-rendered knobs are rejected" {
     run env IGC_RUN="my run" bash "$LAUNCH"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"IGC_RUN must contain no whitespace"* ]]
+    [[ "$output" == *"IGC_RUN contains whitespace or shell-control characters"* ]]
 
-    run env IGC_MODEL="a b" bash "$LAUNCH"
+    run env IGC_MODEL="gpt2;echo-bad" bash "$LAUNCH"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"IGC_MODEL must contain no whitespace"* ]]
+    [[ "$output" == *"IGC_MODEL contains whitespace or shell-control characters"* ]]
+
+    run env IGC_OUTPUT_DIR="experiments/out;echo-bad" bash "$LAUNCH"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"IGC_OUTPUT_DIR contains whitespace or shell-control characters"* ]]
+}
+
+@test "invalid master port and runtime toggles are rejected" {
+    run env IGC_MASTER_PORT="29500;echo-bad" bash "$LAUNCH"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"IGC_MASTER_PORT must be an integer TCP port 1-65535"* ]]
+
+    run env IGC_MASTER_PORT=70000 bash "$LAUNCH"
+    [ "$status" -ne 0 ]
+
+    run env IGC_SMOKE=maybe bash "$LAUNCH"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"IGC_SMOKE must be 0 or 1"* ]]
+
+    run env IGC_USE_PEFT=1 LORA_DROPOUT="0.1;echo-bad" bash "$LAUNCH"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"LORA_DROPOUT must be a decimal value"* ]]
 }
 
 # --- render tells the truth about 1-GPU precision ---------------------------
