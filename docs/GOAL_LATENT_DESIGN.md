@@ -180,12 +180,12 @@ python scripts/build_goal_dataset.py \
 ```
 
 The full dataset build runs inside the NV72 Docker lab, not on a laptop. The lab wrapper
-`scripts/build_goal_dataset_lab.sh` initializes the `redfish_ctl`/`idrac_ctl` submodule in the Docker
-checkout, runs `git lfs pull` inside that submodule so the full Redfish JSON corpus is present, verifies
-JSON files exist, and then calls `scripts/build_goal_dataset.py`. Capture roots are discovered from
-the LFS-backed vendor fixture directories and `~/.json_responses`, or supplied with
-`IGC_CAPTURE_ROOTS`. The model endpoint comes only from environment variables or a private env file;
-the script never hardcodes private hosts.
+`scripts/build_goal_dataset_lab.sh` initializes the canonical `redfish_ctl` checkout, runs
+`git lfs pull` inside that checkout so the full Redfish JSON corpus is present, verifies that the
+Dell iDRAC, Supermicro GB300/HGX, and HPE iLO discovery corpora are non-empty, and then calls
+`scripts/build_goal_dataset.py`. Capture roots are discovered from the LFS-backed vendor fixture
+directories and `~/.json_responses`, or supplied with `IGC_CAPTURE_ROOTS`. The model endpoint comes
+only from environment variables or a private env file; the script never hardcodes private hosts.
 
 For a lab-side full-corpus draft pass, generate one text batch per discovered atomic goal and write a
 manifest with the counts:

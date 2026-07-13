@@ -11,7 +11,13 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python}"
-IGC_REDFISH_CTL_DIR="${IGC_REDFISH_CTL_DIR:-${REPO_ROOT}/idrac_ctl}"
+if [[ -z "${IGC_REDFISH_CTL_DIR:-}" ]]; then
+	if [[ -d "${REPO_ROOT}/redfish_ctl" ]]; then
+		IGC_REDFISH_CTL_DIR="${REPO_ROOT}/redfish_ctl"
+	else
+		IGC_REDFISH_CTL_DIR="${REPO_ROOT}/idrac_ctl"
+	fi
+fi
 IGC_GOAL_DATASET_OUT="${IGC_GOAL_DATASET_OUT:-}"
 IGC_GOAL_DATASET_ENV_FILE="${IGC_GOAL_DATASET_ENV_FILE:-${REPO_ROOT}/.internal/goal_dataset.env}"
 IGC_GOAL_DATASET_PARAPHRASE_MODE="${IGC_GOAL_DATASET_PARAPHRASE_MODE:-openai}"
@@ -19,6 +25,7 @@ IGC_GOAL_DATASET_GLOB="${IGC_GOAL_DATASET_GLOB:-**/*.json}"
 IGC_GOAL_PARAPHRASE_COUNT="${IGC_GOAL_PARAPHRASE_COUNT:-8}"
 IGC_LFS_PULL="${IGC_LFS_PULL:-1}"
 IGC_LAB_DRY_RUN="${IGC_LAB_DRY_RUN:-0}"
+IGC_REQUIRE_VENDOR_CORPUS="${IGC_REQUIRE_VENDOR_CORPUS:-1}"
 
 say() {
 	printf '%s\n' "$*"
@@ -85,6 +92,26 @@ count_json_files() {
 	find "${root}" -type f -name '*.json' 2>/dev/null | wc -l | tr -dc '0-9'
 }
 
+require_json_corpus() {
+	local label="$1"
+	shift
+
+	local total=0
+	local root
+	local count
+	for root in "$@"; do
+		if [[ -d "${root}" ]]; then
+			count="$(count_json_files "${root}")"
+			total=$((total + count))
+		fi
+	done
+
+	if ((total == 0)); then
+		blocker "missing required redfish_ctl LFS JSON corpus: ${label}; run git -C ${IGC_REDFISH_CTL_DIR} lfs pull or fix the discovery export"
+	fi
+	say "required corpus: ${label} json_files=${total}"
+}
+
 prepare_redfish_ctl() {
 	require_command git
 	if [[ ! -d "${IGC_REDFISH_CTL_DIR}/.git" && ! -f "${IGC_REDFISH_CTL_DIR}/.git" ]]; then
@@ -98,6 +125,23 @@ prepare_redfish_ctl() {
 		run_or_print git -C "${IGC_REDFISH_CTL_DIR}" lfs install --local
 		run_or_print git -C "${IGC_REDFISH_CTL_DIR}" lfs pull
 	fi
+}
+
+require_vendor_corpora() {
+	if [[ "${IGC_REQUIRE_VENDOR_CORPUS}" != "1" ]]; then
+		return
+	fi
+
+	require_json_corpus \
+		"Dell iDRAC full discovery pass" \
+		"${IGC_REDFISH_CTL_DIR}/tests/idrac_fixtures"
+	require_json_corpus \
+		"Supermicro GB300/HGX full discovery pass" \
+		"${IGC_REDFISH_CTL_DIR}/tests/supermicro_gb300_corpus" \
+		"${IGC_REDFISH_CTL_DIR}/tests/supermicro_fixtures"
+	require_json_corpus \
+		"HPE iLO full discovery pass" \
+		"${IGC_REDFISH_CTL_DIR}/tests/hpe_fixtures"
 }
 
 discover_capture_roots() {
@@ -179,6 +223,7 @@ build_dataset() {
 main() {
 	source_private_env
 	prepare_redfish_ctl
+	require_vendor_corpora
 	discover_capture_roots
 	validate_generation_env
 	build_dataset
