@@ -20,6 +20,9 @@ aniso8601
 itsdangerous
 Werkzeug
 # metrics / utilities
+# imported at module load by igc/shared/shared_torch_utils.py (nvmlInit is
+# only called lazily at runtime, so the import is safe on a CPU-only runner)
+pynvml
 tabulate
 prettytable
 tensorboard
