@@ -20,6 +20,12 @@ from igc.ds.sources.base import (
     TrustLevel,
 )
 from igc.ds.sources.redfish_fixture_source import RedfishFixtureSource
+from igc.ds.sources.redfish_ctl_manifest import (
+    RedfishCorpusManifestError,
+    RedfishCtlCorpusManifest,
+    RedfishCtlManifestSource,
+    load_redfish_ctl_manifest,
+)
 from igc.ds.sources.mixer import DataManifest, SourceMix, unit_hash
 from igc.ds.sources.redfish_enum_space import (
     EnumSlot,
@@ -53,6 +59,10 @@ __all__ = [
     "SourceRecord",
     "TrustLevel",
     "RedfishFixtureSource",
+    "RedfishCorpusManifestError",
+    "RedfishCtlCorpusManifest",
+    "RedfishCtlManifestSource",
+    "load_redfish_ctl_manifest",
     "EnumSlot",
     "EnumSpaceIndex",
     "ResourceKind",
