@@ -106,8 +106,9 @@ The model is doing real work — just not the deciding:
 
 - **Understanding** the observation: turning a nested, vendor-specific JSON body into a state the
   policy can use is a language/code problem the backbone is good at.
-- **Planning / decomposition**: mapping a high-level `instruction` into ordered sub-goals (the
-  planned M3 layer in `ARCHITECTURE.md`) is where the model's world knowledge helps.
+- **Goal extraction**: mapping a high-level `instruction` into atomic `GoalRef` targets and explicit
+  dependency hints is where the model's world knowledge helps; the RL policy still learns execution
+  order from reward.
 - **Argument values**: choosing enum values for an action's typed slots draws on the model's grasp of
   what the fields mean.
 

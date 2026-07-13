@@ -104,7 +104,7 @@ class Goal:
     """A goal: a natural-language ``instruction``, a machine-checkable ``spec``
     the Evaluator reads (replacing embedding ``allclose``), optional
     ``constraints``, and an optional ordered ``plan`` (a list of
-    :class:`ToolAction` sub-goals filled by the planner / casting layer).
+    :class:`ToolAction` sub-goals filled by an upstream scheduler or UI layer).
     """
 
     instruction: str

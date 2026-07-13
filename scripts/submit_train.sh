@@ -22,7 +22,7 @@ SBATCH_FILE="${HERE}/scripts/train_igc.sbatch"
 
 case "${STAGE}" in
     m1|m2|m3|m3p|m6|agent|state_encoder|autoencoder|goal|parameter|rl|all) : ;;
-    *) echo "ERROR: stage '${STAGE}' is not one of m1|m2|m3|m3p|m6|all" >&2; exit 2 ;;
+    *) echo "ERROR: stage '${STAGE}' is not one of m1|m2|legacy goal|legacy parameter|m6|all" >&2; exit 2 ;;
 esac
 
 # Fleet-health gate (TEAM_GUIDE blocker rule): never submit against an unhealthy fleet.

@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 680 392" role="img" xmlns="http://www.w3.org/2000/svg">
 <title>A high-level workload decomposed into ordered, dependent sub-goals with discovery</title>
-<desc>The statement "tune BIOS, then boot Ubuntu" is decomposed by a planner into five ordered sub-goals where each is a precondition for the next; reboot steps are disruptive and gated; the terminal reward is clear but sparse. The agent must additionally discover the API, discover the state machine, and learn the optimal strategy.</desc>
+<desc>The statement "tune BIOS, then boot Ubuntu" is extracted into atomic sub-goals with an explicit dependency hint; reboot steps are disruptive and gated; the terminal reward is clear but sparse. The agent must additionally discover the API, discover the state machine, and learn the optimal strategy.</desc>
 <style>
 svg{--surface-2:#ffffff;--surface-1:#f7f7f5;--surface-0:#f0efea;--text-primary:#1f1e1b;--text-secondary:#57564f;--text-muted:#8a897f;--border:#e3e2dc;--border-strong:#cbcabf}
 .t,.th,.ts{font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:var(--text-primary)}
@@ -23,7 +23,7 @@ rect.c-purple{fill:#EEEDFE;stroke:#AFA9EC}.c-purple text{fill:#26215C}
 <text class="ts" x="624" y="62" text-anchor="end">reward: Ubuntu boots (clear, but sparse)</text>
 
 <rect x="250" y="92" width="180" height="24" rx="12" fill="var(--surface-1)" stroke="var(--border-strong)"/>
-<text class="ts" x="340" y="108" text-anchor="middle">planner (casting): NL → plan</text>
+<text class="ts" x="340" y="108" text-anchor="middle">GoalExtractor: NL → GoalRefs</text>
 <line x1="340" y1="86" x2="340" y2="92" stroke="var(--text-secondary)" marker-end="url(#arr3)"/>
 <line x1="340" y1="116" x2="340" y2="126" stroke="var(--text-secondary)" marker-end="url(#arr3)"/>
 
