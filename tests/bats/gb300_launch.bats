@@ -255,7 +255,7 @@ setup() {
     [[ "$output" == *"DRY RUN — nothing launched"* ]]
 }
 
-@test "live path passes a syntactically valid inner script to docker" {
+@test "live path executes inner script without printing HF token values" {
     fake_bin="${BATS_TEST_TMPDIR}/bin"
     mkdir -p "$fake_bin" "$IGC_CODE_DIR" "$IGC_DATA_DIR"
     touch "${IGC_CODE_DIR}/igc_main.py"
@@ -281,7 +281,7 @@ esac
 if [ "$1" = "run" ]; then
   while [ "$#" -gt 0 ]; do
     if [ "$1" = "bash" ] && [ "${2:-}" = "-lc" ]; then
-      bash -n -c "${3:-}"
+      HF_TOKEN=SECRET_SENTINEL bash -c "${3:-}"
       exit $?
     fi
     shift
@@ -292,12 +292,18 @@ fi
 echo "unexpected docker invocation: $*" >&2
 exit 8
 EOF
-    chmod +x "${fake_bin}/nvidia-smi" "${fake_bin}/df" "${fake_bin}/docker"
+    cat > "${fake_bin}/python" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+    chmod +x "${fake_bin}/nvidia-smi" "${fake_bin}/df" "${fake_bin}/docker" "${fake_bin}/python"
 
     run env -u IGC_DRY_RUN IGC_RUNG=smoke1 IGC_IMAGE=igc-train:ngc26.03 \
         IGC_CODE_DIR="$IGC_CODE_DIR" IGC_DATA_DIR="$IGC_DATA_DIR" \
         PATH="${fake_bin}:/usr/bin:/bin" bash "$LAUNCH"
     [ "$status" -eq 0 ]
     [[ "$output" == *"launch: rung=smoke1"* ]]
+    [[ "$output" == *"token=available"* ]]
+    [[ "$output" != *"SECRET_SENTINEL"* ]]
     [[ "$output" == *"run exited rc=0"* ]]
 }
