@@ -19,7 +19,7 @@ from ...ds.redfish_masked_dataset import MaskedJSONDataset
 from ...modules.base.igc_llm_base_module import LlmModule
 from ...modules.base.igc_metric_logger import MetricLogger
 from ...modules.igc_train_auto_state_encoder import AutoencoderTrainer
-from ...modules.llm_train_goal_extract import GoalExtractorTrainer
+from ...modules.legacy.llm_train_goal_extract import GoalExtractorTrainer
 from ...modules.llm_train_state_encoder import LlmEmbeddingsTrainer
 from ...modules.shared.llm_shared import (
     from_pretrained_default,

@@ -13,6 +13,8 @@ datasets/modules/*
 datasets/*.tar.gz
 datasets/*.tar.gz.md5
 datasets/dataset.json
+datasets/generated/
+datasets/goal*/
 datasets/tokenizer/tokenizer.json
 test_datasets/
 tests/datasets/
