@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 from typing import Protocol
@@ -50,20 +51,20 @@ def render_sync_plan(spec_path: str | Path, *, push: bool = False) -> str:
 
     if policy == "if_missing":
         lines.append(
-            f"docker image inspect {image} >/dev/null 2>&1 "
-            f"|| docker pull {image}"
+            f"docker image inspect {_shell(image)} >/dev/null 2>&1 "
+            f"|| docker pull {_shell(image)}"
         )
     elif policy == "always":
-        lines.append(f"docker pull {image}")
+        lines.append(f"docker pull {_shell(image)}")
     elif policy == "build":
         lines.append(_build_command(spec.image, image))
     elif policy in {"never", "locked_digest"}:
-        lines.append(f"docker image inspect {image} >/dev/null")
+        lines.append(f"docker image inspect {_shell(image)} >/dev/null")
     else:
         raise RunSpecError(f"unsupported image.pull_policy: {policy}")
 
     if push:
-        lines.append(f"docker push {image}")
+        lines.append(f"docker push {_shell(image)}")
     return "\n".join(lines) + "\n"
 
 
@@ -151,7 +152,15 @@ def _push(runner: Runner, image: str) -> bool:
 def _build_command(image_cfg: dict, image: str) -> str:
     dockerfile = str(image_cfg.get("dockerfile", "docker/Dockerfile.train"))
     context = str(image_cfg.get("context", "."))
-    return f"docker build -f {dockerfile} -t {image} {context}"
+    return (
+        f"docker build -f {_shell(dockerfile)} "
+        f"-t {_shell(image)} {_shell(context)}"
+    )
+
+
+def _shell(value: str) -> str:
+    """Return a copy/paste-safe shell token for dry-run output."""
+    return shlex.quote(str(value))
 
 
 def main(argv: list[str] | None = None) -> int:
