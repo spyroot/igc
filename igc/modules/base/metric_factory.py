@@ -144,24 +144,32 @@ class ClearMLLogger(BaseLogger):
 def _wandb_run_meta(kw: dict) -> dict:
     """Build W&B run metadata (name/group/job_type/tags/config) from the spec kwargs.
 
-    Maps the ``--train``/``--llm``/``--rl`` selection to a readable curriculum label so
-    a W&B run reads as e.g. ``m1-state-encoder`` grouped, tagged, and configured — not a
-    random name. The old goal/parameter selections are labelled as legacy.
+    Maps phase profile kwargs or the older ``--train``/``--llm``/``--rl`` selection to a
+    readable curriculum label so a W&B run reads as e.g. ``phase2_goal_extract`` or
+    ``m1-state-encoder`` grouped, tagged, and configured — not a random name. The old
+    goal/parameter selections are labelled as legacy.
 
     :param kw: the flattened spec (``vars(specs)``).
     :return: a dict of ``name``, ``group``, ``job_type``, ``tags``, ``config``.
     """
-    train, llm = kw.get("train"), kw.get("llm")
-    stage_map = {
-        ("llm", "latent"): "m1-state-encoder",
-        ("llm", "all"): "m1m2-encoder",
-        ("llm", "goal"): "goal-extractor-legacy",
-        ("llm", "parameter"): "param-extractor-legacy",
-    }
-    if train in ("agent",) or kw.get("rl"):
-        stage = "m6-rl-agent"
+    phase = kw.get("phase")
+    if phase:
+        stage = str(phase)
     else:
-        stage = stage_map.get((train, llm), f"{train or 'run'}-{llm}" if llm else (train or "run"))
+        train, llm = kw.get("train"), kw.get("llm")
+        stage_map = {
+            ("llm", "latent"): "m1-state-encoder",
+            ("llm", "all"): "m1m2-encoder",
+            ("llm", "goal"): "goal-extractor-legacy",
+            ("llm", "parameter"): "param-extractor-legacy",
+        }
+        if train in ("agent",) or kw.get("rl"):
+            stage = "m6-rl-agent"
+        else:
+            stage = stage_map.get(
+                (train, llm),
+                f"{train or 'run'}-{llm}" if llm else (train or "run"),
+            )
 
     model = str(kw.get("model_type") or "").rstrip("/").split("/")[-1].lower() or "model"
     epochs, bs = kw.get("num_train_epochs"), kw.get("per_device_train_batch_size")
@@ -183,16 +191,16 @@ def _wandb_run_meta(kw: dict) -> dict:
         name_bits.append(f"bs{bs}")
 
     config_keys = [
+        "phase", "profile", "objective", "dataset_jsonl", "record_count",
         "model_type", "train", "llm", "rl", "num_train_epochs",
-        "per_device_train_batch_size", "num_workers", "use_peft",
-        "lora_r", "lora_alpha", "sharding", "llm_torch_dtype", "device",
-        "lora_dropout", "lora_method", "use_rslora", "use_dora",
-        "m3_profile", "m3_record_count", "m3_optimizer", "m3_scheduler",
-        "m3_learning_rate", "m3_weight_decay", "m3_warmup_ratio",
-        "m3_gradient_accumulation_steps", "m3_max_length", "m3_max_steps",
-        "m3_precision", "m3_gradient_checkpointing", "m3_torch_compile",
-        "m3_dataloader_num_workers", "m3_total_parameters",
-        "m3_trainable_parameters", "m3_trainable_parameter_ratio",
+        "per_device_train_batch_size", "num_workers", "dataloader_num_workers",
+        "use_peft", "lora_r", "lora_alpha", "sharding", "precision",
+        "torch_dtype", "llm_torch_dtype", "device", "lora_dropout",
+        "lora_method", "use_rslora", "use_dora", "optimizer", "scheduler",
+        "learning_rate", "weight_decay", "warmup_ratio",
+        "gradient_accumulation_steps", "max_length", "max_steps",
+        "gradient_checkpointing", "torch_compile", "total_parameters",
+        "trainable_parameters", "trainable_parameter_ratio",
         "hf_home", "hf_hub_cache", "hf_token_available",
         "nccl_mnnvl_enable", "nccl_cumem_enable", "nccl_nvls_enable",
     ]

@@ -4,4 +4,6 @@ datasets/raw/*.pt filter=lfs diff=lfs merge=lfs -text
 datasets/raw/processed_dataset_gpt2.pt filter=lfs diff=lfs merge=lfs -text
 datasets/raw/processed_masked_dataset_gpt2.pt filter=lfs diff=lfs merge=lfs -text
 *.zip filter=lfs diff=lfs merge=lfs -text
-datasets/m3/*.jsonl filter=lfs diff=lfs merge=lfs -text
+datasets/phase1/*.jsonl filter=lfs diff=lfs merge=lfs -text
+datasets/phase2/*.jsonl filter=lfs diff=lfs merge=lfs -text
+datasets/phase3/*.jsonl filter=lfs diff=lfs merge=lfs -text

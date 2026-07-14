@@ -30,6 +30,8 @@ Reinforce Learner).
 - [GOAL_LATENT_DESIGN.md](GOAL_LATENT_DESIGN.md) — the GoalExtractor and GoalEncoder design:
   atomic sub-goal extraction, latent `z_sub_goal` alignment, hidden verifier payloads, and HER
   relabel boundaries.
+- [P0_PHASE_WORKFLOW.md](P0_PHASE_WORKFLOW.md) — the Phase 1/2/3 Redfish language-model workflow:
+  JSON pretraining, ordered REST-goal extraction, and method/argument extraction.
 - [TRAINING_OPTIMIZATION_PLAN.md](TRAINING_OPTIMIZATION_PLAN.md) — the large-model training,
   optimization, and GPU-efficiency roadmap for 3B/7B state-encoder work.
 

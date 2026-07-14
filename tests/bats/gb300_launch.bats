@@ -163,7 +163,7 @@ setup() {
 
 # --- IGC_STAGE is a real selector, not just a label -------------------------
 
-@test "IGC_STAGE maps to the real --train/--llm flags and labels the run" {
+@test "IGC_STAGE maps active legacy stages to the real --train/--llm flags" {
     run env IGC_GPUS=4 IGC_STAGE=m2 bash "$LAUNCH"
     [ "$status" -eq 0 ]
     [[ "$output" == *"--train llm --llm encoder"* ]]
@@ -171,9 +171,13 @@ setup() {
     [[ "$output" == *"name=verify-m2-"* ]]
     # m2 must NOT silently emit m1's --llm latent
     [[ "$output" != *"--llm latent"* ]]
+}
 
+@test "old m3 launcher stage is blocked in favor of Phase 2/3 specs" {
     run env IGC_GPUS=4 IGC_STAGE=m3 bash "$LAUNCH"
-    [[ "$output" == *"--llm goal"* ]]
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"legacy IGC_STAGE='m3' is retired"* ]]
+    [[ "$output" == *"configs/phase_training/profiles.yaml"* ]]
 }
 
 @test "RL/combined stages are rejected here (they belong in train_igc.sbatch)" {

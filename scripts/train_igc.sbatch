@@ -6,8 +6,8 @@
 # Stages (curriculum order — each later stage loads the earlier artifacts):
 #   m1 | state_encoder   --train llm  --llm latent     state encoder (backbone SFT; --use_peft for LoRA)
 #   m2 | autoencoder     --train llm  --llm encoder     state autoencoder (compresses the state)
-#   m3 | goal            --train llm  --llm goal         legacy permutation goal extractor
-#   m3p| parameter       --train llm  --llm parameter    legacy goal+parameter extractor
+#   m3 | goal            RETIRED; use configs/phase_training/profiles.yaml Phase 2
+#   m3p| parameter       RETIRED; use configs/phase_training/profiles.yaml Phase 3
 #   m6 | agent           --train agent --rl all          RL agent (DQN+HER) — needs m1+m2 first
 #   all                  --train all  --llm all --rl all  everything in one job
 #
@@ -55,7 +55,7 @@ export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-${HF_HOME}/hub}"
 export PYTHONUNBUFFERED=1
 
 # Overridable knobs (env). Stage code + captured data on the node's local NVMe.
-IGC_STAGE="${IGC_STAGE:-m1}"                     # m1|m2|m3|m3p|m6|all (see header)
+IGC_STAGE="${IGC_STAGE:-m1}"                     # m1|m2|m6|all; m3/m3p retired into phase_training specs
 IGC_GPUS="${IGC_GPUS:-1}"                        # per-node GPUs; >1 or multi-node = accelerate+FSDP2
 # multi-node rendezvous: first job node is the accelerate main process host.
 MASTER_ADDR="$(scontrol show hostnames "${SLURM_JOB_NODELIST:-$(hostname)}" 2>/dev/null | head -n1 || hostname)"
@@ -78,11 +78,11 @@ IGC_RUN="${IGC_RUN:-default}"
 case "${IGC_STAGE}" in
     m1|state_encoder) TRAIN_ARGS="--train llm --llm latent"      ; EPOCH_FLAG="--num_train_epochs"    ;;
     m2|autoencoder)   TRAIN_ARGS="--train llm --llm encoder"     ; EPOCH_FLAG="--num_train_epochs"    ;;
-    m3|goal)          TRAIN_ARGS="--train llm --llm goal"        ; EPOCH_FLAG="--num_train_epochs"    ;;
-    m3p|parameter)    TRAIN_ARGS="--train llm --llm parameter"   ; EPOCH_FLAG="--num_train_epochs"    ;;
+    m3|goal)          echo "ERROR: legacy IGC_STAGE='${IGC_STAGE}' is retired; use configs/phase_training/profiles.yaml Phase 2" >&2; exit 2 ;;
+    m3p|parameter)    echo "ERROR: legacy IGC_STAGE='${IGC_STAGE}' is retired; use configs/phase_training/profiles.yaml Phase 3" >&2; exit 2 ;;
     m6|agent|rl)      TRAIN_ARGS="--train agent --rl all"        ; EPOCH_FLAG="--rl_num_train_epochs" ;;
     all)              TRAIN_ARGS="--train all --llm all --rl all"; EPOCH_FLAG="--num_train_epochs"    ;;
-    *) echo "ERROR: unknown IGC_STAGE='${IGC_STAGE}' (use m1|m2|m3|m3p|m6|all)" >&2; exit 2 ;;
+    *) echo "ERROR: unknown IGC_STAGE='${IGC_STAGE}' (use m1|m2|m6|all; Phase 2/3 use configs/phase_training/profiles.yaml)" >&2; exit 2 ;;
 esac
 
 # The combined `all` stage also runs the RL agent, whose epochs come from --rl_num_train_epochs

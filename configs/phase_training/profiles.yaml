@@ -1,0 +1,516 @@
+schema_version: igc.phase_training.v1
+phases:
+  - phase1_pretrain
+  - phase2_goal_extract
+  - phase3_argument_extract
+default_profiles:
+  phase1_pretrain: phase1_gpt2_smoke
+  phase2_goal_extract: phase2_gpt2_smoke
+  phase3_argument_extract: phase3_gpt2_smoke
+gpu_default_profiles:
+  phase1_pretrain: phase1_qwen2_5_7b_rslora
+  phase2_goal_extract: phase2_qwen2_5_7b_rslora
+  phase3_argument_extract: phase3_qwen2_5_7b_rslora
+
+datasets:
+  phase1_full_corpus:
+    objective: redfish_json_reconstruction
+    jsonl: /models/igc/phase1_corpus/phase1_redfish_json_full.jsonl
+    build:
+      corpus_root: /workspace/igc/redfish_ctl/full_corpus
+      require_full_corpus: true
+      require_rest_api_map: true
+      require_manifest: true
+      required_archives:
+        - dell_xr8620t_full_corpus.tar.gz
+        - hpe_dl360_full_corpus.tar.gz
+        - supermicro_gb300_full_corpus.tar.gz
+        - supermicro_x10_full_corpus.tar.gz
+
+  phase2_d1_rest_goals:
+    objective: ordered_rest_goal_extraction
+    jsonl: /models/igc/goal-datasets/D1_ordered_rest_goals.jsonl
+    depends_on:
+      - phase1_full_corpus
+    build:
+      source_jsonl: /models/igc/phase1_corpus/phase1_redfish_json_full.jsonl
+      label_source: pro_reviewed_operator_text
+      target_key: rest_api_list
+
+  phase3_d2_method_arguments:
+    objective: ordered_method_argument_extraction
+    jsonl: /models/igc/goal-datasets/D2_ordered_method_arguments.jsonl
+    depends_on:
+      - phase2_d1_rest_goals
+    build:
+      source_jsonl: /models/igc/goal-datasets/D1_ordered_rest_goals.jsonl
+      target_key: calls
+      preserve_order: true
+
+models:
+  gpt2:
+    model_type: gpt2
+    trust_remote_code: false
+    torch_dtype: float32
+
+  qwen2_5_7b:
+    model_type: Qwen/Qwen2.5-7B-Instruct
+    trust_remote_code: true
+    torch_dtype: bfloat16
+
+optimizers:
+  adamw_phase_smoke:
+    name: adamw_torch_fused
+    learning_rate: 0.00005
+    weight_decay: 0.01
+    betas: [0.9, 0.95]
+    eps: 0.00000001
+    max_grad_norm: 1.0
+    scheduler: cosine
+    warmup_ratio: 0.03
+
+  adamw_phase_lora:
+    name: adamw_torch_fused
+    learning_rate: 0.0002
+    weight_decay: 0.0
+    betas: [0.9, 0.95]
+    eps: 0.00000001
+    max_grad_norm: 1.0
+    scheduler: cosine
+    warmup_ratio: 0.03
+
+peft:
+  qwen_rslora_32:
+    enabled: true
+    method: rslora
+    r: 32
+    lora_alpha: 64
+    lora_dropout: 0.05
+    bias: none
+    use_rslora: true
+    use_dora: false
+    init_lora_weights: true
+    target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+
+metric_sets:
+  phase1_pretrain:
+    event_fields:
+      - record_index
+      - rest_api
+      - allowed_methods
+      - vendor
+      - model_profile
+      - dataset_jsonl
+      - source_archive
+      - prompt_token_count
+      - target_token_count
+      - total_token_count
+      - train_loss
+      - learning_rate
+      - grad_norm
+      - tokens_per_second
+      - samples_per_second
+      - padding_ratio
+      - gpu_memory_allocated_gb
+      - gpu_memory_reserved_gb
+      - json_valid
+      - json_reconstruction_exact_match
+      - rest_api_exact_match
+      - allowed_methods_exact_match
+      - schema_valid
+      - inference_latency_ms
+    plot_names:
+      dataset_records: phase1_dataset/record_count
+      dataset_unique_rest_api_count: phase1_dataset/unique_rest_api_count
+      dataset_unique_resource_type_count: phase1_dataset/unique_resource_type_count
+      dataset_method_get_rate: phase1_dataset/method_get_rate
+      dataset_method_post_rate: phase1_dataset/method_post_rate
+      dataset_method_patch_rate: phase1_dataset/method_patch_rate
+      dataset_method_put_rate: phase1_dataset/method_put_rate
+      dataset_method_delete_rate: phase1_dataset/method_delete_rate
+      dataset_prompt_tokens_mean: phase1_dataset/prompt_token_count_mean
+      dataset_target_tokens_mean: phase1_dataset/target_token_count_mean
+      dataset_total_tokens_p95: phase1_dataset/total_tokens_p95
+      train_loss: phase1_pretrain/train_loss
+      train_ppl: phase1_pretrain/train_ppl
+      train_lr: phase1_pretrain/learning_rate
+      train_grad_norm: phase1_pretrain/grad_norm
+      train_tokens_per_second: phase1_pretrain/tokens_per_second
+      train_samples_per_second: phase1_pretrain/samples_per_second
+      train_padding_ratio: phase1_pretrain/padding_ratio
+      train_gpu_memory_allocated_gb: phase1_pretrain/gpu_memory_allocated_gb
+      train_gpu_memory_reserved_gb: phase1_pretrain/gpu_memory_reserved_gb
+      train_optimizer_step: phase1_pretrain/optimizer_step
+      train_epoch: phase1_pretrain/epoch
+      eval_json_valid_rate: phase1_eval/json_valid_rate
+      eval_schema_valid_rate: phase1_eval/schema_valid_rate
+      eval_json_reconstruction_exact_match: phase1_eval/json_reconstruction_exact_match
+      eval_rest_api_exact_match: phase1_eval/rest_api_exact_match
+      eval_allowed_methods_exact_match: phase1_eval/allowed_methods_exact_match
+      eval_inference_latency_ms_p50: phase1_eval/inference_latency_ms_p50
+      eval_inference_latency_ms_p95: phase1_eval/inference_latency_ms_p95
+
+  phase2_goal_extract:
+    event_fields:
+      - record_index
+      - instruction
+      - model_profile
+      - dataset_jsonl
+      - rest_api_list
+      - rest_api_list_length
+      - order_relation
+      - prompt_token_count
+      - target_token_count
+      - total_token_count
+      - train_loss
+      - learning_rate
+      - grad_norm
+      - tokens_per_second
+      - samples_per_second
+      - padding_ratio
+      - gpu_memory_allocated_gb
+      - gpu_memory_reserved_gb
+      - json_valid
+      - schema_valid
+      - rest_api_list_ordered_exact_match
+      - rest_api_list_set_f1
+      - hallucinated_endpoint
+      - text_interface_success
+      - inference_latency_ms
+    plot_names:
+      dataset_records: phase2_dataset/record_count
+      dataset_unique_rest_api_count: phase2_dataset/unique_rest_api_count
+      dataset_rest_api_list_length_mean: phase2_dataset/rest_api_list_length_mean
+      dataset_rest_api_list_length_p95: phase2_dataset/rest_api_list_length_p95
+      dataset_ordered_request_rate: phase2_dataset/ordered_request_rate
+      dataset_weak_order_request_rate: phase2_dataset/weak_order_request_rate
+      dataset_method_get_rate: phase2_dataset/method_get_rate
+      dataset_method_post_rate: phase2_dataset/method_post_rate
+      dataset_method_patch_rate: phase2_dataset/method_patch_rate
+      dataset_method_put_rate: phase2_dataset/method_put_rate
+      dataset_method_delete_rate: phase2_dataset/method_delete_rate
+      dataset_prompt_tokens_mean: phase2_dataset/prompt_token_count_mean
+      dataset_target_tokens_mean: phase2_dataset/target_token_count_mean
+      dataset_total_tokens_p95: phase2_dataset/total_tokens_p95
+      train_loss: phase2_goal_extract/train_loss
+      train_ppl: phase2_goal_extract/train_ppl
+      train_lr: phase2_goal_extract/learning_rate
+      train_grad_norm: phase2_goal_extract/grad_norm
+      train_tokens_per_second: phase2_goal_extract/tokens_per_second
+      train_samples_per_second: phase2_goal_extract/samples_per_second
+      train_padding_ratio: phase2_goal_extract/padding_ratio
+      train_gpu_memory_allocated_gb: phase2_goal_extract/gpu_memory_allocated_gb
+      train_gpu_memory_reserved_gb: phase2_goal_extract/gpu_memory_reserved_gb
+      train_optimizer_step: phase2_goal_extract/optimizer_step
+      train_epoch: phase2_goal_extract/epoch
+      eval_json_valid_rate: phase2_eval/json_valid_rate
+      eval_schema_valid_rate: phase2_eval/schema_valid_rate
+      eval_rest_api_list_ordered_exact_match: phase2_eval/rest_api_list_ordered_exact_match
+      eval_rest_api_list_set_f1: phase2_eval/rest_api_list_set_f1
+      eval_endpoint_recall_at_1: phase2_eval/endpoint_recall_at_1
+      eval_endpoint_recall_at_5: phase2_eval/endpoint_recall_at_5
+      eval_order_relation_exact_match: phase2_eval/order_relation_exact_match
+      eval_hallucinated_endpoint_rate: phase2_eval/hallucinated_endpoint_rate
+      eval_text_interface_success: phase2_eval/text_interface_success
+      eval_inference_latency_ms_p50: phase2_eval/inference_latency_ms_p50
+      eval_inference_latency_ms_p95: phase2_eval/inference_latency_ms_p95
+
+  phase3_argument_extract:
+    event_fields:
+      - record_index
+      - instruction
+      - model_profile
+      - dataset_jsonl
+      - rest_api_list
+      - calls
+      - call_count
+      - prompt_token_count
+      - target_token_count
+      - total_token_count
+      - train_loss
+      - learning_rate
+      - grad_norm
+      - tokens_per_second
+      - samples_per_second
+      - padding_ratio
+      - gpu_memory_allocated_gb
+      - gpu_memory_reserved_gb
+      - json_valid
+      - schema_valid
+      - ordered_call_exact_match
+      - rest_api_order_exact_match
+      - http_method_exact_match
+      - argument_exact_match
+      - argument_schema_exact_match
+      - argument_enum_valid
+      - hallucinated_endpoint
+      - hallucinated_action
+      - executable_against_catalog
+      - inference_latency_ms
+    plot_names:
+      dataset_records: phase3_dataset/record_count
+      dataset_call_count_mean: phase3_dataset/call_count_mean
+      dataset_call_count_p95: phase3_dataset/call_count_p95
+      dataset_method_get_rate: phase3_dataset/method_get_rate
+      dataset_method_post_rate: phase3_dataset/method_post_rate
+      dataset_method_patch_rate: phase3_dataset/method_patch_rate
+      dataset_method_put_rate: phase3_dataset/method_put_rate
+      dataset_method_delete_rate: phase3_dataset/method_delete_rate
+      dataset_argument_required_rate: phase3_dataset/argument_required_rate
+      dataset_prompt_tokens_mean: phase3_dataset/prompt_token_count_mean
+      dataset_target_tokens_mean: phase3_dataset/target_token_count_mean
+      dataset_total_tokens_p95: phase3_dataset/total_tokens_p95
+      train_loss: phase3_argument_extract/train_loss
+      train_ppl: phase3_argument_extract/train_ppl
+      train_lr: phase3_argument_extract/learning_rate
+      train_grad_norm: phase3_argument_extract/grad_norm
+      train_tokens_per_second: phase3_argument_extract/tokens_per_second
+      train_samples_per_second: phase3_argument_extract/samples_per_second
+      train_padding_ratio: phase3_argument_extract/padding_ratio
+      train_gpu_memory_allocated_gb: phase3_argument_extract/gpu_memory_allocated_gb
+      train_gpu_memory_reserved_gb: phase3_argument_extract/gpu_memory_reserved_gb
+      train_optimizer_step: phase3_argument_extract/optimizer_step
+      train_epoch: phase3_argument_extract/epoch
+      eval_json_valid_rate: phase3_eval/json_valid_rate
+      eval_schema_valid_rate: phase3_eval/schema_valid_rate
+      eval_ordered_call_exact_match: phase3_eval/ordered_call_exact_match
+      eval_rest_api_order_exact_match: phase3_eval/rest_api_order_exact_match
+      eval_http_method_exact_match: phase3_eval/http_method_exact_match
+      eval_argument_exact_match: phase3_eval/argument_exact_match
+      eval_argument_schema_exact_match: phase3_eval/argument_schema_exact_match
+      eval_argument_enum_valid_rate: phase3_eval/argument_enum_valid_rate
+      eval_hallucinated_endpoint_rate: phase3_eval/hallucinated_endpoint_rate
+      eval_hallucinated_action_rate: phase3_eval/hallucinated_action_rate
+      eval_executable_against_catalog_rate: phase3_eval/executable_against_catalog_rate
+      eval_inference_latency_ms_p50: phase3_eval/inference_latency_ms_p50
+      eval_inference_latency_ms_p95: phase3_eval/inference_latency_ms_p95
+
+profiles:
+  phase1_gpt2_smoke:
+    phase: phase1_pretrain
+    objective: redfish_json_reconstruction
+    description: CPU/GPU smoke over a small slice of the full Redfish JSON reconstruction data.
+    tracking:
+      report_to: wandb
+      entity: spyroot
+      project: igc
+      metric_prefix: phase1_pretrain
+      metric_set: phase1_pretrain
+    dataset:
+      ref: phase1_full_corpus
+      max_records: 64
+    model:
+      ref: gpt2
+    optimizer:
+      ref: adamw_phase_smoke
+    trainer:
+      output_dir: /models/igc/checkpoints/phase1_pretrain/gpt2_smoke
+      epochs: 1
+      batch_size: 1
+      gradient_accumulation_steps: 1
+      max_length: 1024
+      max_steps: 8
+      precision: fp32
+      dataloader_num_workers: 0
+      gradient_checkpointing: false
+      torch_compile: false
+      tf32: true
+      seed: 42
+      log_every: 1
+    distributed:
+      launcher: torchrun
+      nproc_per_node: 1
+      backend: nccl
+
+  phase1_qwen2_5_7b_rslora:
+    phase: phase1_pretrain
+    objective: redfish_json_reconstruction
+    description: Full-corpus Phase 1 adapter pretraining for the 7B candidate backbone.
+    tracking:
+      report_to: wandb
+      entity: spyroot
+      project: igc
+      metric_prefix: phase1_pretrain
+      metric_set: phase1_pretrain
+    dataset:
+      ref: phase1_full_corpus
+      max_records: null
+    model:
+      ref: qwen2_5_7b
+    optimizer:
+      ref: adamw_phase_lora
+    peft:
+      ref: qwen_rslora_32
+    trainer:
+      output_dir: /models/igc/checkpoints/phase1_pretrain/qwen2_5_7b_rslora
+      epochs: 3
+      batch_size: 1
+      gradient_accumulation_steps: 16
+      max_length: 1536
+      max_steps: null
+      precision: bf16
+      dataloader_num_workers: 4
+      gradient_checkpointing: true
+      torch_compile: false
+      tf32: true
+      seed: 42
+      log_every: 20
+    distributed:
+      launcher: torchrun
+      nproc_per_node: 4
+      backend: nccl
+
+  phase2_gpt2_smoke:
+    phase: phase2_goal_extract
+    objective: ordered_rest_goal_extraction
+    description: Offline smoke for D1 text-to-ordered-REST-goal extraction.
+    tracking:
+      report_to: wandb
+      entity: spyroot
+      project: igc
+      metric_prefix: phase2_goal_extract
+      metric_set: phase2_goal_extract
+    dataset:
+      ref: phase2_d1_rest_goals
+      max_records: 64
+    model:
+      ref: gpt2
+    optimizer:
+      ref: adamw_phase_smoke
+    trainer:
+      output_dir: /models/igc/checkpoints/phase2_goal_extract/gpt2_smoke
+      epochs: 1
+      batch_size: 1
+      gradient_accumulation_steps: 1
+      max_length: 1024
+      max_steps: 8
+      precision: fp32
+      dataloader_num_workers: 0
+      gradient_checkpointing: false
+      torch_compile: false
+      tf32: true
+      seed: 42
+      log_every: 1
+    distributed:
+      launcher: torchrun
+      nproc_per_node: 1
+      backend: nccl
+
+  phase2_qwen2_5_7b_rslora:
+    phase: phase2_goal_extract
+    objective: ordered_rest_goal_extraction
+    description: Phase 2 text-to-ordered-REST-goal adapter fine-tune.
+    tracking:
+      report_to: wandb
+      entity: spyroot
+      project: igc
+      metric_prefix: phase2_goal_extract
+      metric_set: phase2_goal_extract
+    dataset:
+      ref: phase2_d1_rest_goals
+      max_records: null
+    model:
+      ref: qwen2_5_7b
+    optimizer:
+      ref: adamw_phase_lora
+    peft:
+      ref: qwen_rslora_32
+    trainer:
+      output_dir: /models/igc/checkpoints/phase2_goal_extract/qwen2_5_7b_rslora
+      epochs: 3
+      batch_size: 1
+      gradient_accumulation_steps: 16
+      max_length: 1536
+      max_steps: null
+      precision: bf16
+      dataloader_num_workers: 4
+      gradient_checkpointing: true
+      torch_compile: false
+      tf32: true
+      seed: 42
+      log_every: 20
+    distributed:
+      launcher: torchrun
+      nproc_per_node: 4
+      backend: nccl
+
+  phase3_gpt2_smoke:
+    phase: phase3_argument_extract
+    objective: ordered_method_argument_extraction
+    description: Offline smoke for D2 text+REST-list to ordered method/argument calls.
+    tracking:
+      report_to: wandb
+      entity: spyroot
+      project: igc
+      metric_prefix: phase3_argument_extract
+      metric_set: phase3_argument_extract
+    dataset:
+      ref: phase3_d2_method_arguments
+      max_records: 64
+    model:
+      ref: gpt2
+    optimizer:
+      ref: adamw_phase_smoke
+    trainer:
+      output_dir: /models/igc/checkpoints/phase3_argument_extract/gpt2_smoke
+      epochs: 1
+      batch_size: 1
+      gradient_accumulation_steps: 1
+      max_length: 1024
+      max_steps: 8
+      precision: fp32
+      dataloader_num_workers: 0
+      gradient_checkpointing: false
+      torch_compile: false
+      tf32: true
+      seed: 42
+      log_every: 1
+    distributed:
+      launcher: torchrun
+      nproc_per_node: 1
+      backend: nccl
+
+  phase3_qwen2_5_7b_rslora:
+    phase: phase3_argument_extract
+    objective: ordered_method_argument_extraction
+    description: Phase 3 ordered method/argument adapter fine-tune.
+    tracking:
+      report_to: wandb
+      entity: spyroot
+      project: igc
+      metric_prefix: phase3_argument_extract
+      metric_set: phase3_argument_extract
+    dataset:
+      ref: phase3_d2_method_arguments
+      max_records: null
+    model:
+      ref: qwen2_5_7b
+    optimizer:
+      ref: adamw_phase_lora
+    peft:
+      ref: qwen_rslora_32
+    trainer:
+      output_dir: /models/igc/checkpoints/phase3_argument_extract/qwen2_5_7b_rslora
+      epochs: 3
+      batch_size: 1
+      gradient_accumulation_steps: 16
+      max_length: 1536
+      max_steps: null
+      precision: bf16
+      dataloader_num_workers: 4
+      gradient_checkpointing: true
+      torch_compile: false
+      tf32: true
+      seed: 42
+      log_every: 20
+    distributed:
+      launcher: torchrun
+      nproc_per_node: 4
+      backend: nccl

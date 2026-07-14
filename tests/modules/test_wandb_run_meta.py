@@ -30,6 +30,36 @@ def test_goal_extractor_and_rl_stages():
     assert _wandb_run_meta({"train": "agent", "rl": "dqn"})["group"] == "m6-rl-agent"
 
 
+def test_phase_training_metadata_is_first_class():
+    """Phase profiles label W&B runs without using legacy m3 config keys."""
+    meta = _wandb_run_meta({
+        "phase": "phase2_goal_extract",
+        "profile": "phase2_qwen2_5_7b_rslora",
+        "model_type": "Qwen/Qwen2.5-7B-Instruct",
+        "objective": "ordered_rest_goal_extraction",
+        "dataset_jsonl": "/models/igc/goal-datasets/D1_ordered_rest_goals.jsonl",
+        "record_count": 1024,
+        "optimizer": "adamw_torch_fused",
+        "scheduler": "cosine",
+        "learning_rate": 0.0002,
+        "weight_decay": 0.0,
+        "warmup_ratio": 0.03,
+        "gradient_accumulation_steps": 16,
+        "max_length": 1536,
+        "precision": "bf16",
+        "use_peft": True,
+    })
+
+    assert meta["group"] == "phase2_goal_extract"
+    assert meta["name"] == "phase2_goal_extract-qwen2.5-7b-instruct"
+    assert "phase2_goal_extract" in meta["tags"]
+    assert "lora" in meta["tags"]
+    assert meta["config"]["phase"] == "phase2_goal_extract"
+    assert meta["config"]["profile"] == "phase2_qwen2_5_7b_rslora"
+    assert meta["config"]["record_count"] == 1024
+    assert not any(key.startswith("m3_") for key in meta["config"])
+
+
 def test_sharding_tag_only_when_set():
     """A real sharding mode is tagged; 'none' is not."""
     sharded = _wandb_run_meta({"train": "llm", "llm": "latent", "sharding": "zero3"})
