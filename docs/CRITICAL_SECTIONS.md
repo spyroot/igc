@@ -1,5 +1,12 @@
 # Critical sections & performance
 
+> **⚠️ STATUS (2026-07-13, code audit).** The "RL training path" hot-path claims below (pointer
+> forward, `score_candidates` cache 51×, `resource_graph.neighbors` O(1)) are **offline-only** — the
+> live RL trainer builds `Igc_QNetwork` (the legacy DQN) and never touches the pointer or resource
+> graph, so those optimizations are on the *data-gen/benchmark* path, **not** the running RL loop.
+> Only the DQN/HER/TD/replay hot-path items are on the live path. Verify with
+> `scripts/code_reality_check.py`.
+
 Human-readable map of every performance-critical code path in igc: **where it is, what it
 costs, what we optimized, and how it is guarded** so a slow path can never silently make
 training take days. Every number here is reproducible with one command

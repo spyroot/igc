@@ -179,7 +179,7 @@ class IgcBaseState:
             self.logger.info("Memory allocated:", mem_get_info["allocated_bytes.all.current"] / 1024 ** 3, "GB")
             # additional CUDA statistics if available
             if hasattr(torch.cuda, 'utilization'):
-                self.logger.info(f"CUDA utilization:", torch.cuda.utilization())
+                self.logger.info("CUDA utilization:", torch.cuda.utilization())
             if hasattr(torch.cuda, 'memory_summary'):
                 torch.cuda.memory_summary()
 

@@ -144,10 +144,9 @@ class ClearMLLogger(BaseLogger):
 def _wandb_run_meta(kw: dict) -> dict:
     """Build W&B run metadata (name/group/job_type/tags/config) from the spec kwargs.
 
-    Maps the ``--train``/``--llm``/``--rl`` selection to the curriculum STAGE so a W&B
-    run reads as e.g. ``m1-state-encoder`` grouped, tagged, and configured — not a random
-    name. ``m1`` = state encoder (``--train llm --llm latent``), then m2/m3/m4/m6 as they
-    come online.
+    Maps the ``--train``/``--llm``/``--rl`` selection to a readable curriculum label so
+    a W&B run reads as e.g. ``m1-state-encoder`` grouped, tagged, and configured — not a
+    random name. The old goal/parameter selections are labelled as legacy.
 
     :param kw: the flattened spec (``vars(specs)``).
     :return: a dict of ``name``, ``group``, ``job_type``, ``tags``, ``config``.
@@ -156,8 +155,8 @@ def _wandb_run_meta(kw: dict) -> dict:
     stage_map = {
         ("llm", "latent"): "m1-state-encoder",
         ("llm", "all"): "m1m2-encoder",
-        ("llm", "goal"): "m3-goal-extractor",
-        ("llm", "parameter"): "m3p-param-extractor",
+        ("llm", "goal"): "goal-extractor-legacy",
+        ("llm", "parameter"): "param-extractor-legacy",
     }
     if train in ("agent",) or kw.get("rl"):
         stage = "m6-rl-agent"

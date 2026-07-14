@@ -26,8 +26,12 @@ def test_gb300_launch_keeps_mnnvl_opt_in_after_private_env_source():
     src = _read_script("gb300_launch.sh")
 
     assert 'IGC_NCCL_MNNVL="${IGC_NCCL_MNNVL:-${NCCL_MNNVL_ENABLE:-0}}"' in src
-    assert 'export NCCL_MNNVL_ENABLE="${_igc_nccl_mnnvl}"' in src
+    assert 'NCCL_MNNVL_ENABLE="${IGC_NCCL_MNNVL}"' in src
     assert 'export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"' in src
+    assert 'export NCCL_MNNVL_ENABLE="${IGC_NCCL_MNNVL}"' in src
+    assert src.index('[ -f "${IGC_HF_ENV}" ]') < src.index(
+        'export NCCL_MNNVL_ENABLE="${IGC_NCCL_MNNVL}"'
+    )
 
 
 def test_gb300_sanity_uses_safe_mnnvl_default():

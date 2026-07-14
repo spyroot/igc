@@ -22,7 +22,7 @@ class TestRestApiEnv(unittest.TestCase):
     #     args = shared_main()
     #     package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     #
-    #     model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+    #     model, tokenizer, last_epoch = IgcLanguageModule.load_llm_embeddings_model(args, only_tokenizer=False)
     #     json_directory_path = os.path.expanduser(args.raw_data_dir)
     #     self.dataset = JSONDataset(
     #         raw_json_directory_path=json_directory_path,
@@ -154,7 +154,7 @@ class TestRestApiEnv(unittest.TestCase):
         """
         args = shared_main()
         package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+        model, tokenizer, last_epoch = IgcLanguageModule.load_llm_embeddings_model(args, only_tokenizer=False)
         json_directory_path = os.path.expanduser(args.raw_data_dir)
         dataset = JSONDataset(
             raw_json_directory_path=json_directory_path,
@@ -183,7 +183,7 @@ class TestRestApiEnv(unittest.TestCase):
         args = shared_main()
         package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+        model, tokenizer, last_epoch = IgcLanguageModule.load_llm_embeddings_model(args, only_tokenizer=False)
         json_directory_path = os.path.expanduser(args.raw_data_dir)
         dataset = JSONDataset(
             raw_json_directory_path=json_directory_path,
@@ -237,7 +237,7 @@ class TestRestApiEnv(unittest.TestCase):
         args = shared_main()
         package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+        model, tokenizer, last_epoch = IgcLanguageModule.load_llm_embeddings_model(args, only_tokenizer=False)
         json_directory_path = os.path.expanduser(args.raw_data_dir)
         dataset = JSONDataset(
             raw_json_directory_path=json_directory_path,
@@ -279,7 +279,7 @@ class TestRestApiEnv(unittest.TestCase):
         args = shared_main()
         package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+        model, tokenizer, last_epoch = IgcLanguageModule.load_llm_embeddings_model(args, only_tokenizer=False)
         json_directory_path = os.path.expanduser(args.raw_data_dir)
         dataset = JSONDataset(
             raw_json_directory_path=json_directory_path,
@@ -321,7 +321,7 @@ class TestRestApiEnv(unittest.TestCase):
         args = shared_main()
         package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+        model, tokenizer, last_epoch = IgcLanguageModule.load_llm_embeddings_model(args, only_tokenizer=False)
         json_directory_path = os.path.expanduser(args.raw_data_dir)
         dataset = JSONDataset(
             raw_json_directory_path=json_directory_path,
@@ -396,7 +396,7 @@ class TestRestApiEnv(unittest.TestCase):
         args = shared_main()
         package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+        model, tokenizer, last_epoch = IgcLanguageModule.load_llm_embeddings_model(args, only_tokenizer=False)
         json_directory_path = os.path.expanduser(args.raw_data_dir)
         dataset = JSONDataset(
             raw_json_directory_path=json_directory_path,
@@ -457,7 +457,7 @@ class TestRestApiEnv(unittest.TestCase):
         args = shared_main()
         package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+        model, tokenizer, last_epoch = IgcLanguageModule.load_llm_embeddings_model(args, only_tokenizer=False)
         json_directory_path = os.path.expanduser(args.raw_data_dir)
         dataset = JSONDataset(
             raw_json_directory_path=json_directory_path,
@@ -519,7 +519,7 @@ class TestRestApiEnv(unittest.TestCase):
         args = shared_main()
         package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+        model, tokenizer, last_epoch = IgcLanguageModule.load_llm_embeddings_model(args, only_tokenizer=False)
         json_directory_path = os.path.expanduser(args.raw_data_dir)
         dataset = JSONDataset(
             raw_json_directory_path=json_directory_path,
@@ -577,7 +577,7 @@ class TestRestApiEnv(unittest.TestCase):
         args = shared_main()
         package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-        model, tokenizer, last_epoch = IgcLllModule.load_llm_embeddings_model(args, only_tokenizer=False)
+        model, tokenizer, last_epoch = IgcLanguageModule.load_llm_embeddings_model(args, only_tokenizer=False)
         json_directory_path = os.path.expanduser(args.raw_data_dir)
         dataset = JSONDataset(
             raw_json_directory_path=json_directory_path,
@@ -597,7 +597,7 @@ class TestRestApiEnv(unittest.TestCase):
             max_episode=max_episode_len)
 
         # register handler, which is our final goal state that we mutate.
-        goal_reset_api = register_reset_goal(env.mock_server())
+        register_reset_goal(env.mock_server())
         # rest_action = dataset.action_to_rest[goal_reset_api]
         # print(rest_action)
 

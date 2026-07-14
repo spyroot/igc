@@ -6,8 +6,8 @@
 # Stages (curriculum order — each later stage loads the earlier artifacts):
 #   m1 | state_encoder   --train llm  --llm latent     state encoder (backbone SFT; --use_peft for LoRA)
 #   m2 | autoencoder     --train llm  --llm encoder     state autoencoder (compresses the state)
-#   m3 | goal            --train llm  --llm goal         goal extractor (planner)
-#   m3p| parameter       --train llm  --llm parameter    goal+parameter extractor (arg head)
+#   m3 | goal            --train llm  --llm goal         legacy permutation goal extractor
+#   m3p| parameter       --train llm  --llm parameter    legacy goal+parameter extractor
 #   m6 | agent           --train agent --rl all          RL agent (DQN+HER) — needs m1+m2 first
 #   all                  --train all  --llm all --rl all  everything in one job
 #

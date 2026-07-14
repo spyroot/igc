@@ -1,0 +1,36 @@
+# Public run-spec schema sketch for Docker and Slurm launchers.
+#
+# This file documents the committed YAML contract. The first implementation
+# validates the same fields in igc/shared/run_spec.py so default tests do not
+# depend on a separate schema-validation package.
+version: 1
+required:
+  - version
+  - name
+  - backend
+  - image
+  - runtime
+properties:
+  backend:
+    enum: [docker, slurm]
+  image:
+    required: [ref]
+    properties:
+      ref: string
+      pull_policy:
+        enum: [never, always, if_missing, build, locked_digest]
+  runtime:
+    required: [command]
+    properties:
+      command: list[string]
+      env: mapping[string, string]
+  docker:
+    properties:
+      env_files: list[string]
+      mounts: list[mapping]
+  slurm:
+    properties:
+      partition: string
+      account: string
+      output: string
+      extra_args: list[string]

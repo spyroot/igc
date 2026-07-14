@@ -57,7 +57,7 @@ class IgcRlModule(IgcBaseState):
             # encoder=encoder
         )
 
-        directory_path = os.path.expanduser(spec.raw_data_dir)
+        os.path.expanduser(spec.raw_data_dir)
 
         # module_name,
         # spec,

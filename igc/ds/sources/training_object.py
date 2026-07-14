@@ -49,17 +49,19 @@ class TrainingExample:
     ``resource_graph_after`` is a separate-but-equal copy of ``resource_graph_before``.
     """
 
-    source: str
-    trust_level: TrustLevel
-    schema_version: str
+    source: str  # where this example came from (host / dataset / fixture id)
+    trust_level: TrustLevel  # data trust tier: REAL(5) > REPLAY(4) > SIM_VENDOR(3) > SIM_GENERIC(2) > SIM_DRIFT(1)
+    schema_version: str  # Redfish schema version the resource declares
+    # STATE *before* the action. TODAY this is a single-node dict {url: compact_resource}, NOT a
+    # topology graph — it has no parent/subordinate edges (those live only in RedfishResourceGraph).
     resource_graph_before: Dict[str, Dict[str, Any]]
-    request_or_action: Dict[str, Any]
-    response: Dict[str, Any]
-    resource_graph_after: Dict[str, Dict[str, Any]]
-    allowed_methods: List[str]
-    expected_semantics: Dict[str, Any]
-    vendor: Optional[str]
-    provenance: Dict[str, Any] = field(default_factory=dict)
+    request_or_action: Dict[str, Any]  # the action taken: {"method", "url", "body"} (the REST call)
+    response: Dict[str, Any]  # raw Redfish response body returned — what the M1 encoder actually reads today
+    resource_graph_after: Dict[str, Dict[str, Any]]  # STATE *after* the action; == before for a GET (a read never mutates)
+    allowed_methods: List[str]  # HTTP methods the API permits on this URL (GET/POST/PATCH/DELETE...) -> the legal action set
+    expected_semantics: Dict[str, Any]  # derived facts about the call: mutating? idempotent? expected status (see normalize_record)
+    vendor: Optional[str]  # hardware vendor (Dell/Supermicro/HPE...) — used for cross-vendor train/eval splits
+    provenance: Dict[str, Any] = field(default_factory=dict)  # audit trail: how/when/by-what this example was produced
 
     def to_dict(self) -> Dict[str, Any]:
         """Return a JSON-serializable dict representation of the training example.
@@ -70,17 +72,17 @@ class TrainingExample:
         :return: Dict suitable for JSON serialization.
         """
         return {
-            "source": self.source,
-            "trust_level": self.trust_level.name,
-            "schema_version": self.schema_version,
-            "resource_graph_before": self.resource_graph_before,
-            "request_or_action": self.request_or_action,
-            "response": self.response,
-            "resource_graph_after": self.resource_graph_after,
-            "allowed_methods": self.allowed_methods,
-            "expected_semantics": self.expected_semantics,
-            "vendor": self.vendor,
-            "provenance": self.provenance,
+            "source": self.source,                              # provenance: origin id
+            "trust_level": self.trust_level.name,               # tier name, e.g. "REAL" (IntEnum -> str for JSON)
+            "schema_version": self.schema_version,              # Redfish schema version
+            "resource_graph_before": self.resource_graph_before,  # state before (single-node dict today)
+            "request_or_action": self.request_or_action,        # {"method","url","body"} — the REST call
+            "response": self.response,                          # raw Redfish response body (what the encoder reads)
+            "resource_graph_after": self.resource_graph_after,  # state after (== before for a GET)
+            "allowed_methods": self.allowed_methods,            # HTTP methods legal on this URL -> action set
+            "expected_semantics": self.expected_semantics,      # mutating? idempotent? expected status
+            "vendor": self.vendor,                              # Dell/Supermicro/HPE... for vendor splits
+            "provenance": self.provenance,                      # full audit trail
         }
 
 
@@ -98,12 +100,12 @@ def normalize_record(record: SourceRecord) -> TrainingExample:
     allowed = record.allowed_methods or []
 
     expected_semantics: Dict[str, Any] = {
-        "method": method_upper,
-        "mutating": mutating,
-        "read_only": not mutating,
-        "idempotent": method_upper in ("GET", "HEAD", "PUT", "DELETE"),
-        "expected_status": 200,
-        "mutable_endpoint": any(
+        "method": method_upper,                    # normalized HTTP verb of this call
+        "mutating": mutating,                      # True if the call changes server state (anything but GET/HEAD)
+        "read_only": not mutating,                 # convenience inverse of `mutating`
+        "idempotent": method_upper in ("GET", "HEAD", "PUT", "DELETE"),  # safe to retry: same effect if repeated
+        "expected_status": 200,                    # HTTP status a healthy call should return
+        "mutable_endpoint": any(                   # True if the URL allows ANY write method (a write-capable endpoint)
             m.upper() in ("POST", "PATCH", "PUT", "DELETE") for m in allowed
         ),
     }

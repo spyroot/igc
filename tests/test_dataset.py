@@ -437,10 +437,9 @@ class DatasetTest(unittest.TestCase):
             self.assertEqual(torch.Size([1, 10]), chunk_mask.shape)
             print(f"{chunk_input}, {chunk_mask}")
 
-    def test_create_single_token_overlap(self, model_name='gpt2'):
+    def test_create_single_token_overlap_masked(self, model_name='gpt2'):
         # Set up the necessary data
-        target_key = "@odata.id"
-        tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        GPT2Tokenizer.from_pretrained("gpt2")
         # json_lines = json.dumps(j_data)
         # attention_mask = mask_specific_key_and_value(json_lines, target_key, tokenizer=tokenizer, debug=True)
         # print("Modified attention_mask:", attention_mask)

@@ -1,6 +1,18 @@
 """
 Redfish resource graph built from provenance-tagged capture records (D-002).
 
+"D-002" is Decision 002 in ``docs/DECISIONS.md`` (the action-candidate representation). This
+graph is the map of one host's REST surface: nodes are the resources the crawler walked, edges
+are the ways to get from one resource to another (URL containment, ``@odata.id`` links, and
+invokable action targets). It answers "from where the agent is now, what can it reach next?" —
+which is exactly the set of candidate actions the policy has to choose among.
+
+The problem it solves: the agent's legal next moves are NOT a fixed list — they depend on which
+resource it is looking at, and a real host exposes hundreds of endpoints. This graph is what turns
+a pile of captured JSON responses into "you are here, and from here you can reach these," the
+reachability the policy needs before it can even enumerate its choices. Who needs it: the candidate
+featurizer (to build the menu of next moves) and the ranking feasibility check.
+
 Builds the typed resource graph the D-002 candidate representation needs: nodes are walked
 resources, edges are URL-prefix containment plus ``@odata.id`` references harvested from the
 WHOLE body — the corpus census showed explicit ``Links`` sections cover only 10-14% of real

@@ -99,6 +99,7 @@ class TestRestApiEnv(unittest.TestCase):
         self.assertEqual(module.optimizer, None)
         self.assertEqual(module._save_strategy, SaveStrategy.EPOCH)
 
+    @pytest.mark.download  # constructs the module, which loads the gpt2 backbone from HF
     def test_dirs(self):
         """
 
@@ -220,6 +221,7 @@ class TestRestApiEnv(unittest.TestCase):
         with self.assertRaises(ValueError):
             IgcModule.model_file("wrong", module_name)
 
+    @pytest.mark.download  # constructs the module, which loads the gpt2 backbone from HF
     def test_save_and_load_model(self):
         """
         Test saving and loading the model.
@@ -265,6 +267,7 @@ class TestRestApiEnv(unittest.TestCase):
             self.assertTrue(success)
             self.assertTrue(module._is_trained)
 
+    @pytest.mark.download  # constructs the module, which loads the gpt2 backbone from HF
     def test_save_and_without_opt_sched(self):
         """
         Test saving and loading checkpoints with optimizer and scheduler.
