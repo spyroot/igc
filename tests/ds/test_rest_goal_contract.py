@@ -272,9 +272,31 @@ def test_rendered_examples_have_prompt_target_boundary_and_canonical_json() -> N
     rendered3 = render_ordered_call_example(phase3)
 
     assert rendered2.target_char_start == len(rendered2.prompt)
+    assert rendered2.target_json == (
+        "{\n"
+        '  "rest_api_list": [\n'
+        '    "/redfish/v1/Systems"\n'
+        "  ]\n"
+        "}"
+    )
     assert json.loads(rendered2.target_json) == {"rest_api_list": ["/redfish/v1/Systems"]}
     assert "### Ordered REST API List" in rendered2.prompt
     assert rendered2.full_text == rendered2.prompt + rendered2.target_json
+    assert rendered3.target_json == (
+        "{\n"
+        '  "calls": [\n'
+        "    {\n"
+        '      "allowed_methods": [\n'
+        '        "GET",\n'
+        '        "HEAD"\n'
+        "      ],\n"
+        '      "arguments": {},\n'
+        '      "method": "GET",\n'
+        '      "rest_api": "/redfish/v1/Systems"\n'
+        "    }\n"
+        "  ]\n"
+        "}"
+    )
     assert json.loads(rendered3.target_json) == {
         "calls": phase3["y_true"]["calls"],
     }
@@ -328,6 +350,26 @@ def test_y_pred_parsers_preserve_order_and_report_bad_contracts() -> None:
                 }],
             },
         })
+
+
+def test_ordered_calls_parser_preserves_multiple_call_order() -> None:
+    """Phase 3 y_pred parsing keeps the model-emitted call sequence intact."""
+    calls = [
+        {
+            "rest_api": "/redfish/v1/TaskService/Tasks",
+            "allowed_methods": ["GET", "HEAD"],
+            "method": "GET",
+            "arguments": {},
+        },
+        {
+            "rest_api": "/redfish/v1/Systems",
+            "allowed_methods": ["GET", "HEAD"],
+            "method": "GET",
+            "arguments": {},
+        },
+    ]
+
+    assert parse_ordered_calls_y_pred({"calls": calls}) == calls
 
 
 def test_wandb_metric_keys_are_stage_scoped_and_not_m3_names() -> None:
