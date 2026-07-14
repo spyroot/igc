@@ -165,6 +165,9 @@ body is not proof that the resource accepts that value in a PATCH or POST body.
 - `phase3_argument_extract/test/latency_sec_p95`
 - `phase3_argument_extract/test/memory_peak_mb`
 
+When Phase 3 moves beyond mock plumbing, its acceptance gate must mirror Phase 1: approved full
+corpora, readable W&B plots, checkpoint/report storage, and reviewed Git LFS artifact metadata.
+
 ## Inference Handoff
 
 At normal inference time the chain is:

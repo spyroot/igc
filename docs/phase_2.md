@@ -25,6 +25,8 @@ separate exact-order accuracy from set-recall.
 
 To build one `D1` row, sample one, two, or three Redfish records from `D0` or the same captured
 corpus. Each sampled record must carry its `rest_api`, full `json`, and `allowed_methods`.
+The following block is an intermediate synthetic-text generation request, not the final stored row:
+`x` is the sampled Redfish context, and `y_pred.text` is the draft operator sentence.
 
 ```json
 {
@@ -201,6 +203,9 @@ Cross-entropy is computed on the target JSON tokens. Evaluation parses `y_pred`,
 - `phase2_goal_extract/test/latency_sec_p50`
 - `phase2_goal_extract/test/latency_sec_p95`
 - `phase2_goal_extract/test/memory_peak_mb`
+
+When Phase 2 moves beyond mock plumbing, its acceptance gate must mirror Phase 1: approved full
+corpora, readable W&B plots, checkpoint/report storage, and reviewed Git LFS artifact metadata.
 
 Author:
 Mus mbayramo@stanford.edu
