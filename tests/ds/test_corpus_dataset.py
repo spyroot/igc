@@ -184,7 +184,7 @@ def test_trainer_duck_type_surface(tmp_path: Path):
     ds = CorpusJSONLDataset(_corpus_dir(tmp_path), max_len=16, tokenizer=_FakeTokenizer())
     for hook in ("disable_masking", "enable_masking", "mask_section", "mask_new_tokens",
                  "mask_targets", "mask_allowed_value", "mask_odata_id", "mask_targets_key",
-                 "mask_objects", "mask_arrays"):
+                 "mask_objects", "mask_arrays", "mask_api_prefix"):
         getattr(ds, hook)()  # must not raise
     assert ds.tokenizer is not None
     ds.load_tokenizer()  # idempotent

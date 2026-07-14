@@ -268,6 +268,9 @@ class CorpusJSONLDataset(Dataset):
     def mask_arrays(self, *args, **kwargs) -> None:
         """No-op masking hook (see :meth:`enable_masking`)."""
 
+    def mask_api_prefix(self, *args, **kwargs) -> None:
+        """No-op masking hook (see :meth:`enable_masking`)."""
+
     # --- torch Dataset -------------------------------------------------------------
 
     def __len__(self) -> int:
