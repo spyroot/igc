@@ -1,8 +1,8 @@
 """Offline tests for _wandb_run_meta (W&B run labelling by curriculum stage).
 
-Pins that a run's spec maps to a legible STAGE (m1 state encoder, m3 goal extractor,
-m6 RL agent) with a readable name, filterable tags, and a config snapshot — so W&B
-shows what stage/model/epochs a run is instead of a random name. Pure logic — no wandb.
+Pins that a run's spec maps to a legible label (m1 state encoder, legacy goal extractor,
+m6 RL agent) with a readable name, filterable tags, and a config snapshot — so W&B shows
+what stage/model/epochs a run is instead of a random name. Pure logic — no wandb.
 
 Author:
 Mus mbayramo@stanford.edu
@@ -25,8 +25,8 @@ def test_m1_state_encoder_labels():
 
 
 def test_goal_extractor_and_rl_stages():
-    """Other selections map to their stages (m3 goal extractor, m6 RL agent)."""
-    assert _wandb_run_meta({"train": "llm", "llm": "goal"})["group"] == "m3-goal-extractor"
+    """Other selections map to their stages (legacy goal extractor, m6 RL agent)."""
+    assert _wandb_run_meta({"train": "llm", "llm": "goal"})["group"] == "goal-extractor-legacy"
     assert _wandb_run_meta({"train": "agent", "rl": "dqn"})["group"] == "m6-rl-agent"
 
 
