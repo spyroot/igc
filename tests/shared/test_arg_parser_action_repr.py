@@ -47,6 +47,15 @@ def test_raw_data_dir_is_defined(monkeypatch):
     assert args.raw_data_dir == "~/.json_responses"
 
 
+def test_corpus_objective_defaults_legacy_and_phase1_selectable(monkeypatch):
+    """--corpus_objective selects the explicit Phase 1 prompt/completion objective."""
+    defaults = _parse(monkeypatch, [])
+    phase1 = _parse(monkeypatch, ["--corpus_objective", "phase1_pretrain"])
+
+    assert defaults.corpus_objective == "legacy"
+    assert phase1.corpus_objective == "phase1_pretrain"
+
+
 def test_rl_sizes_are_ints(monkeypatch):
     """rl batch/buffer sizes parse as ints, not floats."""
     args = _parse(monkeypatch, [])
