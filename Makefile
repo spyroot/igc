@@ -40,7 +40,7 @@ profile-rl: ## Profile only the RL training hot paths
 	$(PYTHON) scripts/bench_hot_paths.py --section rl --profile
 
 docker-test: ## Build the CPU test image and run the gate inside it
-	docker build -f docker/Dockerfile.test -t igc-test:cpu . && docker run --rm igc-test:cpu pytest -q
+	docker build -f docker/Dockerfile.test -t igc-test:cpu . && docker run --rm igc-test:cpu python -m pytest -q
 
 docker-push: ## Build and push the CPU test image (requires DOCKER_REPO=<user>/igc-test)
 	@test "$${DOCKER_REPO}" || (echo "ERROR: set DOCKER_REPO, e.g. DOCKER_REPO=youruser/igc-test make docker-push"; exit 1)
