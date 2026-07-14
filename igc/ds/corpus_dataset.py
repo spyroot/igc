@@ -24,13 +24,19 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import torch
 from torch.utils.data import Dataset
 
 from igc.ds.sources.corpus_io import iter_examples, read_manifest
 from igc.ds.sources.mixer import DataManifest
+from igc.modules.base.metric_keys import PHASE1_PRETRAIN
+
+
+LEGACY_OBJECTIVE = "legacy"
+PHASE1_PRETRAIN_OBJECTIVE = PHASE1_PRETRAIN
+CORPUS_OBJECTIVES = (LEGACY_OBJECTIVE, PHASE1_PRETRAIN_OBJECTIVE)
 
 
 class CorpusJSONLDataset(Dataset):
@@ -48,11 +54,17 @@ class CorpusJSONLDataset(Dataset):
                  corpus_dir: str,
                  default_tokenize: Optional[str] = "gpt2",
                  max_len: Optional[int] = 1024,
-                 tokenizer: Optional[Any] = None):
+                 tokenizer: Optional[Any] = None,
+                 objective: str = LEGACY_OBJECTIVE):
         self._corpus_dir = os.path.abspath(os.path.expanduser(corpus_dir))
         self._default_tokenize = default_tokenize
         self._max_len = max_len
         self._tokenizer = tokenizer
+        self.objective = objective
+        if objective not in CORPUS_OBJECTIVES:
+            raise ValueError(
+                f"unknown corpus objective {objective!r}; choose from {CORPUS_OBJECTIVES}")
+        self.metric_namespace = PHASE1_PRETRAIN if objective == PHASE1_PRETRAIN_OBJECTIVE else ""
 
         examples_path = os.path.join(self._corpus_dir, "examples.jsonl")
         if not os.path.isfile(examples_path):
@@ -65,15 +77,10 @@ class CorpusJSONLDataset(Dataset):
         self._data: List[Dict[str, torch.Tensor]] = []
         tok = self.tokenizer
         for example in iter_examples(examples_path):
-            action = example.get("request_or_action", {}) or {}
-            text = (f"{action.get('method', 'GET')} {action.get('url', '')}\n"
-                    f"{json.dumps(example.get('response', {}), sort_keys=True)}")
-            out = tok(text, padding="max_length", max_length=self._max_len,
-                      truncation=True, return_tensors="pt")
-            self._data.append({
-                "input_ids": out["input_ids"].squeeze(0),
-                "attention_mask": out["attention_mask"].squeeze(0),
-            })
+            if objective == PHASE1_PRETRAIN_OBJECTIVE:
+                self._data.append(self._phase1_item(tok, example))
+            else:
+                self._data.append(self._legacy_item(tok, example))
 
     # --- tokenizer surface (mirrors JSONDataset) ---------------------------------
 
@@ -91,6 +98,128 @@ class CorpusJSONLDataset(Dataset):
             self._tokenizer = AutoTokenizer.from_pretrained(self._default_tokenize)
         if self._tokenizer.pad_token is None:
             self._tokenizer.pad_token = self._tokenizer.eos_token
+
+    # --- render/tokenize objectives ------------------------------------------------
+
+    def _legacy_item(self, tok: Any, example: Mapping[str, Any]) -> Dict[str, torch.Tensor]:
+        """Render the historical whole-text objective for backward compatibility."""
+        action = example.get("request_or_action", {}) or {}
+        text = (f"{action.get('method', 'GET')} {action.get('url', '')}\n"
+                f"{json.dumps(example.get('response', {}), sort_keys=True)}")
+        out = tok(text, padding="max_length", max_length=self._max_len,
+                  truncation=True, return_tensors="pt")
+        return {
+            "input_ids": out["input_ids"].squeeze(0).long(),
+            "attention_mask": out["attention_mask"].squeeze(0).long(),
+        }
+
+    def _phase1_item(self, tok: Any, example: Mapping[str, Any]) -> Dict[str, torch.Tensor]:
+        """Render Phase 1 as prompt context plus JSON completion labels."""
+        rest_api, allowed_methods, input_json, target_json = self._phase1_fields(example)
+        allowed = ", ".join(allowed_methods) if allowed_methods else "UNKNOWN"
+        prompt = (
+            "### REST API\n"
+            f"{rest_api}\n\n"
+            "### Allowed Methods\n"
+            f"{allowed}\n\n"
+            "### Redfish JSON Input\n"
+            f"{self._json_dumps(input_json)}\n\n"
+            "### Complete Redfish JSON\n"
+        )
+        completion = f"{self._json_dumps(target_json)}\n"
+        return self._tokenize_prompt_completion(tok, prompt, completion)
+
+    def _tokenize_prompt_completion(
+            self, tok: Any, prompt: str, completion: str) -> Dict[str, torch.Tensor]:
+        """Tokenize prompt/completion and mask loss over prompt + padding."""
+        prompt_ids = self._token_ids(tok, prompt)
+        completion_ids = self._token_ids(tok, completion)
+        max_len = int(self._max_len or (prompt_ids.numel() + completion_ids.numel()))
+
+        if max_len < 2:
+            raise ValueError("phase1_pretrain requires max_len >= 2")
+
+        # Keep at least one prompt token when there is prompt context, and at least
+        # one completion token. All-ignored rows can produce NaN CausalLM loss, and
+        # prompt-free truncation would turn the objective into unconditional JSON LM.
+        max_completion = max_len - 1 if prompt_ids.numel() > 0 else max_len
+        completion_budget = min(max(1, completion_ids.numel()), max_completion)
+        prompt_budget = max_len - completion_budget
+        # Preserve the prompt tail because it carries the "complete JSON" marker
+        # immediately before the completion. Keeping the head would leave the model
+        # with context but no clear generation boundary on long Redfish resources.
+        prompt_ids = prompt_ids[-prompt_budget:] if prompt_budget else prompt_ids[:0]
+        completion_ids = completion_ids[:completion_budget]
+
+        input_ids = torch.cat((prompt_ids, completion_ids)).long()
+        attention_mask = torch.ones_like(input_ids, dtype=torch.long)
+        labels = torch.full_like(input_ids, -100)
+        # Labels stay unshifted: Hugging Face CausalLM shifts logits/labels
+        # internally, so completion-token positions carry their own ids here.
+        labels[prompt_ids.numel():] = completion_ids
+
+        if input_ids.numel() < max_len:
+            pad_id = int(getattr(tok, "pad_token_id", 0) or 0)
+            pad_len = max_len - input_ids.numel()
+            input_ids = torch.cat((input_ids, torch.full((pad_len,), pad_id, dtype=torch.long)))
+            attention_mask = torch.cat((attention_mask, torch.zeros(pad_len, dtype=torch.long)))
+            labels = torch.cat((labels, torch.full((pad_len,), -100, dtype=torch.long)))
+
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+        }
+
+    @staticmethod
+    def _token_ids(tok: Any, text: str) -> torch.Tensor:
+        """Return unpadded token ids for ``text``."""
+        try:
+            out = tok(text, padding=False, truncation=False, return_tensors="pt",
+                      add_special_tokens=False)
+        except TypeError:
+            out = tok(text, padding=False, truncation=False, return_tensors="pt")
+        return out["input_ids"].squeeze(0).long()
+
+    @staticmethod
+    def _phase1_fields(
+            example: Mapping[str, Any]) -> tuple[str, List[str], Dict[str, Any], Dict[str, Any]]:
+        """Extract Phase 1 ``x``/``y_true`` from explicit or normalized corpus rows."""
+        x = example.get("x")
+        y_true = example.get("y_true")
+        if isinstance(x, Mapping) and isinstance(y_true, Mapping):
+            input_json = x.get("json", {})
+            target_json = y_true.get("json", input_json)
+            rest_api = str(x.get("rest_api") or CorpusJSONLDataset._odata_id(input_json))
+            methods = CorpusJSONLDataset._methods(x.get("allowed_methods", []))
+            return rest_api, methods, dict(input_json), dict(target_json)
+
+        action = example.get("request_or_action", {}) or {}
+        response = example.get("response", {}) or {}
+        rest_api = str(action.get("url") or CorpusJSONLDataset._odata_id(response))
+        methods = CorpusJSONLDataset._methods(example.get("allowed_methods", []))
+        return rest_api, methods, dict(response), dict(response)
+
+    @staticmethod
+    def _methods(value: Any) -> List[str]:
+        """Normalize an allowed-method field to uppercase strings."""
+        if value is None:
+            return []
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, Sequence):
+            return []
+        return [str(method).upper() for method in value]
+
+    @staticmethod
+    def _odata_id(body: Any) -> str:
+        """Best-effort ``@odata.id`` extraction from a JSON body."""
+        return str(body.get("@odata.id", "")) if isinstance(body, Mapping) else ""
+
+    @staticmethod
+    def _json_dumps(value: Any) -> str:
+        """Stable pretty JSON rendering used by Phase 1/2/3 renderers."""
+        return json.dumps(value or {}, indent=2, sort_keys=True)
 
     # --- provenance for run reports -----------------------------------------------
 

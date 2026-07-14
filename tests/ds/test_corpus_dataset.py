@@ -11,6 +11,7 @@ Author:
 Mus mbayramo@stanford.edu
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -28,14 +29,20 @@ class _FakeTokenizer:
 
     pad_token = "<pad>"
     eos_token = "<eos>"
+    pad_token_id = 0
 
     def __call__(self, text, padding=None, max_length=None, truncation=None,
-                 return_tensors=None):
-        ids = [ord(c) % 1000 + 1 for c in text][:max_length]
+                 return_tensors=None, add_special_tokens=None):
+        ids = [ord(c) % 1000 + 1 for c in text]
+        if add_special_tokens:
+            ids = [999] + ids + [998]
+        if max_length is not None and truncation:
+            ids = ids[:max_length]
         mask = [1] * len(ids)
-        while len(ids) < max_length:
-            ids.append(0)
-            mask.append(0)
+        if padding == "max_length":
+            while len(ids) < max_length:
+                ids.append(0)
+                mask.append(0)
         return {"input_ids": torch.tensor([ids]), "attention_mask": torch.tensor([mask])}
 
 
@@ -64,6 +71,22 @@ def _corpus_dir(tmp_path: Path, n=4) -> str:
     return str(out)
 
 
+def _explicit_phase1_corpus_dir(tmp_path: Path, body: dict, target: dict | None = None) -> str:
+    """Write an explicit x/y_true Phase 1 row without invoking the corpus mixer."""
+    out = tmp_path / "explicit_corpus"
+    out.mkdir()
+    row = {
+        "x": {
+            "rest_api": "/redfish/v1/Systems/1",
+            "allowed_methods": ["GET", "PATCH"],
+            "json": body,
+        },
+        "y_true": {"json": target or body},
+    }
+    (out / "examples.jsonl").write_text(json.dumps(row) + "\n")
+    return str(out)
+
+
 def test_items_are_fixed_length_tensor_dicts(tmp_path: Path):
     """Every item is a {input_ids, attention_mask} pair of length max_len."""
     ds = CorpusJSONLDataset(_corpus_dir(tmp_path), max_len=64, tokenizer=_FakeTokenizer())
@@ -71,6 +94,81 @@ def test_items_are_fixed_length_tensor_dicts(tmp_path: Path):
     item = ds[0]
     assert set(item) == {"input_ids", "attention_mask"}
     assert item["input_ids"].shape == (64,) and item["attention_mask"].shape == (64,)
+
+
+def test_phase1_items_mask_prompt_and_padding_labels(tmp_path: Path):
+    """Phase 1 rows train only on the completion JSON, never prompt or padding tokens."""
+    ds = CorpusJSONLDataset(
+        _corpus_dir(tmp_path),
+        max_len=256,
+        tokenizer=_FakeTokenizer(),
+        objective="phase1_pretrain",
+    )
+
+    item = ds[0]
+
+    assert set(item) == {"input_ids", "attention_mask", "labels"}
+    assert item["input_ids"].shape == (256,)
+    assert item["labels"].shape == (256,)
+    active = item["labels"].ne(-100).nonzero(as_tuple=False).flatten()
+    assert active.numel() > 0
+    assert active[0].item() > 0
+    assert torch.equal(item["labels"][active], item["input_ids"][active])
+    assert item["labels"][item["attention_mask"].eq(0)].eq(-100).all()
+    assert ds.metric_namespace == "phase1_pretrain"
+
+
+def test_phase1_tiny_sequence_keeps_prompt_and_completion(tmp_path: Path):
+    """Even when truncated hard, Phase 1 keeps context before active completion labels."""
+    ds = CorpusJSONLDataset(
+        _corpus_dir(tmp_path),
+        max_len=8,
+        tokenizer=_FakeTokenizer(),
+        objective="phase1_pretrain",
+    )
+
+    item = ds[0]
+    active = item["labels"].ne(-100).nonzero(as_tuple=False).flatten()
+
+    assert active.numel() > 0
+    assert active[0].item() > 0
+
+
+def test_phase1_rejects_max_len_too_small(tmp_path: Path):
+    """A one-token Phase 1 sequence cannot hold prompt context and completion."""
+    with pytest.raises(ValueError, match="max_len >= 2"):
+        CorpusJSONLDataset(
+            _corpus_dir(tmp_path),
+            max_len=1,
+            tokenizer=_FakeTokenizer(),
+            objective="phase1_pretrain",
+        )
+
+
+def test_phase1_long_prompt_keeps_completion_marker(tmp_path: Path):
+    """Long resources are left-truncated so the prompt tail still names the task."""
+    tok = _FakeTokenizer()
+    ds = CorpusJSONLDataset(
+        _explicit_phase1_corpus_dir(
+            tmp_path,
+            {
+                "@odata.id": "/redfish/v1/Systems/1",
+                "Description": "A" * 500,
+            },
+            target={"@odata.id": "/redfish/v1/Systems/1", "Id": "1"},
+        ),
+        max_len=96,
+        tokenizer=tok,
+        objective="phase1_pretrain",
+    )
+
+    item = ds[0]
+    active = item["labels"].ne(-100).nonzero(as_tuple=False).flatten()
+    prompt_ids = item["input_ids"][:active[0].item()].tolist()
+    marker_ids = tok("### Complete Redfish JSON\n", return_tensors="pt",
+                     add_special_tokens=False)["input_ids"].squeeze(0).tolist()
+
+    assert _contains_subsequence(prompt_ids, marker_ids)
 
 
 def test_items_stack_like_the_trainer_collate(tmp_path: Path):
@@ -105,6 +203,17 @@ def test_missing_corpus_raises(tmp_path: Path):
     """A directory without examples.jsonl fails fast, not at first batch."""
     with pytest.raises(FileNotFoundError):
         CorpusJSONLDataset(str(tmp_path / "nope"), tokenizer=_FakeTokenizer())
+
+
+def test_unknown_objective_rejected(tmp_path: Path):
+    """The corpus objective is explicit; typos fail before tokenization."""
+    with pytest.raises(ValueError, match="unknown corpus objective"):
+        CorpusJSONLDataset(_corpus_dir(tmp_path), tokenizer=_FakeTokenizer(), objective="phase9")
+
+
+def _contains_subsequence(values: list[int], needle: list[int]) -> bool:
+    """Whether ``needle`` appears contiguously in ``values``."""
+    return any(values[i:i + len(needle)] == needle for i in range(len(values) - len(needle) + 1))
 
 
 # Author: Mus mbayramo@stanford.edu

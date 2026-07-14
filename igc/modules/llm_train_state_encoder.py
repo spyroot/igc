@@ -23,6 +23,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 from igc.modules.base.igc_llm_base_module import LlmModule
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.modules.shared.llm_shared import safe_resize_token_embeddings
+from igc.modules.base.metric_keys import phase_metric
 from igc.shared.shared_accelerator import broadcast_flag
 from igc.shared.shared_torch_builder import TorchBuilder
 
@@ -54,6 +55,24 @@ def build_causal_lm_labels(input_ids, attention_mask, pad_token_id=None):
     if pad_token_id is not None:
         labels = labels.masked_fill(input_ids == pad_token_id, -100)
     return labels
+
+
+def causal_lm_labels_from_batch(batch, input_ids, attention_mask, pad_token_id=None):
+    """Return dataset-provided labels or build whole-sequence causal-LM labels.
+
+    Phase 1 corpus rows provide prompt-masked ``labels``. Legacy datasets do not, so
+    the trainer falls back to full-sequence next-token labels.
+
+    :param batch: Collated batch dictionary.
+    :param input_ids: Device-local input ids.
+    :param attention_mask: Device-local attention mask.
+    :param pad_token_id: Tokenizer pad id for the legacy fallback.
+    :return: Labels on the same device as ``input_ids``.
+    """
+    labels = batch.get("labels")
+    if labels is not None:
+        return labels.to(input_ids.device, non_blocking=False)
+    return build_causal_lm_labels(input_ids, attention_mask, pad_token_id)
 
 
 def optimizer_steps_per_epoch(num_micro_batches: int, accum_steps: int) -> int:
@@ -209,6 +228,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         self._mask_probability = 1.0
         self._best_validation_metric = float('-inf')
         self.dataset = dataset
+        self._metric_namespace = getattr(dataset, "metric_namespace", "")
 
         self.logger.info(
             f"Rank {self.rank} creating llm trainer, num epochs {self.num_epochs} "
@@ -258,13 +278,22 @@ class LlmEmbeddingsTrainer(LlmModule):
     def custom_collate_fn(samples):
         """Stack tokenized samples into a model batch.
 
-        :param samples: Dataset rows containing ``input_ids`` and ``attention_mask``.
+        :param samples: Dataset rows containing ``input_ids`` and ``attention_mask``;
+            Phase 1 rows also carry prompt-masked ``labels``.
         :return: Batch dictionary with tensor values stacked on the leading axis.
         """
         included_keys = ['input_ids', 'attention_mask']
+        if all(LlmEmbeddingsTrainer._has_prompt_masked_labels(sample) for sample in samples):
+            included_keys.append("labels")
         batch = {key: torch.stack([s[key] for s in samples]) for key in included_keys}
 
         return batch
+
+    @staticmethod
+    def _has_prompt_masked_labels(sample) -> bool:
+        """Whether a sample carries Phase 1 prompt-masked CausalLM labels."""
+        labels = sample.get("labels")
+        return torch.is_tensor(labels) and labels.eq(-100).any().item()
 
     @staticmethod
     def generate_square_subsequent_mask(sz: int) -> Tensor:
@@ -324,29 +353,19 @@ class LlmEmbeddingsTrainer(LlmModule):
 
         with torch.no_grad():
             for i, batch in enumerate(validation_dataset):
-                batch_size = batch['input_ids'].size(0)
-                target_ids = batch["input_ids"][:, 1:].clone().detach()
-                mask = (batch["input_ids"] == self.tokenizer.pad_token_id)
-                mask = mask.to(self.device)
-                target_ids = target_ids.to(self.device)
+                input_ids = batch['input_ids'].to(self.device)
+                attention_mask = batch['attention_mask'].to(self.device)
+                labels = causal_lm_labels_from_batch(
+                    batch, input_ids, attention_mask, self.tokenizer.pad_token_id)
 
-                target_ids = target_ids.masked_fill(mask[:, 1:], -100)
-                original_mask = batch['attention_mask']
-                shifted_input = batch['input_ids'][:, :-1].to(self.device)
-                shifter_mask = batch['attention_mask'][:, :-1].to(self.device)
-                target_ids = target_ids.to(self.device)
-
-                batch_inputs = {
-                    'input_ids': shifted_input,
-                    'attention_mask': shifter_mask,
-                }
+                batch_inputs = {'input_ids': input_ids, 'attention_mask': attention_mask}
 
                 outputs = self.model(**batch_inputs)
-                compute_accuracy = self.compute_accuracy(
-                    outputs.logits, target_ids, original_mask
-                )
-                correct_predictions += compute_accuracy * batch_size
-                total_predictions += batch_size
+                predictions = torch.argmax(outputs.logits[:, :-1, :], dim=-1)
+                targets = labels[:, 1:]
+                valid = targets.ne(-100)
+                correct_predictions += ((predictions == targets) & valid).sum().item()
+                total_predictions += valid.sum().item()
 
         # Global metric: each rank validates only its own eval shard, so a rank-LOCAL accuracy makes
         # ranks disagree on "best" and enter the epoch-boundary save collective asymmetrically — the
@@ -621,6 +640,8 @@ class LlmEmbeddingsTrainer(LlmModule):
         run_started_clock = time.time()
         final_epoch_loss = None
         epochs_done = last_epoch
+        tokens_processed = 0
+        samples_processed = 0
 
         if total_batches == calculated_total_batches:
             print(f"Rank {self.rank}, Staring training, "
@@ -653,8 +674,11 @@ class LlmEmbeddingsTrainer(LlmModule):
                 # (the old target_ids = input_ids[:, 1:] + truncated input) double-shifts
                 # and trains the model to predict two tokens ahead. build_causal_lm_labels
                 # keeps the sequence full-length and only sets -100 on ignored positions.
-                labels = build_causal_lm_labels(
-                    input_ids, attention_mask, self.tokenizer.pad_token_id)
+                labels = causal_lm_labels_from_batch(
+                    batch, input_ids, attention_mask, self.tokenizer.pad_token_id)
+                active_tokens = int(labels.ne(-100).sum().item())
+                tokens_processed += active_tokens
+                samples_processed += input_ids.size(0)
 
                 batch_inputs = {
                     'input_ids': input_ids,
@@ -699,6 +723,26 @@ class LlmEmbeddingsTrainer(LlmModule):
                     self.metric_logger.log_metric("train/loss", loss.item(), step)
                     self.metric_logger.log_metric("train/lr", current_lr, step)
                     self.metric_logger.log_metric("train/grad_norm", last_grad_norm, step)
+                    if self._metric_namespace:
+                        elapsed = max(time.time() - run_started_clock, 1e-9)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "train", "loss"),
+                            loss.item(), step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "train", "perplexity"),
+                            float(np.exp(min(loss.item(), 20.0))), step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "train", "optimizer_step"),
+                            global_opt_steps + 1, step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "train", "tokens_processed"),
+                            tokens_processed, step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "throughput", "train_tokens_per_sec"),
+                            tokens_processed / elapsed, step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "throughput", "train_samples_per_sec"),
+                            samples_processed / elapsed, step)
 
                 if is_step:
                     global_opt_steps += 1
@@ -733,6 +777,11 @@ class LlmEmbeddingsTrainer(LlmModule):
                 validation_accuracy = self.validate(eval_dataloader)
                 if self.is_rank_zero():
                     self.metric_logger.log_metric("eval/accuracy", validation_accuracy, epoch_step)
+                    if self._metric_namespace:
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "eval", "token_accuracy"),
+                            validation_accuracy / 100.0,
+                            epoch_step)
 
                 print(f"Rank {self.rank} Epoch {epoch + 1} - Validation Accuracy: "
                       f"{validation_accuracy} Best: {self._best_validation_metric}")
@@ -742,6 +791,15 @@ class LlmEmbeddingsTrainer(LlmModule):
                 final_epoch_loss = average_loss
                 if self.is_rank_zero():
                     self.metric_logger.log_metric("train/epoch_loss", average_loss, epoch_step)
+                    if self._metric_namespace:
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "train", "epoch_loss"),
+                            average_loss,
+                            epoch_step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "train", "epoch_perplexity"),
+                            float(np.exp(min(average_loss, 20.0))),
+                            epoch_step)
                 print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
             epochs_done = epoch + 1
 
@@ -933,8 +991,8 @@ class LlmEmbeddingsTrainer(LlmModule):
                 # Pre-shifting here as well (the old target_ids = input_ids[:, 1:] +
                 # truncated input) double-shifts and trains for two-tokens-ahead — the
                 # same correction applied in _train via build_causal_lm_labels.
-                labels = build_causal_lm_labels(
-                    input_ids, attention_mask, self.tokenizer.pad_token_id)
+                labels = causal_lm_labels_from_batch(
+                    batch, input_ids, attention_mask, self.tokenizer.pad_token_id)
 
                 batch_inputs = {
                     'input_ids': input_ids,

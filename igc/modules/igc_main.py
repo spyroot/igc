@@ -91,6 +91,7 @@ class IgcMain:
                     corpus_dir,
                     default_tokenize=self._specs.model_type,
                     max_len=self._specs.seq_len,
+                    objective=getattr(self._specs, "corpus_objective", "legacy"),
                 )
             else:
                 self._dataset = MaskedJSONDataset(

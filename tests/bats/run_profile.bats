@@ -42,12 +42,14 @@ EOF
     [[ "$output" == *"set IGC_PROFILE"* ]]
 }
 
-@test "run_profile resolves profile argv and launches igc_main with paths and extras" {
+@test "run_profile resolves profile argv and launches igc_main with paths, corpus, and extras" {
     install_python_stub
 
     run env \
         IGC_PROFILE=m1_gpt2_smoke \
         IGC_DATA_DIR="${BATS_TEST_TMPDIR}/data" \
+        IGC_CORPUS_DIR="${BATS_TEST_TMPDIR}/corpus" \
+        IGC_CORPUS_OBJECTIVE=phase1_pretrain \
         IGC_OUTPUT_DIR="${BATS_TEST_TMPDIR}/out" \
         IGC_METRIC_REPORT=tensorboard \
         IGC_SET="batch_size=2 lr=1e-4" \
@@ -67,6 +69,8 @@ EOF
     final_args="$(cat "${BATS_TEST_TMPDIR}/final-args.txt")"
     [[ "$final_args" == *"igc_main.py --train llm --batch_size 2"* ]]
     [[ "$final_args" == *"--json_data_dir ${BATS_TEST_TMPDIR}/data"* ]]
+    [[ "$final_args" == *"--corpus_dir ${BATS_TEST_TMPDIR}/corpus"* ]]
+    [[ "$final_args" == *"--corpus_objective phase1_pretrain"* ]]
     [[ "$final_args" == *"--output_dir ${BATS_TEST_TMPDIR}/out"* ]]
     [[ "$final_args" == *"--metric_report tensorboard -- --recreate_dataset"* ]]
 }
