@@ -24,8 +24,12 @@ import cProfile
 import io
 import json
 import pstats
+import sys
 import time
+from pathlib import Path
 from typing import Callable, Dict, List, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from igc.ds.sources import RedfishFixtureSource, TrustLevel
 from igc.ds.sources.candidate_features import build_candidate_cache
