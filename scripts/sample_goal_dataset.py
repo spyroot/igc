@@ -16,6 +16,8 @@ import json
 import os
 import random
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -33,6 +35,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--dataset-dir",
         default="",
         help="Directory containing goal_dataset_manifest.json and JSONL outputs.",
+    )
+    parser.add_argument(
+        "--dataset-tar",
+        default="",
+        help="Tar.gz artifact containing goal_dataset_manifest.json and JSONL outputs.",
     )
     parser.add_argument(
         "--surfaces",
@@ -83,6 +90,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Print full verifier payloads. Off by default to keep output compact.",
     )
     return parser.parse_args(argv)
+
+
+def _safe_extract_dataset_tar(path: Path, target: Path) -> None:
+    """Extract a dataset tarball without allowing path traversal."""
+    with tarfile.open(path, "r:gz") as tar:
+        for member in tar.getmembers():
+            member_path = Path(member.name)
+            if (
+                member_path.is_absolute()
+                or ".." in member_path.parts
+                or member.issym()
+                or member.islnk()
+            ):
+                raise SystemExit(f"unsafe path in dataset tar: {member.name}")
+        tar.extractall(target)
 
 
 def _dataset_path(args: argparse.Namespace, name: str, explicit: str) -> Path | None:
@@ -245,6 +267,12 @@ def main(argv: list[str] | None = None) -> int:
     :return: process-style exit code.
     """
     args = parse_args(argv)
+    temp_dir: tempfile.TemporaryDirectory[str] | None = None
+    if args.dataset_tar:
+        temp_dir = tempfile.TemporaryDirectory(prefix="igc-goal-dataset-")
+        _safe_extract_dataset_tar(Path(args.dataset_tar), Path(temp_dir.name))
+        args.dataset_dir = temp_dir.name
+
     manifest_path = _dataset_path(args, "goal_dataset_manifest.json", args.manifest)
     surfaces_path = _dataset_path(args, "goal_surfaces.jsonl", args.surfaces)
     text_path = _dataset_path(args, "goal_text_examples.jsonl", args.text)
@@ -267,6 +295,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.mode in {"both", "text"}:
         print()
         _print_text(_sample(text_rows, args.limit, args.seed))
+    if temp_dir is not None:
+        temp_dir.cleanup()
     return 0
 
 

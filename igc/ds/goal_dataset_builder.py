@@ -241,6 +241,9 @@ def _surface(
     if goal_ref.action_name:
         verifier["action_name"] = goal_ref.action_name
         verifier["arguments"] = dict(goal_ref.arguments)
+    provenance = dict(record.provenance)
+    if record.allowed_methods:
+        provenance["allowed_methods"] = list(record.allowed_methods)
     return GoalSurface(
         goal_ref=goal_ref,
         vendor=record.vendor or "",
@@ -252,7 +255,7 @@ def _surface(
         current_value=current_value,
         allowed_values=tuple(allowed_values),
         verifier=verifier,
-        provenance=dict(record.provenance),
+        provenance=provenance,
     )
 
 

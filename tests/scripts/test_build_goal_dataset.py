@@ -8,6 +8,9 @@ import importlib.util
 import json
 from pathlib import Path
 
+import numpy as np
+import pytest
+
 from igc.ds.goal_dataset import read_goal_surfaces, read_goal_text_examples
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -145,3 +148,105 @@ def test_build_goal_dataset_infers_vendor_from_known_redfish_ctl_roots(
         "hpe",
         "supermicro",
     }
+
+
+def test_build_goal_dataset_vendor_inference_avoids_substring_false_positive() -> None:
+    """A misleading directory name should not silently relabel a capture."""
+    script = _load_script()
+
+    assert script._infer_vendor_from_root("/tmp/not_dell_capture/10.0.0.1") == ""
+    assert script._infer_vendor_from_root("/tmp/hpe_dl360_full_corpus/10.0.0.2") == "hpe"
+
+
+def test_build_goal_dataset_loads_allowed_methods_from_rest_api_map(
+    tmp_path: Path,
+) -> None:
+    """Full corpora keep same-run method maps for action/reward consumers."""
+    script = _load_script()
+    capture = tmp_path / "dell_xr8620t_full_corpus" / "10.0.0.1"
+    _write_capture(capture)
+    (capture / "corpus_manifest.json").write_text(json.dumps({
+        "artifact_type": "full_training",
+        "json_file_count": 2,
+    }))
+    np.save(
+        capture / "rest_api_map.npy",
+        {
+            "url_file_mapping": {
+                "/redfish/v1/Systems/1": "_redfish_v1_Systems_1.json",
+                "/redfish/v1/Managers/1/NetworkProtocol": (
+                    "_redfish_v1_Managers_1_NetworkProtocol.json"
+                ),
+            },
+            "allowed_methods_mapping": {
+                "/redfish/v1/Systems/1": ["GET", "HEAD", "PATCH"],
+                "/redfish/v1/Managers/1/NetworkProtocol": ["GET", "HEAD", "PATCH"],
+            },
+        },
+    )
+    surfaces_out = tmp_path / "goal_surfaces.jsonl"
+
+    code = script.main([
+        "--capture-root", str(capture),
+        "--source", "full_redfish_corpus",
+        "--surfaces-out", str(surfaces_out),
+    ])
+
+    assert code == 0
+    power_surface = next(
+        surface
+        for surface in read_goal_surfaces(surfaces_out)
+        if surface.goal_ref.goal_id == "power.computer_system.PowerState.eq.On"
+    )
+    assert power_surface.vendor == "dell"
+    assert power_surface.provenance["allowed_methods"] == ["GET", "HEAD", "PATCH"]
+
+
+def test_build_goal_dataset_ignores_method_map_without_manifest(tmp_path: Path) -> None:
+    """Do not pickle-load loose rest_api_map.npy files outside full-corpus roots."""
+    script = _load_script()
+    capture = tmp_path / "dell_xr8620t_full_corpus" / "10.0.0.1"
+    _write_capture(capture)
+    np.save(
+        capture / "rest_api_map.npy",
+        {
+            "allowed_methods_mapping": {
+                "/redfish/v1/Systems/1": ["GET", "HEAD", "PATCH"],
+            },
+        },
+    )
+    surfaces_out = tmp_path / "goal_surfaces.jsonl"
+
+    code = script.main([
+        "--capture-root", str(capture),
+        "--source", "full_redfish_corpus",
+        "--surfaces-out", str(surfaces_out),
+    ])
+
+    assert code == 0
+    power_surface = next(
+        surface
+        for surface in read_goal_surfaces(surfaces_out)
+        if surface.goal_ref.goal_id == "power.computer_system.PowerState.eq.On"
+    )
+    assert "allowed_methods" not in power_surface.provenance
+
+
+def test_build_goal_dataset_rejects_non_dict_rest_api_map(tmp_path: Path) -> None:
+    """Malformed full-corpus map payloads fail before writing a dataset."""
+    script = _load_script()
+    capture = tmp_path / "dell_xr8620t_full_corpus" / "10.0.0.1"
+    _write_capture(capture)
+    (capture / "corpus_manifest.json").write_text(json.dumps({
+        "artifact_type": "full_training",
+        "json_file_count": 2,
+    }))
+    np.save(capture / "rest_api_map.npy", ["not", "a", "mapping"])
+    surfaces_out = tmp_path / "goal_surfaces.jsonl"
+
+    with pytest.raises(SystemExit, match="rest_api_map.npy is not a dict"):
+        script.main([
+            "--capture-root", str(capture),
+            "--source", "full_redfish_corpus",
+            "--surfaces-out", str(surfaces_out),
+        ])

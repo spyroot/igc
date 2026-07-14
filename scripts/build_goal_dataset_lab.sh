@@ -18,7 +18,9 @@ if [[ -z "${IGC_REDFISH_CTL_DIR:-}" ]]; then
 		IGC_REDFISH_CTL_DIR="${REPO_ROOT}/idrac_ctl"
 	fi
 fi
+IGC_REDFISH_FULL_CORPUS_DIR="${IGC_REDFISH_FULL_CORPUS_DIR:-${IGC_REDFISH_CTL_DIR}/full_corpus}"
 IGC_GOAL_DATASET_OUT="${IGC_GOAL_DATASET_OUT:-}"
+IGC_GOAL_DATASET_WORK_DIR="${IGC_GOAL_DATASET_WORK_DIR:-}"
 IGC_GOAL_DATASET_ENV_FILE="${IGC_GOAL_DATASET_ENV_FILE:-${REPO_ROOT}/.internal/goal_dataset.env}"
 IGC_GOAL_DATASET_PARAPHRASE_MODE="${IGC_GOAL_DATASET_PARAPHRASE_MODE:-openai}"
 IGC_GOAL_DATASET_GLOB="${IGC_GOAL_DATASET_GLOB:-**/*.json}"
@@ -26,6 +28,12 @@ IGC_GOAL_PARAPHRASE_COUNT="${IGC_GOAL_PARAPHRASE_COUNT:-8}"
 IGC_LFS_PULL="${IGC_LFS_PULL:-1}"
 IGC_LAB_DRY_RUN="${IGC_LAB_DRY_RUN:-0}"
 IGC_REQUIRE_VENDOR_CORPUS="${IGC_REQUIRE_VENDOR_CORPUS:-1}"
+REQUIRED_FULL_CORPORA=(
+	"dell_xr8620t_full_corpus.tar.gz"
+	"hpe_dl360_full_corpus.tar.gz"
+	"supermicro_gb300_full_corpus.tar.gz"
+	"supermicro_x10_full_corpus.tar.gz"
+)
 
 say() {
 	printf '%s\n' "$*"
@@ -92,24 +100,82 @@ count_json_files() {
 	find "${root}" -type f -name '*.json' 2>/dev/null | wc -l | tr -dc '0-9'
 }
 
-require_json_corpus() {
-	local label="$1"
-	shift
+is_lfs_pointer() {
+	local archive="$1"
+	LC_ALL=C head -c 96 "${archive}" 2>/dev/null |
+		grep -q 'version https://git-lfs.github.com/spec/v1'
+}
 
-	local total=0
-	local root
-	local count
-	for root in "$@"; do
-		if [[ -d "${root}" ]]; then
-			count="$(count_json_files "${root}")"
-			total=$((total + count))
-		fi
-	done
+tar_contains() {
+	local archive="$1"
+	local pattern="$2"
+	tar -tzf "${archive}" | grep -Eq "${pattern}"
+}
 
-	if ((total == 0)); then
-		blocker "missing required redfish_ctl LFS JSON corpus: ${label}; run git -C ${IGC_REDFISH_CTL_DIR} lfs pull or fix the discovery export"
+validate_tar_members() {
+	local archive="$1"
+	local member
+	while IFS= read -r member; do
+		case "${member}" in
+		"" | /* | ../* | */../* | */.. | . | ..)
+			blocker "unsafe path in redfish_ctl full corpus archive: ${archive}: ${member}"
+			;;
+		esac
+	done < <(tar -tzf "${archive}")
+
+	local listing
+	while IFS= read -r listing; do
+		case "${listing:0:1}" in
+		l | h)
+			blocker "unsafe link entry in redfish_ctl full corpus archive: ${archive}"
+			;;
+		esac
+	done < <(tar -tvzf "${archive}")
+}
+
+tar_json_count() {
+	local archive="$1"
+	tar -tzf "${archive}" |
+		awk -F/ '$NF ~ /[.]json$/ && $NF != "corpus_manifest.json" {count++} END {print count + 0}'
+}
+
+archive_host_roots() {
+	local archive="$1"
+	tar -tzf "${archive}" |
+		awk -F/ 'NF == 2 && $2 == "rest_api_map.npy" {print $1}' |
+		sort -u
+}
+
+require_archive_host_roots() {
+	local archive="$1"
+	local roots
+	roots="$(archive_host_roots "${archive}")"
+	[[ -n "${roots}" ]] ||
+		blocker "redfish_ctl full corpus archive lacks top-level host rest_api_map.npy: ${archive}"
+}
+
+require_full_corpus_archive() {
+	local archive_name="$1"
+	local archive="${IGC_REDFISH_FULL_CORPUS_DIR}/${archive_name}"
+	[[ -f "${archive}" ]] ||
+		blocker "missing required redfish_ctl full corpus archive: ${archive}"
+	if is_lfs_pointer "${archive}"; then
+		blocker "redfish_ctl full corpus archive is still an LFS pointer: ${archive}"
 	fi
-	say "required corpus: ${label} json_files=${total}"
+	tar -tzf "${archive}" >/dev/null ||
+		blocker "redfish_ctl full corpus archive is not readable tar.gz: ${archive}"
+	validate_tar_members "${archive}"
+	tar_contains "${archive}" '(^|/)rest_api_map[.]npy$' ||
+		blocker "redfish_ctl full corpus archive lacks rest_api_map.npy: ${archive}"
+	require_archive_host_roots "${archive}"
+	tar_contains "${archive}" '(^|/)corpus_manifest[.]json$' ||
+		blocker "redfish_ctl full corpus archive lacks corpus_manifest.json: ${archive}"
+
+	local count
+	count="$(tar_json_count "${archive}")"
+	((count > 0)) ||
+		blocker "redfish_ctl full corpus archive contains no resource JSON: ${archive}"
+	say "full corpus archive: ${archive_name} json_files=${count}"
 }
 
 prepare_redfish_ctl() {
@@ -132,16 +198,31 @@ require_vendor_corpora() {
 		return
 	fi
 
-	require_json_corpus \
-		"Dell iDRAC full discovery pass" \
-		"${IGC_REDFISH_CTL_DIR}/tests/idrac_fixtures"
-	require_json_corpus \
-		"Supermicro GB300/HGX full discovery pass" \
-		"${IGC_REDFISH_CTL_DIR}/tests/supermicro_gb300_corpus" \
-		"${IGC_REDFISH_CTL_DIR}/tests/supermicro_fixtures"
-	require_json_corpus \
-		"HPE iLO full discovery pass" \
-		"${IGC_REDFISH_CTL_DIR}/tests/hpe_fixtures"
+	local archive_name
+	for archive_name in "${REQUIRED_FULL_CORPORA[@]}"; do
+		require_full_corpus_archive "${archive_name}"
+	done
+}
+
+extract_full_corpora() {
+	local extract_root="${IGC_GOAL_DATASET_WORK_DIR}/full_corpus"
+	local archive_name
+	local archive
+	local dest
+	local host_root
+	mkdir -p "${extract_root}"
+
+	for archive_name in "${REQUIRED_FULL_CORPORA[@]}"; do
+		archive="${IGC_REDFISH_FULL_CORPUS_DIR}/${archive_name}"
+		dest="${extract_root}/${archive_name%.tar.gz}"
+		run_or_print mkdir -p "${dest}"
+		run_or_print tar -xzf "${archive}" -C "${dest}"
+
+		while IFS= read -r host_root; do
+			[[ -n "${host_root}" ]] || continue
+			CAPTURE_ROOTS+=("${dest}/${host_root}")
+		done < <(archive_host_roots "${archive}")
+	done
 }
 
 discover_capture_roots() {
@@ -149,12 +230,7 @@ discover_capture_roots() {
 	if [[ -n "${IGC_CAPTURE_ROOTS:-}" ]]; then
 		split_roots "${IGC_CAPTURE_ROOTS}"
 	else
-		append_root_if_present "${IGC_REDFISH_CTL_DIR}/tests/idrac_fixtures"
-		append_root_if_present "${IGC_REDFISH_CTL_DIR}/tests/supermicro_fixtures"
-		append_root_if_present "${IGC_REDFISH_CTL_DIR}/tests/hpe_fixtures"
-		append_root_if_present "${IGC_REDFISH_CTL_DIR}/tests/generic_fixtures"
-		append_root_if_present "${IGC_REDFISH_CTL_DIR}/captures"
-		append_root_if_present "${HOME}/.json_responses"
+		extract_full_corpora
 	fi
 	if [[ -n "${IGC_EXTRA_CAPTURE_ROOTS:-}" ]]; then
 		split_roots "${IGC_EXTRA_CAPTURE_ROOTS}"
@@ -166,19 +242,28 @@ discover_capture_roots() {
 	local root
 	local count
 	for root in "${CAPTURE_ROOTS[@]}"; do
+		if [[ "${IGC_LAB_DRY_RUN}" = "1" && ! -d "${root}" ]]; then
+			say "capture root: ${root} json_files=dry-run"
+			continue
+		fi
 		[[ -d "${root}" ]] || blocker "capture root does not exist: ${root}"
 		count="$(count_json_files "${root}")"
 		say "capture root: ${root} json_files=${count}"
 		total=$((total + count))
 	done
-	((total > 0)) || blocker "capture roots contain no JSON files after git lfs pull"
+	if [[ "${IGC_LAB_DRY_RUN}" != "1" ]]; then
+		((total > 0)) || blocker "capture roots contain no JSON files after git lfs pull"
+	fi
 }
 
 validate_generation_env() {
 	[[ -n "${IGC_GOAL_DATASET_OUT}" ]] || blocker "set IGC_GOAL_DATASET_OUT to a private dataset output directory"
+	if [[ -z "${IGC_GOAL_DATASET_WORK_DIR}" ]]; then
+		IGC_GOAL_DATASET_WORK_DIR="${IGC_GOAL_DATASET_OUT}/_build"
+	fi
 	case "${IGC_GOAL_DATASET_PARAPHRASE_MODE}" in
-	none | static | openai) ;;
-	*) blocker "IGC_GOAL_DATASET_PARAPHRASE_MODE must be none, static, or openai" ;;
+	none | template | static | openai) ;;
+	*) blocker "IGC_GOAL_DATASET_PARAPHRASE_MODE must be none, template, static, or openai" ;;
 	esac
 	if [[ "${IGC_GOAL_DATASET_PARAPHRASE_MODE}" = "openai" ]]; then
 		[[ -n "${GOAL_PARAPHRASE_BASE_URL:-}" ]] || blocker "GOAL_PARAPHRASE_BASE_URL is required for openai paraphrases"
@@ -224,8 +309,8 @@ main() {
 	source_private_env
 	prepare_redfish_ctl
 	require_vendor_corpora
-	discover_capture_roots
 	validate_generation_env
+	discover_capture_roots
 	build_dataset
 }
 

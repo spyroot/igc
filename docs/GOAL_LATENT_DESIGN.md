@@ -181,17 +181,32 @@ python scripts/build_goal_dataset.py \
 
 The full dataset build runs inside the NV72 Docker lab, not on a laptop. The lab wrapper
 `scripts/build_goal_dataset_lab.sh` initializes the canonical `redfish_ctl` checkout, runs
-`git lfs pull` inside that checkout so the full Redfish JSON corpus is present, verifies that the
-Dell iDRAC, Supermicro GB300/HGX, and HPE iLO discovery corpora are non-empty, and then calls
-`scripts/build_goal_dataset.py`. Capture roots are discovered from the LFS-backed vendor fixture
-directories and `~/.json_responses`, or supplied with `IGC_CAPTURE_ROOTS`. The model endpoint comes
-only from environment variables or a private env file; the script never hardcodes private hosts.
+`git lfs pull` inside that checkout so the full Redfish corpus archives are present, verifies that
+`full_corpus/dell_xr8620t_full_corpus.tar.gz`,
+`full_corpus/hpe_dl360_full_corpus.tar.gz`,
+`full_corpus/supermicro_gb300_full_corpus.tar.gz`, and
+`full_corpus/supermicro_x10_full_corpus.tar.gz` are real tarballs rather than LFS pointer stubs, and
+then extracts their host roots into a private build directory. Each extracted root must carry the
+same-run `rest_api_map.npy`; `scripts/build_goal_dataset.py` loads its `allowed_methods_mapping` so
+action/reward consumers can see the discovered methods in goal-surface provenance. Capture roots can
+also be supplied explicitly with `IGC_CAPTURE_ROOTS`. The model endpoint comes only from environment
+variables or a private env file; the script never hardcodes private hosts.
 
 For a lab-side full-corpus draft pass, generate one text batch per discovered atomic goal and write a
 manifest with the counts:
 
 ```bash
 IGC_GOAL_DATASET_OUT=/private/or/lfs/path/goal_dataset \
+IGC_GOAL_DATASET_PARAPHRASE_MODE=template \
+bash scripts/build_goal_dataset_lab.sh
+```
+
+Use `IGC_GOAL_DATASET_PARAPHRASE_MODE=template` for a deterministic, endpoint-free inspection
+dataset. Use `openai` only when the private lab endpoint variables are present:
+
+```bash
+IGC_GOAL_DATASET_OUT=/private/or/lfs/path/goal_dataset \
+IGC_GOAL_DATASET_PARAPHRASE_MODE=openai \
 GOAL_PARAPHRASE_BASE_URL=<openai-compatible-base-url> \
 GOAL_PARAPHRASE_MODEL=<model-name> \
 bash scripts/build_goal_dataset_lab.sh
@@ -206,6 +221,15 @@ To inspect a built dataset locally, use the sampler without loading models or ca
 ```bash
 python scripts/sample_goal_dataset.py \
   --dataset-dir /path/to/goal_dataset \
+  --limit 5 \
+  --family power
+```
+
+If the dataset was packaged as a tarball, sample it directly:
+
+```bash
+python scripts/sample_goal_dataset.py \
+  --dataset-tar datasets/goal_latent_full_corpus.tar.gz \
   --limit 5 \
   --family power
 ```

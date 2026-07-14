@@ -9,6 +9,7 @@ from igc.ds.goal_dataset_builder import build_goal_surfaces
 from igc.ds.goal_paraphrases import (
     StaticParaphraseProvider,
     build_paraphrase_prompt,
+    generate_template_goal_text_drafts,
     generate_goal_text_drafts,
     generate_goal_text_examples,
     validate_paraphrase_texts,
@@ -96,6 +97,40 @@ def test_generate_goal_text_drafts_attaches_deterministic_labels_without_validat
     ]
     assert examples[0].dependencies == ()
     assert examples[0].metadata["validation"] == "llm_generated_unvalidated"
+
+
+def test_generate_template_goal_text_drafts_creates_endpoint_free_x_rows() -> None:
+    """The inspection dataset can contain X rows without calling a model."""
+    refs = _refs()
+
+    examples = generate_template_goal_text_drafts(refs[:1], count=2)
+
+    assert [example.text for example in examples] == [
+        "set computer system power state to On",
+        "make computer system power state On",
+    ]
+    assert examples[0].goal_refs == refs[:1]
+    assert examples[0].text_source == "template"
+    assert examples[0].metadata["validation"] == "template_generated"
+
+
+def test_generate_template_goal_text_drafts_keeps_multi_argument_actions() -> None:
+    """Action text should not silently drop arguments from true_y labels."""
+    ref = GoalRef(
+        goal_id="action.computer_system.Reset",
+        family="action",
+        resource_type="computer_system",
+        mode="transition",
+        action_name="Reset",
+        arguments={"ResetType": "ForceRestart", "BootSourceOverrideTarget": "Pxe"},
+    )
+
+    examples = generate_template_goal_text_drafts((ref,), count=1)
+
+    assert examples[0].text == (
+        "run reset on computer system setting "
+        "reset type ForceRestart and boot source override target Pxe"
+    )
 
 
 def test_generate_goal_text_drafts_preserves_dependency_labels() -> None:

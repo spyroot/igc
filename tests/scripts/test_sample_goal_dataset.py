@@ -6,7 +6,10 @@ Mus mbayramo@stanford.edu
 
 import importlib.util
 import json
+import tarfile
 from pathlib import Path
+
+import pytest
 
 from igc.ds.goal_dataset import GoalRef, GoalSurface, GoalTextExample
 
@@ -132,3 +135,64 @@ def test_sample_goal_dataset_filters_surface_family(tmp_path: Path, capsys) -> N
     output = capsys.readouterr().out
     assert "network.manager_network_protocol.NTP.ProtocolEnabled.eq.True" in output
     assert "power.computer_system.PowerState.eq.On" not in output
+
+
+def test_sample_goal_dataset_reads_tar_artifact(tmp_path: Path, capsys) -> None:
+    """Committed LFS tarballs can be sampled without manual extraction."""
+    script = _load_script()
+    dataset = tmp_path / "goal_dataset"
+    dataset.mkdir()
+    goal_ref = GoalRef(
+        goal_id="power.computer_system.PowerState.eq.On",
+        family="power",
+        resource_type="computer_system",
+        property_path="PowerState",
+        target_value="On",
+    )
+    surface = GoalSurface(
+        goal_ref=goal_ref,
+        vendor="dell",
+        source="full_redfish_corpus",
+        resource_uri="/redfish/v1/Systems/1",
+        resource_type="#ComputerSystem.v1_20_0.ComputerSystem",
+        fact_path="PowerState",
+        target_value="On",
+    )
+    (dataset / "goal_dataset_manifest.json").write_text(json.dumps({
+        "capture_records": 1,
+        "goal_surfaces": 1,
+        "text_examples": 0,
+        "unique_goal_ids": 1,
+        "vendors": ["dell"],
+    }))
+    _write_jsonl(dataset / "goal_surfaces.jsonl", [surface.to_dict()])
+    _write_jsonl(dataset / "goal_text_examples.jsonl", [])
+    artifact = tmp_path / "goal_dataset.tar.gz"
+    with tarfile.open(artifact, "w:gz") as tar:
+        for name in (
+            "goal_dataset_manifest.json",
+            "goal_surfaces.jsonl",
+            "goal_text_examples.jsonl",
+        ):
+            tar.add(dataset / name, arcname=name)
+
+    code = script.main(["--dataset-tar", str(artifact), "--limit", "1"])
+
+    assert code == 0
+    output = capsys.readouterr().out
+    assert "vendors: dell" in output
+    assert "power.computer_system.PowerState.eq.On" in output
+
+
+def test_sample_goal_dataset_rejects_tar_link_entries(tmp_path: Path) -> None:
+    """Dataset tar extraction rejects links before writing any files."""
+    script = _load_script()
+    artifact = tmp_path / "unsafe_goal_dataset.tar.gz"
+    with tarfile.open(artifact, "w:gz") as tar:
+        info = tarfile.TarInfo("unsafe-link")
+        info.type = tarfile.SYMTYPE
+        info.linkname = "/tmp"
+        tar.addfile(info)
+
+    with pytest.raises(SystemExit, match="unsafe path in dataset tar"):
+        script.main(["--dataset-tar", str(artifact)])

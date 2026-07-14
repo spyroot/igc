@@ -115,6 +115,88 @@ def _safe_prompt_payload(value: Any) -> Any:
     return _safe_prompt_value(value)
 
 
+def _words(value: str) -> str:
+    """Render ids / dotted paths as operator-readable words."""
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", value)
+    text = re.sub(r"[^A-Za-z0-9]+", " ", text)
+    return " ".join(text.lower().split()) or "resource"
+
+
+def _safe_text_value(value: Any) -> str:
+    """Render a target value for deterministic template text."""
+    safe = _safe_prompt_value(value)
+    if safe == "<redacted-string>":
+        return "the requested value"
+    if isinstance(safe, bool):
+        return "enabled" if safe else "disabled"
+    return str(safe)
+
+
+def _argument_text(arguments: Mapping[str, Any]) -> str:
+    """Render action arguments without dropping multi-argument actions."""
+    parts = [
+        f"{_words(str(name))} {_safe_text_value(value)}"
+        for name, value in arguments.items()
+    ]
+    return " and ".join(parts)
+
+
+def _atomic_template(ref: GoalRef, variant: int = 0) -> str:
+    """Render one atomic goal ref as a compact operator request."""
+    resource = _words(ref.resource_type)
+    value = _safe_text_value(ref.target_value)
+    if ref.mode == "transition":
+        action = _words(ref.action_name or "action")
+        if ref.arguments:
+            args = _argument_text(ref.arguments)
+            if variant % 2:
+                return f"invoke {action} on {resource} with {args}"
+            return f"run {action} on {resource} setting {args}"
+        return f"invoke {action} on {resource}"
+
+    prop = _words(ref.property_path or ref.goal_id)
+    if variant % 2:
+        return f"make {resource} {prop} {value}"
+    return f"set {resource} {prop} to {value}"
+
+
+def generate_template_goal_text_drafts(
+    goal_refs: Sequence[GoalRef],
+    dependencies: Sequence[GoalDependency] = (),
+    count: int = 2,
+    text_source: str = "template",
+    split: str = "train",
+) -> tuple[GoalTextExample, ...]:
+    """Generate deterministic text examples for goal dataset inspection.
+
+    This is the no-endpoint bootstrap path. It creates real ``x`` rows whose
+    labels are still the deterministic ``true_y`` goal refs.
+    """
+    if count <= 0:
+        return ()
+    rows: list[GoalTextExample] = []
+    for variant in range(count):
+        atoms = [_atomic_template(ref, variant=variant) for ref in goal_refs]
+        if len(atoms) == 1:
+            text = atoms[0]
+        elif dependencies:
+            text = " then ".join(atoms)
+        else:
+            text = " and ".join(atoms)
+        rows.append(make_goal_text_example(
+            text=text,
+            goal_refs=tuple(goal_refs),
+            dependencies=tuple(dependencies),
+            text_source=text_source,
+            split=split,
+            metadata={
+                "validation": "template_generated",
+                "requested_count": count,
+            },
+        ))
+    return tuple(rows)
+
+
 def _safe_prompt_goal_ref(ref: GoalRef) -> dict[str, Any]:
     """Return a prompt-safe view of a GoalRef without raw captured strings."""
     data = ref.to_dict()

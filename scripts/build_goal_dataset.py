@@ -16,6 +16,9 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 # Running as ``python scripts/build_goal_dataset.py`` puts scripts/ on sys.path;
 # add the repo root so ``import igc`` works without installation.
@@ -26,6 +29,7 @@ from igc.ds.goal_dataset_builder import build_goal_surfaces
 from igc.ds.goal_paraphrases import (
     OpenAICompatibleParaphraseProvider,
     StaticParaphraseProvider,
+    generate_template_goal_text_drafts,
     generate_goal_text_drafts,
 )
 from igc.ds.sources import RedfishFixtureSource, TrustLevel
@@ -34,11 +38,17 @@ _VENDOR_ROOT_MARKERS = (
     ("idrac_fixtures", "dell"),
     ("dell", "dell"),
     ("hpe_fixtures", "hpe"),
+    ("hpe", "hpe"),
     ("ilo", "hpe"),
     ("supermicro_gb300_corpus", "supermicro"),
     ("supermicro_fixtures", "supermicro"),
     ("supermicro", "supermicro"),
 )
+
+
+def _path_part_matches_marker(part: str, marker: str) -> bool:
+    """Return true when a path part carries a vendor marker intentionally."""
+    return part == marker or part.startswith(f"{marker}_") or part.startswith(f"{marker}-")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -69,7 +79,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--paraphrase-mode",
-        choices=("none", "static", "openai"),
+        choices=("none", "template", "static", "openai"),
         default="none",
         help="How to produce candidate operator text.",
     )
@@ -123,9 +133,43 @@ def _infer_vendor_from_root(root: str) -> str:
     """Infer vendor provenance from known redfish_ctl corpus root names."""
     normalized = [part.lower() for part in Path(root).parts]
     for marker, vendor in _VENDOR_ROOT_MARKERS:
-        if marker in normalized:
+        if any(_path_part_matches_marker(part, marker) for part in normalized):
             return vendor
     return ""
+
+
+def _load_allowed_methods_map(root: str) -> dict[str, list[str]]:
+    """Load the same-run ``rest_api_map.npy`` method map when present."""
+    path = Path(root) / "rest_api_map.npy"
+    if not path.is_file():
+        return {}
+    if not (Path(root) / "corpus_manifest.json").is_file():
+        return {}
+    # ``rest_api_map.npy`` is a legacy trusted-corpus contract produced by
+    # redfish_ctl discovery. Keep this load behind full-corpus validation.
+    try:
+        data: Any = np.load(path, allow_pickle=True).item()
+    except (OSError, TypeError, ValueError) as err:
+        raise SystemExit(f"rest_api_map.npy is not a dict: {path}") from err
+    if not isinstance(data, dict):
+        raise SystemExit(f"rest_api_map.npy is not a dict: {path}")
+    raw = data.get("allowed_methods_mapping") or {}
+    if not isinstance(raw, dict):
+        raise SystemExit(f"allowed_methods_mapping is not a dict: {path}")
+    allowed: dict[str, list[str]] = {}
+    for url, methods in raw.items():
+        if isinstance(url, str) and isinstance(methods, (list, tuple)):
+            allowed[url] = [str(method).upper() for method in methods]
+    return allowed
+
+
+def _capture_root_label(root: str, index: int) -> str:
+    """Return a public-safe label for a capture root."""
+    for part in reversed(Path(root).parts):
+        lowered = part.lower()
+        if lowered.endswith("_full_corpus") or lowered.endswith("_corpus"):
+            return part
+    return f"capture_root_{index}"
 
 
 def _load_records(args: argparse.Namespace):
@@ -138,6 +182,7 @@ def _load_records(args: argparse.Namespace):
             source=args.source,
             trust_level=TrustLevel.REAL,
             vendor=vendor,
+            allowed_methods_map=_load_allowed_methods_map(root),
             glob_pattern=args.glob_pattern,
         )
         records.extend(source.iter_records())
@@ -178,7 +223,6 @@ def _write_text_examples(args: argparse.Namespace, surfaces) -> int:
             "--goal-id or --generate-all-goals is required when writing text examples"
         )
 
-    provider = _provider(args)
     targets = (
         [(tuple(by_id[goal_id] for goal_id in args.goal_id))]
         if args.goal_id
@@ -186,11 +230,18 @@ def _write_text_examples(args: argparse.Namespace, surfaces) -> int:
     )
     examples = []
     for refs in targets:
-        examples.extend(generate_goal_text_drafts(
-            provider,
-            goal_refs=refs,
-            count=args.count,
-        ))
+        if args.paraphrase_mode == "template":
+            examples.extend(generate_template_goal_text_drafts(
+                goal_refs=refs,
+                count=args.count,
+            ))
+        else:
+            provider = _provider(args)
+            examples.extend(generate_goal_text_drafts(
+                provider,
+                goal_refs=refs,
+                count=args.count,
+            ))
     from igc.ds.goal_dataset import GoalTextExample
 
     GoalTextExample.write_jsonl(Path(args.text_out), examples)
@@ -210,7 +261,14 @@ def _manifest(args: argparse.Namespace, records, surfaces, num_text: int) -> dic
         )
         by_family[surface.goal_ref.family] = by_family.get(surface.goal_ref.family, 0) + 1
     return {
-        "capture_roots": list(args.capture_root),
+        "capture_roots": [
+            {
+                "index": index,
+                "label": _capture_root_label(root, index),
+                "vendor": _infer_vendor_from_root(root) or "",
+            }
+            for index, root in enumerate(args.capture_root)
+        ],
         "glob_pattern": args.glob_pattern,
         "capture_records": len(records),
         "goal_surfaces": len(surfaces),
@@ -218,8 +276,8 @@ def _manifest(args: argparse.Namespace, records, surfaces, num_text: int) -> dic
         "text_examples": num_text,
         "sources": sources,
         "vendors": vendors,
-        "surfaces_out": args.surfaces_out,
-        "text_out": args.text_out,
+        "surfaces_out": Path(args.surfaces_out).name,
+        "text_out": Path(args.text_out).name if args.text_out else "",
         "by_goal_family": dict(sorted(by_family.items())),
         "by_resource_type": dict(sorted(by_resource_type.items())),
     }
