@@ -157,13 +157,10 @@ class IgcMain:
 
         :return:
         """
-        self._dataset = MaskedJSONDataset(
-            self._dataset_dir,
-            default_tokenize=self._specs.model_type,
-            max_len=self._specs.seq_len,
-            recreate_dataset=self._specs.recreate_dataset,
-            do_consistency_check=self._specs.do_consistency_check
-        )
+        # Initialize the selected dataset once through the property so --corpus_dir
+        # can choose the written corpus path instead of eagerly rebuilding the
+        # legacy MaskedJSONDataset before train()/test/copy paths run.
+        _ = self.dataset
 
         # copy last checkpoint as last model with opt etc. so we can use it.
         if self._specs.copy_llm:
