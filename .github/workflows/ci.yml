@@ -24,7 +24,7 @@ jobs:
           sudo apt-get install -y bats shellcheck
       - name: Bash syntax
         shell: bash
-        run: bash -n scripts/*.sh scripts/*.sbatch tests/bats/*.bats
+        run: bash -n scripts/*.sh scripts/*.sbatch
       - name: ShellCheck
         shell: bash
         run: shellcheck scripts/*.sh scripts/*.sbatch tests/bats/*.bats
