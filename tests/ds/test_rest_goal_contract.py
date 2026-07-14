@@ -8,6 +8,7 @@ Mus mbayramo@stanford.edu
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -71,6 +72,50 @@ def test_d1_row_preserves_operator_order_independent_of_context_order() -> None:
         "all_rest_api_present": True,
         "extra_rest_api_present": False,
         "order_preserved": True,
+    }
+
+
+def test_phase23_rows_pin_locked_field_names() -> None:
+    """Phase 2/3 rows expose only the locked contract field names."""
+    context = _context(
+        "/redfish/v1/Systems",
+        ("GET", "HEAD"),
+        {"@odata.id": "/redfish/v1/Systems", "Name": "Systems"},
+    )
+
+    assert set(context.to_dict()) == {"rest_api", "allowed_methods", "json"}
+
+    phase2 = build_d1_rest_api_list_row(
+        text="list systems",
+        contexts=(context,),
+        rest_api_list=("/redfish/v1/Systems",),
+    )
+    phase3 = build_ordered_call_row(
+        text="list systems",
+        contexts=(context,),
+        rest_api_list=("/redfish/v1/Systems",),
+    )
+
+    assert set(phase2) == {
+        "phase",
+        "dataset",
+        "source_dataset",
+        "model_x",
+        "task",
+        "x",
+        "y_true",
+        "validation",
+    }
+    assert set(phase2["x"]) == {"text", "json", "allowed_methods"}
+    assert set(phase2["y_true"]) == {"rest_api_list", "order_evidence"}
+    assert set(phase3) == {"phase", "source_dataset", "model_x", "task", "x", "y_true"}
+    assert set(phase3["x"]) == {"text", "rest_api_list", "json", "allowed_methods"}
+    assert set(phase3["y_true"]) == {"calls"}
+    assert set(phase3["y_true"]["calls"][0]) == {
+        "rest_api",
+        "allowed_methods",
+        "method",
+        "arguments",
     }
 
 
@@ -295,6 +340,19 @@ def test_wandb_metric_keys_are_stage_scoped_and_not_m3_names() -> None:
     assert all(k.startswith("phase3_argument_extract/") for k in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS)
     assert not any(k.startswith("m3_") for k in PHASE2_GOAL_EXTRACT_METRIC_KEYS)
     assert not any(k.startswith("m3_") for k in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS)
+
+
+def test_training_docs_pin_phase23_metric_constants() -> None:
+    """Training docs name the Phase 2/3 constants and representative key groups."""
+    docs_path = Path(__file__).resolve().parents[2] / "docs" / "TRAINING.md"
+    training_doc = docs_path.read_text(encoding="utf-8")
+
+    assert "PHASE2_GOAL_EXTRACT_METRIC_KEYS" in training_doc
+    assert "PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS" in training_doc
+    assert "phase2_goal_extract/eval/{loss,perplexity,token_accuracy" in training_doc
+    assert "phase2_goal_extract/test/{latency_sec_p50,latency_sec_p95" in training_doc
+    assert "phase3_argument_extract/eval/{allowed_methods_exact_match_rate" in training_doc
+    assert "phase3_argument_extract/data/{avg_num_calls,avg_arguments_length" in training_doc
 
 
 # Author: Mus mbayramo@stanford.edu
