@@ -45,9 +45,10 @@ export NCCL_NVLS_ENABLE="${IGC_NCCL_NVLS:-1}"
 # for correctness. MNNVL is only an optional fast path and needs working IMEX
 # channels; keep it opt-in until the node preflight proves IMEX is configured.
 # CUMEM remains on by default.
+export IGC_NCCL_CUMEM="${IGC_NCCL_CUMEM:-${NCCL_CUMEM_ENABLE:-1}}"
+export NCCL_CUMEM_ENABLE="${IGC_NCCL_CUMEM}"
 export IGC_NCCL_MNNVL="${IGC_NCCL_MNNVL:-${NCCL_MNNVL_ENABLE:-0}}"
 export NCCL_MNNVL_ENABLE="${IGC_NCCL_MNNVL}"
-export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
 export HF_HOME="${HF_HOME:-/models/hf-cache}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
 export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-${HF_HOME}/hub}"
@@ -100,6 +101,7 @@ RUN_NAME="${WANDB_NAME:-${IGC_STAGE}-${IGC_MODEL//\//_}-${SLURM_JOB_ID:-local}}"
 if [ "${IGC_REPORT}" = "wandb" ]; then
     # shellcheck source=/dev/null
     [ -f "${IGC_DIR}/.internal/hf.env" ] && . "${IGC_DIR}/.internal/hf.env"
+    export NCCL_CUMEM_ENABLE="${IGC_NCCL_CUMEM}"
     export NCCL_MNNVL_ENABLE="${IGC_NCCL_MNNVL}"
     # convenience: source a node-local gitignored key file if present (.internal/ is never committed)
     # shellcheck source=/dev/null
@@ -121,13 +123,14 @@ srun --container-image="${NGC_IMAGE}" \
      bash -lc '
         set -euo pipefail
         cd /workspace/igc
+        _igc_nccl_cumem="${IGC_NCCL_CUMEM:-${NCCL_CUMEM_ENABLE:-1}}"
         _igc_nccl_mnnvl="${IGC_NCCL_MNNVL:-${NCCL_MNNVL_ENABLE:-0}}"
         [ -f .internal/hf.env ] && { set -a; . .internal/hf.env; set +a; }
         export HF_HOME="${HF_HOME:-/models/hf-cache}"
         export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
         export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-${HF_HOME}/hub}"
         export NCCL_MNNVL_ENABLE="${_igc_nccl_mnnvl}"
-        export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
+        export NCCL_CUMEM_ENABLE="${_igc_nccl_cumem}"
         # auto-load W&B creds (gitignored env file) so the run streams live
         [ -f .internal/wandb.env ] && { set -a; . .internal/wandb.env; set +a; }
         pip install --no-cache-dir -r docker/requirements-train.txt

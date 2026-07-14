@@ -76,7 +76,8 @@ IGC_HF_ENV="${IGC_HF_ENV:-.internal/hf.env}"               # gitignored HF cache
 WANDB_PROJECT="${WANDB_PROJECT:-igc}"                       # W&B project (non-secret)
 WANDB_MODE="${WANDB_MODE:-}"                                # online|offline|disabled; empty => online for a real run, disabled for a smoke
 # NCCL (GB300 defaults per TEAM_GUIDE: CUMEM on, MNNVL off unless a preflight proves the IMEX channels)
-NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"                 # default 1 (CUMEM helps NCCL memory registration)
+IGC_NCCL_CUMEM="${IGC_NCCL_CUMEM:-${NCCL_CUMEM_ENABLE:-1}}" # preserve the launcher decision across private env sourcing
+NCCL_CUMEM_ENABLE="${IGC_NCCL_CUMEM}"                       # default 1 (CUMEM helps NCCL memory registration)
 IGC_NCCL_MNNVL="${IGC_NCCL_MNNVL:-${NCCL_MNNVL_ENABLE:-0}}" # preserve the launcher decision across private env sourcing
 NCCL_MNNVL_ENABLE="${IGC_NCCL_MNNVL}"                       # default 0 (multi-node MNNVL off until a node preflight proves it works)
 # Control
@@ -267,7 +268,7 @@ fi
 # creds: source the gitignored env files if present; NEVER echo their values
 [ -f "${IGC_WANDB_ENV}" ] && { set -a; . "${IGC_WANDB_ENV}"; set +a; }
 [ -f "${IGC_HF_ENV}" ]    && { set -a; . "${IGC_HF_ENV}";    set +a; }
-export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
+export NCCL_CUMEM_ENABLE="${IGC_NCCL_CUMEM}"
 export NCCL_MNNVL_ENABLE="${IGC_NCCL_MNNVL}"
 export WANDB_PROJECT="${WANDB_PROJECT}"
 export WANDB_NAME="${WANDB_NAME}"
