@@ -431,6 +431,32 @@ def add_trainer_group(parser):
         help="Training mode, we either train all or agent or llm."
     )
 
+    parser.add_argument(
+        "--phase",
+        type=str,
+        default="",
+        help="Optional P0 phase label from configs/phase_training/profiles.yaml "
+             "(for run metadata and W&B grouping)."
+    )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        default="",
+        help="Optional named training profile resolved by igc.modules.train.launch."
+    )
+    parser.add_argument(
+        "--objective",
+        type=str,
+        default="",
+        help="Optional training objective label from the active profile."
+    )
+    parser.add_argument(
+        "--dataset_jsonl",
+        type=str,
+        default="",
+        help="Optional JSONL dataset path declared by the active profile."
+    )
+
     # setting what llm model we train
     parser.add_argument(
         "--llm",

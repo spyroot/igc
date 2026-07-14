@@ -117,6 +117,27 @@ def test_sharding_and_accelerator_flags_parse(monkeypatch):
     assert args.device is None
 
 
+def test_phase_profile_metadata_flags_parse(monkeypatch):
+    """Phase launcher metadata is accepted by igc_main.py."""
+    args = _parse(
+        monkeypatch,
+        [
+            "--phase",
+            "phase2_goal_extract",
+            "--profile",
+            "phase2_gpt2_smoke",
+            "--objective",
+            "ordered_rest_goal_extraction",
+            "--dataset_jsonl",
+            "/models/igc/goal-datasets/D1_ordered_rest_goals.jsonl",
+        ],
+    )
+    assert args.phase == "phase2_goal_extract"
+    assert args.profile == "phase2_gpt2_smoke"
+    assert args.objective == "ordered_rest_goal_extraction"
+    assert args.dataset_jsonl.endswith("D1_ordered_rest_goals.jsonl")
+
+
 def test_redfish_connection_flags_parse_without_live_mode(monkeypatch):
     """Redfish connection flags parse but do not imply live execution."""
     args = _parse(

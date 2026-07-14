@@ -49,7 +49,7 @@ IGC_GPUS="${IGC_GPUS:-}"                                    # GPUs for THIS run 
 IGC_SHARDING="${IGC_SHARDING:-}"                            # none|ddp|zero2|zero3|zero3_offload|fsdp (>1 GPU). Empty => ddp (the default per DISTRIBUTED_PLAN)
 IGC_SMOKE="${IGC_SMOKE:-}"                                  # 1=fast check (cap steps, W&B off, 1 epoch); 0=real run. Empty => rung/0
 # Model / data / output
-IGC_STAGE="${IGC_STAGE:-m1}"                                # legacy LLM stage -> --train/--llm (m1=latent|m2=encoder). Phase 2/3 use configs/phase_training/profiles.yaml; RL/combined (m6/all) live in scripts/train_igc.sbatch
+IGC_STAGE="${IGC_STAGE:-m1}"                                # legacy LLM stage -> --train/--llm (m1=latent|m2=encoder|m3=goal|m3p=parameter). Phase profiles use scripts/run_profile.sh
 IGC_MODEL="${IGC_MODEL:-gpt2}"                              # gpt2 smoke, or an HF repo id / local path to scale up
 IGC_RUN="${IGC_RUN:-verify}"                                # run name -> W&B name, output subdir, container name
 IGC_CODE_DIR="${IGC_CODE_DIR:-${HOME:-/root}/igc}"          # igc checkout (node-local or /models/igc)
@@ -134,17 +134,17 @@ case "$NCCL_MNNVL_ENABLE" in 0|1) ;; *) blocker "NCCL_MNNVL_ENABLE must be 0 or 
 { is_int "$LORA_ALPHA" && [ "$LORA_ALPHA" -ge 1 ]; } || blocker "LORA_ALPHA must be a positive integer (got '${LORA_ALPHA}')"
 is_decimal "$LORA_DROPOUT" || blocker "LORA_DROPOUT must be a decimal value (got '${LORA_DROPOUT}')"
 
-# Resolve legacy LLM stages -> the real --train/--llm flags. Phase 2/3 goal work
-# must not use the retired --llm goal/parameter trainers; it is driven by the
-# shared specs in configs/phase_training/profiles.yaml.
+# Resolve legacy LLM stages -> the real --train/--llm flags. Phase 2/3 profile
+# work is additionally available through scripts/run_profile.sh and the shared
+# specs in configs/phase_training/profiles.yaml; these aliases stay live for
+# direct compatibility with igc_main.py --llm goal/parameter.
 case "$IGC_STAGE" in
     m1|state_encoder) STAGE_ARGS="--train llm --llm latent" ;;
     m2|autoencoder)   STAGE_ARGS="--train llm --llm encoder" ;;
-    m3|goal|m3p|parameter)
-        blocker "legacy IGC_STAGE='${IGC_STAGE}' is retired; use configs/phase_training/profiles.yaml for Phase 2/3 GoalExtractor/argument extraction"
-        ;;
-    m6|agent|rl|all)  blocker "IGC_STAGE='${IGC_STAGE}' (RL/combined) is not wired here — use scripts/train_igc.sbatch; this launcher covers the legacy LLM stages m1|m2" ;;
-    *)                blocker "IGC_STAGE='${IGC_STAGE}' invalid (m1|m2; Phase 2/3 use configs/phase_training/profiles.yaml)" ;;
+    m3|goal)          STAGE_ARGS="--train llm --llm goal" ;;
+    m3p|parameter)    STAGE_ARGS="--train llm --llm parameter" ;;
+    m6|agent|rl|all)  blocker "IGC_STAGE='${IGC_STAGE}' (RL/combined) is not wired here — use scripts/train_igc.sbatch; this launcher covers the legacy LLM stages m1|m2|m3|m3p" ;;
+    *)                blocker "IGC_STAGE='${IGC_STAGE}' invalid (m1|m2|m3|m3p; Phase profiles use scripts/run_profile.sh)" ;;
 esac
 
 # --- 3. resolve smoke- and run-shaped settings ---------------------------------

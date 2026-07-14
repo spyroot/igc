@@ -173,11 +173,20 @@ setup() {
     [[ "$output" != *"--llm latent"* ]]
 }
 
-@test "old m3 launcher stage is blocked in favor of Phase 2/3 specs" {
+@test "m3 launcher stage still maps to the working goal trainer" {
     run env IGC_GPUS=4 IGC_STAGE=m3 bash "$LAUNCH"
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"legacy IGC_STAGE='m3' is retired"* ]]
-    [[ "$output" == *"configs/phase_training/profiles.yaml"* ]]
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--train llm --llm goal"* ]]
+    [[ "$output" == *"stage=m3"* ]]
+    [[ "$output" == *"name=verify-m3-"* ]]
+}
+
+@test "m3p launcher stage still maps to the working parameter trainer" {
+    run env IGC_GPUS=4 IGC_STAGE=m3p bash "$LAUNCH"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--train llm --llm parameter"* ]]
+    [[ "$output" == *"stage=m3p"* ]]
+    [[ "$output" == *"name=verify-m3p-"* ]]
 }
 
 @test "RL/combined stages are rejected here (they belong in train_igc.sbatch)" {

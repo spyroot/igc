@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run an M1 state-encoder experiment by PROFILE NAME.
+# Run an IGC training experiment by PROFILE NAME.
 #
 # Public-safe: this script contains no endpoints, hosts, credentials, or private
 # paths. Data and output locations come from the environment, and the training flags
@@ -15,7 +15,8 @@
 #   # override a profile field, or pass extra igc_main flags after --:
 #   IGC_PROFILE=m1_3b_lora IGC_SET="batch_size=16 lr=2e-4" bash scripts/run_profile.sh -- --recreate_dataset
 #
-# Profiles: m1_gpt2_smoke m1_3b_lora m1_7b_lora m1_7b_rslora_r32 m1_3b_full m1_7b_full_zero3
+# Profiles include M1 names from igc.modules.train.profiles and Phase 1/2/3 names
+# from configs/phase_training/profiles.yaml.
 set -euo pipefail
 
 PROFILE="${IGC_PROFILE:?set IGC_PROFILE (e.g. m1_7b_rslora_r32)}"
