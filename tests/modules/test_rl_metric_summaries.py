@@ -12,13 +12,11 @@ import torch
 
 from igc.modules.rl.metrics import (
     DQN_UPDATE_METRIC_KEYS,
-    EVAL_HINDSIGHT_GOALS_METRIC_KEYS,
     EVAL_ORIGINAL_GOALS_METRIC_KEYS,
     HER_METRIC_KEYS,
     ORIGIN_HER,
     ORIGIN_ORIGINAL,
     summarize_dqn_update_metrics,
-    summarize_eval_metrics,
     summarize_her_metrics,
 )
 
@@ -49,11 +47,6 @@ def test_metric_key_contract_keeps_m6_rl_namespaces_separate():
         "03_m6_eval_original_goals/success_ratio",
         "03_m6_eval_original_goals/return_undiscounted_mean_reward",
     )
-    assert EVAL_HINDSIGHT_GOALS_METRIC_KEYS == (
-        "03_m6_eval_hindsight_goals/success_ratio",
-        "03_m6_eval_hindsight_goals/return_undiscounted_mean_reward",
-    )
-
 
 def test_summarize_her_metrics_counts_original_and_relabelled_samples():
     """HER summaries split original rewards from relabelled rewards and goals."""
@@ -99,29 +92,6 @@ def test_summarize_dqn_update_metrics_splits_original_and_her_td_loss():
     assert metrics["03_m6_dqn_update/loss_td_her_mean_per_transition"] == 10.0
     assert metrics["03_m6_dqn_update/td_error_abs_original_p90_reward"] == 1.0
     assert metrics["03_m6_dqn_update/td_error_abs_her_p90_reward"] == 4.0
-
-
-def test_summarize_eval_metrics_uses_goal_specific_namespaces():
-    """Original-goal and hindsight-goal eval panels have distinct prefixes."""
-    original = summarize_eval_metrics(
-        successes=torch.tensor([1.0, 0.0, 1.0]),
-        returns=torch.tensor([1.0, 0.0, 2.0]),
-        hindsight=False,
-    )
-    hindsight = summarize_eval_metrics(
-        successes=torch.tensor([1.0, 1.0]),
-        returns=torch.tensor([0.5, 1.5]),
-        hindsight=True,
-    )
-
-    assert original == {
-        "03_m6_eval_original_goals/success_ratio": 2 / 3,
-        "03_m6_eval_original_goals/return_undiscounted_mean_reward": 1.0,
-    }
-    assert hindsight == {
-        "03_m6_eval_hindsight_goals/success_ratio": 1.0,
-        "03_m6_eval_hindsight_goals/return_undiscounted_mean_reward": 1.0,
-    }
 
 
 # Author: Mus mbayramo@stanford.edu

@@ -69,8 +69,10 @@ explicit M6 RL namespaces:
   losses and TD-error percentiles.
 - `03_m6_eval_original_goals/*` tracks success and undiscounted return for the
   original rollout goal.
-- `03_m6_eval_hindsight_goals/*` tracks the same view for hindsight goals
-  produced by HER relabeling.
+
+HER relabeling metrics are replay-level diagnostics, not trajectory-level
+hindsight evaluation. Add a separate evaluator before introducing
+`03_m6_eval_hindsight_goals/*` plots.
 
 Treat perplexity, tokens/sec, and GPU memory curves as planned instrumentation
 unless a later change adds those exact metric keys.

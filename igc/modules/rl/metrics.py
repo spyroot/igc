@@ -45,11 +45,6 @@ EVAL_ORIGINAL_GOALS_METRIC_KEYS = (
     "03_m6_eval_original_goals/return_undiscounted_mean_reward",
 )
 
-EVAL_HINDSIGHT_GOALS_METRIC_KEYS = (
-    "03_m6_eval_hindsight_goals/success_ratio",
-    "03_m6_eval_hindsight_goals/return_undiscounted_mean_reward",
-)
-
 RL_TRAIN_METRIC_KEYS = (
     "03_m6_rl_train/epsilon",
     "03_m6_rl_train/replay_buffer_size",
@@ -164,28 +159,6 @@ def summarize_dqn_update_metrics(
         "03_m6_dqn_update/td_error_abs_her_p90_reward": _nearest_percentile(
             td_error_t[her_mask].abs(), 0.90
         ),
-    }
-
-
-def summarize_eval_metrics(
-    *,
-    successes: Any,
-    returns: Any,
-    hindsight: bool,
-) -> dict[str, float]:
-    """Summarize goal-specific evaluation success and undiscounted return.
-
-    :param successes: Success flags for the evaluated trajectories.
-    :param returns: Undiscounted returns for the same trajectories.
-    :param hindsight: Whether the trajectories use hindsight goals.
-    :return: Metric-name to scalar-value mapping for original or hindsight eval.
-    """
-    success_t = _as_float_tensor(successes)
-    return_t = _as_float_tensor(returns)
-    keys = EVAL_HINDSIGHT_GOALS_METRIC_KEYS if hindsight else EVAL_ORIGINAL_GOALS_METRIC_KEYS
-    return {
-        keys[0]: _safe_ratio(_count_positive(success_t), int(success_t.numel())),
-        keys[1]: _mean(return_t),
     }
 
 

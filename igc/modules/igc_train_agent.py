@@ -25,7 +25,6 @@ from igc.modules.base.igc_rl_base_module import RlBaseModule
 from igc.modules.igc_experience_buffer import Buffer
 from igc.modules.igc_q_network import Igc_QNetwork
 from igc.modules.rl.metrics import (
-    EVAL_HINDSIGHT_GOALS_METRIC_KEYS,
     EVAL_ORIGINAL_GOALS_METRIC_KEYS,
     ORIGIN_HER,
     ORIGIN_ORIGINAL,
@@ -455,12 +454,6 @@ class IgcAgentTrainer(RlBaseModule):
                 {
                     EVAL_ORIGINAL_GOALS_METRIC_KEYS[0]: total_goal_reached / trajectory_count,
                     EVAL_ORIGINAL_GOALS_METRIC_KEYS[1]: total_reward / trajectory_count,
-                    EVAL_HINDSIGHT_GOALS_METRIC_KEYS[0]: her_metrics.get(
-                        "03_m6_her/relabelled_success_ratio", 0.0
-                    ),
-                    EVAL_HINDSIGHT_GOALS_METRIC_KEYS[1]: her_metrics.get(
-                        "03_m6_her/relabelled_reward_mean", 0.0
-                    ),
                     "03_m6_rl_train/epsilon": epsilon,
                     "03_m6_rl_train/replay_buffer_size": len(self.replay_buffer._buffer),
                 },
