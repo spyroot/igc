@@ -108,6 +108,26 @@ def test_custom_collate_ignores_unmasked_legacy_extra_labels() -> None:
     assert set(batch) == {"input_ids", "attention_mask"}
 
 
+def test_custom_collate_ignores_all_ignored_extra_labels() -> None:
+    """All-ignored labels are invalid Phase 1 rows, not usable prompt masks."""
+    samples = [
+        {
+            "input_ids": torch.tensor([1, 2, 3]),
+            "attention_mask": torch.tensor([1, 1, 1]),
+            "labels": torch.tensor([-100, -100, -100]),
+        },
+        {
+            "input_ids": torch.tensor([4, 5, 6]),
+            "attention_mask": torch.tensor([1, 1, 1]),
+            "labels": torch.tensor([-100, -100, -100]),
+        },
+    ]
+
+    batch = LlmEmbeddingsTrainer.custom_collate_fn(samples)
+
+    assert set(batch) == {"input_ids", "attention_mask"}
+
+
 def test_validate_returns_percent_for_legacy_metric_contract() -> None:
     """Validation returns 0-100 percent; namespaced W&B accuracy divides by 100."""
 

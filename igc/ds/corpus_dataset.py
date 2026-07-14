@@ -134,6 +134,8 @@ class CorpusJSONLDataset(Dataset):
         """Tokenize prompt/completion and mask loss over prompt + padding."""
         prompt_ids = self._token_ids(tok, prompt)
         completion_ids = self._token_ids(tok, completion)
+        if completion_ids.numel() == 0:
+            raise ValueError("phase1_pretrain completion tokenized to zero tokens")
         max_len = int(self._max_len or (prompt_ids.numel() + completion_ids.numel()))
 
         if max_len < 2:
@@ -178,6 +180,11 @@ class CorpusJSONLDataset(Dataset):
             out = tok(text, padding=False, truncation=False, return_tensors="pt",
                       add_special_tokens=False)
         except TypeError:
+            encode = getattr(tok, "encode", None)
+            if callable(encode):
+                ids = encode(text, add_special_tokens=False)
+                ids_tensor = torch.as_tensor(ids, dtype=torch.long)
+                return ids_tensor.squeeze(0) if ids_tensor.dim() > 1 else ids_tensor
             out = tok(text, padding=False, truncation=False, return_tensors="pt")
         return out["input_ids"].squeeze(0).long()
 

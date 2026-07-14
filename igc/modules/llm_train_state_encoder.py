@@ -293,7 +293,10 @@ class LlmEmbeddingsTrainer(LlmModule):
     def _has_prompt_masked_labels(sample) -> bool:
         """Whether a sample carries Phase 1 prompt-masked CausalLM labels."""
         labels = sample.get("labels")
-        return torch.is_tensor(labels) and labels.eq(-100).any().item()
+        if not torch.is_tensor(labels):
+            return False
+        active_positions = labels.reshape(-1).ne(-100).nonzero(as_tuple=False).flatten()
+        return active_positions.numel() > 0 and active_positions[0].item() > 0
 
     @staticmethod
     def generate_square_subsequent_mask(sz: int) -> Tensor:

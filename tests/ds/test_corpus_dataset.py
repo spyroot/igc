@@ -46,6 +46,45 @@ class _FakeTokenizer:
         return {"input_ids": torch.tensor([ids]), "attention_mask": torch.tensor([mask])}
 
 
+class _EmptyCompletionTokenizer(_FakeTokenizer):
+    """Tokenizer stub that exposes a degenerate zero-token completion."""
+
+    def __call__(self, text, padding=None, max_length=None, truncation=None,
+                 return_tensors=None, add_special_tokens=None):
+        if text == '{\n  "empty": true\n}\n':
+            empty = torch.empty((1, 0), dtype=torch.long)
+            return {"input_ids": empty, "attention_mask": empty}
+        return super().__call__(
+            text,
+            padding=padding,
+            max_length=max_length,
+            truncation=truncation,
+            return_tensors=return_tensors,
+            add_special_tokens=add_special_tokens,
+        )
+
+
+class _NoAddSpecialCallTokenizer(_FakeTokenizer):
+    """Tokenizer where only encode() can suppress special tokens."""
+
+    def __init__(self) -> None:
+        self.encode_add_special_tokens = None
+
+    def __call__(self, text, padding=None, max_length=None, truncation=None,
+                 return_tensors=None, add_special_tokens=None):
+        if add_special_tokens is not None:
+            raise TypeError("legacy tokenizer does not accept add_special_tokens")
+        ids = [777] + [ord(c) % 1000 + 1 for c in text] + [778]
+        return {"input_ids": torch.tensor([ids]), "attention_mask": torch.ones(1, len(ids))}
+
+    def encode(self, text, add_special_tokens=True):
+        self.encode_add_special_tokens = add_special_tokens
+        ids = [ord(c) % 1000 + 1 for c in text]
+        if add_special_tokens:
+            ids = [777] + ids + [778]
+        return ids
+
+
 class _FakeSource:
     """Fixed-record source for building a small corpus."""
 
@@ -145,6 +184,21 @@ def test_phase1_rejects_max_len_too_small(tmp_path: Path):
         )
 
 
+def test_phase1_rejects_empty_completion_tokens(tmp_path: Path):
+    """A tokenizer bug or odd target must not produce an all-ignored training row."""
+    with pytest.raises(ValueError, match="completion tokenized to zero tokens"):
+        CorpusJSONLDataset(
+            _explicit_phase1_corpus_dir(
+                tmp_path,
+                {"@odata.id": "/redfish/v1/Systems/1"},
+                target={"empty": True},
+            ),
+            max_len=32,
+            tokenizer=_EmptyCompletionTokenizer(),
+            objective="phase1_pretrain",
+        )
+
+
 def test_phase1_long_prompt_keeps_completion_marker(tmp_path: Path):
     """Long resources are left-truncated so the prompt tail still names the task."""
     tok = _FakeTokenizer()
@@ -177,6 +231,7 @@ def test_items_stack_like_the_trainer_collate(tmp_path: Path):
     batch = {k: torch.stack([ds[i][k] for i in range(len(ds))]) for k in ("input_ids", "attention_mask")}
     assert batch["input_ids"].shape == (len(ds), 32)
     assert batch["attention_mask"].dtype == torch.int64
+    assert batch["input_ids"].dtype == torch.int64
 
 
 def test_trainer_duck_type_surface(tmp_path: Path):
@@ -209,6 +264,16 @@ def test_unknown_objective_rejected(tmp_path: Path):
     """The corpus objective is explicit; typos fail before tokenization."""
     with pytest.raises(ValueError, match="unknown corpus objective"):
         CorpusJSONLDataset(_corpus_dir(tmp_path), tokenizer=_FakeTokenizer(), objective="phase9")
+
+
+def test_token_ids_fallback_keeps_special_tokens_disabled():
+    """Legacy tokenizer fallback must preserve the prompt/completion boundary."""
+    tok = _NoAddSpecialCallTokenizer()
+
+    ids = CorpusJSONLDataset._token_ids(tok, "abc")
+
+    assert ids.tolist() == [98, 99, 100]
+    assert tok.encode_add_special_tokens is False
 
 
 def _contains_subsequence(values: list[int], needle: list[int]) -> bool:
