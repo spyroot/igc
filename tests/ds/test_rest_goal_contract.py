@@ -39,6 +39,13 @@ def _context(rest_api: str, allowed_methods: tuple[str, ...], body: dict) -> Red
     return RedfishContext(rest_api=rest_api, allowed_methods=allowed_methods, json=body)
 
 
+def test_phase23_locked_name_constants_use_literal_contract_values() -> None:
+    """Locked Phase 2/3 names stay literal, not only internally self-consistent."""
+    assert MODEL_X == "model_x"
+    assert D0 == "D0"
+    assert D1 == "D1"
+
+
 def test_d1_row_preserves_operator_order_independent_of_context_order() -> None:
     """The label order follows the operator-stated order, not JSON context order."""
     systems = _context(
