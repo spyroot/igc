@@ -5,6 +5,7 @@ Author:Mus mbayramo@stanford.edu
 
 import argparse
 import os
+from types import SimpleNamespace
 import tempfile
 import unittest
 
@@ -16,8 +17,36 @@ from igc.modules.shared.llm_shared import (
     from_pretrained_default,
     save_pretrained_default,
     load_pretrained_default,
-    load_igc_tokenizer
+    load_igc_tokenizer,
+    safe_resize_token_embeddings,
 )
+
+
+class _DummyEmbeddings:
+    def __init__(self, num_embeddings):
+        self.num_embeddings = num_embeddings
+
+
+class _DummyModel:
+    def __init__(self, num_embeddings=100, name_or_path="demo/backbone"):
+        self.config = SimpleNamespace(_name_or_path=name_or_path, vocab_size=num_embeddings)
+        self.embeddings = _DummyEmbeddings(num_embeddings)
+        self.resized_to = None
+
+    def get_input_embeddings(self):
+        return self.embeddings
+
+    def resize_token_embeddings(self, size):
+        self.resized_to = size
+
+
+class _DummyTokenizer:
+    def __init__(self, size=100, name_or_path="demo/backbone"):
+        self.size = size
+        self.name_or_path = name_or_path
+
+    def __len__(self):
+        return self.size
 
 
 class TestFromPretrainedDefault(unittest.TestCase):
@@ -120,3 +149,20 @@ class TestFromPretrainedDefault(unittest.TestCase):
         self.assertIsInstance(loaded_tokenizer, GPT2Tokenizer)
         self.assertEqual(loaded_tokenizer.pad_token, loaded_tokenizer.eos_token)
         self.assertEqual(loaded_tokenizer.pad_token_id, loaded_tokenizer.eos_token_id)
+
+    def test_safe_resize_allows_same_backbone_padded_vocab_noop(self):
+        """Model vocab padding above tokenizer length should not trigger a shrink."""
+        model = _DummyModel(num_embeddings=128, name_or_path="vendor/model")
+        tokenizer = _DummyTokenizer(size=120, name_or_path="vendor/model")
+
+        safe_resize_token_embeddings(model, tokenizer)
+
+        self.assertIsNone(model.resized_to)
+
+    def test_safe_resize_rejects_obvious_wrong_tokenizer_shrink(self):
+        """A much smaller tokenizer from another backbone still raises loudly."""
+        model = _DummyModel(num_embeddings=128, name_or_path="vendor/model")
+        tokenizer = _DummyTokenizer(size=32, name_or_path="other/model")
+
+        with self.assertRaisesRegex(ValueError, "Refusing to shrink"):
+            safe_resize_token_embeddings(model, tokenizer)

@@ -6,7 +6,7 @@ Author:Mus mbayramo@stanford.edu
 import argparse
 import os
 import pkgutil
-from typing import Optional, Union, Dict, Tuple
+from typing import Any, Optional, Union, Dict, Tuple
 
 from transformers import (
     AutoModelForCausalLM,
@@ -48,6 +48,44 @@ def _uses_conv1d_attention(model) -> bool:
     except ImportError:
         return False
     return any(isinstance(m, Conv1D) for m in model.modules())
+
+
+def _config_name_or_path(model: Any) -> str:
+    """Best-effort Hugging Face model id/path, including PEFT wrapper shapes."""
+    candidates = [
+        getattr(model, "config", None),
+        getattr(getattr(model, "base_model", None), "config", None),
+        getattr(getattr(getattr(model, "base_model", None), "model", None), "config", None),
+        getattr(getattr(model, "model", None), "config", None),
+    ]
+    for config in candidates:
+        if config is None:
+            continue
+        name = getattr(config, "_name_or_path", None) or getattr(config, "name_or_path", None)
+        if name:
+            return str(name).rstrip("/")
+    return ""
+
+
+def _tokenizer_name_or_path(tokenizer: Any) -> str:
+    """Best-effort Hugging Face tokenizer id/path."""
+    name = getattr(tokenizer, "name_or_path", None)
+    return str(name).rstrip("/") if name else ""
+
+
+def _same_backbone(model: Any, tokenizer: Any) -> bool:
+    """Whether model and tokenizer advertise the same HF id/path."""
+    model_name = _config_name_or_path(model)
+    tokenizer_name = _tokenizer_name_or_path(tokenizer)
+    return bool(model_name and tokenizer_name and model_name == tokenizer_name)
+
+
+def _is_small_padded_vocab_gap(current: int, target: int) -> bool:
+    """Whether ``current`` looks like a padded vocab size rather than a wrong tokenizer."""
+    gap = current - target
+    if gap <= 0:
+        return False
+    return gap <= max(16, min(4096, int(current * 0.05)))
 
 
 def _from_pretrained_best_attention(model_id: str, load_kwargs: dict):
@@ -162,11 +200,16 @@ def safe_resize_token_embeddings(
     current = model.get_input_embeddings().num_embeddings
     target = len(tokenizer)
     if target < current and not force_shrink:
+        if _same_backbone(model, tokenizer) or (
+                not _config_name_or_path(model)
+                and _is_small_padded_vocab_gap(current, target)):
+            return model
         raise ValueError(
             f"Refusing to shrink token embeddings from {current} to {target}: this "
-            f"tokenizer does not belong to the backbone (a shrink silently deletes "
-            f"pretrained embedding rows). Rebuild the dataset tokenizer for this "
-            f"backbone, or pass force_shrink=True to override.")
+            f"tokenizer does not belong to the backbone, or the model/tokenizer "
+            f"identity is unavailable (a shrink silently deletes pretrained "
+            f"embedding rows). Rebuild the dataset tokenizer for this backbone, or "
+            f"pass force_shrink=True to override.")
     if target != current:
         model.resize_token_embeddings(target)
     return model
