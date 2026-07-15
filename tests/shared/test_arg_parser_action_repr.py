@@ -123,6 +123,41 @@ def test_large_model_loader_flags_parse(monkeypatch):
     assert args.llm_torch_dtype == "bfloat16"
 
 
+def test_onecycle_defaults_follow_llm_learning_rate(monkeypatch):
+    """OneCycleLR defaults must not jump from the profile LR to the old 0.008 LR."""
+    args = _parse(
+        monkeypatch,
+        [
+            "--llm_learning_rate",
+            "0.0001",
+            "--llm_scheduler",
+            "OneCycleLR",
+        ],
+    )
+
+    assert args.max_lr == 0.0001
+    assert args.div_factor == 25.0
+    assert args.max_lr / args.div_factor < args.max_lr
+
+
+def test_onecycle_explicit_max_lr_and_div_factor_are_preserved(monkeypatch):
+    """Explicit scheduler knobs remain expert-overridable."""
+    args = _parse(
+        monkeypatch,
+        [
+            "--llm_learning_rate",
+            "0.0001",
+            "--max_lr",
+            "0.0002",
+            "--div_factor",
+            "10",
+        ],
+    )
+
+    assert args.max_lr == 0.0002
+    assert args.div_factor == 10.0
+
+
 def test_large_model_dtype_rejects_unknown_value(monkeypatch):
     """--llm_torch_dtype stays constrained to supported loader values."""
     with pytest.raises(SystemExit):

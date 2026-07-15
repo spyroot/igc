@@ -223,13 +223,13 @@ def add_scheduler_group(parser):
 
     scheduler_group.add_argument(
         "--base_lr",
-        type=int, default=0.01,
+        type=float, default=0.01,
         help="Initial learning rate which is the lower boundary in the cycle for each parameter group.."
     )
 
     scheduler_group.add_argument(
         "--max_lr",
-        type=int, default=5e-5,
+        type=float, default=None,
         help="Upper learning rate boundaries in the cycle for each parameter group. ."
     )
 
@@ -947,8 +947,10 @@ def shared_arg_parser(
         args.device = None
 
     # set defaults
+    if args.max_lr is None:
+        args.max_lr = args.llm_learning_rate
     if args.div_factor is None:
-        args.div_factor = args.max_lr / 0.008
+        args.div_factor = 25.0
 
     # args.device = get_device(rank=int(os.environ.get('LOCAL_RANK', -1))) \
     #     if args.device == "auto" else args.device
