@@ -80,6 +80,44 @@ Current Phase 1 corpus runs log under the `phase1_finetune/*` namespace when
 `igc/modules/base/metric_keys.py` as planned instrumentation unless a later change adds that exact
 producer.
 
+Phase 2/3 mock-plumbing metric names are constants only; no live W&B run is part of that lane.
+`PHASE2_GOAL_EXTRACT_METRIC_KEYS`, re-exported by `igc/ds/rest_goal_contract.py` from the shared
+`PHASE2_WANDB_METRIC_KEYS` registry in `igc/modules/base/metric_keys.py`, currently reserves:
+`phase2_goal_extract/train/{loss,perplexity,optimizer_step}`,
+`phase2_goal_extract/eval/{ordered_exact_match_rate,set_match_rate,precision,recall,f1,`
+`missing_allowed_methods_rate}`,
+and `phase2_goal_extract/order/{kendall_tau,edit_distance}`.
+`PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS`, re-exported by `igc/ds/rest_goal_contract.py` from the shared
+`PHASE3_WANDB_METRIC_KEYS` registry in `igc/modules/base/metric_keys.py`, currently reserves:
+`phase3_argument_extract/train/{loss,perplexity,optimizer_step}`,
+`phase3_argument_extract/eval/{call_ordered_exact_match_rate,method_exact_match_rate,`
+`arguments_exact_match_rate,readonly_empty_arguments_rate}`,
+and `phase3_argument_extract/order/{kendall_tau,edit_distance}`.
+Exact reserved keys:
+
+```text
+phase2_goal_extract/train/loss
+phase2_goal_extract/train/perplexity
+phase2_goal_extract/train/optimizer_step
+phase2_goal_extract/eval/ordered_exact_match_rate
+phase2_goal_extract/eval/set_match_rate
+phase2_goal_extract/eval/precision
+phase2_goal_extract/eval/recall
+phase2_goal_extract/eval/f1
+phase2_goal_extract/eval/missing_allowed_methods_rate
+phase2_goal_extract/order/kendall_tau
+phase2_goal_extract/order/edit_distance
+phase3_argument_extract/train/loss
+phase3_argument_extract/train/perplexity
+phase3_argument_extract/train/optimizer_step
+phase3_argument_extract/eval/call_ordered_exact_match_rate
+phase3_argument_extract/eval/method_exact_match_rate
+phase3_argument_extract/eval/arguments_exact_match_rate
+phase3_argument_extract/eval/readonly_empty_arguments_rate
+phase3_argument_extract/order/kendall_tau
+phase3_argument_extract/order/edit_distance
+```
+
 To use TensorBoard instead, choose the variable for the launcher you are using:
 `IGC_METRIC_REPORT=tensorboard bash scripts/run_profile.sh` for the profile wrapper, or
 `IGC_REPORT=tensorboard sbatch scripts/train_phase1_smoke.sbatch` for the sbatch smoke path.
