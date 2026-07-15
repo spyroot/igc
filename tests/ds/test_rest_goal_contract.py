@@ -1028,28 +1028,28 @@ def test_ordered_calls_parser_rejects_readonly_arguments() -> None:
 def test_wandb_metric_keys_are_stage_scoped_and_not_m3_names() -> None:
     """Phase 2/3 contract constants reuse the shared W&B metric registry."""
     expected_phase2 = (
-        "phase2_goal_extract/train/loss",
-        "phase2_goal_extract/train/perplexity",
-        "phase2_goal_extract/train/optimizer_step",
-        "phase2_goal_extract/eval/ordered_exact_match_rate",
-        "phase2_goal_extract/eval/set_match_rate",
-        "phase2_goal_extract/eval/precision",
-        "phase2_goal_extract/eval/recall",
-        "phase2_goal_extract/eval/f1",
-        "phase2_goal_extract/eval/missing_allowed_methods_rate",
-        "phase2_goal_extract/order/kendall_tau",
-        "phase2_goal_extract/order/edit_distance",
+        "phase2_goal_extraction/train/loss",
+        "phase2_goal_extraction/train/perplexity",
+        "phase2_goal_extraction/train/optimizer_step",
+        "phase2_goal_extraction/eval/ordered_exact_match_rate",
+        "phase2_goal_extraction/eval/set_match_rate",
+        "phase2_goal_extraction/eval/precision",
+        "phase2_goal_extraction/eval/recall",
+        "phase2_goal_extraction/eval/f1",
+        "phase2_goal_extraction/eval/missing_allowed_methods_rate",
+        "phase2_goal_extraction/order/kendall_tau",
+        "phase2_goal_extraction/order/edit_distance",
     )
     expected_phase3 = (
-        "phase3_argument_extract/train/loss",
-        "phase3_argument_extract/train/perplexity",
-        "phase3_argument_extract/train/optimizer_step",
-        "phase3_argument_extract/eval/call_ordered_exact_match_rate",
-        "phase3_argument_extract/eval/method_exact_match_rate",
-        "phase3_argument_extract/eval/arguments_exact_match_rate",
-        "phase3_argument_extract/eval/readonly_empty_arguments_rate",
-        "phase3_argument_extract/order/kendall_tau",
-        "phase3_argument_extract/order/edit_distance",
+        "phase3_argument_extraction/train/loss",
+        "phase3_argument_extraction/train/perplexity",
+        "phase3_argument_extraction/train/optimizer_step",
+        "phase3_argument_extraction/eval/call_ordered_exact_match_rate",
+        "phase3_argument_extraction/eval/method_exact_match_rate",
+        "phase3_argument_extraction/eval/arguments_exact_match_rate",
+        "phase3_argument_extraction/eval/readonly_empty_arguments_rate",
+        "phase3_argument_extraction/order/kendall_tau",
+        "phase3_argument_extraction/order/edit_distance",
     )
 
     assert PHASE2_GOAL_EXTRACT_METRIC_KEYS == PHASE2_WANDB_METRIC_KEYS
@@ -1063,20 +1063,20 @@ def test_wandb_metric_keys_are_stage_scoped_and_not_m3_names() -> None:
     assert len(PHASE2_GOAL_EXTRACT_METRIC_KEYS) == len(set(PHASE2_GOAL_EXTRACT_METRIC_KEYS))
     assert len(PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS) == len(set(PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS))
     assert (
-        "phase2_goal_extract/eval/ordered_exact_match_rate"
+        "phase2_goal_extraction/eval/ordered_exact_match_rate"
         in PHASE2_GOAL_EXTRACT_METRIC_KEYS
     )
-    assert "phase2_goal_extract/eval/set_match_rate" in PHASE2_GOAL_EXTRACT_METRIC_KEYS
+    assert "phase2_goal_extraction/eval/set_match_rate" in PHASE2_GOAL_EXTRACT_METRIC_KEYS
     assert (
-        "phase3_argument_extract/eval/readonly_empty_arguments_rate"
+        "phase3_argument_extraction/eval/readonly_empty_arguments_rate"
         in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS
     )
     assert (
-        "phase3_argument_extract/eval/arguments_exact_match_rate"
+        "phase3_argument_extraction/eval/arguments_exact_match_rate"
         in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS
     )
-    assert all(k.startswith("phase2_goal_extract/") for k in PHASE2_GOAL_EXTRACT_METRIC_KEYS)
-    assert all(k.startswith("phase3_argument_extract/") for k in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS)
+    assert all(k.startswith("phase2_goal_extraction/") for k in PHASE2_GOAL_EXTRACT_METRIC_KEYS)
+    assert all(k.startswith("phase3_argument_extraction/") for k in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS)
     assert not any(k.startswith("m3_") for k in PHASE2_GOAL_EXTRACT_METRIC_KEYS)
     assert not any(k.startswith("m3_") for k in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS)
 
@@ -1090,10 +1090,10 @@ def test_training_docs_pin_phase23_metric_constants() -> None:
     assert "PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS" in training_doc
     assert "PHASE2_WANDB_METRIC_KEYS" in training_doc
     assert "PHASE3_WANDB_METRIC_KEYS" in training_doc
-    assert "phase2_goal_extract/eval/{ordered_exact_match_rate,set_match_rate" in training_doc
-    assert "phase2_goal_extract/order/{kendall_tau,edit_distance}" in training_doc
-    assert "phase3_argument_extract/eval/{call_ordered_exact_match_rate" in training_doc
-    assert "phase3_argument_extract/order/{kendall_tau,edit_distance}" in training_doc
+    assert "phase2_goal_extraction/eval/{ordered_exact_match_rate,set_match_rate" in training_doc
+    assert "phase2_goal_extraction/order/{kendall_tau,edit_distance}" in training_doc
+    assert "phase3_argument_extraction/eval/{call_ordered_exact_match_rate" in training_doc
+    assert "phase3_argument_extraction/order/{kendall_tau,edit_distance}" in training_doc
     for metric_key in PHASE2_GOAL_EXTRACT_METRIC_KEYS:
         assert metric_key in training_doc
     for metric_key in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS:
