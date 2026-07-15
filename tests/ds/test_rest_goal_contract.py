@@ -288,6 +288,34 @@ def test_phase3_patch_does_not_infer_top_level_get_scalars() -> None:
     }
 
 
+def test_phase3_post_does_not_infer_action_arguments_from_get_scalars() -> None:
+    """POST rows do not turn observed action metadata into arguments."""
+    action_target = _context(
+        "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
+        ("POST",),
+        {
+            "@odata.id": "/redfish/v1/Systems/1",
+            "ResetType": "GracefulRestart",
+        },
+    )
+
+    row = build_ordered_call_row(
+        text="reset the system",
+        contexts=(action_target,),
+        rest_api_list=("/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",),
+        method_by_api={
+            "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset": "POST",
+        },
+    )
+
+    assert row["y_true"]["calls"][0] == {
+        "rest_api": "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
+        "allowed_methods": ["POST"],
+        "method": "POST",
+        "arguments": {},
+    }
+
+
 def test_rows_reject_missing_and_duplicate_contexts() -> None:
     """Rows fail fast when labels cannot be resolved to one current context."""
     context = _context(
