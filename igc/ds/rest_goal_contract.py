@@ -314,11 +314,14 @@ def parse_ordered_calls_y_pred(y_pred: Mapping[str, Any] | str) -> list[dict[str
             )
         if not isinstance(call["arguments"], Mapping):
             raise ValueError("y_pred.calls.arguments must be an object")
+        arguments = dict(call["arguments"])
+        if method in ("GET", "HEAD") and arguments:
+            raise ValueError("read-only y_pred.calls.arguments must be empty")
         parsed.append({
             "rest_api": call["rest_api"],
             "allowed_methods": allowed_methods,
             "method": method,
-            "arguments": dict(call["arguments"]),
+            "arguments": arguments,
         })
     return parsed
 

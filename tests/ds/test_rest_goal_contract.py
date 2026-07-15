@@ -722,6 +722,20 @@ def test_ordered_calls_parser_rejects_invalid_method_and_arguments_shape() -> No
         })
 
 
+def test_ordered_calls_parser_rejects_readonly_arguments() -> None:
+    """Phase 3 y_pred parsing rejects non-empty GET/HEAD argument objects."""
+    for method in ("GET", "HEAD"):
+        with pytest.raises(ValueError, match="read-only"):
+            parse_ordered_calls_y_pred({
+                "calls": [{
+                    "rest_api": "/redfish/v1/Systems",
+                    "allowed_methods": ["GET", "HEAD", "PATCH"],
+                    "method": method,
+                    "arguments": {"PowerState": "On"},
+                }],
+            })
+
+
 def test_wandb_metric_keys_are_stage_scoped_and_not_m3_names() -> None:
     """Phase 2/3 contract constants reuse the shared W&B metric registry."""
     assert PHASE2_GOAL_EXTRACT_METRIC_KEYS == PHASE2_WANDB_METRIC_KEYS
