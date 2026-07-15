@@ -370,10 +370,30 @@ def parse_pro_judge_result(
             raw=raw,
         )
 
-    rest_api_list = _string_tuple(
-        decoded.get("rest_api_list", decoded.get("rest_api_set", ())),
-        "rest_api_list",
-    )
+    if "rest_api_list" in decoded:
+        rest_api_value = decoded["rest_api_list"]
+        rest_api_field = "rest_api_list"
+    elif "rest_api_set" in decoded:
+        rest_api_value = decoded["rest_api_set"]
+        rest_api_field = "rest_api_set"
+    else:
+        rest_api_value = []
+        rest_api_field = "rest_api_list"
+
+    try:
+        rest_api_list = _string_tuple(rest_api_value, rest_api_field)
+    except Phase2LabelledRequestsSpecError as exc:
+        return ProJudgeResult(
+            valid_json=False,
+            accepted=False,
+            pro_accept=False,
+            rest_api_set_match=False,
+            empty_set_match=False,
+            nonsense=False,
+            invalid_json=True,
+            reason=str(exc),
+            raw=raw,
+        )
     computed_set_match = rest_api_sets_equal(expected_rest_apis, rest_api_list)
     judge_set_match = decoded.get("rest_api_set_match")
     rest_api_set_match = (
@@ -464,8 +484,6 @@ def _float_mapping(raw: Mapping[str, Any], context: str) -> dict[str, float]:
 
 def _string_tuple(value: Any, context: str) -> tuple[str, ...]:
     """Return a tuple of strings from a JSON list field."""
-    if value is None:
-        return ()
     if not isinstance(value, list):
         raise Phase2LabelledRequestsSpecError(f"{context} must be a list")
     if not all(isinstance(item, str) for item in value):

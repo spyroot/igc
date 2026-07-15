@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -152,6 +153,39 @@ def test_pro_judge_result_parser_handles_accept_reject_empty_and_invalid_json() 
     assert invalid.invalid_json
     assert not invalid.accepted
     assert not invalid.pro_accept
+
+
+@pytest.mark.parametrize(
+    ("field_name", "field_value"),
+    (
+        ("rest_api_list", "/redfish/v1/Systems"),
+        ("rest_api_list", ["/redfish/v1/Systems", 7]),
+        ("rest_api_list", None),
+        ("rest_api_set", "/redfish/v1/Systems"),
+        ("rest_api_set", ["/redfish/v1/Systems", 7]),
+        ("rest_api_set", None),
+    ),
+)
+def test_pro_judge_result_parser_counts_malformed_rest_api_fields_as_invalid(
+    field_name: str,
+    field_value: Any,
+) -> None:
+    """Malformed judge fields are counted as invalid output, not raised errors."""
+    result = parse_pro_judge_result(
+        json.dumps({
+            "accepted": True,
+            field_name: field_value,
+            "nonsense": False,
+        }),
+        expected_rest_apis=[],
+    )
+    assert not result.valid_json
+    assert result.invalid_json
+    assert not result.accepted
+    assert not result.pro_accept
+    assert not result.rest_api_set_match
+    assert result.rest_api_list == ()
+    assert field_name in result.reason
 
 
 def test_nonsense_invalid_and_acceptance_counters_emit_phase2_metrics() -> None:
