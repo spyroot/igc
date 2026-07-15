@@ -165,6 +165,33 @@ def test_phase3_get_calls_preserve_order_and_keep_arguments_empty() -> None:
     ]
 
 
+def test_phase3_get_calls_discard_supplied_arguments() -> None:
+    """Read-only GET labels keep arguments empty even if caller supplies body-like data."""
+    row = build_ordered_call_row(
+        text="inspect system power",
+        contexts=(
+            _context(
+                "/redfish/v1/Systems/1",
+                ("GET", "PATCH"),
+                {
+                    "@odata.id": "/redfish/v1/Systems/1",
+                    "PowerState": "On",
+                },
+            ),
+        ),
+        rest_api_list=("/redfish/v1/Systems/1",),
+        method_by_api={"/redfish/v1/Systems/1": "GET"},
+        arguments_by_api={"/redfish/v1/Systems/1": {"PowerState": "On"}},
+    )
+
+    assert row["y_true"]["calls"][0] == {
+        "rest_api": "/redfish/v1/Systems/1",
+        "allowed_methods": ["GET", "PATCH"],
+        "method": "GET",
+        "arguments": {},
+    }
+
+
 def test_phase3_mutation_arguments_must_be_supplied_explicitly() -> None:
     """PATCH rows do not infer arguments from arbitrary scalar values in GET JSON."""
     settings = _context(
