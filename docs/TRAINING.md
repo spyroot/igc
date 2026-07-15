@@ -40,12 +40,28 @@ values into repo files.
 
 ## 2. Data
 
-Training reads captured Redfish JSON from `~/.json_responses` (collected by `idrac_ctl`; the
-`.npy` map is the binding contract). The cluster has a shared filesystem mounted at `/models` on
-every node — stage large shared artifacts (staged weights, checkpoints, built corpora) there, in
-packed form (tarballs, JSONL) rather than many small files. Keep per-run scratch (the igc checkout,
-a run's working dataset copy) on the target node's local NVMe, and pin the job to that node with
-the scheduler's node-selection flag.
+Training reads captured Redfish JSON from a materialized `redfish_ctl` dataset artifact. Use the
+corpus workflow in the `redfish_ctl` checkout to pull, strictly verify, and materialize the selected
+dataset into a stable vendor/model/capture layout. Then point IGC at the manifest and materialized
+root with `--corpus_manifest`, `--corpus_root`, and `--corpus_kind`, which are parser flags defined in
+`igc/shared/shared_arg_parser.py`:
+
+```bash
+IGC_PROFILE=m1_gpt2_smoke \
+IGC_METRIC_REPORT=tensorboard \
+bash scripts/run_profile.sh \
+  --corpus_manifest /path/to/redfish_ctl/corpora/manifest.v1.json \
+  --corpus_root /path/to/materialized/corpus \
+  --corpus_kind dataset \
+  --corpus_objective phase1_pretrain
+```
+
+The legacy `~/.json_responses` capture layout remains a compatibility input; its `.npy` map is the
+binding legacy contract. The cluster has a shared filesystem mounted at `/models` on every node —
+stage large shared artifacts (staged weights, checkpoints, built corpora) there, in packed form
+(tarballs, JSONL) rather than many small files. Keep per-run scratch (the igc checkout, a run's
+working dataset copy) on the target node's local NVMe, and pin the job to that node with the
+scheduler's node-selection flag.
 
 ## 3. Experiment tracking (Weights & Biases)
 

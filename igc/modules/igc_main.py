@@ -7,6 +7,7 @@ Author:Mus mbayramo@stanford.edu
 """
 import argparse
 import os
+from pathlib import Path
 from typing import Optional, Union, List, Dict
 
 import torch
@@ -81,11 +82,8 @@ class IgcMain:
         :return:
         """
         if self._dataset is None:
-            corpus_dir = getattr(self._specs, "corpus_dir", "") or ""
+            corpus_dir = self._corpus_dataset_dir()
             if corpus_dir:
-                # --corpus_dir selects the provenance-tagged JSONL corpus written by
-                # igc.ds.sources.write_corpus (trust-tier split + manifest) instead of
-                # rebuilding from raw ~/.json_responses captures.
                 from igc.ds.corpus_dataset import CorpusJSONLDataset
                 self._dataset = CorpusJSONLDataset(
                     corpus_dir,
@@ -102,6 +100,53 @@ class IgcMain:
                     do_consistency_check=self._specs.do_consistency_check
                 )
         return self._dataset
+
+    def _corpus_dataset_dir(self) -> str:
+        """Return a written corpus dir, materializing one from a manifest if needed.
+
+        ``--corpus_dir`` points directly at an existing ``examples.jsonl`` corpus.
+        ``--corpus_manifest`` + ``--corpus_root`` point at redfish_ctl's materialized
+        corpus manifest; this method composes those sources into the same written
+        corpus format so the tokenizer bridge has one live input contract.
+
+        :return: a corpus directory path, or ``""`` for the legacy raw-capture path.
+        :raises ValueError: when manifest inputs are incomplete or select no sources.
+        """
+        corpus_dir = getattr(self._specs, "corpus_dir", "") or ""
+        if corpus_dir:
+            return corpus_dir
+
+        manifest = getattr(self._specs, "corpus_manifest", "") or ""
+        if not manifest:
+            return ""
+
+        root = getattr(self._specs, "corpus_root", "") or ""
+        if not root:
+            raise ValueError("--corpus_root is required when --corpus_manifest is set")
+
+        from igc.ds.sources import RedfishFixtureSource, TrustLevel
+        from igc.ds.sources.corpus_io import write_corpus
+        from igc.ds.sources.mixer import SourceMix
+        from igc.ds.sources.training_object import normalize
+
+        kind = getattr(self._specs, "corpus_kind", "dataset") or "dataset"
+        sources = RedfishFixtureSource.from_redfish_ctl_manifest(
+            manifest,
+            root,
+            trust_level=TrustLevel.REAL,
+            kind=kind,
+        )
+        if not sources:
+            raise ValueError(
+                f"no redfish_ctl corpus sources selected from {manifest} "
+                f"under {root} for kind={kind}"
+            )
+
+        out_dir = Path(self._dataset_dir) / "redfish_ctl_corpus" / str(kind).lower()
+        mix = SourceMix(sources)
+        train_records, _ = mix.split()
+        write_corpus(normalize(train_records), mix.manifest(), str(out_dir))
+        return str(out_dir)
 
     def train(self):
         """
@@ -160,13 +205,13 @@ class IgcMain:
         # Initialize the selected dataset once through the property so --corpus_dir
         # can choose the written corpus path instead of eagerly rebuilding the
         # legacy MaskedJSONDataset before train()/test/copy paths run.
-        _ = self.dataset
+        dataset = self.dataset
 
         # copy last checkpoint as last model with opt etc. so we can use it.
         if self._specs.copy_llm:
             model, _ = from_pretrained_default(self._specs, only_model=True)
             model.to(torch.device("cpu"))
-            safe_resize_token_embeddings(model, self._dataset.tokenizer)
+            safe_resize_token_embeddings(model, dataset.tokenizer)
             # (BetterTransformer was removed in transformers 5.x; SDPA is native.)
             model, epoch, model_path = IgcModule.copy_checkpoint(self._specs, "state_encoder", model)
             print("Saved model to checkpoint file: ", model_path)

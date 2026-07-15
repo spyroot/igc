@@ -17,10 +17,11 @@ contain the real value spaces; this layer extracts them offline.
 
 ## What discovery captures vs. what was ingested
 
-`redfish_ctl` (>= 1.1.3) discovery preserves the `idrac_ctl` output contract — one JSON
-file per resource plus `rest_api_map.npy` holding `url_file_mapping` and
-`allowed_methods_mapping` (the binding `.npy` contract loaded by
-`igc/ds/ds_rest_trajectories.py`, unchanged by this work). The generic adapter
+`redfish_ctl` discovery preserves the legacy output contract — one JSON file per resource plus
+`rest_api_map.npy` holding `url_file_mapping` and `allowed_methods_mapping` (the binding `.npy`
+contract loaded by `igc/ds/ds_rest_trajectories.py`, unchanged by this work). Materialized dataset
+artifacts also provide `rest_api_map.v1.json` with relative paths for portable consumers. The generic
+adapter
 `RedfishFixtureSource` (in `igc/ds/sources/redfish_fixture_source.py`) already streams
 every captured body as a provenance-tagged `SourceRecord`; what was missing is semantic
 extraction of the value spaces inside these resource types:
@@ -80,8 +81,8 @@ distinguishable `TrainingExample` records without re-parsing bodies.
 
 ## Validation on real corpora
 
-Running the index over the three vendor fixture corpora
-(`idrac_ctl/tests/{idrac,supermicro,hpe}_fixtures`) plus one live HPE capture tree
+Running the index over the vendor fixture corpora
+(`tests/{dell,supermicro,hpe}_fixtures`) plus one live HPE capture tree
 (2,030 records, zero parse skips) yields 380 patchable slots — 97 of them categorical
 with real enum spaces (e.g. `ProcCStates`, `BootMode`) — 9 action parameters
 (`ResetType` with the full DMTF reset set, Dell OEM job parameters, SecureBoot /
@@ -100,4 +101,4 @@ external registry pointers.
 * **HPE registry payloads are external** (`Location[].Uri` under a registry store);
   ingesting them needs either a targeted capture of those URIs or the vendor tree they
   ship in.
-* The `.npy` contract and the `idrac_ctl` submodule are untouched.
+* The legacy `.npy` contract is retained while portable dataset maps are added.

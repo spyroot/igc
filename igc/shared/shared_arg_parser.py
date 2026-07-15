@@ -741,6 +741,25 @@ def add_dataset_dataloader(parser):
              "provenance-tagged corpus instead of building from --json_data_dir.")
 
     group.add_argument(
+        "--corpus_manifest",
+        type=str, default="",
+        help="redfish_ctl corpus manifest, such as corpora/manifest.v1.json. "
+             "Use with --corpus_root after materializing dataset artifacts.")
+
+    group.add_argument(
+        "--corpus_root",
+        type=str, default="",
+        help="Root directory created by redfish_ctl corpus materialize/extract-all. "
+             "When --corpus_manifest is set, dataset captures are discovered below this root.")
+
+    group.add_argument(
+        "--corpus_kind",
+        type=str, default="dataset",
+        choices=("dataset", "mock", "full", "sim"),
+        help="redfish_ctl artifact kind to consume. dataset is the preferred IGC input; "
+             "full is accepted as a legacy alias.")
+
+    group.add_argument(
         "--corpus_objective",
         type=str, default="legacy",
         choices=["legacy", "phase1_pretrain"],

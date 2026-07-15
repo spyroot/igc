@@ -17,7 +17,7 @@ from igc_main import _is_sensitive, save_spec
 @pytest.mark.parametrize(
     "key",
     (
-        "IDRAC_PASSWORD",
+        "REDFISH_PASSWORD",
         "HUGGINGFACE_TOKEN",
         "OPENAI_API_KEY",
         "WANDB_APIKEY",

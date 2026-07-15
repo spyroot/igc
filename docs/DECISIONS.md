@@ -21,7 +21,7 @@ reflects it, or the agent learns a degenerate read-only policy. Today the shippe
 for every POST/PATCH/DELETE — the stateful mechanism exists (`register_callback`/`new_state`/
 `callback_dispatcher` in `igc/envs/rest_mock_server.py`) but is wired only in tests, and there is no
 ordered mutation trace. Separately, `rest_mock_server.py` is a 769-line **home-grown Redfish client +
-mock** built when `idrac_ctl` was only a data collector: it re-implements Redfish HTTP transport,
+mock** built when the capture tool was only a data collector: it re-implements Redfish HTTP transport,
 auth, captured-response serving, error modelling, and a **live-BMC proxy** — duplicating what the
 renamed, full multi-vendor **redfish_ctl** now provides, and putting a live-write path in the RL
 codebase that the safety contract says must go through redfish_ctl.

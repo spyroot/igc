@@ -18,16 +18,15 @@ python scripts/bench_hot_paths.py
 python scripts/bench_hot_paths.py --section rl
 
 # just the data-gen path over a specific corpus
-python scripts/bench_hot_paths.py --section data --corpus idrac_ctl/tests/hpe_fixtures
+python scripts/bench_hot_paths.py --section data --corpus tests/hpe_fixtures
 
 # add cProfile: prints the top cumulative-time functions (the critical sections)
 python scripts/bench_hot_paths.py --profile
 ```
 
 Local runs use the project env (`conda activate igc-dev`, or call its Python directly). The
-data-gen section reads fixture corpora from the `idrac_ctl` submodule, so
-`git submodule update --init && git -C idrac_ctl lfs pull` first if you want that section; the RL
-section needs nothing but the repo.
+data-gen section reads fixture corpora from the checkout or a materialized `redfish_ctl` dataset; the
+RL section needs nothing but the repo.
 
 ### Reading the output
 
