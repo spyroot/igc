@@ -80,6 +80,38 @@ def test_d1_row_preserves_operator_order_independent_of_context_order() -> None:
     }
 
 
+def test_d1_row_does_not_leak_extra_context_into_target_list() -> None:
+    """Extra current context stays in x and never becomes an unrequested target."""
+    systems = _context(
+        "/redfish/v1/Systems",
+        ("GET", "HEAD"),
+        {"@odata.id": "/redfish/v1/Systems", "Name": "Systems"},
+    )
+    tasks = _context(
+        "/redfish/v1/TaskService/Tasks",
+        ("GET", "HEAD"),
+        {"@odata.id": "/redfish/v1/TaskService/Tasks", "Name": "Tasks"},
+    )
+    chassis = _context(
+        "/redfish/v1/Chassis",
+        ("GET", "HEAD"),
+        {"@odata.id": "/redfish/v1/Chassis", "Name": "Chassis"},
+    )
+
+    row = build_d1_rest_api_list_row(
+        text="check the task queue, then list systems",
+        contexts=(systems, tasks, chassis),
+        rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems"),
+    )
+
+    assert row["x"]["json"] == [systems.json, tasks.json, chassis.json]
+    assert row["y_true"]["rest_api_list"] == [
+        "/redfish/v1/TaskService/Tasks",
+        "/redfish/v1/Systems",
+    ]
+    assert "/redfish/v1/Chassis" not in row["y_true"]["rest_api_list"]
+
+
 def test_phase23_rows_pin_locked_field_names() -> None:
     """Phase 2/3 rows expose only the locked contract field names."""
     context = _context(
@@ -312,6 +344,68 @@ def test_phase3_post_does_not_infer_action_arguments_from_get_scalars() -> None:
         "rest_api": "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
         "allowed_methods": ["POST"],
         "method": "POST",
+        "arguments": {},
+    }
+
+
+def test_phase3_ignores_unselected_method_and_argument_labels() -> None:
+    """Phase 3 emits exactly one call per ordered rest_api_list entry."""
+    system = _context(
+        "/redfish/v1/Systems/1",
+        ("GET", "HEAD"),
+        {"@odata.id": "/redfish/v1/Systems/1"},
+    )
+    reset = _context(
+        "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
+        ("POST",),
+        {"@odata.id": "/redfish/v1/Systems/1"},
+    )
+
+    row = build_ordered_call_row(
+        text="inspect the system",
+        contexts=(system, reset),
+        rest_api_list=("/redfish/v1/Systems/1",),
+        method_by_api={
+            "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset": "POST",
+        },
+        arguments_by_api={
+            "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset": {
+                "ResetType": "GracefulRestart",
+            },
+        },
+    )
+
+    assert row["x"]["rest_api_list"] == ["/redfish/v1/Systems/1"]
+    assert row["y_true"]["calls"] == [{
+        "rest_api": "/redfish/v1/Systems/1",
+        "allowed_methods": ["GET", "HEAD"],
+        "method": "GET",
+        "arguments": {},
+    }]
+
+
+def test_phase3_default_method_prefers_get_over_mutating_methods() -> None:
+    """Default Phase 3 labels prefer read-only GET even if PATCH appears first."""
+    system = _context(
+        "/redfish/v1/Systems/1",
+        ("PATCH", "GET"),
+        {
+            "@odata.id": "/redfish/v1/Systems/1",
+            "PowerState": "On",
+        },
+    )
+
+    row = build_ordered_call_row(
+        text="inspect system power",
+        contexts=(system,),
+        rest_api_list=("/redfish/v1/Systems/1",),
+        arguments_by_api={"/redfish/v1/Systems/1": {"PowerState": "On"}},
+    )
+
+    assert row["y_true"]["calls"][0] == {
+        "rest_api": "/redfish/v1/Systems/1",
+        "allowed_methods": ["PATCH", "GET"],
+        "method": "GET",
         "arguments": {},
     }
 
@@ -565,6 +659,28 @@ def test_ordered_calls_parser_preserves_multiple_call_order() -> None:
     ]
 
     assert parse_ordered_calls_y_pred({"calls": calls}) == calls
+
+
+def test_ordered_calls_parser_rejects_invalid_method_and_arguments_shape() -> None:
+    """Phase 3 y_pred parsing rejects invalid method and argument contracts."""
+    with pytest.raises(ValueError, match="not in allowed_methods"):
+        parse_ordered_calls_y_pred({
+            "calls": [{
+                "rest_api": "/redfish/v1/Systems",
+                "allowed_methods": ["GET", "HEAD"],
+                "method": "PATCH",
+                "arguments": {},
+            }],
+        })
+    with pytest.raises(ValueError, match="arguments"):
+        parse_ordered_calls_y_pred({
+            "calls": [{
+                "rest_api": "/redfish/v1/Systems",
+                "allowed_methods": ["GET", "HEAD"],
+                "method": "GET",
+                "arguments": ["PowerState", "On"],
+            }],
+        })
 
 
 def test_wandb_metric_keys_are_stage_scoped_and_not_m3_names() -> None:
