@@ -21,7 +21,7 @@ from igc.ds.rest_goal_contract import (
     RedfishContext,
     build_d1_rest_api_list_row,
     build_ordered_call_row,
-    inference_ordered_goals_json,
+    inference_target_calls_json,
     parse_ordered_calls_y_pred,
     parse_rest_api_list_y_pred,
     render_ordered_call_example,
@@ -143,7 +143,7 @@ def test_phase23_rows_pin_locked_field_names() -> None:
         "y_true",
         "validation",
     }
-    assert phase2["task"] == "text_to_ordered_rest_api_list"
+    assert phase2["task"] == "text_to_rest_api_list"
     assert set(phase2["x"]) == {"text", "json", "allowed_methods"}
     assert set(phase2["y_true"]) == {"rest_api_list", "order_evidence"}
     assert set(phase3) == {"phase", "source_dataset", "model_x", "task", "x", "y_true"}
@@ -576,8 +576,8 @@ def test_rendered_phase3_patch_example_keeps_explicit_arguments() -> None:
     assert "/redfish/v1/Systems/1/Bios/Settings" in rendered.prompt
 
 
-def test_inference_json_uses_ordered_goals_shape() -> None:
-    """The combined inference handoff uses ordered_goals with Phase 3 call fields."""
+def test_inference_json_uses_target_calls_shape() -> None:
+    """The combined inference handoff uses target_calls with Phase 3 call fields."""
     context = _context(
         "/redfish/v1/TaskService/Tasks",
         ("GET", "HEAD"),
@@ -589,9 +589,9 @@ def test_inference_json_uses_ordered_goals_shape() -> None:
         rest_api_list=("/redfish/v1/TaskService/Tasks",),
     )
 
-    assert inference_ordered_goals_json(row) == {
+    assert inference_target_calls_json(row) == {
         "text": "check task queue",
-        "ordered_goals": row["y_true"]["calls"],
+        "target_calls": row["y_true"]["calls"],
     }
 
 

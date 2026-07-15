@@ -122,7 +122,7 @@ def build_d1_rest_api_list_row(
         "dataset": D1,                      # D1 is the accepted Phase 2 dataset name.
         "source_dataset": D0,               # D0 is the Phase 1 JSON reconstruction source.
         "model_x": MODEL_X,                 # model_x creates/reviews D1 after Phase 1.
-        "task": "text_to_ordered_rest_api_list",  # Contract name from the phase workflow.
+        "task": "text_to_rest_api_list",    # Contract name from the phase workflow.
         "x": {
             "text": text,                   # Operator sentence shown to the model.
             "json": [dict(context.json) for context in contexts],  # Current resource bodies.
@@ -326,15 +326,15 @@ def parse_ordered_calls_y_pred(y_pred: Mapping[str, Any] | str) -> list[dict[str
     return parsed
 
 
-def inference_ordered_goals_json(row: Mapping[str, Any]) -> dict[str, Any]:
+def inference_target_calls_json(row: Mapping[str, Any]) -> dict[str, Any]:
     """Build the combined inference JSON handoff from a Phase 3 row.
 
     :param row: row from :func:`build_ordered_call_row`.
-    :return: ``{"text": ..., "ordered_goals": [...]}``.
+    :return: ``{"text": ..., "target_calls": [...]}``.
     """
     return {
         "text": str(row["x"]["text"]),        # Operator sentence tied to the call sequence.
-        "ordered_goals": list(row["y_true"]["calls"]),  # Ordered calls for the RL handoff.
+        "target_calls": list(row["y_true"]["calls"]),  # Ordered calls for the RL handoff.
     }
 
 
