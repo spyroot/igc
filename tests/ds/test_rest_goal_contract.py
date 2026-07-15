@@ -122,13 +122,23 @@ def test_d1_row_does_not_leak_extra_context_into_target_list() -> None:
 
 def test_phase23_rows_pin_locked_field_names() -> None:
     """Phase 2/3 rows expose only the locked contract field names."""
+    body = {"@odata.id": "/redfish/v1/Systems", "Name": "Systems"}
     context = _context(
         "/redfish/v1/Systems",
         ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/Systems", "Name": "Systems"},
+        body,
     )
 
-    assert set(context.to_dict()) == {"rest_api", "allowed_methods", "json"}
+    serialized = context.to_dict()
+
+    assert set(serialized) == {"rest_api", "allowed_methods", "json"}
+    assert serialized == {
+        "rest_api": "/redfish/v1/Systems",
+        "allowed_methods": ["GET", "HEAD"],
+        "json": {"@odata.id": "/redfish/v1/Systems", "Name": "Systems"},
+    }
+    assert serialized["allowed_methods"] is not context.allowed_methods
+    assert serialized["json"] is not body
 
     phase2 = build_d1_rest_api_list_row(
         text="list systems",
@@ -433,6 +443,28 @@ def test_phase3_default_method_prefers_get_over_mutating_methods() -> None:
     }
 
 
+def test_phase3_default_method_uses_first_non_get_method_when_needed() -> None:
+    """POST-only rows default to POST without synthesizing request arguments."""
+    reset = _context(
+        "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
+        ("POST",),
+        {"@odata.id": "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset"},
+    )
+
+    row = build_ordered_call_row(
+        text="reset the system",
+        contexts=(reset,),
+        rest_api_list=("/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",),
+    )
+
+    assert row["y_true"]["calls"][0] == {
+        "rest_api": "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
+        "allowed_methods": ["POST"],
+        "method": "POST",
+        "arguments": {},
+    }
+
+
 def test_phase3_mixed_calls_preserve_order_case_and_per_api_arguments() -> None:
     """Mixed read/write calls keep order, normalize methods, and isolate arguments."""
     virtual_media = _context(
@@ -500,6 +532,18 @@ def test_rows_reject_missing_and_duplicate_contexts() -> None:
 
     with pytest.raises(ValueError, match="not present"):
         build_d1_rest_api_list_row(
+            text="list chassis",
+            contexts=(context,),
+            rest_api_list=("/redfish/v1/Chassis",),
+        )
+    with pytest.raises(ValueError, match="duplicate rest_api"):
+        build_d1_rest_api_list_row(
+            text="list systems",
+            contexts=(context, context),
+            rest_api_list=("/redfish/v1/Systems",),
+        )
+    with pytest.raises(ValueError, match="not present"):
+        build_ordered_call_row(
             text="list chassis",
             contexts=(context,),
             rest_api_list=("/redfish/v1/Chassis",),
@@ -768,6 +812,9 @@ def test_y_pred_parsers_preserve_order_and_report_bad_contracts() -> None:
     assert parse_rest_api_list_y_pred({
         "y_pred": {"rest_api_list": ["/redfish/v1/B", "/redfish/v1/A"]},
     }) == ["/redfish/v1/B", "/redfish/v1/A"]
+    assert parse_rest_api_list_y_pred({
+        "rest_api_list": ["/redfish/v1/Systems", "/redfish/v1/Managers"],
+    }) == ["/redfish/v1/Systems", "/redfish/v1/Managers"]
     calls = [{
         "rest_api": "/redfish/v1/Systems",
         "allowed_methods": ["get", "head"],
