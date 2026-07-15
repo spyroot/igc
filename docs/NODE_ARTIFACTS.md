@@ -8,10 +8,10 @@ SSH for everyone).
 
 ## Push large LFS artifacts from a slot
 
-`scripts/lfs_push_from_slot.sh` commits an artifact on a `data/<name>` branch and uploads its
-git-LFS objects to the remote from the node. Run it **on the slot**, inside the repo whose
-`.gitattributes` tracks that file type (the `igc` checkout, or the data-collection submodule for
-capture corpora).
+`scripts/lfs_push_from_slot.sh` commits explicitly supplied artifact paths on a `data/<name>` branch
+and uploads their git-LFS objects to the remote from the node. Run it **on the slot**, inside the repo
+whose `.gitattributes` tracks that file type (the `igc` checkout, or the data-collection submodule
+for capture corpora).
 
 ```bash
 # on the slot, in the repo checkout
