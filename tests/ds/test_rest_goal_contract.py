@@ -649,6 +649,20 @@ def test_rest_api_list_parser_rejects_non_string_items() -> None:
         })
 
 
+def test_rest_api_list_parser_rejects_non_object_top_level_json() -> None:
+    """Phase 2 y_pred parsing rejects JSON that is not an object."""
+    for y_pred in ('["/redfish/v1/Systems"]', '"not an object"'):
+        with pytest.raises(ValueError, match="y_pred must be an object"):
+            parse_rest_api_list_y_pred(y_pred)
+
+
+def test_rest_api_list_parser_rejects_non_object_y_pred_envelope() -> None:
+    """Phase 2 y_pred parsing rejects a malformed y_pred envelope value."""
+    for y_pred in ({"y_pred": ["/redfish/v1/Systems"]}, {"y_pred": "not an object"}):
+        with pytest.raises(ValueError, match="y_pred.y_pred must be an object"):
+            parse_rest_api_list_y_pred(y_pred)
+
+
 def test_ordered_calls_parser_preserves_multiple_call_order() -> None:
     """Phase 3 y_pred parsing keeps the model-emitted call sequence intact."""
     calls = [
@@ -698,6 +712,20 @@ def test_ordered_calls_parser_rejects_non_string_contract_fields() -> None:
                 "arguments": {},
             }],
         })
+
+
+def test_ordered_calls_parser_rejects_non_object_top_level_json() -> None:
+    """Phase 3 y_pred parsing rejects JSON that is not an object."""
+    for y_pred in ("[]", "42"):
+        with pytest.raises(ValueError, match="y_pred must be an object"):
+            parse_ordered_calls_y_pred(y_pred)
+
+
+def test_ordered_calls_parser_rejects_non_object_y_pred_envelope() -> None:
+    """Phase 3 y_pred parsing rejects a malformed y_pred envelope value."""
+    for y_pred in ({"y_pred": []}, {"y_pred": 42}):
+        with pytest.raises(ValueError, match="y_pred.y_pred must be an object"):
+            parse_ordered_calls_y_pred(y_pred)
 
 
 def test_ordered_calls_parser_rejects_invalid_method_and_arguments_shape() -> None:

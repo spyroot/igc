@@ -265,7 +265,11 @@ def parse_rest_api_list_y_pred(y_pred: Mapping[str, Any] | str) -> list[str]:
     """
     if isinstance(y_pred, str):
         y_pred = json.loads(y_pred)
+    if not isinstance(y_pred, Mapping):
+        raise ValueError("y_pred must be an object")
     value = y_pred.get("y_pred", y_pred)
+    if not isinstance(value, Mapping):
+        raise ValueError("y_pred.y_pred must be an object")
     rest_api_list = value.get("rest_api_list")
     if not isinstance(rest_api_list, list):
         raise ValueError("y_pred.rest_api_list must be a list")
@@ -282,7 +286,11 @@ def parse_ordered_calls_y_pred(y_pred: Mapping[str, Any] | str) -> list[dict[str
     """
     if isinstance(y_pred, str):
         y_pred = json.loads(y_pred)
+    if not isinstance(y_pred, Mapping):
+        raise ValueError("y_pred must be an object")
     value = y_pred.get("y_pred", y_pred)
+    if not isinstance(value, Mapping):
+        raise ValueError("y_pred.y_pred must be an object")
     calls = value.get("calls")
     if not isinstance(calls, list):
         raise ValueError("y_pred.calls must be a list")
