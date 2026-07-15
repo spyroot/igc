@@ -359,6 +359,45 @@ def test_rendered_examples_have_prompt_target_boundary_and_canonical_json() -> N
     assert "### Ordered REST Calls" in rendered3.prompt
 
 
+def test_rendered_phase3_patch_example_keeps_explicit_arguments() -> None:
+    """Rendered Phase 3 labels preserve explicit non-GET arguments."""
+    context = _context(
+        "/redfish/v1/Systems/1/Bios/Settings",
+        ("GET", "PATCH"),
+        {
+            "@odata.id": "/redfish/v1/Systems/1/Bios/Settings",
+            "Attributes": {"BootMode": "Uefi"},
+        },
+    )
+    row = build_ordered_call_row(
+        text="set bios boot mode to Uefi",
+        contexts=(context,),
+        rest_api_list=("/redfish/v1/Systems/1/Bios/Settings",),
+        method_by_api={"/redfish/v1/Systems/1/Bios/Settings": "PATCH"},
+        arguments_by_api={
+            "/redfish/v1/Systems/1/Bios/Settings": {
+                "Attributes": {"BootMode": "Uefi"},
+            },
+        },
+    )
+
+    rendered = render_ordered_call_example(row)
+
+    assert rendered.target_char_start == len(rendered.prompt)
+    assert json.loads(rendered.target_json) == {
+        "calls": [{
+            "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
+            "allowed_methods": ["GET", "PATCH"],
+            "method": "PATCH",
+            "arguments": {"Attributes": {"BootMode": "Uefi"}},
+        }],
+    }
+    assert '"PATCH"' in rendered.target_json
+    assert '"Attributes": {' in rendered.target_json
+    assert "### Ordered REST Calls" in rendered.prompt
+    assert "/redfish/v1/Systems/1/Bios/Settings" in rendered.prompt
+
+
 def test_inference_json_uses_ordered_goals_shape() -> None:
     """The combined inference handoff uses ordered_goals with Phase 3 call fields."""
     context = _context(
