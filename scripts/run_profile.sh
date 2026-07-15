@@ -14,7 +14,7 @@
 #
 #   # override a profile field, or pass extra igc_main flags after --:
 #   IGC_PROFILE=phase1_3b_lora IGC_SET="batch_size=16 lr=2e-4" bash scripts/run_profile.sh -- --recreate_dataset
-#   IGC_PROFILE=phase1_gpt2_smoke IGC_SET="corpus_objective=legacy" bash scripts/run_profile.sh
+#   IGC_PROFILE=phase1_gpt2_smoke IGC_SET="max_steps=10" bash scripts/run_profile.sh
 #
 # Profiles: phase1_gpt2_smoke phase1_3b_lora phase1_7b_lora
 #           phase1_7b_rslora_r32 phase1_3b_full phase1_7b_full_zero3

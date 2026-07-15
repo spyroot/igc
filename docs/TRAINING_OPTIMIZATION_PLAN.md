@@ -2,7 +2,7 @@
 
 This plan keeps the large-model training path from inheriting old GPT-2 and
 small-GPU assumptions. It is a code-improvement roadmap for Phase 1 Redfish JSON
-pretraining of the M1 backbone/state encoder, GPU efficiency, Redfish data variation,
+pretraining of the RedfishBackbone / `model_x`, GPU efficiency, Redfish data variation,
 simulator-backed data generation, and the evaluation gates needed before claiming that a 3B or 7B
 backbone is better.
 
@@ -12,14 +12,15 @@ repository.
 
 ## Purpose
 
-The M1 state encoder is the first large-model representation stage in `igc`. Phase 1 is the
+The RedfishBackbone is the first large-model representation stage in `igc`. Phase 1 is the
 concrete Redfish JSON pretraining/fine-tune that starts that stage: it teaches `model_x` to
 reconstruct Redfish resource JSON from `x = {rest_api, allowed_methods, json}` before Phase 2/3
 specialize goal and argument extraction. That goal needs a modern large-model path, not defaults
 carried over from a GPT-2 smoke test.
 
 Profile names use the `phase1_*` prefix because they are launchable Phase 1 training profiles.
-`M1` and `M2` remain architecture-stage names in `docs/ARCHITECTURE.md`.
+StateEncoder and downstream components write separate checkpoint roles in later phases; they are not
+encoded in the Phase 1 profile name.
 
 The intended progression is:
 

@@ -47,6 +47,7 @@ def profile_to_argv(profile: TrainingProfile) -> List[str]:
     """
     argv = [
         "--profile", profile.name,
+        "--weights_role", profile.weights_role,
         "--train", "llm", "--llm", profile.llm_stage,
         "--corpus_objective", profile.corpus_objective,
         "--model_type", profile.model,

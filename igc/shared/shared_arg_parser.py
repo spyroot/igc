@@ -430,6 +430,12 @@ def add_trainer_group(parser):
              "Used for run metadata and reports; launch behavior still comes "
              "from the explicit CLI flags."
     )
+    parser.add_argument(
+        "--weights_role",
+        type=str, default="",
+        help="Named checkpoint role written by this run, such as model_x, "
+             "goal_extractor, or argument_extractor."
+    )
 
     # indicate that we train
     parser.add_argument(

@@ -19,8 +19,8 @@ pytest -q          # must be green; ruff check on touched files
 
 ## R1 — CPU mini-train (before any GPU time)
 
-A 20-step Phase 1/M1-backbone run on the tiny dataset (`--device cpu`, `--num_workers 2`).
-`M1` is the architecture-stage name for the backbone/state encoder, not a launch profile name.
+A 20-step Phase 1 RedfishBackbone run on the tiny dataset (`--device cpu`, `--num_workers 2`).
+The checkpoint role is `model_x`; launch profiles use `phase1_*` names, not historical aliases.
 Gates: loss decreases; a checkpoint is written; **the run resumes from its own checkpoint**
 (kill it, restart, confirm the epoch advances instead of restarting at zero).
 

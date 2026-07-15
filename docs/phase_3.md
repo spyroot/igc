@@ -7,7 +7,12 @@ the ordered `rest_api_list` from Phase 2, the model must produce the method and 
 Names are fixed as follows:
 
 - `D1`: Phase 2 text-to-ordered-REST-goal data.
-- `model_x`: the Phase 1 Redfish-tuned LLM, cloned or continued for this fine-tune.
+- `model_x`: the Phase 1 Redfish-tuned LLM.
+- `goal_extractor`: the separate Phase 2 weight role, used upstream to produce `rest_api_list`.
+- `argument_extractor`: the separate Phase 3 fine-tuned weight role.
+- `profile`: a planned `phase3_argument_extractor_*` training profile.
+- `base_weights_role`: `model_x` or `goal_extractor`, whichever the run explicitly initializes from.
+- `weights_role`: `argument_extractor`; Phase 3 must not overwrite Phase 1 or Phase 2 checkpoints.
 - `x`: the input context shown to the model.
 - `y_true`: the exact target label stored in the dataset.
 - `y_pred`: the model output during inference or evaluation.
@@ -20,6 +25,10 @@ Names are fixed as follows:
 
 Phase 3 does not choose new REST APIs. It fills `method` and `arguments` for the ordered
 `rest_api_list` already produced by Phase 2.
+
+Checkpoint rule: Phase 3 writes only `argument_extractor` artifacts. A run config must record the
+input checkpoint path, the output path for `argument_extractor`, the `phase3_argument_extraction/*`
+W&B namespace, and the exact dataset manifest used for training.
 
 ## Phase 3 Row From D1
 

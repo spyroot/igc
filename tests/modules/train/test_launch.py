@@ -28,6 +28,7 @@ def test_smoke_is_step_capped_full_ft():
     assert _val(argv, "--model_type") == "gpt2"
     assert _val(argv, "--max_train_steps") == "50"
     assert _val(argv, "--corpus_objective") == "phase1_pretrain"
+    assert _val(argv, "--weights_role") == "model_x"
     assert _val(argv, "--llm") == "latent"
     assert "--use_peft" not in argv and "--num_train_epochs" not in argv
 
@@ -89,6 +90,7 @@ def test_main_prints_public_safe_profile_json(capsys):
     assert payload["profile"] == "phase1_7b_full_zero3"
     assert payload["num_workers"] == 2
     assert payload["phase"] == "phase1_finetune"
+    assert payload["weights_role"] == "model_x"
     assert payload["corpus_objective"] == "phase1_pretrain"
     assert payload["adapter"]["method"] == "full_finetune"
     assert "json_data_dir" not in payload and "output_dir" not in payload

@@ -29,7 +29,7 @@ _SETTINGS_KEYS = (
     "per_device_train_batch_size", "gradient_accumulation_steps", "num_train_epochs",
     "llm_learning_rate", "llm_scheduler", "llm_optimizer", "mixed_precision",
     "sharding", "use_accelerator", "use_peft", "lora_r", "lora_alpha", "lora_dropout",
-    "masking_type", "num_workers", "seed", "profile", "corpus_objective",
+    "masking_type", "num_workers", "seed", "profile", "weights_role", "corpus_objective",
 )
 
 # any spec key containing one of these is never emitted, whatever its value.

@@ -1,14 +1,16 @@
 # Phase 1: Redfish JSON Pretraining
 
-Phase 1 trains `model_x` on Redfish JSON reconstruction. In the architecture docs this is the
-pretraining/fine-tuning step that produces the M1 backbone checkpoint; M2, the state
-pooler/autoencoder, is a later consumer of that checkpoint. This phase does not train goal
-extraction, argument extraction, ordering, rewards, or RL behavior. It only teaches the chosen LLM
+Phase 1 trains `model_x` on Redfish JSON reconstruction. This is the RedfishBackbone
+pretraining/fine-tuning step; StateEncoder, goal extraction, argument extraction, rewards, and RL
+policy training are separate consumers with separate weights. This phase only teaches the chosen LLM
 the shape of Redfish resources, URI grammar, method context, and JSON completion.
 
 Names are fixed as follows:
 
 - `model_x`: the chosen base LLM after this Redfish JSON pretraining step.
+- `weights_role`: `model_x`; this run writes a separate Phase 1 checkpoint.
+- `profile`: a `phase1_*` training profile from `igc/modules/train/profiles.py`.
+- `corpus_objective`: `phase1_pretrain`, the Redfish JSON reconstruction objective.
 - `x`: the input context shown to the model.
 - `y_true`: the exact target JSON the model should emit.
 - `y_pred`: the model output during inference or evaluation.
@@ -23,6 +25,10 @@ words, this phase trains:
 ```text
 P(y_true.json | x.rest_api, x.allowed_methods, x.json)
 ```
+
+Checkpoint rule: Phase 1 writes `model_x` only. Later Phase 2/3 runs may initialize from that
+checkpoint, but they must write `goal_extractor` and `argument_extractor` checkpoints in distinct
+output directories and W&B groups.
 
 ## JSONL Row
 

@@ -74,6 +74,21 @@ def test_corpus_objective_defaults_legacy_and_phase1_selectable(monkeypatch):
     assert phase1.corpus_objective == "phase1_pretrain"
 
 
+def test_profile_weights_role_metadata_parses(monkeypatch):
+    """Profile launches can record which checkpoint role a run writes."""
+    args = _parse(
+        monkeypatch,
+        [
+            "--profile",
+            "phase1_7b_rslora_r32",
+            "--weights_role",
+            "model_x",
+        ],
+    )
+    assert args.profile == "phase1_7b_rslora_r32"
+    assert args.weights_role == "model_x"
+
+
 def test_rl_sizes_are_ints(monkeypatch):
     """rl batch/buffer sizes parse as ints, not floats."""
     args = _parse(monkeypatch, [])

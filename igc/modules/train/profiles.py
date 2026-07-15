@@ -4,7 +4,7 @@
 truth; this module makes the Phase 1 profile/adapter matrix executable so every run resolves
 to an explicit, logged config instead of carrying over GPT-2 / small-GPU defaults. A
 :class:`TrainingProfile` fully determines a run (phase, objective, model, precision, batch,
-accumulation, lr, scheduler, warmup, sharding, sequence length, and the
+weight role, accumulation, lr, scheduler, warmup, sharding, sequence length, and the
 :class:`AdapterSpec`); :func:`resolve_profile` applies overrides and :func:`describe` yields
 the flat dict a launcher prints and logs to W&B config.
 
@@ -75,6 +75,7 @@ class TrainingProfile:
     name: str
     model: str
     phase: str = "phase1_finetune"
+    weights_role: str = "model_x"
     llm_stage: str = "latent"
     corpus_objective: str = "phase1_pretrain"
     use_peft: bool = True
@@ -96,7 +97,7 @@ class TrainingProfile:
         """Flat, log-safe dict of the resolved config (for stdout + W&B config)."""
         d = {
             "profile": self.name, "model": self.model, "use_peft": self.use_peft,
-            "phase": self.phase, "llm_stage": self.llm_stage,
+            "phase": self.phase, "weights_role": self.weights_role, "llm_stage": self.llm_stage,
             "corpus_objective": self.corpus_objective,
             "precision": self.precision, "torch_dtype": self.torch_dtype,
             "batch_size": self.batch_size, "grad_accum": self.grad_accum, "lr": self.lr,

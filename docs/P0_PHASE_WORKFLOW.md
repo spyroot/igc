@@ -4,10 +4,21 @@ This is the current P0 split for Redfish language-model work. It keeps the immed
 goal separate from later goal/argument extraction, so Phase 1 can finish without being blocked by
 Phase 2 and Phase 3 dataset generation.
 
-Naming rule: `M1` and `M2` are architecture-stage names from `docs/ARCHITECTURE.md` (backbone encoder
-and state pooler/autoencoder). Launchable training profiles for this workflow use `phase1_*`,
-`phase2_*`, and `phase3_*` names so their dataset objective is visible in commands, W&B, and
-reports.
+Naming rule: current docs use phase names for launch surfaces and component names for weights. Do
+not introduce historical model-number aliases for profiles; those aliases were retired because they
+hide the dataset objective. Launchable profiles use `phase1_*`, `phase2_*`, and `phase3_*` names,
+while model artifacts use explicit roles such as `model_x`, `goal_extractor`, and
+`argument_extractor`.
+
+| Phase | Profile prefix | Weight role | W&B namespace | Dataset objective | Checkpoint rule |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `phase1_*` | `model_x` | `phase1_finetune/*` | `phase1_pretrain` / Redfish JSON reconstruction | writes a separate Phase 1 checkpoint |
+| 2 | `phase2_goal_extractor_*` (planned) | `goal_extractor` | `phase2_goal_extraction/*` | `text_to_ordered_rest_api_list` | initializes from `model_x` only when requested; never overwrites it |
+| 3 | `phase3_argument_extractor_*` (planned) | `argument_extractor` | `phase3_argument_extraction/*` | `text_and_rest_api_list_to_calls` | initializes from `model_x` or `goal_extractor` only when requested; never overwrites either |
+
+Phase 2 and Phase 3 profile names are planned until their trainers land. Do not add live profiles
+unless `igc.modules.train.launch.profile_to_argv` can emit a runnable command with a distinct
+checkpoint/output directory and W&B namespace.
 
 ## Phase 1: Pretrain `model_x`
 

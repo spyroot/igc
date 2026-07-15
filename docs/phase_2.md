@@ -8,6 +8,10 @@ Names are fixed as follows:
 - `D0`: Phase 1 JSON reconstruction data.
 - `D1`: Phase 2 text-to-ordered-REST-goal data.
 - `model_x`: the Phase 1 Redfish-tuned LLM.
+- `goal_extractor`: the separate Phase 2 fine-tuned weight role.
+- `profile`: a planned `phase2_goal_extractor_*` training profile.
+- `base_weights_role`: `model_x`, when Phase 2 initializes from the Phase 1 checkpoint.
+- `weights_role`: `goal_extractor`; Phase 2 must not overwrite the Phase 1 checkpoint.
 - `x`: the input context shown to the model.
 - `y_true`: the exact target label stored in the dataset.
 - `y_pred`: the model output during inference or evaluation.
@@ -20,6 +24,10 @@ Phase 2 output is ordered. If the operator sentence says "check tasks, then chec
 target order is tasks first and systems second. If the sentence has no explicit order, the dataset
 builder still stores a deterministic order and marks that order as weak evidence so evaluation can
 separate exact-order accuracy from set-recall.
+
+Checkpoint rule: Phase 2 writes only `goal_extractor` artifacts. A run config must record the input
+checkpoint path for `model_x`, the output path for `goal_extractor`, the `phase2_goal_extraction/*`
+W&B namespace, and the exact `D1` dataset manifest used for training.
 
 ## D1 Build Input
 

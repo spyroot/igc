@@ -89,6 +89,7 @@ def test_profile_matrix_matches_plan_contract(
     assert p.precision == precision
     assert p.max_steps == max_steps
     assert p.phase == "phase1_finetune"
+    assert p.weights_role == "model_x"
     assert p.llm_stage == "latent"
     assert p.corpus_objective == "phase1_pretrain"
 
@@ -174,6 +175,7 @@ def test_describe_is_flat_log_safe_dict():
     d = resolve_profile("phase1_7b_rslora_r32").describe()
     assert d["profile"] == "phase1_7b_rslora_r32" and d["use_peft"] is True
     assert d["phase"] == "phase1_finetune"
+    assert d["weights_role"] == "model_x"
     assert d["corpus_objective"] == "phase1_pretrain"
     assert d["adapter"]["method"] == "rslora" and d["adapter"]["r"] == 32
     full = resolve_profile("phase1_7b_full_zero3").describe()
