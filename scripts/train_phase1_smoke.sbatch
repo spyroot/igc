@@ -1,14 +1,14 @@
 #!/bin/bash
-# First end-to-end GPU loop: train M1, the state-encoder (causal/masked-LM SFT,
-# igc/modules/llm_train_state_encoder.py LlmEmbeddingsTrainer) on ONE GB300.
+# First end-to-end GPU loop: Phase 1 Redfish JSON pretraining
+# (igc/modules/llm_train_state_encoder.py LlmEmbeddingsTrainer) on ONE GB300.
 # Validate on a small model first, then set IGC_MODEL to a large decoder and scale.
 # Runbook + cautions: GPU_ACCESS.md. Full guide: docs/TRAINING.md.
 #
 #   export WANDB_API_KEY=...            # in your shell, NOT here (rotate if ever shared)
-#   sbatch scripts/train_m1.sbatch                          # gpt2 smoke -> wandb
-#   IGC_MODEL=<hf-repo-id> EPOCHS=3 sbatch scripts/train_m1.sbatch
+#   sbatch scripts/train_phase1_smoke.sbatch                          # gpt2 smoke -> wandb
+#   IGC_MODEL=<hf-repo-id> EPOCHS=3 sbatch scripts/train_phase1_smoke.sbatch
 #
-#SBATCH --job-name=igc-m1
+#SBATCH --job-name=igc-phase1
 #SBATCH --partition=debug
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
@@ -46,10 +46,10 @@ if [ "${IGC_REPORT}" = "wandb" ]; then
     : "${WANDB_API_KEY:?set WANDB_API_KEY in your env or ${IGC_DIR}/.internal/wandb.env to use wandb}"
     export WANDB_API_KEY
     export WANDB_PROJECT="${WANDB_PROJECT:-igc}"
-    export WANDB_NAME="${WANDB_NAME:-m1-${IGC_MODEL//\//_}-${SLURM_JOB_ID:-local}}"
+    export WANDB_NAME="${WANDB_NAME:-phase1-${IGC_MODEL//\//_}-${SLURM_JOB_ID:-local}}"
 fi
 
-echo "igc M1 SFT | model=${IGC_MODEL} epochs=${EPOCHS} report=${IGC_REPORT} node=$(hostname)"
+echo "igc Phase 1 SFT | model=${IGC_MODEL} epochs=${EPOCHS} report=${IGC_REPORT} node=$(hostname)"
 
 # shellcheck disable=SC2016  # The single-quoted payload is evaluated inside the container.
 srun --container-image="${NGC_IMAGE}" \
@@ -61,6 +61,8 @@ srun --container-image="${NGC_IMAGE}" \
         nvidia-smi -L
         python igc_main.py \
             --train llm --llm latent \
+            --weights_role model_x \
+            --corpus_objective phase1_pretrain \
             --model_type "'"${IGC_MODEL}"'" \
             --num_train_epochs "'"${EPOCHS}"'" \
             --json_data_dir /root/.json_responses \

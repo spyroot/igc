@@ -9,16 +9,17 @@ Mus mbayramo@stanford.edu
 """
 from __future__ import annotations
 
-PHASE1_PRETRAIN = "phase1_pretrain"
-PHASE2_GOAL_EXTRACT = "phase2_goal_extract"
+PHASE1_OBJECTIVE_PRETRAIN = "phase1_pretrain"
+PHASE1_FINETUNE = "phase1_finetune"
+PHASE2_GOAL_EXTRACT = "phase2_goal_extraction"
 PHASE2_LABELLED_REQUESTS = "phase2_labelled_requests"
-PHASE3_ARGUMENT_EXTRACT = "phase3_argument_extract"
+PHASE3_ARGUMENT_EXTRACT = "phase3_argument_extraction"
 
 
 def phase_metric(namespace: str, group: str, name: str) -> str:
     """Return a stable ``<namespace>/<group>/<name>`` metric key.
 
-    :param namespace: Phase namespace, for example :data:`PHASE1_PRETRAIN`.
+    :param namespace: Phase namespace, for example :data:`PHASE1_FINETUNE`.
     :param group: Metric group such as ``train`` or ``eval``.
     :param name: Metric name inside the group.
     :return: Slash-separated W&B/TensorBoard metric key.
@@ -30,17 +31,17 @@ def phase_metric(namespace: str, group: str, name: str) -> str:
 
 
 PHASE1_WANDB_METRIC_KEYS = (
-    phase_metric(PHASE1_PRETRAIN, "train", "loss"),
-    phase_metric(PHASE1_PRETRAIN, "train", "epoch_loss"),
-    phase_metric(PHASE1_PRETRAIN, "train", "perplexity"),
-    phase_metric(PHASE1_PRETRAIN, "train", "epoch_perplexity"),
-    phase_metric(PHASE1_PRETRAIN, "train", "optimizer_step"),
-    phase_metric(PHASE1_PRETRAIN, "train", "tokens_processed"),
-    phase_metric(PHASE1_PRETRAIN, "eval", "loss"),
-    phase_metric(PHASE1_PRETRAIN, "eval", "perplexity"),
-    phase_metric(PHASE1_PRETRAIN, "eval", "token_accuracy"),
-    phase_metric(PHASE1_PRETRAIN, "throughput", "train_tokens_per_sec"),
-    phase_metric(PHASE1_PRETRAIN, "throughput", "train_samples_per_sec"),
+    phase_metric(PHASE1_FINETUNE, "train", "loss"),
+    phase_metric(PHASE1_FINETUNE, "train", "epoch_loss"),
+    phase_metric(PHASE1_FINETUNE, "train", "perplexity"),
+    phase_metric(PHASE1_FINETUNE, "train", "epoch_perplexity"),
+    phase_metric(PHASE1_FINETUNE, "train", "optimizer_step"),
+    phase_metric(PHASE1_FINETUNE, "train", "tokens_processed"),
+    phase_metric(PHASE1_FINETUNE, "eval", "loss"),
+    phase_metric(PHASE1_FINETUNE, "eval", "perplexity"),
+    phase_metric(PHASE1_FINETUNE, "eval", "token_accuracy"),
+    phase_metric(PHASE1_FINETUNE, "throughput", "train_tokens_per_sec"),
+    phase_metric(PHASE1_FINETUNE, "throughput", "train_samples_per_sec"),
 )
 
 PHASE2_WANDB_METRIC_KEYS = (

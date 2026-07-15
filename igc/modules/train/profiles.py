@@ -1,11 +1,12 @@
-"""Named M1 state-encoder training profiles + adapter specs (the run contract).
+"""Named Phase 1 Redfish JSON pretraining profiles + adapter specs.
 
-``docs/TRAINING_OPTIMIZATION_PLAN.md`` is the source of truth; this module makes its
-profile/adapter matrix executable so every run resolves to an explicit, logged config
-instead of carrying over GPT-2 / small-GPU defaults. A :class:`TrainingProfile` fully
-determines a run (model, precision, batch, accumulation, lr, scheduler, warmup, sharding,
-sequence length, and the :class:`AdapterSpec`); :func:`resolve_profile` applies overrides
-and :func:`describe` yields the flat dict a launcher prints and logs to W&B config.
+``docs/P0_PHASE_WORKFLOW.md`` and ``docs/TRAINING_OPTIMIZATION_PLAN.md`` are the source of
+truth; this module makes the Phase 1 profile/adapter matrix executable so every run resolves
+to an explicit, logged config instead of carrying over GPT-2 / small-GPU defaults. A
+:class:`TrainingProfile` fully determines a run (phase, objective, model, precision, batch,
+weight role, accumulation, lr, scheduler, warmup, sharding, sequence length, and the
+:class:`AdapterSpec`); :func:`resolve_profile` applies overrides and :func:`describe` yields
+the flat dict a launcher prints and logs to W&B config.
 
 Pure standard library on purpose (no torch/peft): imported by the launcher and tests,
 and must stay cheap/offline. :func:`apply_lora_kwargs` produces the exact kwargs for
@@ -63,14 +64,20 @@ class AdapterSpec:
 
 @dataclass(frozen=True)
 class TrainingProfile:
-    """A fully-resolved M1 run: model + precision + optimization + adapter.
+    """A fully-resolved Phase 1 run: model + precision + optimization + adapter.
 
     ``use_peft=False`` marks a full fine-tune (``adapter`` is ignored); large full FTs set
-    ``sharding`` to ``zero3``/``fsdp``.
+    ``sharding`` to ``zero3``/``fsdp``. ``llm_stage`` is the internal trainer route; Phase 1
+    currently uses the latent/state-encoder trainer path while the profile/objective name
+    records that the data task is Redfish JSON reconstruction.
     """
 
     name: str
     model: str
+    phase: str = "phase1_finetune"
+    weights_role: str = "model_x"
+    llm_stage: str = "latent"
+    corpus_objective: str = "phase1_pretrain"
     use_peft: bool = True
     adapter: Optional[AdapterSpec] = field(default_factory=AdapterSpec)
     precision: str = "bf16"          # accelerate mixed_precision
@@ -82,6 +89,8 @@ class TrainingProfile:
     warmup_ratio: float = 0.03
     epochs: int = 3                  # used when max_steps is None
     max_steps: Optional[int] = None  # hard step cap (overrides epochs when set)
+    early_stopping_patience: int = 3
+    early_stopping_min_delta: float = 0.005
     sharding: str = "none"           # none | zero3 | fsdp
     seq_len: int = 1024
     num_workers: int = 8
@@ -90,10 +99,15 @@ class TrainingProfile:
         """Flat, log-safe dict of the resolved config (for stdout + W&B config)."""
         d = {
             "profile": self.name, "model": self.model, "use_peft": self.use_peft,
+            "phase": self.phase, "weights_role": self.weights_role, "llm_stage": self.llm_stage,
+            "corpus_objective": self.corpus_objective,
             "precision": self.precision, "torch_dtype": self.torch_dtype,
             "batch_size": self.batch_size, "grad_accum": self.grad_accum, "lr": self.lr,
             "scheduler": self.scheduler, "warmup_ratio": self.warmup_ratio,
-            "epochs": self.epochs, "max_steps": self.max_steps, "sharding": self.sharding,
+            "epochs": self.epochs, "max_steps": self.max_steps,
+            "early_stopping_patience": self.early_stopping_patience,
+            "early_stopping_min_delta": self.early_stopping_min_delta,
+            "sharding": self.sharding,
             "seq_len": self.seq_len, "num_workers": self.num_workers,
         }
         if self.use_peft and self.adapter is not None:
@@ -103,41 +117,42 @@ class TrainingProfile:
         return d
 
 
-# The named profiles of docs/TRAINING_OPTIMIZATION_PLAN.md §Target Training Profiles.
+# The named profiles of docs/P0_PHASE_WORKFLOW.md §Phase 1 and
+# docs/TRAINING_OPTIMIZATION_PLAN.md §Target Training Profiles.
 PROFILES: Dict[str, TrainingProfile] = {
-    "m1_gpt2_smoke": TrainingProfile(
-        name="m1_gpt2_smoke", model="gpt2", use_peft=False, adapter=None,
+    "phase1_gpt2_smoke": TrainingProfile(
+        name="phase1_gpt2_smoke", model="gpt2", use_peft=False, adapter=None,
         precision="no", torch_dtype="float32", batch_size=8, lr=5e-5,
         max_steps=50, seq_len=256, sharding="none",
     ),
-    "m1_3b_lora": TrainingProfile(
-        name="m1_3b_lora", model="Qwen/Qwen2.5-3B-Instruct",
+    "phase1_3b_lora": TrainingProfile(
+        name="phase1_3b_lora", model="Qwen/Qwen2.5-3B-Instruct",
         adapter=AdapterSpec(method="lora", r=16, alpha=32),
         batch_size=8, grad_accum=2, lr=1e-4, warmup_ratio=0.03,
     ),
-    "m1_7b_lora": TrainingProfile(
-        name="m1_7b_lora", model="Qwen/Qwen2.5-7B-Instruct",
+    "phase1_7b_lora": TrainingProfile(
+        name="phase1_7b_lora", model="Qwen/Qwen2.5-7B-Instruct",
         adapter=AdapterSpec(method="lora", r=16, alpha=32),
         batch_size=8, grad_accum=4, lr=1e-4, warmup_ratio=0.03,
     ),
-    "m1_7b_rslora_r32": TrainingProfile(
-        name="m1_7b_rslora_r32", model="Qwen/Qwen2.5-7B-Instruct",
+    "phase1_7b_rslora_r32": TrainingProfile(
+        name="phase1_7b_rslora_r32", model="Qwen/Qwen2.5-7B-Instruct",
         adapter=AdapterSpec(method="rslora", r=32, alpha=64, init="default"),
         batch_size=8, grad_accum=4, lr=1e-4, warmup_ratio=0.03,
     ),
-    "m1_local": TrainingProfile(
+    "phase1_local": TrainingProfile(
         # local weights dir from the environment (e.g. the staged DeepSeek-V4-Flash or
         # any node-local backbone) -- no path is baked into committed code.
-        name="m1_local", model="$IGC_MODEL_DIR",
+        name="phase1_local", model="$IGC_MODEL_DIR",
         adapter=AdapterSpec(method="lora", r=16, alpha=32),
         batch_size=8, grad_accum=4, lr=1e-4, warmup_ratio=0.03,
     ),
-    "m1_3b_full": TrainingProfile(
-        name="m1_3b_full", model="Qwen/Qwen2.5-3B-Instruct", use_peft=False, adapter=None,
+    "phase1_3b_full": TrainingProfile(
+        name="phase1_3b_full", model="Qwen/Qwen2.5-3B-Instruct", use_peft=False, adapter=None,
         batch_size=4, grad_accum=8, lr=2e-5, sharding="zero3", warmup_ratio=0.03,
     ),
-    "m1_7b_full_zero3": TrainingProfile(
-        name="m1_7b_full_zero3", model="Qwen/Qwen2.5-7B-Instruct", use_peft=False, adapter=None,
+    "phase1_7b_full_zero3": TrainingProfile(
+        name="phase1_7b_full_zero3", model="Qwen/Qwen2.5-7B-Instruct", use_peft=False, adapter=None,
         batch_size=2, grad_accum=16, lr=1e-5, sharding="zero3", warmup_ratio=0.03,
     ),
 }
@@ -166,7 +181,7 @@ def resolve_profile(name: str, **overrides) -> TrainingProfile:
         if bad:
             raise ValueError(f"unknown profile override(s) {sorted(bad)}; valid: {sorted(valid)}")
         base = replace(base, **overrides)
-    # expand $ENV_VAR model references (e.g. m1_local's $IGC_MODEL_DIR) at resolve
+    # expand $ENV_VAR model references (e.g. phase1_local's $IGC_MODEL_DIR) at resolve
     # time so the env decides the weights dir, never committed code.
     if "$" in base.model:
         expanded = os.path.expandvars(base.model)

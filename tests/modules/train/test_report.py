@@ -20,7 +20,7 @@ def _bundle(arm_method, rank, metrics, *, data="ds-v1", split="held-out-a", step
     """A ResultBundle for one arm with a shared (fair) manifest by default."""
     return ResultBundle(
         manifest=RunManifest(
-            run_id=f"run-{arm_method}-{rank}", profile="m1_7b_lora",
+            run_id=f"run-{arm_method}-{rank}", profile="phase1_7b_lora",
             model="Qwen/Qwen2.5-7B-Instruct", tokenizer="qwen2.5",
             adapter_method=arm_method, adapter_rank=rank,
             data_manifest=data, eval_split=split, max_steps=steps, seq_len=seq,
@@ -89,7 +89,7 @@ def test_enriched_manifest_round_trips(tmp_path: Path) -> None:
     """The comprehensive-capture fields survive write/read."""
     b = ResultBundle(
         manifest=RunManifest(
-            run_id="r1", profile="m1_7b_rslora_r32", model="Qwen/Qwen2.5-7B-Instruct",
+            run_id="r1", profile="phase1_7b_rslora_r32", model="Qwen/Qwen2.5-7B-Instruct",
             argv=["--train", "llm", "--adapter_method", "rslora"],
             started_at="2026-07-01T09:00:00", checkpoint_path="experiments/r1/last.pt",
             environment=capture_environment(),
@@ -134,7 +134,7 @@ def test_from_dict_defaults_missing_optional_collections() -> None:
     bundle = ResultBundle.from_dict({
         "manifest": {
             "run_id": "legacy-r1",
-            "profile": "m1_3b_lora",
+            "profile": "phase1_3b_lora",
             "model": "Qwen/Qwen2.5-3B-Instruct",
         },
         "metrics": {"recall@1": 0.5},

@@ -1,22 +1,23 @@
 # Node artifacts: LFS push from a slot, and Docker Hub images
 
-How to move large artifacts (captured corpora, built datasets, tarballs, images) **without
-dragging multi-GB data across the shared VPN**. The rule: data that is generated on a training
-node is pushed *from* that node over its own datacenter uplink — never pulled to a laptop and
-pushed from there (a multi-GB transfer over the VPN has saturated the shared tunnel and blocked
+How to move large artifacts, including captured corpora, built datasets, model adapters, tarballs,
+and images, without dragging multi-GB data across the shared VPN. The rule: data that is generated
+on a training node is pushed *from* that node over its own datacenter uplink — never pulled to a laptop
+and pushed from there (a multi-GB transfer over the VPN has saturated the shared tunnel and blocked
 SSH for everyone).
 
 ## Push large LFS artifacts from a slot
 
-`scripts/lfs_push_from_slot.sh` commits an artifact on a `data/<name>` branch and uploads its
-git-LFS objects to the remote from the node. Run it **on the slot**, inside the repo whose
-`.gitattributes` tracks that file type (the `igc` checkout, or the data-collection submodule for
-capture corpora).
+`scripts/lfs_push_from_slot.sh` commits explicitly supplied artifact paths on a `data/<name>` branch
+and uploads their git-LFS objects to the remote from the node. Run it **on the slot**, inside the repo
+whose `.gitattributes` tracks that file type (the `igc` checkout, or the data-collection submodule
+for capture corpora).
 
 ```bash
 # on the slot, in the repo checkout
 scripts/lfs_push_from_slot.sh ~/.json_responses/<host>          # push a captured host walk
 scripts/lfs_push_from_slot.sh datasets/raw/processed_dataset.pt # push a built dataset
+scripts/lfs_push_from_slot.sh models/model_x/adapter.safetensors # push a reviewed adapter
 ```
 
 It:

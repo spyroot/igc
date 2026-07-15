@@ -37,7 +37,7 @@ The plan should consolidate these existing entrypoints instead of replacing them
 
 - `scripts/gb300_launch.sh`, the existing direct-Docker node launcher.
 - `scripts/submit_train.sh`, the existing Slurm submit helper.
-- `scripts/train_igc.sbatch` and `scripts/train_m1.sbatch`, the existing scheduled training scripts.
+- `scripts/train_igc.sbatch` and `scripts/train_phase1_smoke.sbatch`, the existing scheduled training scripts.
 - `scripts/preflight_nv72.sh`, the existing fleet-state preflight wrapper; the endpoint comes from
   the runtime environment.
 - `scripts/publish_checkpoint.sh`, the existing checkpoint copier and checksum manifest helper.

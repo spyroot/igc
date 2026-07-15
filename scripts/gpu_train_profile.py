@@ -1,5 +1,5 @@
 """
-Multi-GPU per-section profiler for the state-encoder training step (S0/M1 backbone).
+Multi-GPU per-section profiler for the Phase 1 RedfishBackbone training step.
 
 igc has offline CPU hot-path benchmarks (``scripts/bench_hot_paths.py`` — the RL decision path)
 and a distributed dataset-isolation harness (``scripts/gpu_dataset_isolation.py`` — the epoch-2

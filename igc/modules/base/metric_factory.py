@@ -152,13 +152,18 @@ def _wandb_run_meta(kw: dict) -> dict:
     :return: a dict of ``name``, ``group``, ``job_type``, ``tags``, ``config``.
     """
     train, llm = kw.get("train"), kw.get("llm")
+    profile = str(kw.get("profile") or "")
+    corpus_objective = str(kw.get("corpus_objective") or "")
     stage_map = {
         ("llm", "latent"): "m1-state-encoder",
         ("llm", "all"): "m1m2-encoder",
         ("llm", "goal"): "goal-extractor-legacy",
         ("llm", "parameter"): "param-extractor-legacy",
     }
-    if train in ("agent",) or kw.get("rl"):
+    rl_stage = str(kw.get("rl") or "").lower()
+    if profile.startswith("phase1_") or corpus_objective == "phase1_pretrain":
+        stage = "phase1-finetune"
+    elif train in ("agent",) or rl_stage not in ("", "none"):
         stage = "m6-rl-agent"
     else:
         stage = stage_map.get((train, llm), f"{train or 'run'}-{llm}" if llm else (train or "run"))
@@ -186,6 +191,7 @@ def _wandb_run_meta(kw: dict) -> dict:
         "model_type", "train", "llm", "rl", "num_train_epochs",
         "per_device_train_batch_size", "num_workers", "use_peft",
         "lora_r", "lora_alpha", "sharding", "llm_torch_dtype", "device",
+        "profile", "weights_role", "corpus_objective",
     ]
     config = {k: kw[k] for k in config_keys if k in kw}
 

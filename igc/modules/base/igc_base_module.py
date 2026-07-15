@@ -36,7 +36,14 @@ BatchItem = namedtuple('BatchItem', ['prompt', 'goal'])
 
 # a checkpoint state
 CheckpointState = namedtuple('Checkpoint', [
-    'last_epoch', 'scheduler_state', 'initial_lr', 'best_accuracy', 'batch_idx'])
+    'last_epoch',        # epoch stored in the checkpoint (0 when starting fresh)
+    'scheduler_state',   # raw scheduler state dict(s) from the checkpoint, or None
+    'initial_lr',        # learning rate recorded at save time, or None
+    'best_accuracy',     # legacy accuracy channel (last_accuracy at save time)
+    'batch_idx',         # mid-epoch batch index for batch-level resume (0 otherwise)
+    'best_metric',       # best-selection metric at save time (loss or accuracy), or None
+    'best_metric_mode',  # which metric best_metric holds: 'loss' | 'accuracy' | None
+], defaults=(None, None))  # the two best_metric fields are absent in legacy checkpoints
 
 
 class DownloadModuleError(Exception):
@@ -580,6 +587,8 @@ class IgcModule(IgcBaseState):
             is_best_accuracy: Optional[bool] = False,
             batch_idx: Optional[int] = None,
             model_state_dict: Optional[Dict] = None,
+            best_metric: Optional[float] = None,
+            best_metric_mode: Optional[str] = None,
     ) -> str:
         """
         Save model checkpoint.
@@ -597,6 +606,10 @@ class IgcModule(IgcBaseState):
         :param last_accuracy: if the last accuracy provide we save it , so we can track it.
         :param is_best_accuracy: if the is_best_accuracy accuracy we save it as separate file.
         :param batch_idx:  if we're saving during batch training, we save the batch_idx
+        :param best_metric: best-selection metric so far (validation loss or accuracy),
+                            persisted so a resumed run keeps its best tracking.
+        :param best_metric_mode: which metric ``best_metric`` holds: ``'loss'`` or
+                                 ``'accuracy'``; restore only honors a matching mode.
         :return:  return path where checkpoint saved
         """
 
@@ -634,6 +647,13 @@ class IgcModule(IgcBaseState):
 
         if last_accuracy is not None:
             checkpoint['last_accuracy'] = last_accuracy
+
+        # persisted together so a resumed run can restore best tracking without
+        # mistaking a loss-mode best for an accuracy-mode best (or vice versa).
+        if best_metric is not None:
+            checkpoint['best_metric'] = float(best_metric)
+        if best_metric_mode is not None:
+            checkpoint['best_metric_mode'] = str(best_metric_mode)
 
         if initial_lr is not None:
             checkpoint['initial_lr'] = initial_lr
@@ -771,13 +791,19 @@ class IgcModule(IgcBaseState):
         initial_lr = checkpoint['initial_lr'] if "initial_lr" in checkpoint else None
         batch_idx = checkpoint['batch_idx'] if "batch_idx" in checkpoint else 0
         epoch = checkpoint['epoch'] if "epoch" in checkpoint else 0
+        # legacy checkpoints predate the best-metric channel; both default to None
+        # so a resumed trainer knows to start best tracking fresh.
+        best_metric = checkpoint.get('best_metric')
+        best_metric_mode = checkpoint.get('best_metric_mode')
 
         self.logger.info(
             f"Rank: {self.rank} module {self.module_name} "
             f"loaded checkpoint from "
             f"{checkpoint_file}, epoch: {epoch}")
 
-        return CheckpointState(epoch, scheduler, initial_lr, last_accuracy, batch_idx)
+        return CheckpointState(
+            epoch, scheduler, initial_lr, last_accuracy, batch_idx,
+            best_metric, best_metric_mode)
 
     @staticmethod
     def load(

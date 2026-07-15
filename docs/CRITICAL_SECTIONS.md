@@ -94,7 +94,8 @@ host's candidates are static and the projector weights are fixed within an optim
 **Fix (design decision [D-002](DECISIONS.md)).** Project the host's **unique** candidate set once
 per optimizer step, cache the keys, and score with `score_candidates` (an einsum over cached
 keys) for every state in the batch. The primitive already exists — `score_candidates` takes
-pre-projected keys — so the M6 training loop must use it rather than the full per-state forward.
+pre-projected keys — so the RLPolicy training loop must use it rather than the full per-state
+forward.
 
 **Result.** Pointer forward **0.193 s → 0.0038 s (~51×)** on CPU; on a 100k-step run this is the
 difference between hours and minutes of pure projection.

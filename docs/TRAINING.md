@@ -24,7 +24,7 @@ export WANDB_ENTITY=spyroot
 export WANDB_PROJECT=igc
 ```
 
-`scripts/train_m1.sbatch` auto-sources `$IGC_DIR/.internal/wandb.env` when present (copy it to the
+`scripts/train_phase1_smoke.sbatch` auto-sources `$IGC_DIR/.internal/wandb.env` when present (copy it to the
 cluster login node alongside the checkout — it is not in git). If a key has been shared anywhere
 (chat, a paste, a screenshot), **rotate it** before using it.
 
@@ -47,7 +47,7 @@ root with `--corpus_manifest`, `--corpus_root`, and `--corpus_kind`, which are p
 `igc/shared/shared_arg_parser.py`:
 
 ```bash
-IGC_PROFILE=m1_gpt2_smoke \
+IGC_PROFILE=phase1_gpt2_smoke \
 IGC_METRIC_REPORT=tensorboard \
 bash scripts/run_profile.sh \
   --corpus_manifest /path/to/redfish_ctl/corpora/manifest.v1.json \
@@ -66,7 +66,7 @@ scheduler's node-selection flag.
 ## 3. Experiment tracking (Weights & Biases)
 
 The metric backend is selected by `--metric_report` (the run wires `igc.modules` `MetricLogger`).
-The M1 launcher defaults to `wandb`:
+The Phase 1 profile launcher defaults to `wandb`:
 
 ```bash
 export WANDB_API_KEY=...                 # required for wandb
@@ -74,41 +74,84 @@ export WANDB_PROJECT=igc                 # optional; defaults to "igc"
 # WANDB_NAME is auto-derived from the model + Slurm job id
 ```
 
-Current M1 state-encoder runs log `train/loss`, `train/lr`, `train/grad_norm`, `eval/accuracy`, and
-`train/epoch_loss`. Current RL-agent runs log `epoch_mean_loss`, `epoch_cumulative_reward`, and
-`epoch_goal_reached_count`. Treat perplexity, tokens/sec, GPU memory, and success-rate curves as
-planned instrumentation unless a later change adds those exact metric keys.
+Current Phase 1 corpus runs log under the `phase1_finetune/*` namespace when
+`--corpus_objective phase1_pretrain` is active. Current RL-agent runs log `epoch_mean_loss`,
+`epoch_cumulative_reward`, and `epoch_goal_reached_count`. Treat any metric not listed in
+`igc/modules/base/metric_keys.py` as planned instrumentation unless a later change adds that exact
+producer.
+
+Phase 2/3 mock-plumbing metric names are constants only; no live W&B run is part of that lane.
+`PHASE2_GOAL_EXTRACT_METRIC_KEYS`, re-exported by `igc/ds/rest_goal_contract.py` from the shared
+`PHASE2_WANDB_METRIC_KEYS` registry in `igc/modules/base/metric_keys.py`, currently reserves:
+`phase2_goal_extraction/train/{loss,perplexity,optimizer_step}`,
+`phase2_goal_extraction/eval/{ordered_exact_match_rate,set_match_rate,precision,recall,f1,`
+`missing_allowed_methods_rate}`,
+and `phase2_goal_extraction/order/{kendall_tau,edit_distance}`.
+`PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS`, re-exported by `igc/ds/rest_goal_contract.py` from the shared
+`PHASE3_WANDB_METRIC_KEYS` registry in `igc/modules/base/metric_keys.py`, currently reserves:
+`phase3_argument_extraction/train/{loss,perplexity,optimizer_step}`,
+`phase3_argument_extraction/eval/{call_ordered_exact_match_rate,method_exact_match_rate,`
+`arguments_exact_match_rate,readonly_empty_arguments_rate}`,
+and `phase3_argument_extraction/order/{kendall_tau,edit_distance}`.
+Exact reserved keys:
+
+```text
+phase2_goal_extraction/train/loss
+phase2_goal_extraction/train/perplexity
+phase2_goal_extraction/train/optimizer_step
+phase2_goal_extraction/eval/ordered_exact_match_rate
+phase2_goal_extraction/eval/set_match_rate
+phase2_goal_extraction/eval/precision
+phase2_goal_extraction/eval/recall
+phase2_goal_extraction/eval/f1
+phase2_goal_extraction/eval/missing_allowed_methods_rate
+phase2_goal_extraction/order/kendall_tau
+phase2_goal_extraction/order/edit_distance
+phase3_argument_extraction/train/loss
+phase3_argument_extraction/train/perplexity
+phase3_argument_extraction/train/optimizer_step
+phase3_argument_extraction/eval/call_ordered_exact_match_rate
+phase3_argument_extraction/eval/method_exact_match_rate
+phase3_argument_extraction/eval/arguments_exact_match_rate
+phase3_argument_extraction/eval/readonly_empty_arguments_rate
+phase3_argument_extraction/order/kendall_tau
+phase3_argument_extraction/order/edit_distance
+```
 
 To use TensorBoard instead, choose the variable for the launcher you are using:
 `IGC_METRIC_REPORT=tensorboard bash scripts/run_profile.sh` for the profile wrapper, or
-`IGC_REPORT=tensorboard sbatch scripts/train_m1.sbatch` for the sbatch smoke path.
+`IGC_REPORT=tensorboard sbatch scripts/train_phase1_smoke.sbatch` for the sbatch smoke path.
 
-## 4. Launch (first GPU loop — M1 state encoder)
+## 4. Launch (Phase 1 JSON pretraining)
 
 There are two launch routes today:
 
-- `scripts/train_m1.sbatch`, the Slurm smoke launcher, is the normal scheduled GPU path.
+- `scripts/train_phase1_smoke.sbatch`, the Slurm smoke launcher, is the normal scheduled GPU path.
 - `scripts/run_profile.sh`, the profile-backed wrapper, is for direct named-profile execution.
 
 The profile registry, defined in `igc/modules/train/profiles.py`, is the committed source of truth
-for named M1 state-encoder runs. Inspect a profile locally before spending GPU time:
+for named Phase 1 Redfish JSON pretraining runs. Current launch profiles are named `phase1_*` so
+their data objective and checkpoint role are explicit. Inspect a profile locally before spending GPU
+time:
 
 ```bash
-python -m igc.modules.train.launch --profile m1_gpt2_smoke
-python -m igc.modules.train.launch --profile m1_7b_rslora_r32 --print-argv
+python -m igc.modules.train.launch --profile phase1_gpt2_smoke
+python -m igc.modules.train.launch --profile phase1_7b_rslora_r32 --print-argv
 ```
 
-The smoke argv should include `--model_type gpt2` and `--max_train_steps 50`; the rsLoRA argv should
-include `--adapter_method rslora`, `--lora_r 32`, and `--lora_alpha 64`.
+The smoke argv should include `--profile phase1_gpt2_smoke`, `--corpus_objective phase1_pretrain`,
+`--weights_role model_x`, `--model_type gpt2`, and `--max_train_steps 50`; the rsLoRA argv should include
+`--profile phase1_7b_rslora_r32`, `--weights_role model_x`, `--adapter_method rslora`, `--lora_r 32`, and
+`--lora_alpha 64`.
 
 The `scripts/run_profile.sh` wrapper, committed as the profile-name launcher, resolves `IGC_PROFILE`
 through `igc.modules.train.launch`, then supplies `--json_data_dir`, `--output_dir`, and
 `--metric_report` from `IGC_DATA_DIR`, `IGC_OUTPUT_DIR`, and `IGC_METRIC_REPORT`:
 
 ```bash
-IGC_PROFILE=m1_gpt2_smoke \
+IGC_PROFILE=phase1_gpt2_smoke \
 IGC_DATA_DIR=$HOME/.json_responses \
-IGC_OUTPUT_DIR=experiments/m1_gpt2_smoke \
+IGC_OUTPUT_DIR=experiments/phase1_gpt2_smoke \
 bash scripts/run_profile.sh
 ```
 
@@ -116,26 +159,27 @@ Use `IGC_SET`, read by `scripts/run_profile.sh` as profile-field overrides, for 
 changes such as a shorter smoke or batch-size check:
 
 ```bash
-IGC_PROFILE=m1_3b_lora IGC_SET="batch_size=16 lr=2e-4" bash scripts/run_profile.sh
+IGC_PROFILE=phase1_3b_lora IGC_SET="batch_size=16 lr=2e-4" bash scripts/run_profile.sh
 ```
 
-`scripts/run_profile.sh` is the profile-backed local launcher. `scripts/train_m1.sbatch`, the older
-Slurm smoke launcher, does not read `IGC_PROFILE`; it still uses `IGC_MODEL`, `EPOCHS`, and
-`IGC_USE_PEFT`.
+`scripts/run_profile.sh` is the profile-backed local launcher. `scripts/train_phase1_smoke.sbatch`
+is the Slurm smoke launcher; it does not read `IGC_PROFILE` and still uses `IGC_MODEL`, `EPOCHS`,
+and `IGC_USE_PEFT`.
 
 ```bash
 # on a GB300 login node, with $HOME/igc and $HOME/.json_responses staged on the node
 export WANDB_API_KEY=...
-sbatch scripts/train_m1.sbatch                                  # gpt2 smoke — validates the path
-IGC_MODEL=<large-hf-decoder> EPOCHS=3 sbatch scripts/train_m1.sbatch   # then scale up
-squeue --me ; tail -f igc-m1-*.out                              # watch
+sbatch scripts/train_phase1_smoke.sbatch
+IGC_MODEL=<large-hf-decoder> EPOCHS=3 sbatch scripts/train_phase1_smoke.sbatch
+squeue --me
+tail -f igc-phase1-*.out
 ```
 
-[scripts/train_m1.sbatch](../scripts/train_m1.sbatch) runs `igc_main.py --train llm --llm latent`
-on 1 GPU with conservative fabric settings and unavailable nodes excluded by the launcher. **Start
-with the `gpt2` smoke** before spending a large model's time — it surfaces any remaining launch
-issues cheaply. A *large* model on one GPU needs LoRA — set `IGC_USE_PEFT=1` (LoRA via HF PEFT);
-full fine-tune is for the small validation model only.
+[scripts/train_phase1_smoke.sbatch](../scripts/train_phase1_smoke.sbatch) runs
+`igc_main.py --train llm --llm latent` on 1 GPU with conservative fabric settings and unavailable
+nodes excluded by the launcher. **Start with the `gpt2` smoke** before spending a large model's time
+— it surfaces any remaining launch issues cheaply. A *large* model on one GPU needs LoRA — set
+`IGC_USE_PEFT=1` (LoRA via HF PEFT); full fine-tune is for the small validation model only.
 
 The code-improvement and GPU-efficiency roadmap for 3B/7B state-encoder training lives in
 [TRAINING_OPTIMIZATION_PLAN.md](TRAINING_OPTIMIZATION_PLAN.md). Keep this page as the runnable launch
@@ -180,10 +224,10 @@ the exact launch command and metrics before calling any sharded run successful.
 ### Profile launcher for tuning
 
 `scripts/run_profile.sh` (documented in §4 above) also passes trailing arguments through to the
-trainer — use it when you need knobs that `scripts/train_m1.sbatch` does not expose directly:
+trainer — use it when you need knobs that `scripts/train_phase1_smoke.sbatch` does not expose directly:
 
 ```bash
-IGC_PROFILE=m1_gpt2_smoke \
+IGC_PROFILE=phase1_gpt2_smoke \
 IGC_DATA_DIR=$HOME/.json_responses \
 IGC_METRIC_REPORT=tensorboard \
 bash scripts/run_profile.sh --gradient_accumulation_steps 4 --num_workers 2
@@ -202,8 +246,8 @@ can find earlier checkpoints; see the script header for stage names and epoch kn
 
 ## 5. Checkpoints & weight sharing
 
-Checkpoints are node-local and must not be committed. With `scripts/train_m1.sbatch`, the default
-`output_dir` comes from `igc/shared/shared_main.py` and resolves to
+Checkpoints are node-local and must not be committed. With `scripts/train_phase1_smoke.sbatch`, the
+default `output_dir` comes from `igc/shared/shared_main.py` and resolves to
 `experiments/<model_batch_optimizer_scheduler_lr>/<module>`. With `scripts/train_igc.sbatch`, the
 launcher sets `--output_dir experiments/${IGC_RUN}`, so stages land under
 `experiments/${IGC_RUN}/<module>`.
