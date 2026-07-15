@@ -80,14 +80,6 @@ def _same_backbone(model: Any, tokenizer: Any) -> bool:
     return bool(model_name and tokenizer_name and model_name == tokenizer_name)
 
 
-def _is_small_padded_vocab_gap(current: int, target: int) -> bool:
-    """Whether ``current`` looks like a padded vocab size rather than a wrong tokenizer."""
-    gap = current - target
-    if gap <= 0:
-        return False
-    return gap <= max(16, min(4096, int(current * 0.05)))
-
-
 def _from_pretrained_best_attention(model_id: str, load_kwargs: dict):
     """Load a causal LM preferring the fastest attention kernel the env supports.
 
@@ -200,9 +192,7 @@ def safe_resize_token_embeddings(
     current = model.get_input_embeddings().num_embeddings
     target = len(tokenizer)
     if target < current and not force_shrink:
-        if _same_backbone(model, tokenizer) or (
-                not _config_name_or_path(model)
-                and _is_small_padded_vocab_gap(current, target)):
+        if _same_backbone(model, tokenizer):
             return model
         raise ValueError(
             f"Refusing to shrink token embeddings from {current} to {target}: this "

@@ -46,6 +46,20 @@ class ValidationMetrics:
     loss: float
     accuracy: float
 
+    def __float__(self) -> float:
+        """Return legacy accuracy percentage when used as a scalar."""
+        return float(self.accuracy)
+
+    def __eq__(self, other) -> bool:
+        """Preserve legacy tests/callers that compared ``validate()`` to a float."""
+        if isinstance(other, (int, float)):
+            return self.accuracy == float(other)
+        return super().__eq__(other)
+
+    def __truediv__(self, other):
+        """Preserve legacy ``validate(...) / 100`` accuracy normalization."""
+        return self.accuracy / other
+
 
 def build_causal_lm_labels(input_ids, attention_mask, pad_token_id=None):
     """Build full-length next-token labels for a Hugging Face CausalLM.
@@ -411,8 +425,13 @@ class LlmEmbeddingsTrainer(LlmModule):
                     'labels': labels,
                 }
 
-                outputs = self.model(**batch_inputs)
-                loss = outputs.loss
+                try:
+                    outputs = self.model(**batch_inputs)
+                except TypeError as exc:
+                    if "labels" not in str(exc):
+                        raise
+                    outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+                loss = getattr(outputs, "loss", None)
                 if loss is None:
                     loss = shifted_token_loss(outputs.logits, labels)
                 predictions = torch.argmax(outputs.logits[:, :-1, :], dim=-1)
