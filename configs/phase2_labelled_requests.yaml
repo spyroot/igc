@@ -1,0 +1,88 @@
+version: phase2_labelled_requests.v1
+dataset_name: phase2_labelled_requests
+
+sample_widths:
+  - 1
+  - 2
+  - 3
+
+wandb:
+  namespace: phase2_labelled_requests
+  project: igc
+  run_group: phase2_labelled_requests_offline_plumbing
+
+model_x:
+  id: phase1_redfish_model_x
+  artifact_sha: fixture-model-x-sha256
+  artifact_source: approved_model_store_placeholder
+
+judge:
+  route:
+    name: private_pro_judge
+    transport: configured_private_runtime
+    endpoint_env: PHASE2_PRO_JUDGE_ENDPOINT
+  model: private_pro
+  profile: max_reasoning
+
+generation:
+  draft_human_request:
+    temperature: 0.2
+    top_p: 0.9
+    max_tokens: 256
+  pro_judge_set_match:
+    temperature: 0.0
+    top_p: 1.0
+    max_tokens: 512
+
+acceptance_thresholds:
+  pro_accept_rate_min: 0.95
+  rest_api_set_match_rate_min: 0.98
+  empty_set_match_rate_min: 1.0
+  nonsense_rate_max: 0.02
+  invalid_json_rate_max: 0.01
+
+prompts:
+  draft_human_request:
+    version: phase2_labelled_requests.prompt.draft.v1
+    template: |
+      You generate one natural operator request for the dataset {dataset_name}.
+      The request must ask for all and only the sampled REST API records.
+      Do not include endpoint URLs in the request text.
+      Do not invent actions, arguments, hosts, credentials, or ordering language.
+      If there are multiple records, use a natural compound request.
+
+      Sample width: {sample_width}
+      REST API records:
+      {records_json}
+
+      Return JSON only with this shape:
+      {{
+        "text": "natural operator request"
+      }}
+  pro_judge_set_match:
+    version: phase2_labelled_requests.prompt.judge.v1
+    template: |
+      You judge whether drafted operator text maps back to the same unordered
+      REST API set for the dataset {dataset_name}. Empty set equals empty set.
+      Order is not the primary objective unless the text explicitly carries
+      ordering language such as "then", "before", "after", or numbered steps.
+
+      Draft text:
+      {draft_text}
+
+      Expected REST API set:
+      {rest_api_list_json}
+
+      Allowed methods by REST API:
+      {allowed_methods_json}
+
+      REST API records:
+      {records_json}
+
+      Return JSON only with this shape:
+      {{
+        "accepted": true,
+        "rest_api_list": ["/redfish/v1/example"],
+        "nonsense": false,
+        "reason": "short evidence-backed reason"
+      }}
