@@ -722,6 +722,14 @@ def test_rest_api_list_parser_rejects_non_string_items() -> None:
         })
 
 
+def test_rest_api_list_parser_rejects_non_list_target() -> None:
+    """Phase 2 y_pred parsing rejects scalar REST API labels."""
+    with pytest.raises(ValueError, match="rest_api_list must be a list"):
+        parse_rest_api_list_y_pred({
+            "y_pred": {"rest_api_list": "/redfish/v1/Systems"},
+        })
+
+
 def test_rest_api_list_parser_rejects_non_object_top_level_json() -> None:
     """Phase 2 y_pred parsing rejects JSON that is not an object."""
     for y_pred in ('["/redfish/v1/Systems"]', '"not an object"'):
@@ -787,6 +795,27 @@ def test_ordered_calls_parser_rejects_non_string_contract_fields() -> None:
         })
 
 
+def test_ordered_calls_parser_rejects_non_list_calls_and_items() -> None:
+    """Phase 3 y_pred parsing rejects malformed calls containers and items."""
+    with pytest.raises(ValueError, match="calls must be a list"):
+        parse_ordered_calls_y_pred({"calls": "not a list"})
+    with pytest.raises(ValueError, match="calls item must be an object"):
+        parse_ordered_calls_y_pred({"calls": ["not an object"]})
+
+
+def test_ordered_calls_parser_rejects_non_list_allowed_methods() -> None:
+    """Phase 3 y_pred parsing rejects scalar allowed_methods values."""
+    with pytest.raises(ValueError, match="allowed_methods must be a list"):
+        parse_ordered_calls_y_pred({
+            "calls": [{
+                "rest_api": "/redfish/v1/Systems",
+                "allowed_methods": "GET",
+                "method": "GET",
+                "arguments": {},
+            }],
+        })
+
+
 def test_ordered_calls_parser_rejects_non_object_top_level_json() -> None:
     """Phase 3 y_pred parsing rejects JSON that is not an object."""
     for y_pred in ("[]", "42"):
@@ -839,12 +868,41 @@ def test_ordered_calls_parser_rejects_readonly_arguments() -> None:
 
 def test_wandb_metric_keys_are_stage_scoped_and_not_m3_names() -> None:
     """Phase 2/3 contract constants reuse the shared W&B metric registry."""
+    expected_phase2 = (
+        "phase2_goal_extract/train/loss",
+        "phase2_goal_extract/train/perplexity",
+        "phase2_goal_extract/train/optimizer_step",
+        "phase2_goal_extract/eval/ordered_exact_match_rate",
+        "phase2_goal_extract/eval/set_match_rate",
+        "phase2_goal_extract/eval/precision",
+        "phase2_goal_extract/eval/recall",
+        "phase2_goal_extract/eval/f1",
+        "phase2_goal_extract/eval/missing_allowed_methods_rate",
+        "phase2_goal_extract/order/kendall_tau",
+        "phase2_goal_extract/order/edit_distance",
+    )
+    expected_phase3 = (
+        "phase3_argument_extract/train/loss",
+        "phase3_argument_extract/train/perplexity",
+        "phase3_argument_extract/train/optimizer_step",
+        "phase3_argument_extract/eval/call_ordered_exact_match_rate",
+        "phase3_argument_extract/eval/method_exact_match_rate",
+        "phase3_argument_extract/eval/arguments_exact_match_rate",
+        "phase3_argument_extract/eval/readonly_empty_arguments_rate",
+        "phase3_argument_extract/order/kendall_tau",
+        "phase3_argument_extract/order/edit_distance",
+    )
+
     assert PHASE2_GOAL_EXTRACT_METRIC_KEYS == PHASE2_WANDB_METRIC_KEYS
     assert PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS == PHASE3_WANDB_METRIC_KEYS
+    assert PHASE2_GOAL_EXTRACT_METRIC_KEYS == expected_phase2
+    assert PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS == expected_phase3
     assert (
         PHASE2_GOAL_EXTRACT_METRIC_KEYS + PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS
         == PHASE23_WANDB_METRIC_KEYS
     )
+    assert len(PHASE2_GOAL_EXTRACT_METRIC_KEYS) == len(set(PHASE2_GOAL_EXTRACT_METRIC_KEYS))
+    assert len(PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS) == len(set(PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS))
     assert (
         "phase2_goal_extract/eval/ordered_exact_match_rate"
         in PHASE2_GOAL_EXTRACT_METRIC_KEYS
@@ -877,6 +935,10 @@ def test_training_docs_pin_phase23_metric_constants() -> None:
     assert "phase2_goal_extract/order/{kendall_tau,edit_distance}" in training_doc
     assert "phase3_argument_extract/eval/{call_ordered_exact_match_rate" in training_doc
     assert "phase3_argument_extract/order/{kendall_tau,edit_distance}" in training_doc
+    for metric_key in PHASE2_GOAL_EXTRACT_METRIC_KEYS:
+        assert metric_key in training_doc
+    for metric_key in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS:
+        assert metric_key in training_doc
 
 
 # Author: Mus mbayramo@stanford.edu

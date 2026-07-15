@@ -92,6 +92,30 @@ and `phase2_goal_extract/order/{kendall_tau,edit_distance}`.
 `phase3_argument_extract/eval/{call_ordered_exact_match_rate,method_exact_match_rate,`
 `arguments_exact_match_rate,readonly_empty_arguments_rate}`,
 and `phase3_argument_extract/order/{kendall_tau,edit_distance}`.
+Exact reserved keys:
+
+```text
+phase2_goal_extract/train/loss
+phase2_goal_extract/train/perplexity
+phase2_goal_extract/train/optimizer_step
+phase2_goal_extract/eval/ordered_exact_match_rate
+phase2_goal_extract/eval/set_match_rate
+phase2_goal_extract/eval/precision
+phase2_goal_extract/eval/recall
+phase2_goal_extract/eval/f1
+phase2_goal_extract/eval/missing_allowed_methods_rate
+phase2_goal_extract/order/kendall_tau
+phase2_goal_extract/order/edit_distance
+phase3_argument_extract/train/loss
+phase3_argument_extract/train/perplexity
+phase3_argument_extract/train/optimizer_step
+phase3_argument_extract/eval/call_ordered_exact_match_rate
+phase3_argument_extract/eval/method_exact_match_rate
+phase3_argument_extract/eval/arguments_exact_match_rate
+phase3_argument_extract/eval/readonly_empty_arguments_rate
+phase3_argument_extract/order/kendall_tau
+phase3_argument_extract/order/edit_distance
+```
 
 To use TensorBoard instead, choose the variable for the launcher you are using:
 `IGC_METRIC_REPORT=tensorboard bash scripts/run_profile.sh` for the profile wrapper, or
