@@ -38,12 +38,8 @@ PHASE1_WANDB_METRIC_KEYS = (
     phase_metric(PHASE1_PRETRAIN, "eval", "loss"),
     phase_metric(PHASE1_PRETRAIN, "eval", "perplexity"),
     phase_metric(PHASE1_PRETRAIN, "eval", "token_accuracy"),
-    phase_metric(PHASE1_PRETRAIN, "eval", "json_parse_rate"),
-    phase_metric(PHASE1_PRETRAIN, "eval", "json_exact_match_rate"),
-    phase_metric(PHASE1_PRETRAIN, "eval", "odata_id_match_rate"),
     phase_metric(PHASE1_PRETRAIN, "throughput", "train_tokens_per_sec"),
     phase_metric(PHASE1_PRETRAIN, "throughput", "train_samples_per_sec"),
-    phase_metric(PHASE1_PRETRAIN, "data", "padding_ratio"),
 )
 
 PHASE2_WANDB_METRIC_KEYS = (

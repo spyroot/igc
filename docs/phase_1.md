@@ -97,21 +97,31 @@ cross-entropy only on the `y_true` JSON completion.
 
 ## Phase 1 W&B Metrics
 
-Use a dedicated namespace so Phase 1 curves never mix with goal extraction or RL:
+Use the `PHASE1_WANDB_METRIC_KEYS` registry, defined in
+`igc/modules/base/metric_keys.py`, for metrics that the current trainer can emit.
+The live registry keeps Phase 1 curves separate from goal extraction or RL:
 
 - `phase1_pretrain/train/loss`
+- `phase1_pretrain/train/epoch_loss`
 - `phase1_pretrain/train/perplexity`
+- `phase1_pretrain/train/epoch_perplexity`
 - `phase1_pretrain/train/optimizer_step`
 - `phase1_pretrain/train/tokens_processed`
 - `phase1_pretrain/eval/loss`
 - `phase1_pretrain/eval/perplexity`
 - `phase1_pretrain/eval/token_accuracy`
+- `phase1_pretrain/throughput/train_tokens_per_sec`
+- `phase1_pretrain/throughput/train_samples_per_sec`
+
+The acceptance gate below still requires reconstruction, throughput, data-shape,
+calibration, and test-time evidence before a full Phase 1 run is accepted. These
+metric names are intentionally not in the live registry until the producer code
+lands:
+
 - `phase1_pretrain/eval/top_k_accuracy`
 - `phase1_pretrain/eval/json_parse_rate`
 - `phase1_pretrain/eval/json_exact_match_rate`
 - `phase1_pretrain/eval/odata_id_match_rate`
-- `phase1_pretrain/throughput/train_tokens_per_sec`
-- `phase1_pretrain/throughput/train_samples_per_sec`
 - `phase1_pretrain/throughput/eval_tokens_per_sec`
 - `phase1_pretrain/throughput/eval_samples_per_sec`
 - `phase1_pretrain/data/padding_ratio`
