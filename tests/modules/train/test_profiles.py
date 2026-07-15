@@ -1,4 +1,4 @@
-"""Offline tests for the M1 training profile registry (the run contract).
+"""Offline tests for the Phase 1 training profile registry (the run contract).
 
 Pins the six named profiles, that the 7B rsLoRA candidate resolves to the exact
 LoRA config docs/TRAINING_OPTIMIZATION_PLAN.md specifies, that full-FT profiles carry
@@ -18,42 +18,42 @@ from igc.modules.train.profiles import (
 )
 
 _REGISTERED = [
-    "m1_gpt2_smoke",
-    "m1_3b_lora",
-    "m1_7b_lora",
-    "m1_7b_rslora_r32",
-    "m1_local",
-    "m1_3b_full",
-    "m1_7b_full_zero3",
+    "phase1_gpt2_smoke",
+    "phase1_3b_lora",
+    "phase1_7b_lora",
+    "phase1_7b_rslora_r32",
+    "phase1_local",
+    "phase1_3b_full",
+    "phase1_7b_full_zero3",
 ]
 
 _PROFILE_CASES = [
-    ("m1_gpt2_smoke", "gpt2", False, 8, 1, 5e-5, "none", 256, "no", 50),
+    ("phase1_gpt2_smoke", "gpt2", False, 8, 1, 5e-5, "none", 256, "no", 50),
     (
-        "m1_3b_lora", "Qwen/Qwen2.5-3B-Instruct", True, 8, 2,
+        "phase1_3b_lora", "Qwen/Qwen2.5-3B-Instruct", True, 8, 2,
         1e-4, "none", 1024, "bf16", None,
     ),
     (
-        "m1_7b_lora", "Qwen/Qwen2.5-7B-Instruct", True, 8, 4,
+        "phase1_7b_lora", "Qwen/Qwen2.5-7B-Instruct", True, 8, 4,
         1e-4, "none", 1024, "bf16", None,
     ),
     (
-        "m1_7b_rslora_r32", "Qwen/Qwen2.5-7B-Instruct", True, 8, 4,
+        "phase1_7b_rslora_r32", "Qwen/Qwen2.5-7B-Instruct", True, 8, 4,
         1e-4, "none", 1024, "bf16", None,
     ),
     (
-        "m1_3b_full", "Qwen/Qwen2.5-3B-Instruct", False, 4, 8,
+        "phase1_3b_full", "Qwen/Qwen2.5-3B-Instruct", False, 4, 8,
         2e-5, "zero3", 1024, "bf16", None,
     ),
     (
-        "m1_7b_full_zero3", "Qwen/Qwen2.5-7B-Instruct", False, 2, 16,
+        "phase1_7b_full_zero3", "Qwen/Qwen2.5-7B-Instruct", False, 2, 16,
         1e-5, "zero3", 1024, "bf16", None,
     ),
 ]
 
 
 def test_all_registered_profiles_present():
-    """Every named profile from the plan (plus the env-driven m1_local) is present."""
+    """Every named profile from the plan (plus the env-driven phase1_local) is present."""
     names = profile_names()
     assert names == _REGISTERED
 
@@ -88,11 +88,14 @@ def test_profile_matrix_matches_plan_contract(
     assert p.seq_len == seq_len
     assert p.precision == precision
     assert p.max_steps == max_steps
+    assert p.phase == "phase1_finetune"
+    assert p.llm_stage == "latent"
+    assert p.corpus_objective == "phase1_pretrain"
 
 
 def test_7b_rslora_matches_plan_spec():
-    """m1_7b_rslora_r32 resolves to the plan's exact LoraConfig kwargs."""
-    p = resolve_profile("m1_7b_rslora_r32")
+    """phase1_7b_rslora_r32 resolves to the plan's exact LoraConfig kwargs."""
+    p = resolve_profile("phase1_7b_rslora_r32")
     assert p.model == "Qwen/Qwen2.5-7B-Instruct" and p.use_peft
     kw = apply_lora_kwargs(p)
     assert kw["r"] == 32 and kw["alpha"] == 64 and kw["dropout"] == 0.05
@@ -105,7 +108,7 @@ def test_7b_rslora_matches_plan_spec():
 
 def test_full_ft_profiles_have_no_adapter_and_shard():
     """Full fine-tune profiles disable PEFT, shard with zero3, and refuse LoRA kwargs."""
-    for n in ("m1_3b_full", "m1_7b_full_zero3"):
+    for n in ("phase1_3b_full", "phase1_7b_full_zero3"):
         p = resolve_profile(n)
         assert not p.use_peft and p.adapter is None and p.sharding == "zero3"
         with pytest.raises(ValueError):
@@ -114,25 +117,25 @@ def test_full_ft_profiles_have_no_adapter_and_shard():
 
 def test_smoke_profile_is_cheap_and_capped():
     """The GPT-2 smoke is a small, step-capped full-FT launch check."""
-    p = resolve_profile("m1_gpt2_smoke")
+    p = resolve_profile("phase1_gpt2_smoke")
     assert p.model == "gpt2" and p.max_steps == 50 and not p.use_peft
 
 
 def test_resolve_applies_overrides_and_rejects_typos():
     """Overrides apply; an unknown field raises, and an unknown profile raises."""
-    p = resolve_profile("m1_3b_lora", batch_size=16, lr=2e-4, max_steps=200)
+    p = resolve_profile("phase1_3b_lora", batch_size=16, lr=2e-4, max_steps=200)
     assert p.batch_size == 16 and p.lr == 2e-4 and p.max_steps == 200
     with pytest.raises(ValueError):
-        resolve_profile("m1_3b_lora", btch_size=16)  # typo must not silently no-op
+        resolve_profile("phase1_3b_lora", btch_size=16)  # typo must not silently no-op
     with pytest.raises(KeyError):
         resolve_profile("does_not_exist")
 
 
 def test_resolve_override_does_not_mutate_registered_profile():
     """Overrides return a copy and leave the registered profile unchanged."""
-    base = resolve_profile("m1_3b_lora")
-    changed = resolve_profile("m1_3b_lora", batch_size=16, lr=2e-4, max_steps=200)
-    again = resolve_profile("m1_3b_lora")
+    base = resolve_profile("phase1_3b_lora")
+    changed = resolve_profile("phase1_3b_lora", batch_size=16, lr=2e-4, max_steps=200)
+    again = resolve_profile("phase1_3b_lora")
     assert changed.batch_size == 16 and changed.lr == 2e-4 and changed.max_steps == 200
     assert again is base
     assert again.batch_size == 8 and again.lr == 1e-4 and again.max_steps is None
@@ -140,7 +143,7 @@ def test_resolve_override_does_not_mutate_registered_profile():
 
 def test_peft_false_override_disables_lora_kwargs_even_with_adapter():
     """A use_peft=False override makes a profile behave as a full fine-tune."""
-    p = resolve_profile("m1_3b_lora", use_peft=False)
+    p = resolve_profile("phase1_3b_lora", use_peft=False)
     assert p.adapter is not None
     assert p.describe()["adapter"]["method"] == "full_finetune"
     with pytest.raises(ValueError):
@@ -160,7 +163,7 @@ def test_adapter_init_maps():
 def test_apply_lora_kwargs_preserves_custom_adapter_targets():
     """Custom adapter init and target modules pass through as PEFT kwargs."""
     adapter = AdapterSpec(init="loftq", target_modules=("x_proj",))
-    p = resolve_profile("m1_3b_lora", adapter=adapter)
+    p = resolve_profile("phase1_3b_lora", adapter=adapter)
     kw = apply_lora_kwargs(p)
     assert kw["init_lora_weights"] == "loftq"
     assert kw["target_modules"] == ["x_proj"]
@@ -168,10 +171,12 @@ def test_apply_lora_kwargs_preserves_custom_adapter_targets():
 
 def test_describe_is_flat_log_safe_dict():
     """describe() yields a flat dict suitable for stdout + W&B config."""
-    d = resolve_profile("m1_7b_rslora_r32").describe()
-    assert d["profile"] == "m1_7b_rslora_r32" and d["use_peft"] is True
+    d = resolve_profile("phase1_7b_rslora_r32").describe()
+    assert d["profile"] == "phase1_7b_rslora_r32" and d["use_peft"] is True
+    assert d["phase"] == "phase1_finetune"
+    assert d["corpus_objective"] == "phase1_pretrain"
     assert d["adapter"]["method"] == "rslora" and d["adapter"]["r"] == 32
-    full = resolve_profile("m1_7b_full_zero3").describe()
+    full = resolve_profile("phase1_7b_full_zero3").describe()
     assert full["adapter"]["method"] == "full_finetune" and full["sharding"] == "zero3"
 
 

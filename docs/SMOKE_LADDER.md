@@ -19,19 +19,20 @@ pytest -q          # must be green; ruff check on touched files
 
 ## R1 — CPU mini-train (before any GPU time)
 
-A 20-step M1 run on the tiny dataset (`--device cpu`, `--num_workers 2`). Gates:
-loss decreases; a checkpoint is written; **the run resumes from its own checkpoint**
+A 20-step Phase 1/M1-backbone run on the tiny dataset (`--device cpu`, `--num_workers 2`).
+`M1` is the architecture-stage name for the backbone/state encoder, not a launch profile name.
+Gates: loss decreases; a checkpoint is written; **the run resumes from its own checkpoint**
 (kill it, restart, confirm the epoch advances instead of restarting at zero).
 
 ## R2 — 1 GPU, gpt2 smoke profile
 
-`m1_gpt2_smoke` via `scripts/run_profile.sh` on one GB300. Gates: fleet preflight passes;
+`phase1_gpt2_smoke` via `scripts/run_profile.sh` on one GB300. Gates: fleet preflight passes;
 the W&B run appears (single run — not one per rank); `kill -USR1` produces a resumable
 checkpoint; throughput is recorded.
 
 ## R3 — 1 GPU, modern backbone (LoRA)
 
-The `m1_local` profile (weights dir from `IGC_MODEL_DIR`) or a Qwen2.5 profile, 50 steps,
+The `phase1_local` profile (weights dir from `IGC_MODEL_DIR`) or a Qwen2.5 profile, 50 steps,
 **on a dataset rebuilt for that backbone** (`--recreate_dataset`; the tokenizer-provenance
 guard in the dataset loader refuses mismatched caches). Gates: the vocabulary assertion
 passes (no `safe_resize` refusal); loss decreases; checkpoint round-trips.

@@ -47,7 +47,7 @@ root with `--corpus_manifest`, `--corpus_root`, and `--corpus_kind`, which are p
 `igc/shared/shared_arg_parser.py`:
 
 ```bash
-IGC_PROFILE=m1_gpt2_smoke \
+IGC_PROFILE=phase1_gpt2_smoke \
 IGC_METRIC_REPORT=tensorboard \
 bash scripts/run_profile.sh \
   --corpus_manifest /path/to/redfish_ctl/corpora/manifest.v1.json \
@@ -66,7 +66,7 @@ scheduler's node-selection flag.
 ## 3. Experiment tracking (Weights & Biases)
 
 The metric backend is selected by `--metric_report` (the run wires `igc.modules` `MetricLogger`).
-The M1 launcher defaults to `wandb`:
+The Phase 1 profile launcher defaults to `wandb`:
 
 ```bash
 export WANDB_API_KEY=...                 # required for wandb
@@ -74,16 +74,17 @@ export WANDB_PROJECT=igc                 # optional; defaults to "igc"
 # WANDB_NAME is auto-derived from the model + Slurm job id
 ```
 
-Current M1 state-encoder runs log `train/loss`, `train/lr`, `train/grad_norm`, `eval/accuracy`, and
-`train/epoch_loss`. Current RL-agent runs log `epoch_mean_loss`, `epoch_cumulative_reward`, and
-`epoch_goal_reached_count`. Treat perplexity, tokens/sec, GPU memory, and success-rate curves as
-planned instrumentation unless a later change adds those exact metric keys.
+Current Phase 1 corpus runs log under the `phase1_finetune/*` namespace when
+`--corpus_objective phase1_pretrain` is active. Current RL-agent runs log `epoch_mean_loss`,
+`epoch_cumulative_reward`, and `epoch_goal_reached_count`. Treat any metric not listed in
+`igc/modules/base/metric_keys.py` as planned instrumentation unless a later change adds that exact
+producer.
 
 To use TensorBoard instead, choose the variable for the launcher you are using:
 `IGC_METRIC_REPORT=tensorboard bash scripts/run_profile.sh` for the profile wrapper, or
 `IGC_REPORT=tensorboard sbatch scripts/train_m1.sbatch` for the sbatch smoke path.
 
-## 4. Launch (first GPU loop — M1 state encoder)
+## 4. Launch (Phase 1 JSON pretraining)
 
 There are two launch routes today:
 
@@ -91,24 +92,28 @@ There are two launch routes today:
 - `scripts/run_profile.sh`, the profile-backed wrapper, is for direct named-profile execution.
 
 The profile registry, defined in `igc/modules/train/profiles.py`, is the committed source of truth
-for named M1 state-encoder runs. Inspect a profile locally before spending GPU time:
+for named Phase 1 Redfish JSON pretraining runs. In the architecture docs, `M1` still names the
+backbone/state-encoder stage; the concrete launch profiles are named `phase1_*` so their data
+objective is explicit. Inspect a profile locally before spending GPU time:
 
 ```bash
-python -m igc.modules.train.launch --profile m1_gpt2_smoke
-python -m igc.modules.train.launch --profile m1_7b_rslora_r32 --print-argv
+python -m igc.modules.train.launch --profile phase1_gpt2_smoke
+python -m igc.modules.train.launch --profile phase1_7b_rslora_r32 --print-argv
 ```
 
-The smoke argv should include `--model_type gpt2` and `--max_train_steps 50`; the rsLoRA argv should
-include `--adapter_method rslora`, `--lora_r 32`, and `--lora_alpha 64`.
+The smoke argv should include `--profile phase1_gpt2_smoke`, `--corpus_objective phase1_pretrain`,
+`--model_type gpt2`, and `--max_train_steps 50`; the rsLoRA argv should include
+`--profile phase1_7b_rslora_r32`, `--adapter_method rslora`, `--lora_r 32`, and
+`--lora_alpha 64`.
 
 The `scripts/run_profile.sh` wrapper, committed as the profile-name launcher, resolves `IGC_PROFILE`
 through `igc.modules.train.launch`, then supplies `--json_data_dir`, `--output_dir`, and
 `--metric_report` from `IGC_DATA_DIR`, `IGC_OUTPUT_DIR`, and `IGC_METRIC_REPORT`:
 
 ```bash
-IGC_PROFILE=m1_gpt2_smoke \
+IGC_PROFILE=phase1_gpt2_smoke \
 IGC_DATA_DIR=$HOME/.json_responses \
-IGC_OUTPUT_DIR=experiments/m1_gpt2_smoke \
+IGC_OUTPUT_DIR=experiments/phase1_gpt2_smoke \
 bash scripts/run_profile.sh
 ```
 
@@ -116,7 +121,7 @@ Use `IGC_SET`, read by `scripts/run_profile.sh` as profile-field overrides, for 
 changes such as a shorter smoke or batch-size check:
 
 ```bash
-IGC_PROFILE=m1_3b_lora IGC_SET="batch_size=16 lr=2e-4" bash scripts/run_profile.sh
+IGC_PROFILE=phase1_3b_lora IGC_SET="batch_size=16 lr=2e-4" bash scripts/run_profile.sh
 ```
 
 `scripts/run_profile.sh` is the profile-backed local launcher. `scripts/train_m1.sbatch`, the older
@@ -183,7 +188,7 @@ the exact launch command and metrics before calling any sharded run successful.
 trainer — use it when you need knobs that `scripts/train_m1.sbatch` does not expose directly:
 
 ```bash
-IGC_PROFILE=m1_gpt2_smoke \
+IGC_PROFILE=phase1_gpt2_smoke \
 IGC_DATA_DIR=$HOME/.json_responses \
 IGC_METRIC_REPORT=tensorboard \
 bash scripts/run_profile.sh --gradient_accumulation_steps 4 --num_workers 2

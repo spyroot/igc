@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run an M1 state-encoder experiment by PROFILE NAME.
+# Run a Phase 1 Redfish JSON pretraining experiment by PROFILE NAME.
 #
 # Public-safe: this script contains no endpoints, hosts, credentials, or private
 # paths. Data and output locations come from the environment, and the training flags
@@ -7,23 +7,29 @@
 # per docs/TRAINING_OPTIMIZATION_PLAN.md).
 #
 # Usage:
-#   IGC_PROFILE=m1_7b_rslora_r32 \
+#   IGC_PROFILE=phase1_7b_rslora_r32 \
 #   IGC_DATA_DIR=~/.json_responses \
-#   IGC_OUTPUT_DIR=experiments/m1_7b_rslora_r32 \
+#   IGC_OUTPUT_DIR=experiments/phase1_7b_rslora_r32 \
 #   bash scripts/run_profile.sh
 #
 #   # override a profile field, or pass extra igc_main flags after --:
-#   IGC_PROFILE=m1_3b_lora IGC_SET="batch_size=16 lr=2e-4" bash scripts/run_profile.sh -- --recreate_dataset
+#   IGC_PROFILE=phase1_3b_lora IGC_SET="batch_size=16 lr=2e-4" bash scripts/run_profile.sh -- --recreate_dataset
+#   IGC_PROFILE=phase1_gpt2_smoke IGC_SET="corpus_objective=legacy" bash scripts/run_profile.sh
 #
-# Profiles: m1_gpt2_smoke m1_3b_lora m1_7b_lora m1_7b_rslora_r32 m1_3b_full m1_7b_full_zero3
+# Profiles: phase1_gpt2_smoke phase1_3b_lora phase1_7b_lora
+#           phase1_7b_rslora_r32 phase1_3b_full phase1_7b_full_zero3
 set -euo pipefail
 
-PROFILE="${IGC_PROFILE:?set IGC_PROFILE (e.g. m1_7b_rslora_r32)}"
+PROFILE="${IGC_PROFILE:?set IGC_PROFILE (e.g. phase1_7b_rslora_r32)}"
 DATA_DIR="${IGC_DATA_DIR:-$HOME/.json_responses}"
 CORPUS_DIR="${IGC_CORPUS_DIR:-}"
-CORPUS_OBJECTIVE="${IGC_CORPUS_OBJECTIVE:-legacy}"
 OUT_DIR="${IGC_OUTPUT_DIR:-experiments/${PROFILE}}"
 METRIC_REPORT="${IGC_METRIC_REPORT:-wandb}"
+
+if [ -n "${IGC_CORPUS_OBJECTIVE:-}" ]; then
+    echo "IGC_CORPUS_OBJECTIVE is retired; use IGC_SET=\"corpus_objective=...\" so the resolved profile emits one objective flag." >&2
+    exit 2
+fi
 
 # Auto-load W&B credentials so the run streams to the dashboard with no manual export.
 # The env file is gitignored (creds never committed); override the path via IGC_WANDB_ENV.
@@ -43,7 +49,7 @@ SET_ARGS=()
 for kv in ${IGC_SET:-}; do SET_ARGS+=(--set "$kv"); done
 CORPUS_ARGS=()
 if [ -n "$CORPUS_DIR" ]; then
-    CORPUS_ARGS+=(--corpus_dir "$CORPUS_DIR" --corpus_objective "$CORPUS_OBJECTIVE")
+    CORPUS_ARGS+=(--corpus_dir "$CORPUS_DIR")
 fi
 
 echo "== resolved profile: ${PROFILE} =="

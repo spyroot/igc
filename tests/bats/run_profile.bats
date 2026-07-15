@@ -17,7 +17,7 @@ if [[ "${1:-}" == "-m" && "${2:-}" == "igc.modules.train.launch" ]]; then
     printf '%s\n' "$*" >>"${RUN_PROFILE_CALLS_FILE}"
     for arg in "$@"; do
         if [[ "$arg" == "--print-argv" ]]; then
-            echo "--train llm --batch_size 2"
+            echo "--train llm --corpus_objective phase1_pretrain --batch_size 2"
             exit 0
         fi
     done
@@ -46,10 +46,9 @@ EOF
     install_python_stub
 
     run env \
-        IGC_PROFILE=m1_gpt2_smoke \
+        IGC_PROFILE=phase1_gpt2_smoke \
         IGC_DATA_DIR="${BATS_TEST_TMPDIR}/data" \
         IGC_CORPUS_DIR="${BATS_TEST_TMPDIR}/corpus" \
-        IGC_CORPUS_OBJECTIVE=phase1_pretrain \
         IGC_OUTPUT_DIR="${BATS_TEST_TMPDIR}/out" \
         IGC_METRIC_REPORT=tensorboard \
         IGC_SET="batch_size=2 lr=1e-4" \
@@ -61,16 +60,26 @@ EOF
     [ -d "${BATS_TEST_TMPDIR}/out" ]
 
     calls="$(cat "${BATS_TEST_TMPDIR}/calls.txt")"
-    [[ "$calls" == *"--profile m1_gpt2_smoke"* ]]
+    [[ "$calls" == *"--profile phase1_gpt2_smoke"* ]]
     [[ "$calls" == *"--set batch_size=2"* ]]
     [[ "$calls" == *"--set lr=1e-4"* ]]
     [[ "$calls" == *"--print-argv"* ]]
 
     final_args="$(cat "${BATS_TEST_TMPDIR}/final-args.txt")"
-    [[ "$final_args" == *"igc_main.py --train llm --batch_size 2"* ]]
+    [[ "$final_args" == *"igc_main.py --train llm --corpus_objective phase1_pretrain --batch_size 2"* ]]
     [[ "$final_args" == *"--json_data_dir ${BATS_TEST_TMPDIR}/data"* ]]
     [[ "$final_args" == *"--corpus_dir ${BATS_TEST_TMPDIR}/corpus"* ]]
     [[ "$final_args" == *"--corpus_objective phase1_pretrain"* ]]
     [[ "$final_args" == *"--output_dir ${BATS_TEST_TMPDIR}/out"* ]]
     [[ "$final_args" == *"--metric_report tensorboard -- --recreate_dataset"* ]]
+}
+
+@test "run_profile rejects retired IGC_CORPUS_OBJECTIVE env override" {
+    run env \
+        IGC_PROFILE=phase1_gpt2_smoke \
+        IGC_CORPUS_OBJECTIVE=legacy \
+        bash "${REPO_ROOT}/scripts/run_profile.sh"
+
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"IGC_CORPUS_OBJECTIVE is retired"* ]]
 }

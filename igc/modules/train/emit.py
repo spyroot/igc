@@ -29,7 +29,7 @@ _SETTINGS_KEYS = (
     "per_device_train_batch_size", "gradient_accumulation_steps", "num_train_epochs",
     "llm_learning_rate", "llm_scheduler", "llm_optimizer", "mixed_precision",
     "sharding", "use_accelerator", "use_peft", "lora_r", "lora_alpha", "lora_dropout",
-    "masking_type", "num_workers", "seed",
+    "masking_type", "num_workers", "seed", "profile", "corpus_objective",
 )
 
 # any spec key containing one of these is never emitted, whatever its value.
@@ -79,9 +79,16 @@ def build_run_bundle(spec_vars: Dict, *,
     model = str(spec_vars.get("model_type", ""))
     use_peft = bool(spec_vars.get("use_peft", False))
     started_tag = started_at.replace(":", "").replace("-", "") or "run"
+    profile = str(spec_vars.get("profile", "") or "")
+    is_phase1 = (
+        spec_vars.get("phase") == "phase1_finetune"
+        or spec_vars.get("corpus_objective") == "phase1_pretrain"
+        or profile.startswith("phase1_")
+    )
+    family = "phase1" if is_phase1 else "m1"
     manifest = RunManifest(
-        run_id=f"m1-{os.path.basename(model) or 'model'}-{started_tag}",
-        profile=str(spec_vars.get("profile", "") or ""),
+        run_id=f"{family}-{os.path.basename(model) or 'model'}-{started_tag}",
+        profile=profile,
         model=model,
         tokenizer=model,
         adapter_method=str(spec_vars.get("adapter_method", "lora")) if use_peft else "none",

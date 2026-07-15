@@ -1,9 +1,9 @@
 # Training Optimization Plan
 
 This plan keeps the large-model training path from inheriting old GPT-2 and
-small-GPU assumptions. It is a code-improvement roadmap for M1 state-encoder
-training, GPU efficiency, Redfish data variation, simulator-backed data
-generation, and the evaluation gates needed before claiming that a 3B or 7B
+small-GPU assumptions. It is a code-improvement roadmap for Phase 1 Redfish JSON
+pretraining of the M1 backbone/state encoder, GPU efficiency, Redfish data variation,
+simulator-backed data generation, and the evaluation gates needed before claiming that a 3B or 7B
 backbone is better.
 
 The plan is public-safe by design. Operational secrets, live endpoints, raw
@@ -12,10 +12,14 @@ repository.
 
 ## Purpose
 
-The M1 state encoder is the first large-model training loop in `igc`. Its job is
-to learn a compact representation of Redfish resource state, action availability,
-and transition-relevant fields. That goal needs a modern large-model path, not
-defaults carried over from a GPT-2 smoke test.
+The M1 state encoder is the first large-model representation stage in `igc`. Phase 1 is the
+concrete Redfish JSON pretraining/fine-tune that starts that stage: it teaches `model_x` to
+reconstruct Redfish resource JSON from `x = {rest_api, allowed_methods, json}` before Phase 2/3
+specialize goal and argument extraction. That goal needs a modern large-model path, not defaults
+carried over from a GPT-2 smoke test.
+
+Profile names use the `phase1_*` prefix because they are launchable Phase 1 training profiles.
+`M1` and `M2` remain architecture-stage names in `docs/ARCHITECTURE.md`.
 
 The intended progression is:
 
@@ -48,11 +52,11 @@ become explicit config or launcher presets before routine 3B/7B training.
 
 | Profile | Purpose | Backbone | Adaptation | First-use gate |
 | --- | --- | --- | --- | --- |
-| `m1_gpt2_smoke` | Validate launch, labels, logging, checkpoint write, and data loading cheaply. | GPT-2 class | Full fine-tune is acceptable. | One short run with finite loss and checkpoint output. |
-| `m1_3b_lora` | Fast serious baseline for Redfish representation. | 3B dense decoder | LoRA, bf16 | Held-out loss and structural metrics better than smoke baseline. |
-| `m1_7b_lora` | Default target for the state encoder. | 7B/8B dense decoder | LoRA, bf16 | Beats 3B on held-out structure/action/state metrics within a reasonable cost budget. |
-| `m1_3b_full` | Controlled full fine-tune comparison. | 3B dense decoder | Full fine-tune, bf16 | Runs only after LoRA metrics and data splits are stable. |
-| `m1_7b_full_zero3` | Higher-ceiling experiment when LoRA underfits. | 7B/8B dense decoder | Full fine-tune with ZeRO-3/FSDP | Requires measured LoRA underfit and a successful smaller full-FT control. |
+| `phase1_gpt2_smoke` | Validate launch, labels, logging, checkpoint write, and data loading cheaply. | GPT-2 class | Full fine-tune is acceptable. | One short run with finite loss and checkpoint output. |
+| `phase1_3b_lora` | Fast serious baseline for Redfish JSON reconstruction. | 3B dense decoder | LoRA, bf16 | Held-out loss and structural metrics better than smoke baseline. |
+| `phase1_7b_lora` | Default large-backbone Phase 1 target. | 7B/8B dense decoder | LoRA, bf16 | Beats 3B on held-out structure/action/state metrics within a reasonable cost budget. |
+| `phase1_3b_full` | Controlled full fine-tune comparison. | 3B dense decoder | Full fine-tune, bf16 | Runs only after LoRA metrics and data splits are stable. |
+| `phase1_7b_full_zero3` | Higher-ceiling experiment when LoRA underfits. | 7B/8B dense decoder | Full fine-tune with ZeRO-3/FSDP | Requires measured LoRA underfit and a successful smaller full-FT control. |
 
 Planned profile knobs:
 
@@ -122,7 +126,7 @@ lora_config = LoraConfig(
 )
 ```
 
-Use this as the `m1_7b_rslora_r32` candidate after the plain LoRA control is
+Use this as the `phase1_7b_rslora_r32` candidate after the plain LoRA control is
 green. For a PiSSA run, keep the same rank/targets and change only the
 initializer, for example `init_lora_weights="pissa_niter_16"` if the installed
 PEFT version supports that initializer.

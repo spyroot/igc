@@ -172,37 +172,37 @@ Cross-entropy is computed on the target JSON tokens. Evaluation parses `y_pred`,
 
 ## Phase 2 W&B Metrics
 
-- `phase2_goal_extract/train/loss`
-- `phase2_goal_extract/train/perplexity`
-- `phase2_goal_extract/train/optimizer_step`
-- `phase2_goal_extract/eval/loss`
-- `phase2_goal_extract/eval/perplexity`
-- `phase2_goal_extract/eval/token_accuracy`
-- `phase2_goal_extract/eval/ordered_exact_match_rate`
-- `phase2_goal_extract/eval/set_match_rate`
-- `phase2_goal_extract/eval/precision`
-- `phase2_goal_extract/eval/recall`
-- `phase2_goal_extract/eval/f1`
-- `phase2_goal_extract/eval/top_k_api_accuracy`
-- `phase2_goal_extract/eval/invalid_api_rate`
-- `phase2_goal_extract/eval/missing_required_api_rate`
-- `phase2_goal_extract/eval/missing_allowed_methods_rate`
-- `phase2_goal_extract/eval/order_violation_rate`
-- `phase2_goal_extract/order/kendall_tau`
-- `phase2_goal_extract/order/edit_distance`
-- `phase2_goal_extract/throughput/train_tokens_per_sec`
-- `phase2_goal_extract/throughput/train_samples_per_sec`
-- `phase2_goal_extract/throughput/eval_tokens_per_sec`
-- `phase2_goal_extract/throughput/eval_samples_per_sec`
-- `phase2_goal_extract/data/avg_num_apis`
-- `phase2_goal_extract/data/max_num_apis`
-- `phase2_goal_extract/data/mean_sequence_length`
-- `phase2_goal_extract/data/padding_ratio`
-- `phase2_goal_extract/calibration/log_prob_per_sequence`
-- `phase2_goal_extract/calibration/ece`
-- `phase2_goal_extract/test/latency_sec_p50`
-- `phase2_goal_extract/test/latency_sec_p95`
-- `phase2_goal_extract/test/memory_peak_mb`
+- `phase2_goal_extraction/train/loss`
+- `phase2_goal_extraction/train/perplexity`
+- `phase2_goal_extraction/train/optimizer_step`
+- `phase2_goal_extraction/eval/loss`
+- `phase2_goal_extraction/eval/perplexity`
+- `phase2_goal_extraction/eval/token_accuracy`
+- `phase2_goal_extraction/eval/ordered_exact_match_rate`
+- `phase2_goal_extraction/eval/set_match_rate`
+- `phase2_goal_extraction/eval/precision`
+- `phase2_goal_extraction/eval/recall`
+- `phase2_goal_extraction/eval/f1`
+- `phase2_goal_extraction/eval/top_k_api_accuracy`
+- `phase2_goal_extraction/eval/invalid_api_rate`
+- `phase2_goal_extraction/eval/missing_required_api_rate`
+- `phase2_goal_extraction/eval/missing_allowed_methods_rate`
+- `phase2_goal_extraction/eval/order_violation_rate`
+- `phase2_goal_extraction/order/kendall_tau`
+- `phase2_goal_extraction/order/edit_distance`
+- `phase2_goal_extraction/throughput/train_tokens_per_sec`
+- `phase2_goal_extraction/throughput/train_samples_per_sec`
+- `phase2_goal_extraction/throughput/eval_tokens_per_sec`
+- `phase2_goal_extraction/throughput/eval_samples_per_sec`
+- `phase2_goal_extraction/data/avg_num_apis`
+- `phase2_goal_extraction/data/max_num_apis`
+- `phase2_goal_extraction/data/mean_sequence_length`
+- `phase2_goal_extraction/data/padding_ratio`
+- `phase2_goal_extraction/calibration/log_prob_per_sequence`
+- `phase2_goal_extraction/calibration/ece`
+- `phase2_goal_extraction/test/latency_sec_p50`
+- `phase2_goal_extraction/test/latency_sec_p95`
+- `phase2_goal_extraction/test/memory_peak_mb`
 
 When Phase 2 moves beyond mock plumbing, its acceptance gate must mirror Phase 1: approved full
 corpora, readable W&B plots, checkpoint/report storage, and reviewed Git LFS artifact metadata.

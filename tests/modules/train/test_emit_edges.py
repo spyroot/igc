@@ -19,7 +19,8 @@ def _spec(**overrides):
     """Minimal parsed-spec dict with realistic run-report keys."""
     spec = {
         "model_type": "Qwen/Qwen2.5-7B-Instruct",
-        "profile": "m1_7b_rslora_r32",
+        "profile": "phase1_7b_rslora_r32",
+        "corpus_objective": "phase1_pretrain",
         "use_peft": True,
         "adapter_method": "rslora",
         "lora_r": "32",
@@ -58,7 +59,19 @@ def test_run_id_is_stable_for_model_basename_and_timestamp():
         started_at="2026-07-10T01:02:03",
     )
 
-    assert bundle.manifest.run_id == "m1-Qwen2.5-7B-Instruct-20260710T010203"
+    assert bundle.manifest.run_id == "phase1-Qwen2.5-7B-Instruct-20260710T010203"
+
+
+def test_phase1_profile_keeps_phase1_run_family_with_legacy_objective():
+    """A Phase 1 profile name, not only the corpus objective, selects the phase1 run family."""
+    bundle = build_run_bundle(
+        _spec(model_type="/models/Qwen2.5-7B-Instruct", corpus_objective="legacy"),
+        training={},
+        argv=[],
+        started_at="2026-07-10T01:02:03",
+    )
+
+    assert bundle.manifest.run_id == "phase1-Qwen2.5-7B-Instruct-20260710T010203"
 
 
 def test_report_copies_training_and_metrics_inputs():
@@ -86,6 +99,8 @@ def test_settings_include_only_allowlisted_run_knobs():
         "gradient_accumulation_steps": "4",
         "llm_scheduler": "OneCycleLR",
         "seed": "7",
+        "profile": "phase1_7b_rslora_r32",
+        "corpus_objective": "phase1_pretrain",
         "use_peft": "True",
         "lora_r": "32",
     }
@@ -96,7 +111,7 @@ def test_emit_creates_nested_output_directory(tmp_path: Path):
     bundle = build_run_bundle(
         _spec(use_peft=False, lora_r=64),
         training={"epochs_done": 1},
-        argv=["igc_main.py", "--profile", "m1_gpt2_smoke"],
+        argv=["igc_main.py", "--profile", "phase1_gpt2_smoke"],
         checkpoint_path="experiments/smoke",
     )
     report_path = emit_run_report(bundle, str(tmp_path / "nested" / "run"))

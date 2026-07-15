@@ -31,11 +31,11 @@ from torch.utils.data import Dataset
 
 from igc.ds.sources.corpus_io import iter_examples, read_manifest
 from igc.ds.sources.mixer import DataManifest
-from igc.modules.base.metric_keys import PHASE1_PRETRAIN
+from igc.modules.base.metric_keys import PHASE1_FINETUNE, PHASE1_OBJECTIVE_PRETRAIN
 
 
 LEGACY_OBJECTIVE = "legacy"
-PHASE1_PRETRAIN_OBJECTIVE = PHASE1_PRETRAIN
+PHASE1_PRETRAIN_OBJECTIVE = PHASE1_OBJECTIVE_PRETRAIN
 CORPUS_OBJECTIVES = (LEGACY_OBJECTIVE, PHASE1_PRETRAIN_OBJECTIVE)
 
 
@@ -64,7 +64,7 @@ class CorpusJSONLDataset(Dataset):
         if objective not in CORPUS_OBJECTIVES:
             raise ValueError(
                 f"unknown corpus objective {objective!r}; choose from {CORPUS_OBJECTIVES}")
-        self.metric_namespace = PHASE1_PRETRAIN if objective == PHASE1_PRETRAIN_OBJECTIVE else ""
+        self.metric_namespace = PHASE1_FINETUNE if objective == PHASE1_PRETRAIN_OBJECTIVE else ""
 
         examples_path = os.path.join(self._corpus_dir, "examples.jsonl")
         if not os.path.isfile(examples_path):

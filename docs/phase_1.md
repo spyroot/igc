@@ -1,8 +1,10 @@
 # Phase 1: Redfish JSON Pretraining
 
-Phase 1 trains `model_x` on Redfish JSON reconstruction. This phase does not train goal extraction,
-argument extraction, ordering, rewards, or RL behavior. It only teaches the chosen LLM the shape of
-Redfish resources, URI grammar, method context, and JSON completion.
+Phase 1 trains `model_x` on Redfish JSON reconstruction. In the architecture docs this is the
+pretraining/fine-tuning step that produces the M1 backbone checkpoint; M2, the state
+pooler/autoencoder, is a later consumer of that checkpoint. This phase does not train goal
+extraction, argument extraction, ordering, rewards, or RL behavior. It only teaches the chosen LLM
+the shape of Redfish resources, URI grammar, method context, and JSON completion.
 
 Names are fixed as follows:
 
@@ -101,37 +103,37 @@ Use the `PHASE1_WANDB_METRIC_KEYS` registry, defined in
 `igc/modules/base/metric_keys.py`, for metrics that the current trainer can emit.
 The live registry keeps Phase 1 curves separate from goal extraction or RL:
 
-- `phase1_pretrain/train/loss`
-- `phase1_pretrain/train/epoch_loss`
-- `phase1_pretrain/train/perplexity`
-- `phase1_pretrain/train/epoch_perplexity`
-- `phase1_pretrain/train/optimizer_step`
-- `phase1_pretrain/train/tokens_processed`
-- `phase1_pretrain/eval/loss`
-- `phase1_pretrain/eval/perplexity`
-- `phase1_pretrain/eval/token_accuracy`
-- `phase1_pretrain/throughput/train_tokens_per_sec`
-- `phase1_pretrain/throughput/train_samples_per_sec`
+- `phase1_finetune/train/loss`
+- `phase1_finetune/train/epoch_loss`
+- `phase1_finetune/train/perplexity`
+- `phase1_finetune/train/epoch_perplexity`
+- `phase1_finetune/train/optimizer_step`
+- `phase1_finetune/train/tokens_processed`
+- `phase1_finetune/eval/loss`
+- `phase1_finetune/eval/perplexity`
+- `phase1_finetune/eval/token_accuracy`
+- `phase1_finetune/throughput/train_tokens_per_sec`
+- `phase1_finetune/throughput/train_samples_per_sec`
 
 The acceptance gate below still requires reconstruction, throughput, data-shape,
 calibration, and test-time evidence before a full Phase 1 run is accepted. These
 metric names are intentionally not in the live registry until the producer code
 lands:
 
-- `phase1_pretrain/eval/top_k_accuracy`
-- `phase1_pretrain/eval/json_parse_rate`
-- `phase1_pretrain/eval/json_exact_match_rate`
-- `phase1_pretrain/eval/odata_id_match_rate`
-- `phase1_pretrain/throughput/eval_tokens_per_sec`
-- `phase1_pretrain/throughput/eval_samples_per_sec`
-- `phase1_pretrain/data/padding_ratio`
-- `phase1_pretrain/data/mean_sequence_length`
-- `phase1_pretrain/data/max_sequence_length`
-- `phase1_pretrain/calibration/log_prob_per_token`
-- `phase1_pretrain/calibration/ece`
-- `phase1_pretrain/test/latency_sec_p50`
-- `phase1_pretrain/test/latency_sec_p95`
-- `phase1_pretrain/test/memory_peak_mb`
+- `phase1_finetune/eval/top_k_accuracy`
+- `phase1_finetune/eval/json_parse_rate`
+- `phase1_finetune/eval/json_exact_match_rate`
+- `phase1_finetune/eval/odata_id_match_rate`
+- `phase1_finetune/throughput/eval_tokens_per_sec`
+- `phase1_finetune/throughput/eval_samples_per_sec`
+- `phase1_finetune/data/padding_ratio`
+- `phase1_finetune/data/mean_sequence_length`
+- `phase1_finetune/data/max_sequence_length`
+- `phase1_finetune/calibration/log_prob_per_token`
+- `phase1_finetune/calibration/ece`
+- `phase1_finetune/test/latency_sec_p50`
+- `phase1_finetune/test/latency_sec_p95`
+- `phase1_finetune/test/memory_peak_mb`
 
 ## Acceptance Gate
 

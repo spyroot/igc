@@ -133,37 +133,37 @@ body is not proof that the resource accepts that value in a PATCH or POST body.
 
 ## Phase 3 W&B Metrics
 
-- `phase3_argument_extract/train/loss`
-- `phase3_argument_extract/train/perplexity`
-- `phase3_argument_extract/train/optimizer_step`
-- `phase3_argument_extract/eval/loss`
-- `phase3_argument_extract/eval/perplexity`
-- `phase3_argument_extract/eval/token_accuracy`
-- `phase3_argument_extract/eval/call_ordered_exact_match_rate`
-- `phase3_argument_extract/eval/call_order_correct_rate`
-- `phase3_argument_extract/eval/step_exact_match_rate`
-- `phase3_argument_extract/eval/rest_api_exact_match_rate`
-- `phase3_argument_extract/eval/allowed_methods_exact_match_rate`
-- `phase3_argument_extract/eval/method_exact_match_rate`
-- `phase3_argument_extract/eval/arguments_json_parse_rate`
-- `phase3_argument_extract/eval/arguments_exact_match_rate`
-- `phase3_argument_extract/eval/invalid_method_rate`
-- `phase3_argument_extract/eval/readonly_empty_arguments_rate`
-- `phase3_argument_extract/order/kendall_tau`
-- `phase3_argument_extract/order/edit_distance`
-- `phase3_argument_extract/throughput/train_tokens_per_sec`
-- `phase3_argument_extract/throughput/train_samples_per_sec`
-- `phase3_argument_extract/throughput/eval_tokens_per_sec`
-- `phase3_argument_extract/throughput/eval_samples_per_sec`
-- `phase3_argument_extract/data/avg_num_calls`
-- `phase3_argument_extract/data/avg_arguments_length`
-- `phase3_argument_extract/data/mean_sequence_length`
-- `phase3_argument_extract/data/padding_ratio`
-- `phase3_argument_extract/calibration/log_prob_per_call`
-- `phase3_argument_extract/calibration/ece_method`
-- `phase3_argument_extract/test/latency_sec_p50`
-- `phase3_argument_extract/test/latency_sec_p95`
-- `phase3_argument_extract/test/memory_peak_mb`
+- `phase3_argument_extraction/train/loss`
+- `phase3_argument_extraction/train/perplexity`
+- `phase3_argument_extraction/train/optimizer_step`
+- `phase3_argument_extraction/eval/loss`
+- `phase3_argument_extraction/eval/perplexity`
+- `phase3_argument_extraction/eval/token_accuracy`
+- `phase3_argument_extraction/eval/call_ordered_exact_match_rate`
+- `phase3_argument_extraction/eval/call_order_correct_rate`
+- `phase3_argument_extraction/eval/step_exact_match_rate`
+- `phase3_argument_extraction/eval/rest_api_exact_match_rate`
+- `phase3_argument_extraction/eval/allowed_methods_exact_match_rate`
+- `phase3_argument_extraction/eval/method_exact_match_rate`
+- `phase3_argument_extraction/eval/arguments_json_parse_rate`
+- `phase3_argument_extraction/eval/arguments_exact_match_rate`
+- `phase3_argument_extraction/eval/invalid_method_rate`
+- `phase3_argument_extraction/eval/readonly_empty_arguments_rate`
+- `phase3_argument_extraction/order/kendall_tau`
+- `phase3_argument_extraction/order/edit_distance`
+- `phase3_argument_extraction/throughput/train_tokens_per_sec`
+- `phase3_argument_extraction/throughput/train_samples_per_sec`
+- `phase3_argument_extraction/throughput/eval_tokens_per_sec`
+- `phase3_argument_extraction/throughput/eval_samples_per_sec`
+- `phase3_argument_extraction/data/avg_num_calls`
+- `phase3_argument_extraction/data/avg_arguments_length`
+- `phase3_argument_extraction/data/mean_sequence_length`
+- `phase3_argument_extraction/data/padding_ratio`
+- `phase3_argument_extraction/calibration/log_prob_per_call`
+- `phase3_argument_extraction/calibration/ece_method`
+- `phase3_argument_extraction/test/latency_sec_p50`
+- `phase3_argument_extraction/test/latency_sec_p95`
+- `phase3_argument_extraction/test/memory_peak_mb`
 
 When Phase 3 moves beyond mock plumbing, its acceptance gate must mirror Phase 1: approved full
 corpora, readable W&B plots, checkpoint/report storage, and reviewed Git LFS artifact metadata.

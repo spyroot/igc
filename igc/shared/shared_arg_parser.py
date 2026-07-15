@@ -423,6 +423,14 @@ def add_trainer_group(parser):
         help="Random seed to be used with data samplers."
     )
 
+    parser.add_argument(
+        "--profile",
+        type=str, default="",
+        help="Resolved named training profile, such as phase1_7b_rslora_r32. "
+             "Used for run metadata and reports; launch behavior still comes "
+             "from the explicit CLI flags."
+    )
+
     # indicate that we train
     parser.add_argument(
         "--train",
