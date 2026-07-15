@@ -10,6 +10,7 @@ Author:Mus mbayramo@stanford.edu
 """
 import argparse
 import time
+from dataclasses import dataclass
 from typing import Optional, Tuple, Union, List
 
 import numpy as np
@@ -32,6 +33,32 @@ from igc.ds.redfish_masked_dataset import (
     MaskedJSONDataset,
     MaskingType
 )
+
+
+@dataclass(frozen=True)
+class ValidationMetrics:
+    """Aggregated validation metrics shared by every rank.
+
+    :param loss: Token-weighted validation cross-entropy loss.
+    :param accuracy: Shifted-token accuracy as a percentage for legacy logging.
+    """
+
+    loss: float
+    accuracy: float
+
+    def __float__(self) -> float:
+        """Return legacy accuracy percentage when used as a scalar."""
+        return float(self.accuracy)
+
+    def __eq__(self, other) -> bool:
+        """Preserve legacy tests/callers that compared ``validate()`` to a float."""
+        if isinstance(other, (int, float)):
+            return self.accuracy == float(other)
+        return super().__eq__(other)
+
+    def __truediv__(self, other):
+        """Preserve legacy ``validate(...) / 100`` accuracy normalization."""
+        return self.accuracy / other
 
 
 def build_causal_lm_labels(input_ids, attention_mask, pad_token_id=None):
@@ -138,6 +165,74 @@ def reached_max_steps(global_step: int, max_steps: Optional[int]) -> bool:
     return max_steps is not None and max_steps > 0 and global_step >= max_steps
 
 
+def validation_accuracy(value: Union[ValidationMetrics, float]) -> float:
+    """Return percent token accuracy from either old or structured validation output."""
+    if isinstance(value, ValidationMetrics):
+        return value.accuracy
+    return float(value)
+
+
+def validation_loss(value: Union[ValidationMetrics, float]) -> float:
+    """Return validation loss, or ``inf`` when only legacy accuracy is available."""
+    if isinstance(value, ValidationMetrics):
+        return value.loss
+    return float("inf")
+
+
+def resolve_early_stopping(spec) -> Tuple[int, float]:
+    """Resolve the early-stopping knobs from the run spec.
+
+    Missing/``None`` values fall back to the Phase 1 defaults; an explicit ``0`` is
+    honored — patience ``0`` (or negative) disables early stopping entirely, and
+    min_delta ``0.0`` means any improvement resets patience.
+
+    :param spec: argparse.Namespace-like run spec.
+    :return: ``(patience, min_delta)``.
+    """
+    patience = getattr(spec, "early_stopping_patience", None)
+    min_delta = getattr(spec, "early_stopping_min_delta", None)
+    return (
+        3 if patience is None else int(patience),
+        0.005 if min_delta is None else float(min_delta),
+    )
+
+
+def restored_best_metric(checkpoint_state, select_by_loss: bool) -> Optional[float]:
+    """Best-selection metric to resume best-checkpoint tracking from, or ``None``.
+
+    Only a checkpoint whose ``best_metric_mode`` matches the trainer's current
+    selection mode is trusted (a loss-mode best must never seed accuracy-mode
+    tracking, and vice versa). Accuracy mode additionally falls back to the legacy
+    ``best_accuracy`` channel that old checkpoints carry; loss mode has no legacy
+    channel and starts fresh at ``+inf``.
+
+    :param checkpoint_state: :class:`~igc.modules.base.igc_base_module.CheckpointState`.
+    :param select_by_loss: True when the trainer selects best by eval loss.
+    :return: the metric to seed ``_best_validation_metric`` with, or ``None``.
+    """
+    mode = "loss" if select_by_loss else "accuracy"
+    best_metric = getattr(checkpoint_state, "best_metric", None)
+    best_mode = getattr(checkpoint_state, "best_metric_mode", None)
+    if best_metric is not None and best_mode == mode and np.isfinite(best_metric):
+        return float(best_metric)
+    if not select_by_loss:
+        legacy = getattr(checkpoint_state, "best_accuracy", None)
+        if legacy is not None and np.isfinite(legacy):
+            return float(legacy)
+    return None
+
+
+def shifted_token_loss(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    """Return HF CausalLM-style shifted CE loss for full-length labels."""
+    shifted_logits = logits[..., :-1, :].contiguous()
+    shifted_labels = labels[..., 1:].contiguous()
+    return F.cross_entropy(
+        shifted_logits.view(-1, shifted_logits.size(-1)),
+        shifted_labels.view(-1).long(),
+        ignore_index=-100,
+    )
+
+
 def unwrap_accelerate(wrapped, inner_attr: str):
     """Return the base optimizer/scheduler that accelerate wrapped, or ``wrapped``.
 
@@ -226,9 +321,14 @@ class LlmEmbeddingsTrainer(LlmModule):
         )
 
         self._mask_probability = 1.0
-        self._best_validation_metric = float('-inf')
         self.dataset = dataset
         self._metric_namespace = getattr(dataset, "metric_namespace", "")
+        self._select_best_by_eval_loss = bool(self._metric_namespace)
+        self._best_validation_metric = float('inf') if self._select_best_by_eval_loss else float('-inf')
+        # None-aware on purpose: an explicit 0 disables early stopping / zeroes the
+        # delta; a bare `or` default would silently swallow it.
+        self._early_stopping_patience, self._early_stopping_min_delta = (
+            resolve_early_stopping(spec))
 
         self.logger.info(
             f"Rank {self.rank} creating llm trainer, num epochs {self.num_epochs} "
@@ -347,12 +447,14 @@ class LlmEmbeddingsTrainer(LlmModule):
         """Perform validation on the embedding language model.
 
         :param validation_dataset: Iterable validation dataloader of tokenized batches.
-        :return: Accuracy percentage on the validation dataset.
+        :return: Token-weighted loss and accuracy percentage on the validation dataset.
         """
 
         self.model.eval()
         correct_predictions = 0
         total_predictions = 0
+        loss_sum = 0.0
+        loss_tokens = 0
 
         with torch.no_grad():
             for i, batch in enumerate(validation_dataset):
@@ -361,14 +463,30 @@ class LlmEmbeddingsTrainer(LlmModule):
                 labels = causal_lm_labels_from_batch(
                     batch, input_ids, attention_mask, self.tokenizer.pad_token_id)
 
-                batch_inputs = {'input_ids': input_ids, 'attention_mask': attention_mask}
+                batch_inputs = {
+                    'input_ids': input_ids,
+                    'attention_mask': attention_mask,
+                    'labels': labels,
+                }
 
-                outputs = self.model(**batch_inputs)
+                try:
+                    outputs = self.model(**batch_inputs)
+                except TypeError as exc:
+                    if "labels" not in str(exc):
+                        raise
+                    outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+                loss = getattr(outputs, "loss", None)
+                if loss is None:
+                    loss = shifted_token_loss(outputs.logits, labels)
                 predictions = torch.argmax(outputs.logits[:, :-1, :], dim=-1)
                 targets = labels[:, 1:]
                 valid = targets.ne(-100)
                 correct_predictions += ((predictions == targets) & valid).sum().item()
-                total_predictions += valid.sum().item()
+                active = int(valid.sum().item())
+                total_predictions += active
+                if active and torch.isfinite(loss):
+                    loss_sum += float(loss.item()) * active
+                    loss_tokens += active
 
         # Global metric: each rank validates only its own eval shard, so a rank-LOCAL accuracy makes
         # ranks disagree on "best" and enter the epoch-boundary save collective asymmetrically — the
@@ -376,15 +494,24 @@ class LlmEmbeddingsTrainer(LlmModule):
         # computes the SAME global accuracy (accelerate's reduce is an all-reduce: sum lands on all).
         if getattr(self, "is_accelerator", False) and getattr(self, "accelerator", None) is not None:
             stats = torch.tensor(
-                [float(correct_predictions), float(total_predictions)],
+                [
+                    float(correct_predictions),
+                    float(total_predictions),
+                    float(loss_sum),
+                    float(loss_tokens),
+                ],
                 dtype=torch.float64, device=self.device)
             stats = self.accelerator.reduce(stats, reduction="sum")
-            correct_predictions, total_predictions = stats[0].item(), stats[1].item()
+            correct_predictions = stats[0].item()
+            total_predictions = stats[1].item()
+            loss_sum = stats[2].item()
+            loss_tokens = stats[3].item()
 
         # Guard: with drop_last + a small eval shard a rank can get 0 eval batches; a
-        # bare division would crash (and take the fleet down mid-epoch) — return 0.0.
+        # bare division would crash (and take the fleet down mid-epoch).
         accuracy = (correct_predictions / total_predictions * 100.0) if total_predictions else 0.0
-        return accuracy
+        loss = (loss_sum / loss_tokens) if loss_tokens else float("inf")
+        return ValidationMetrics(loss=loss, accuracy=accuracy)
 
     def is_distributed(self):
         """
@@ -569,10 +696,24 @@ class LlmEmbeddingsTrainer(LlmModule):
         )
 
         last_epoch = checkpoint_state.last_epoch
-        # Seed the pre-loop accuracy with the restored best, not the epoch number: on epochs
-        # where eval doesn't run, this value feeds `is_best_accuracy` below, so an epoch
-        # integer here would spuriously beat _best_validation_metric and corrupt best-checkpoint tracking.
-        validation_accuracy = checkpoint_state.best_accuracy
+        # Legacy runs seed best tracking from the checkpoint's accuracy channel. Phase 1
+        # selects by validation loss, so a fresh run starts at +inf until the first eval.
+        validation_result = ValidationMetrics(
+            loss=float("inf"),
+            accuracy=checkpoint_state.best_accuracy,
+        )
+        # Resume best-checkpoint tracking from the persisted best (mode-matched):
+        # without this, a resumed loss-mode run stays at +inf and flags the FIRST
+        # post-resume eval as "best" — overwriting the true best checkpoint and
+        # resetting early-stop patience.
+        _restored_best = restored_best_metric(
+            checkpoint_state, self._select_best_by_eval_loss)
+        if _restored_best is not None:
+            self._best_validation_metric = _restored_best
+            self.logger.info(
+                f"Rank {self.rank} resumed best validation metric "
+                f"{self._best_validation_metric} "
+                f"({'loss' if self._select_best_by_eval_loss else 'accuracy'} mode).")
         self._trainer_args.epochs = self.num_epochs - last_epoch
         _accum = max(1, int(getattr(self._trainer_args, "gradient_accumulation_steps", 1)))
         self._trainer_args.steps_per_epoch = optimizer_steps_per_epoch(
@@ -645,6 +786,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         epochs_done = last_epoch
         tokens_processed = 0
         samples_processed = 0
+        early_stop_bad_evals = 0
 
         if total_batches == calculated_total_batches:
             print(f"Rank {self.rank}, Staring training, "
@@ -776,18 +918,52 @@ class LlmEmbeddingsTrainer(LlmModule):
             epoch_step = (epoch + 1) * total_batches - 1
 
             # validation on epoch or freq
+            did_eval = False
+            is_best_checkpoint = False
             if self.on_epoch_eval or ((epoch + 1) % self._eval_freq == 0):
-                validation_accuracy = self.validate(eval_dataloader)
+                did_eval = True
+                validation_result = self.validate(eval_dataloader)
+                validation_acc = validation_accuracy(validation_result)
+                validation_eval_loss = validation_loss(validation_result)
                 if self.is_rank_zero():
-                    self.metric_logger.log_metric("eval/accuracy", validation_accuracy, epoch_step)
+                    self.metric_logger.log_metric("eval/accuracy", validation_acc, epoch_step)
                     if self._metric_namespace:
                         self.metric_logger.log_metric(
                             phase_metric(self._metric_namespace, "eval", "token_accuracy"),
-                            validation_accuracy / 100.0,
+                            validation_acc / 100.0,
+                            epoch_step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "eval", "loss"),
+                            validation_eval_loss,
+                            epoch_step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "eval", "perplexity"),
+                            float(np.exp(min(validation_eval_loss, 20.0))),
                             epoch_step)
 
-                print(f"Rank {self.rank} Epoch {epoch + 1} - Validation Accuracy: "
-                      f"{validation_accuracy} Best: {self._best_validation_metric}")
+                if self._select_best_by_eval_loss:
+                    # Phase 1: lower validation loss is better. min_delta prevents tiny
+                    # floating-point noise from resetting patience.
+                    selection_metric = validation_eval_loss
+                    improved = (
+                        selection_metric
+                        < self._best_validation_metric - self._early_stopping_min_delta
+                    )
+                else:
+                    # Legacy metric path: higher validation accuracy is better.
+                    selection_metric = validation_acc
+                    improved = selection_metric > self._best_validation_metric
+
+                if improved:
+                    self._best_validation_metric = selection_metric
+                    early_stop_bad_evals = 0
+                    is_best_checkpoint = True
+                else:
+                    early_stop_bad_evals += 1
+
+                print(f"Rank {self.rank} Epoch {epoch + 1} - Validation Loss: "
+                      f"{validation_eval_loss:.6f} Accuracy: {validation_acc:.4f} "
+                      f"Best: {self._best_validation_metric}")
 
             if num_batches > 0:
                 average_loss = total_loss / num_batches
@@ -806,9 +982,9 @@ class LlmEmbeddingsTrainer(LlmModule):
                 print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
             epochs_done = epoch + 1
 
-            # save best checkpoint
-            is_best_accuracy = validation_accuracy > self._best_validation_metric
-            should_save = is_best_accuracy or (epoch + 1) % self._save_freq == 0
+            # Save every evaluation (for Phase 1 restore-best) and still honor the
+            # legacy periodic save frequency on no-eval epochs.
+            should_save = did_eval or (epoch + 1) % self._save_freq == 0
             gathered_state = None
             if self.is_accelerator and self._module_checkpoint_dir is not None:
                 # rank 0's verdict must be uniform, and the state-dict gather is a
@@ -817,11 +993,6 @@ class LlmEmbeddingsTrainer(LlmModule):
                 should_save = broadcast_flag(self.accelerator, should_save)
                 if should_save:
                     gathered_state = self.accelerator.get_state_dict(self.model)
-            # Every rank tracks the SAME best now that validation_accuracy is a global metric, so
-            # is_best_accuracy is computed identically across ranks next epoch and no rank diverges
-            # into the save collective alone (the _ALLGATHER_BASE hang). Update on improvement only.
-            if is_best_accuracy:
-                self._best_validation_metric = validation_accuracy
             if self.is_rank_zero():
                 if should_save:
                     if self._module_checkpoint_dir is not None:
@@ -838,17 +1009,25 @@ class LlmEmbeddingsTrainer(LlmModule):
                                 model_state_dict=gathered_state,
                                 optimizer=opt,
                                 scheduler=shed,
-                                last_accuracy=validation_accuracy,
+                                last_accuracy=validation_accuracy(validation_result),
                                 initial_lr=self._lr,
-                                is_best_accuracy=is_best_accuracy,
+                                is_best_accuracy=is_best_checkpoint,
+                                best_metric=self._best_validation_metric,
+                                best_metric_mode=(
+                                    "loss" if self._select_best_by_eval_loss
+                                    else "accuracy"),
                             )
                         else:
                             self.save_checkpoint(
                                 self._module_checkpoint_dir,
                                 epoch + 1,
-                                last_accuracy=validation_accuracy,
+                                last_accuracy=validation_accuracy(validation_result),
                                 initial_lr=self._lr,
-                                is_best_accuracy=is_best_accuracy,
+                                is_best_accuracy=is_best_checkpoint,
+                                best_metric=self._best_validation_metric,
+                                best_metric_mode=(
+                                    "loss" if self._select_best_by_eval_loss
+                                    else "accuracy"),
                             )
 
             # Epoch-boundary barrier: all ranks meet here AFTER the rank-0 checkpoint
@@ -858,6 +1037,18 @@ class LlmEmbeddingsTrainer(LlmModule):
             # (ranks spinning, one idle). Collective — every rank must reach it.
             if self.is_accelerator:
                 self.accelerator.wait_for_everyone()
+
+            if (
+                    did_eval
+                    and self._select_best_by_eval_loss
+                    and self._early_stopping_patience > 0
+                    and early_stop_bad_evals >= self._early_stopping_patience):
+                if self.is_rank_zero():
+                    self.logger.info(
+                        "Early stopping Phase 1: validation loss did not improve by "
+                        f"{self._early_stopping_min_delta} for "
+                        f"{self._early_stopping_patience} evaluations.")
+                break
 
         if self._is_quantize:
             self.model = convert(self.model)
@@ -879,7 +1070,10 @@ class LlmEmbeddingsTrainer(LlmModule):
                         "optimizer_steps": global_opt_steps,
                         "best_eval": self._best_validation_metric,
                     },
-                    metrics={"eval/accuracy": validation_accuracy},
+                    metrics={
+                        "eval/accuracy": validation_accuracy(validation_result),
+                        "eval/loss": validation_loss(validation_result),
+                    },
                     dataset_fields=manifest_fields() if callable(manifest_fields) else None,
                     started_at=run_started_at,
                     ended_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -1032,13 +1226,14 @@ class LlmEmbeddingsTrainer(LlmModule):
 
             # validation on epoch or freq
             if self.on_epoch_eval or ((epoch + 1) % self._eval_freq == 0):
-                validation_accuracy = self.validate(eval_dataloader)
+                validation_result = self.validate(eval_dataloader)
+                validation_acc = validation_accuracy(validation_result)
                 if self.is_rank_zero():
-                    self.metric_logger.log_metric("llm_emb_accuracy", validation_accuracy, epoch)
+                    self.metric_logger.log_metric("llm_emb_accuracy", validation_acc, epoch)
                     # self.metric_logger.log_metric("llm_emb_perplexity", perplexity, epoch)
 
                 print(f"Rank {self.rank} Epoch {epoch + 1} - Validation Accuracy: "
-                      f"{validation_accuracy} Best: {self._best_validation_metric}")
+                      f"{validation_acc} Best: {self._best_validation_metric}")
 
             if num_batches > 0:
                 average_loss = total_loss / num_batches

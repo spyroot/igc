@@ -20,30 +20,39 @@ from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
 
 
 def test_validate_all_reduces_the_metric():
-    """validate() must all-reduce the eval counts so accuracy is a single global value."""
+    """validate() must all-reduce eval counts/loss so every rank sees one global metric."""
     src = inspect.getsource(LlmEmbeddingsTrainer.validate)
     assert "accelerator.reduce" in src, (
-        "validate() must reduce (correct, total) across ranks so every rank computes the same "
-        "global accuracy; a rank-local accuracy makes ranks disagree on 'best' and deadlock the save."
+        "validate() must reduce (correct, total, loss_sum, loss_tokens) across ranks so every "
+        "rank computes the same global eval metric; rank-local best values deadlock the save."
     )
 
 
 def test_best_metric_tracked_on_all_ranks_not_only_rank_zero():
-    """The best-metric update must run on ALL ranks (gated on is_best_accuracy), not under is_rank_zero.
+    """The best-metric update must run on ALL ranks, not under is_rank_zero.
 
-    If only rank 0 tracks the best, the non-zero ranks keep -inf, compute is_best_accuracy
+    If only rank 0 tracks the best, the non-zero ranks keep stale metrics, compute best-save state
     differently, and enter the save collective asymmetrically -> the _ALLGATHER_BASE hang.
     """
     src = inspect.getsource(LlmEmbeddingsTrainer)
-    assert src.count("self._best_validation_metric = validation_accuracy") == 1, (
+    assert src.count("self._best_validation_metric = selection_metric") == 1, (
         "expected exactly one best-metric assignment (the rank-0-only one was removed)"
     )
-    idx = src.index("self._best_validation_metric = validation_accuracy")
+    idx = src.index("self._best_validation_metric = selection_metric")
     preceding = src[:idx]
-    assert preceding.rfind("if is_best_accuracy:") > preceding.rfind("if self.is_rank_zero()"), (
-        "the best-metric update must be gated on is_best_accuracy on every rank, i.e. BEFORE / "
+    assert preceding.rfind("if improved:") > preceding.rfind("if self.is_rank_zero()"), (
+        "the best-metric update must be gated on improved on every rank, i.e. BEFORE / "
         "outside the is_rank_zero() block, so all ranks agree on 'best'."
     )
+
+
+def test_phase1_best_metric_is_eval_loss_minimize_with_min_delta():
+    """Phase 1 must select checkpoints by lower eval loss, not higher token accuracy."""
+    src = inspect.getsource(LlmEmbeddingsTrainer._train)
+    assert "self._select_best_by_eval_loss" in src
+    assert "selection_metric = validation_eval_loss" in src
+    assert "self._early_stopping_min_delta" in src
+    assert "< self._best_validation_metric" in src
 
 
 # Author: Mus mbayramo@stanford.edu

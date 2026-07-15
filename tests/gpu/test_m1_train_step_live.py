@@ -137,6 +137,10 @@ def _plain_trainer(tmp_path):
     trainer._pin_memory = False
     trainer._is_quantize = False
     trainer._best_validation_metric = float("-inf")
+    trainer._metric_namespace = ""
+    trainer._select_best_by_eval_loss = False
+    trainer._early_stopping_patience = 3
+    trainer._early_stopping_min_delta = 0.005
     trainer._masked_freq = 1
     trainer._current_mask_method_counter = 0
     trainer._current_mask_method_idx = 0

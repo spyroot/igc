@@ -90,26 +90,26 @@ place. The math gate for these claims lives in [MATH_CHECKS.md](MATH_CHECKS.md).
 
 ```mermaid
 flowchart TD
-    M1["M1 backbone encoder\nconfig-driven causal/decoder model"]
+    RB["RedfishBackbone / model_x\nconfig-driven causal/decoder model"]
     S0["RedfishStateV0 extractor\nstructured state contract + fixtures"]
-    M2["M2 state pooler / autoencoder\npooled structured/text state"]
-    GE["GoalExtractor / GoalEncoder\ninstruction -> atomic goals + z_sub_goal"]
-    M4["M4 evaluator / reward\nstructured verify + dense reward"]
-    M5["M5 world model\nnext-state + status/task phase"]
-    M6["M6 RL policy\ncandidate scoring + replay/HER"]
+    SE["StateEncoder / StatePooler\npooled structured/text state"]
+    GE["GoalExtractor / GoalEncoder\ninstruction -> ordered REST goals + z_goal"]
+    RV["RewardVerifier\nstructured verify + dense reward"]
+    WM["WorldModel\nnext-state + status/task phase"]
+    RP["RLPolicy\ncandidate scoring + replay/HER"]
     Gate["Offline eval harness\nno GPU/network/live host by default"]
 
-    S0 --> M2
-    M1 --> M2
-    M1 --> GE
-    S0 --> M4
-    M2 --> M5
-    M4 --> M5
-    M2 --> M6
-    GE --> M6
-    M4 --> M6
-    M5 --> M6
-    M6 --> Gate
+    S0 --> SE
+    RB --> SE
+    RB --> GE
+    S0 --> RV
+    SE --> WM
+    RV --> WM
+    SE --> RP
+    GE --> RP
+    RV --> RP
+    WM --> RP
+    RP --> Gate
 ```
 
 ### RedfishStateV0 field budget
@@ -268,21 +268,23 @@ The design makes the hypothesis concrete, layer by layer:
 In short: **extract → discover → execute → transfer.** Every layer is built so the unit of
 generalization is *the skill of operating a tool API*, not *a specific API*.
 
-## 4. The six models and the training curriculum
+## 4. Trainable Components And Training Curriculum
 
-`igc` is not one model — it is six, with real dependencies. `M1` (the backbone) is the single root
-and the riskiest node: if hidden size `H` changes, every downstream magic dim breaks, so dims are
-de-hardcoded before the first backbone fit.
+`igc` is not one model. It is a dependency graph of separately named components with separate
+weights. The Redfish-aware backbone checkpoint is `model_x`; downstream state, goal, argument,
+reward, world-model, and policy components must name their own weight roles and output directories
+instead of reusing historical `M*` aliases. If hidden size `H` changes, every downstream magic dim
+breaks, so dims are de-hardcoded before the first backbone fit.
 
 ![Training curriculum](diagrams/05-training-curriculum.svg)
 
-| Stage | Model | Objective | Key metric | Compute |
+| Stage | Component | Objective | Key metric | Compute |
 | --- | --- | --- | --- | --- |
 | 0 | — | make it runnable + de-hardcode dims + backbone config-driven | `pytest -q` green, ruff clean | CPU |
-| 1 | M1 backbone / state encoder | causal-LM SFT over Redfish JSON → checkpoint A | held-out token acc ↑ vs measured GPT-2 baseline | 1-GPU |
-| 2 | M2 autoencoder · GoalExtractor/GoalEncoder · M4 reward | pool→latent 64 · NL→atomic goals · decomposed reward | recon MSE · extraction exact match · reward AUC | 1-GPU ×3 |
-| 3 | M5 world/transition | next-latent + status/job-phase classification | 1-step error, phase accuracy, rollout drift | 1-GPU |
-| 4 | M6 RL agent | goal-cond. DQN + HER on `ToolAction`, learned reward | success_rate per workload, episode_length | 1-GPU (longest) |
+| 1 | RedfishBackbone / `model_x` | causal-LM SFT over Redfish JSON → Phase 1 checkpoint | held-out token acc ↑ vs measured GPT-2 baseline | 1-GPU → multi-GPU |
+| 2 | StateEncoder · GoalExtractor/GoalEncoder · RewardVerifier | pool→latent 64 · text→ordered REST goals · decomposed reward | recon MSE · extraction exact match · reward AUC | 1-GPU ×3 |
+| 3 | WorldModel | next-latent + status/job-phase classification | 1-step error, phase accuracy, rollout drift | 1-GPU |
+| 4 | RLPolicy | goal-cond. DQN + HER on `ToolAction`, learned reward | success_rate per workload, episode_length | 1-GPU (longest) |
 
 ## 5. Backbone modernization (GPT-2 → flash-class LLM)
 
@@ -313,8 +315,8 @@ The target loader should use `AutoTokenizer` + a class arg, and `ValueHead` shou
 | 2 · Registry + Redfish adapter | `register/make`; Redfish plugin; `action_repr` flag + parity test; route `igc_rl_module` through `make_vec` | parity test green (one-hot ≡ tool for GET/HEAD) |
 | 3 · Offline prover envs | filesystem + sqlite plugins (real args, dynamic actions, exact verify, dry-run, destructive blocked) | per-env offline tests |
 | 4 · Trajectory + github | recorder + `TrajectoryDataset`; `CassetteSimulator`; github plugin (offline replay, live-gated) | record→load round-trip; github offline via cassette |
-| 5 · Backbone + M1/M2 | backbone-agnostic refactor; `StatePooler`; train M1 + M2 on NVL72 | small-model CPU green → 1-GPU overfit-a-batch smoke |
-| 6 · Learning layer | GoalExtractor/GoalEncoder + reward (M4) + world model (M5) + evaluators + preference data → RL agent (M6) | offline eval harness scores traces; GPU-marked training |
+| 5 · Backbone + state representation | backbone-agnostic refactor; `StatePooler`; train `model_x` and StateEncoder on NVL72 | small-model CPU green → 1-GPU overfit-a-batch smoke |
+| 6 · Learning layer | GoalExtractor/GoalEncoder + RewardVerifier + WorldModel + evaluators + preference data → RLPolicy | offline eval harness scores traces; GPU-marked training |
 | 7 · Guardrail + deploy | dry-run/approval/executor over `_is_live`; serve backbone + goal extractor via vLLM (TP=1); live Redfish canary behind the gate | guardrail blocks destructive-without-approval; offline gate stays green |
 
 ## 7. Infra · monitoring · deploy (NVL72)
@@ -325,7 +327,7 @@ NVL72 through a one-GPU-first Slurm/pyxis workflow.
 
 - **Monitoring** reuses the existing `MetricLogger` (`--metric_report` tb/wandb/mlflow): per-model
   curves (loss/perplexity/accuracy/grad-norm/tokens-per-sec; reward/success-rate/episode-length for
-  M6).
+  RLPolicy).
 - **Training-loop sanity checks:** overfit-a-batch, grad-norm clip + `isfinite` guard, LR
   warmup/cosine, deterministic seed, resume-from-checkpoint, early stop, a startup dim-contract
   assertion (`observation_space == latent_dim + goal_dim`), and a Buffer arity check.
@@ -397,12 +399,12 @@ discovery + the pointer policy** (score only discovered legal candidates → shr
 
 **Architecture — RL² cast as a Transformer.** The LLM backbone carries cross-episode history in its
 context = the in-context meta-learner (the Transformer analog of RL²'s RNN; cf. Decision Transformer /
-Algorithm Distillation). M1/M2 compress observations so a long history fits the context budget. **Dense
-first; MoE is a later upgrade** (upcycle/distill once there are many APIs + data + expert-parallel infra)
+Algorithm Distillation). StateEncoder/StatePooler compress observations so a long history fits the
+context budget. **Dense first; MoE is a later upgrade** (upcycle/distill once there are many APIs + data + expert-parallel infra)
 — MoE adds capacity/specialization, not the meta-learning (which lives in attention-over-history).
 
-**Backbone sizing — decoupled.** Small dense bf16 backbone for the hot-loop encoder/RL (M1/M2/M6,
-runs every step); a larger model may be used for the GoalExtractor if extraction metrics justify it
+**Backbone sizing — decoupled.** Small dense bf16 backbone for the hot-loop encoder/RL
+(RedfishBackbone/StateEncoder/RLPolicy, runs every step); a larger model may be used for the GoalExtractor if extraction metrics justify it
 (runs once per episode). Trainable =
 small/mid dense bf16 + LoRA + ZeRO-3 (`--sharding zero3`). DeepSeek-V4-Flash (284B FP8/FP4 MoE) is the
 **inference/teacher** only (deployed NVFP4), never the trainable backbone.
@@ -413,10 +415,10 @@ operator text, but deterministic code owns `true_y`; verify generated text again
 GoalExtractor before using it as supervised data.
 
 **Training curriculum.**
-1. **Represent** (supervised, separate): M1 backbone SFT + M2 autoencoder → compact states. Pretrained
-   first; RL LoRA-adapts on top (do not co-train the whole backbone with RL).
+1. **Represent** (supervised, separate): RedfishBackbone SFT + StateEncoder/StatePooler → compact
+   states. Pretrained first; RL LoRA-adapts on top (do not co-train the whole backbone with RL).
 2. **Extract** (distill) + **Reward** (build, parallel): GoalExtractor/GoalEncoder from the
-   generated goal dataset; M4 schema-driven verifier.
+   generated goal dataset; RewardVerifier schema-driven verifier.
 3. **Meta-RL — ONE optimization path:** the in-context RL²-Transformer policy over the API-sim
    distribution, with HER, a **BC/SFT warm-start** (imitate teacher demos before RL — the main lever
    against the sparse-reward cold start), and a **narrow→broad task curriculum**. Meta is not a phase
@@ -439,7 +441,7 @@ flowchart TB
     GE -->|goal-conditions| AGENT
 
     subgraph AGENT["Goal-conditioned RL2 agent (one shared policy)"]
-        ENC["M1/M2 encoder<br/>API response -> compact state vector"]
+        ENC["StateEncoder / StatePooler<br/>API response -> compact state vector"]
         HIST["Transformer over history<br/>state, action, reward = in-context task memory"]
         POL["Pointer policy<br/>score discovered legal candidates"]
         ARG["Argument decoder<br/>fill action values"]
@@ -454,8 +456,8 @@ flowchart TB
     ARG -->|REST call| SIM
     SIM -->|response| ENC
     DISC -->|legal candidates| POL
-    SIM --> M4["M4 evaluator<br/>verify Goal.spec vs state -> sparse reward"]
-    M4 --> HER["HER replay<br/>relabel achieved states"]
+    SIM --> RV["RewardVerifier<br/>verify Goal.spec vs state -> sparse reward"]
+    RV --> HER["HER replay<br/>relabel achieved states"]
     HER --> POL
 
     META["Meta-train over MANY API simulators<br/>-> generalize few-shot to a HELD-OUT API"]
@@ -477,7 +479,7 @@ flowchart LR
     CTX["Transformer context window<br/>compressed states + prev action + prev reward"]
     CTX --> POL["policy head (pointer scoring)"]
     POL --> ADAPT["in-context adaptation:<br/>behaviour improves across episodes<br/>WITHOUT weight updates"]
-    NOTE["M1/M2 compress each observation<br/>so a long history fits the context budget"]
+    NOTE["StateEncoder/StatePooler compress each observation<br/>so a long history fits the context budget"]
     CTX -.- NOTE
 ```
 
@@ -486,9 +488,9 @@ flowchart LR
 ```mermaid
 flowchart TB
     subgraph SEP["Separate prerequisite phases"]
-        REP["Represent<br/>M1 backbone SFT + M2 autoencoder<br/>small dense, pretrained first"]
+        REP["Represent<br/>RedfishBackbone SFT + StateEncoder<br/>small dense, pretrained first"]
         PLAN["Extract<br/>GoalExtractor / GoalEncoder"]
-        REW["Reward<br/>M4 schema-driven verifier"]
+        REW["Reward<br/>RewardVerifier schema-driven verifier"]
     end
     REP --> META
     PLAN --> META
@@ -507,9 +509,9 @@ flowchart LR
     DS -->|draft operator text X only| DISTILL["goal text set<br/>deterministic true_y labels"]
     DISTILL -->|SFT / contrastive| GEB["GoalExtractor / GoalEncoder<br/>(runs once per episode)"]
     SMALL["small dense bf16 backbone 1-7B<br/>+ LoRA + ZeRO-3 (hot loop)"]
-    SMALL --> M1["M1 state encoder"]
-    SMALL --> M2["M2 autoencoder"]
-    SMALL --> M6["M6 RL policy heads"]
+    SMALL --> RB["RedfishBackbone / model_x"]
+    SMALL --> SE["StateEncoder / StatePooler"]
+    SMALL --> RP["RLPolicy heads"]
     DS -.->|direct call for bootstrap| GEB
 ```
 
@@ -542,7 +544,7 @@ flowchart TB
     subgraph GATES["Grounding gates (run BEFORE any injection)"]
         G1["1 evidence-bound prompt<br/>uncited claims dropped"]
         G2["2 schema gate + .npy/ActionInfo override (§9.3)"]
-        G3["3 M4 replay · Evaluator.verify + MockServer"]
+        G3["3 RewardVerifier replay · Evaluator.verify + MockServer"]
         G4["4 online falsification<br/>confirm vs contradict => falsified"]
         G1 --> G2 --> G3 --> G4
     end
@@ -559,7 +561,7 @@ flowchart TB
     subgraph TRAIN["Gradient-trained (offline meta-train only)"]
         BC["BC warm-start (§10 main lever)"]
         AD["Algorithm Distillation<br/>teacher-free at test"]
-        SHAPE["potential shaping F=γΦ'−Φ over q_targets<br/>source reward stays M4 verify()"]
+        SHAPE["potential shaping F=γΦ'−Φ over q_targets<br/>source reward stays RewardVerifier.verify()"]
     end
 ```
 
@@ -568,7 +570,7 @@ flowchart TB
 Passive scorability (§1, §3.3 step 3) embeds an unseen op's declared text so the pointer
 head can *score* it; it does nothing to teach the op's effective signature, response
 shape, or error semantics, so cold-start exploration on a never-seen tool is blind
-trial-and-error under M4's sparse reward (§10). Tool-teaching layers an active induction
+trial-and-error under RewardVerifier's sparse reward (§10). Tool-teaching layers an active induction
 loop on top, leaving the passive path byte-identical when no card is present (the
 `card=None` parity guarantee, pinned by `tests/core/test_action_render_card.py`).
 
@@ -583,7 +585,7 @@ held-out-API trial's cards never leak across trials. Fields: `effective_signatur
 from observed 2xx bodies), `error_taxonomy` (`retriable | fatal | precondition_unmet`,
 each citing ≥1 `Transition`), `preconditions`/`usage_tips`, `provenance`
 (`llm | stub`, evidence ids, `k_observed`), `grounding` (`status ∈
-{provisional, grounded, contradicted}` + confirm/contradict + M4 counters), `version`,
+{provisional, grounded, contradicted}` + confirm/contradict + RewardVerifier counters), `version`,
 `content_hash` (blake2b of the canonical learned content — excludes the volatile
 grounding tallies so a counter tick does not churn the embedding cache), and
 `spec_fingerprint` (blake2b of `ToolSpec.arg_schema[op]` — a moved op schema
@@ -616,7 +618,8 @@ All four seams are inference-time (no weight update during held-out adaptation):
   argument is added to the cosine-normalized `score_candidates` (avoids scale-mixing a
   logit bias).
 - **B · RL² context block** — the same card text as a compact token block prepended once
-  per trial to the cross-episode history (§11.2); M1/M2 keep it within the context budget.
+  per trial to the cross-episode history (§11.2); StateEncoder/StatePooler keeps it within the
+  context budget.
 - **C · argument-decoder enum tightening** — `card.effective_signature` tightens
   `ArgumentSlot.choices`/`required` in `arg_slots_for`
   (`igc/modules/policy/argument_decoder.py`), but **only within `@Redfish.ActionInfo`
@@ -635,8 +638,8 @@ The teacher *will* fabricate; nothing is trusted on assertion. `ToolCardGrounder
 entries are dropped. (2) **schema + enum** — every arg slot must exist in
 `ToolSpec.arg_schema[op]`, and enum claims are clipped to `@Redfish.ActionInfo`
 allowable values; **the `.npy`/ActionInfo overrides the teacher on any enum conflict**
-(§9.3, resolved — binding contract). (3) **M4 replay** — each claim becomes an assertion
-checked via `Evaluator.verify` (M4, `igc/core/protocols.py`) + a no-op replay against
+(§9.3, resolved — binding contract). (3) **RewardVerifier replay** — each claim becomes an assertion
+checked via `Evaluator.verify` (RewardVerifier, `igc/core/protocols.py`) + a no-op replay against
 `MockServer`/cassette; only passing claims flip `grounding.status` to `grounded` (lands
 in slice 6b/6c — the offline slice carries gates 1, 2, 4). (4) **online falsification** —
 every real `StepResult` updates `n_confirmations`/`n_contradictions`; the status flows
@@ -653,11 +656,11 @@ and must not be reported as already-enforced.
 ### 12.6 Training
 
 Tool-teaching is **not a new phase**; it rides §10's single meta-RL optimization path
-(§11.3) inside Phase 6, and depends on M1/M2 (compress so `k` interactions + card fit the
-RL² budget), the gated teacher path, and M4 (the grounder). The interplay:
+(§11.3) inside Phase 6, and depends on StateEncoder/StatePooler (compress so `k` interactions +
+card fit the RL² budget), the gated teacher path, and RewardVerifier (the grounder). The interplay:
 
 - **BC/SFT warm-start** (§10's main lever against the sparse-reward cold start): teacher
-  demos enter BC *only after* M4 confirms they reached a sub-goal, carrying their ToolCard
+  demos enter BC *only after* RewardVerifier confirms they reached a sub-goal, carrying their ToolCard
   in context, so the policy learns the card→action mapping before RL.
 - **Algorithm Distillation** (the learned core): next-action cross-entropy over
   `[ToolCard, ep1(s,a,r), ep2…]` cross-episode histories, internalizing the across-episode
@@ -669,7 +672,7 @@ RL² budget), the gated teacher path, and M4 (the grounder). The interplay:
 - **Potential-based shaping**: a grounded card supplies a potential Φ over (precondition-met,
   expected-progress); shaping is `F = γΦ′ − Φ` over `q_targets`, which *provably cannot
   change the optimal policy*, and decays as real-Q confidence grows. **The source reward
-  stays M4's `verify()` — this is not a new reward channel** (it deliberately avoids a
+  stays RewardVerifier's `verify()` — this is not a new reward channel** (it deliberately avoids a
   second, hallucination-amplifying reward signal adjacent to the still-open §9.4
   reward-decomposition decision).
 
@@ -684,7 +687,7 @@ The primary metric extends §10's contribution (success_rate vs. number of adapt
 interactions on a **held-out API**) into a with-vs-without A/B: `curve_A` = passive
 pointer text only (§3.3); `curve_B` = + ToolCard teaching. The claim is that `curve_B`
 reaches a target success_rate in fewer interactions and at lower `episode_length` (the two
-M6 metrics, §4). Crucially, the **teacher-free distilled agent at test time must match the
+RLPolicy metrics, §4). Crucially, the **teacher-free distilled agent at test time must match the
 teacher-in-loop agent** — the honest proof the across-episode operator was internalized,
 not a present-teacher crutch.
 
@@ -706,9 +709,9 @@ not the objective but (i) the acquired unit is a REST-op acquisition skill over 
 *discovered* action surface, and (ii) the in-context history is seeded by an explicit,
 schema-bound, evidence-grounded, verifier-gated ToolCard — where vanilla
 AD/Decision-Transformer/in-context-RL start from raw `(s,a,r)`. Versus Voyager, a ToolCard
-is a grounded declarative spec adversarially checked against M4/observed evidence, not
+is a grounded declarative spec adversarially checked against RewardVerifier/observed evidence, not
 self-verified executable code; versus Toolformer, adaptation to a *new* tool is
-inference-time with zero weight update and the knowledge is an inspectable, M4-verified
+inference-time with zero weight update and the knowledge is an inspectable, RewardVerifier-verified
 data structure, not latent weights; versus RAP / ReAct / Reflexion, the card is the
 structured, schema-typed, verifier-gated counterpart that flows into a learned pointer
 Q-score plus argument-enum pruning *and* is distilled into weights.
@@ -722,6 +725,6 @@ already live in `spec.arg_schema[op][slot]['enum']` and already feed `arg_slots_
 the card's enum term adds value mainly where capture is *missing* — ablation (3) must
 isolate this honestly. (4) Card-as-context could become a test-time crutch — measured by
 the teacher-free vs teacher-in-loop ablation. (5) Safety rides on the **still-queued
-Phase-7 guardrail**. (6) The **M5 precondition seed is deferred** until M5 exists (§4
+Phase-7 guardrail**. (6) The **WorldModel precondition seed is deferred** until WorldModel exists (§4
 stage 3); it is not load-bearing for the contribution. Cards are dataset artifacts
 (gitignored like `~/.json_responses`), never committed.
