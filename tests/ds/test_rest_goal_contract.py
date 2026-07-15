@@ -232,6 +232,33 @@ def test_phase3_mutation_arguments_must_be_supplied_explicitly() -> None:
     }
 
 
+def test_phase3_patch_does_not_infer_top_level_get_scalars() -> None:
+    """PATCH rows do not turn arbitrary top-level GET values into arguments."""
+    system = _context(
+        "/redfish/v1/Systems/1",
+        ("GET", "PATCH"),
+        {
+            "@odata.id": "/redfish/v1/Systems/1",
+            "PowerState": "On",
+            "Name": "System",
+        },
+    )
+
+    row = build_ordered_call_row(
+        text="set the system power state",
+        contexts=(system,),
+        rest_api_list=("/redfish/v1/Systems/1",),
+        method_by_api={"/redfish/v1/Systems/1": "PATCH"},
+    )
+
+    assert row["y_true"]["calls"][0] == {
+        "rest_api": "/redfish/v1/Systems/1",
+        "allowed_methods": ["GET", "PATCH"],
+        "method": "PATCH",
+        "arguments": {},
+    }
+
+
 def test_rows_reject_missing_and_duplicate_contexts() -> None:
     """Rows fail fast when labels cannot be resolved to one current context."""
     context = _context(
