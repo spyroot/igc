@@ -730,6 +730,39 @@ def test_inference_json_uses_target_calls_shape() -> None:
     }
 
 
+def test_inference_target_calls_json_preserves_mutation_arguments() -> None:
+    """The inference handoff keeps explicit non-GET arguments unchanged."""
+    context = _context(
+        "/redfish/v1/Systems/1/Bios/Settings",
+        ("GET", "PATCH"),
+        {
+            "@odata.id": "/redfish/v1/Systems/1/Bios/Settings",
+            "Attributes": {"BootMode": "LegacyBios"},
+        },
+    )
+    row = build_ordered_call_row(
+        text="set bios boot mode to Uefi",
+        contexts=(context,),
+        rest_api_list=("/redfish/v1/Systems/1/Bios/Settings",),
+        method_by_api={"/redfish/v1/Systems/1/Bios/Settings": "patch"},
+        arguments_by_api={
+            "/redfish/v1/Systems/1/Bios/Settings": {
+                "Attributes": {"BootMode": "Uefi"},
+            },
+        },
+    )
+
+    assert inference_target_calls_json(row) == {
+        "text": "set bios boot mode to Uefi",
+        "target_calls": [{
+            "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
+            "allowed_methods": ["GET", "PATCH"],
+            "method": "PATCH",
+            "arguments": {"Attributes": {"BootMode": "Uefi"}},
+        }],
+    }
+
+
 def test_y_pred_parsers_preserve_order_and_report_bad_contracts() -> None:
     """Parsed y_pred JSON preserves order and rejects malformed call objects clearly."""
     assert parse_rest_api_list_y_pred({
@@ -774,6 +807,23 @@ def test_y_pred_parsers_preserve_order_and_report_bad_contracts() -> None:
                 "method": "GET",
             }],
         })
+
+
+def test_ordered_calls_parser_preserves_mutation_arguments_and_normalizes_method() -> None:
+    """Phase 3 y_pred parsing keeps PATCH arguments and normalizes method case."""
+    calls = [{
+        "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
+        "allowed_methods": ["get", "patch"],
+        "method": "patch",
+        "arguments": {"Attributes": {"BootMode": "Uefi"}},
+    }]
+
+    assert parse_ordered_calls_y_pred({"y_pred": {"calls": calls}}) == [{
+        "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
+        "allowed_methods": ["GET", "PATCH"],
+        "method": "PATCH",
+        "arguments": {"Attributes": {"BootMode": "Uefi"}},
+    }]
 
 
 def test_rest_api_list_parser_rejects_non_string_items() -> None:
