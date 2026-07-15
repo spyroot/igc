@@ -62,6 +62,7 @@ def test_d1_row_preserves_operator_order_independent_of_context_order() -> None:
     assert row["dataset"] == D1
     assert row["source_dataset"] == D0
     assert row["model_x"] == MODEL_X
+    assert row["x"]["text"] == "check the task queue, then list the systems"
     assert row["x"]["json"] == [systems.json, tasks.json]
     assert row["y_true"]["rest_api_list"] == [
         "/redfish/v1/TaskService/Tasks",
@@ -184,6 +185,21 @@ def test_phase3_get_calls_preserve_order_and_keep_arguments_empty() -> None:
     )
 
     assert row["phase"] == 3
+    assert row["x"]["text"] == "check task state, then inspect system power"
+    assert row["x"]["json"] == [
+        {
+            "@odata.id": "/redfish/v1/Systems/1",
+            "PowerState": "On",
+        },
+        {
+            "@odata.id": "/redfish/v1/TaskService/Tasks",
+            "Members@odata.count": 0,
+        },
+    ]
+    assert row["x"]["allowed_methods"] == {
+        "/redfish/v1/Systems/1": ["GET", "HEAD"],
+        "/redfish/v1/TaskService/Tasks": ["GET", "HEAD"],
+    }
     assert row["x"]["rest_api_list"] == [
         "/redfish/v1/TaskService/Tasks",
         "/redfish/v1/Systems/1",
@@ -408,6 +424,63 @@ def test_phase3_default_method_prefers_get_over_mutating_methods() -> None:
         "method": "GET",
         "arguments": {},
     }
+
+
+def test_phase3_mixed_calls_preserve_order_case_and_per_api_arguments() -> None:
+    """Mixed read/write calls keep order, normalize methods, and isolate arguments."""
+    virtual_media = _context(
+        "/redfish/v1/Managers/1/VirtualMedia/CD",
+        ("get", "head"),
+        {
+            "@odata.id": "/redfish/v1/Managers/1/VirtualMedia/CD",
+            "Image": "old.iso",
+        },
+    )
+    bios_settings = _context(
+        "/redfish/v1/Systems/1/Bios/Settings",
+        ("get", "patch"),
+        {
+            "@odata.id": "/redfish/v1/Systems/1/Bios/Settings",
+            "Attributes": {"BootMode": "LegacyBios"},
+        },
+    )
+
+    row = build_ordered_call_row(
+        text="inspect virtual media, then set bios boot mode to Uefi",
+        contexts=(bios_settings, virtual_media),
+        rest_api_list=(
+            "/redfish/v1/Managers/1/VirtualMedia/CD",
+            "/redfish/v1/Systems/1/Bios/Settings",
+        ),
+        method_by_api={"/redfish/v1/Systems/1/Bios/Settings": "patch"},
+        arguments_by_api={
+            "/redfish/v1/Systems/1/Bios/Settings": {
+                "Attributes": {"BootMode": "Uefi"},
+            },
+            "/redfish/v1/Managers/1/VirtualMedia/CD": {"Image": "old.iso"},
+        },
+    )
+
+    assert row["x"]["text"] == "inspect virtual media, then set bios boot mode to Uefi"
+    assert row["x"]["json"] == [bios_settings.json, virtual_media.json]
+    assert row["x"]["allowed_methods"] == {
+        "/redfish/v1/Systems/1/Bios/Settings": ["GET", "PATCH"],
+        "/redfish/v1/Managers/1/VirtualMedia/CD": ["GET", "HEAD"],
+    }
+    assert row["y_true"]["calls"] == [
+        {
+            "rest_api": "/redfish/v1/Managers/1/VirtualMedia/CD",
+            "allowed_methods": ["GET", "HEAD"],
+            "method": "GET",
+            "arguments": {},
+        },
+        {
+            "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
+            "allowed_methods": ["GET", "PATCH"],
+            "method": "PATCH",
+            "arguments": {"Attributes": {"BootMode": "Uefi"}},
+        },
+    ]
 
 
 def test_rows_reject_missing_and_duplicate_contexts() -> None:
