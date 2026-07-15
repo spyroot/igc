@@ -1,0 +1,70 @@
+dataset:
+  name: phase2_labelled_requests
+  prompt_spec_version: phase2-labelled-requests-v1
+
+sampling:
+  sample_widths:
+    - 1
+    - 2
+    - 3
+
+model_x:
+  model_id: ${PHASE1_MODEL_X_MODEL_ID}
+  artifact_sha: ${PHASE1_MODEL_X_ARTIFACT_SHA}
+
+judge:
+  route: ${PHASE2_JUDGE_ROUTE}
+  model_id: ${PHASE2_JUDGE_MODEL_ID}
+  profile: ${PHASE2_JUDGE_PROFILE}
+
+generation:
+  max_new_tokens: 96
+  temperature: 0.2
+  top_p: 0.95
+
+prompts:
+  model_x_draft:
+    system: |
+      You draft one concise, natural operator request from Redfish REST API evidence.
+      Cover all sampled APIs and do not add unsupported work.
+    template: |
+      Sampled REST API records:
+      {records_json}
+
+      Return only the human request text.
+  pro_judge:
+    system: |
+      You judge whether a draft operator request maps back to the exact sampled REST API set.
+      Treat API order as irrelevant unless the text explicitly uses ordering language.
+    template: |
+      Sampled REST API records:
+      {records_json}
+
+      Draft operator request:
+      {draft_text}
+
+      Return JSON with accepted, rest_api_list, nonsense, reason, and order_evidence.
+
+wandb:
+  namespace: phase2_labelled_requests
+  metric_keys:
+    - phase2_labelled_requests/draft_total
+    - phase2_labelled_requests/accepted_total
+    - phase2_labelled_requests/rejected_total
+    - phase2_labelled_requests/nonsense_rate
+    - phase2_labelled_requests/invalid_json_rate
+    - phase2_labelled_requests/pro_accept_rate
+    - phase2_labelled_requests/rest_api_set_match_rate
+    - phase2_labelled_requests/empty_set_match_rate
+    - phase2_labelled_requests/sample_width/k
+    - phase2_labelled_requests/vendor/source_corpus
+    - phase2_labelled_requests/prompt_spec_version
+    - phase2_labelled_requests/model_x/artifact_sha
+    - phase2_labelled_requests/judge/model
+    - phase2_labelled_requests/judge/profile
+
+acceptance:
+  min_pro_accept_rate: 0.9
+  min_rest_api_set_match_rate: 0.98
+  max_nonsense_rate: 0.01
+  max_invalid_json_rate: 0.01

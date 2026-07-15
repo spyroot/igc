@@ -1,37 +1,51 @@
-# Phase 2: Ordered REST Goal Extraction
+# Phase 2: Labelled REST Request Extraction
 
-Phase 2 builds and trains `D1`, the dataset for extracting Redfish REST goals from an operator
-sentence. `model_x` must already have completed Phase 1 Redfish JSON pretraining.
+Legacy notes and old branches may call the Phase 2 text-labelled artifact `D1`.
+New code, configs, metrics, and docs use the canonical dataset name
+`phase2_labelled_requests`. `model_x` must already have completed Phase 1
+Redfish JSON pretraining before real generation runs; offline plumbing may use
+tiny fixtures and injected providers only.
 
 Names are fixed as follows:
 
 - `D0`: Phase 1 JSON reconstruction data.
-- `D1`: Phase 2 text-to-ordered-REST-goal data.
+- `phase2_labelled_requests`: Phase 2 text-to-REST-API-set data.
 - `model_x`: the Phase 1 Redfish-tuned LLM.
 - `x`: the input context shown to the model.
 - `y_true`: the exact target label stored in the dataset.
 - `y_pred`: the model output during inference or evaluation.
 - `rest_api`: one concrete Redfish URI.
-- `rest_api_list`: ordered list of concrete Redfish URIs.
+- `rest_api_list`: canonical list of concrete Redfish URIs; correctness is the
+  unordered API set unless `order_evidence` is explicit.
 - `allowed_methods`: methods from the same discovery run's `rest_api_map.npy`.
 - `json`: full Redfish JSON resource body.
 
-Phase 2 output is ordered. If the operator sentence says "check tasks, then check systems", the
-target order is tasks first and systems second. If the sentence has no explicit order, the dataset
-builder still stores a deterministic order and marks that order as weak evidence so evaluation can
-separate exact-order accuracy from set-recall.
+Phase 2 output is a REST API set extraction target. If the operator sentence
+says "check tasks, then check systems", the row records explicit order evidence
+for auxiliary order metrics. If the sentence has no explicit order, evaluation
+treats `[A, B]` and `[B, A]` as the same target. Empty set equals empty set for
+hard-negative or no-action rows.
 
-## D1 Build Input
+## Builder Spec
 
-To build one `D1` row, sample one, two, or three Redfish records from `D0` or the same captured
-corpus. Each sampled record must carry its `rest_api`, full `json`, and `allowed_methods`.
+The offline builder spec lives in `configs/phase2_labelled_requests.yaml`.
+That spec owns prompt text, `model_x` identifiers, judge route/profile fields,
+generation settings, sample widths, W&B namespace/key lists, and acceptance
+thresholds. Runtime Python must load those values rather than hardcoding prompt
+or model literals.
+
+## Build Input
+
+To build one `phase2_labelled_requests` row, sample one, two, or three Redfish
+records from Phase 1 rows or the same captured corpus. Each sampled record must
+carry its `rest_api`, full `json`, and `allowed_methods`.
 The following block is an intermediate synthetic-text generation request, not the final stored row:
 `x` is the sampled Redfish context, and `y_pred.text` is the draft operator sentence.
 
 ```json
 {
   "x": {
-    "task": "produce_human_text_for_ordered_rest_api_list",
+    "task": "produce_human_text_for_rest_api_set",
     "json": [
       {
         "@odata.context": "/redfish/v1/$metadata#TaskCollection.TaskCollection",
@@ -77,29 +91,30 @@ The following block is an intermediate synthetic-text generation request, not th
 }
 ```
 
-`y_pred.text` is only a draft. If `model_x` emits junk text, that text must not enter `D1`. It must
-be cleaned or rejected.
+`y_pred.text` is only a draft. If `model_x` emits junk text, that text must not
+enter `phase2_labelled_requests`. It must be cleaned or rejected.
 
 ## Review Cleanup And Judge
 
 The generated text should be passed through a review/judge step with the same `json`,
-`allowed_methods`, and ordered `rest_api_list`. The reviewer has two jobs:
+`allowed_methods`, and canonical `rest_api_list`. The reviewer has two jobs:
 
 1. rewrite the text into a natural operator sentence if needed;
-2. judge whether the sentence asks for all and only the sampled `rest_api_list`, in the intended
-   order when the sentence contains ordering language.
+2. judge whether the sentence asks for all and only the sampled REST API set,
+   considering order only when the sentence contains ordering language.
 
-Accepted output becomes the final `D1` row. Rejected output is not used for fine-tuning.
+Accepted output becomes the final `phase2_labelled_requests` row. Rejected
+output is not used for fine-tuning.
 
-## Final D1 Row
+## Final Row
 
 This is the row used to fine-tune text-to-REST-goal extraction:
 
 ```json
 {
   "phase": 2,
-  "dataset": "D1",
-  "task": "text_to_ordered_rest_api_list",
+  "dataset": "phase2_labelled_requests",
+  "task": "text_to_rest_api_set",
   "x": {
     "text": "check the task queue, then list the available computer systems",
     "json": [
@@ -167,10 +182,36 @@ The rendered training target is canonical JSON:
 }
 ```
 
-Cross-entropy is computed on the target JSON tokens. Evaluation parses `y_pred`, reads
-`y_pred.rest_api_list`, and reports both ordered exact match and set match.
+Cross-entropy is computed on the target JSON tokens. Evaluation parses `y_pred`,
+reads `y_pred.rest_api_list`, and treats unordered set match as the primary
+correctness metric. Ordered exact match is auxiliary and applies only when
+`order_evidence` is explicit.
 
-## Phase 2 W&B Metrics
+## Labelled-Request W&B Metrics
+
+The labelled-request generation builder records these keys under the
+`phase2_labelled_requests/*` namespace:
+
+- `phase2_labelled_requests/draft_total`
+- `phase2_labelled_requests/accepted_total`
+- `phase2_labelled_requests/rejected_total`
+- `phase2_labelled_requests/nonsense_rate`
+- `phase2_labelled_requests/invalid_json_rate`
+- `phase2_labelled_requests/pro_accept_rate`
+- `phase2_labelled_requests/rest_api_set_match_rate`
+- `phase2_labelled_requests/empty_set_match_rate`
+- `phase2_labelled_requests/sample_width/k`
+- `phase2_labelled_requests/vendor/source_corpus`
+- `phase2_labelled_requests/prompt_spec_version`
+- `phase2_labelled_requests/model_x/artifact_sha`
+- `phase2_labelled_requests/judge/model`
+- `phase2_labelled_requests/judge/profile`
+
+## Goal-Extractor Training W&B Metrics
+
+After accepted labelled-request rows exist, the later `goal_extractor` training
+path may emit these legacy trainer metrics. They are separate from
+`phase2_labelled_requests/*` generation metrics above.
 
 - `phase2_goal_extract/train/loss`
 - `phase2_goal_extract/train/perplexity`
