@@ -111,9 +111,11 @@ def test_phase23_rows_pin_locked_field_names() -> None:
         "y_true",
         "validation",
     }
+    assert phase2["task"] == "text_to_ordered_rest_api_list"
     assert set(phase2["x"]) == {"text", "json", "allowed_methods"}
     assert set(phase2["y_true"]) == {"rest_api_list", "order_evidence"}
     assert set(phase3) == {"phase", "source_dataset", "model_x", "task", "x", "y_true"}
+    assert phase3["task"] == "text_and_rest_api_list_to_calls"
     assert set(phase3["x"]) == {"text", "rest_api_list", "json", "allowed_methods"}
     assert set(phase3["y_true"]) == {"calls"}
     assert set(phase3["y_true"]["calls"][0]) == {
@@ -193,6 +195,33 @@ def test_phase3_get_calls_discard_supplied_arguments() -> None:
         "rest_api": "/redfish/v1/Systems/1",
         "allowed_methods": ["GET", "PATCH"],
         "method": "GET",
+        "arguments": {},
+    }
+
+
+def test_phase3_head_calls_discard_supplied_arguments() -> None:
+    """Read-only HEAD labels keep arguments empty like GET labels."""
+    row = build_ordered_call_row(
+        text="check system headers",
+        contexts=(
+            _context(
+                "/redfish/v1/Systems/1",
+                ("GET", "HEAD"),
+                {
+                    "@odata.id": "/redfish/v1/Systems/1",
+                    "PowerState": "On",
+                },
+            ),
+        ),
+        rest_api_list=("/redfish/v1/Systems/1",),
+        method_by_api={"/redfish/v1/Systems/1": "HEAD"},
+        arguments_by_api={"/redfish/v1/Systems/1": {"PowerState": "On"}},
+    )
+
+    assert row["y_true"]["calls"][0] == {
+        "rest_api": "/redfish/v1/Systems/1",
+        "allowed_methods": ["GET", "HEAD"],
+        "method": "HEAD",
         "arguments": {},
     }
 
