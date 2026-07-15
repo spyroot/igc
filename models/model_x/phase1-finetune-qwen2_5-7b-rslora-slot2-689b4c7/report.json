@@ -1,133 +1,53 @@
 {
-  "best_examples": [],
-  "known_blockers": [],
-  "manifest": {
-    "adapter_init": "default",
-    "adapter_method": "rslora",
-    "adapter_rank": 32,
-    "argv": [
-      "igc_main.py",
-      "--use_accelerator",
-      "--sharding",
-      "ddp",
-      "--mixed_precision",
-      "bf16",
-      "--profile",
-      "phase1_7b_rslora_r32",
-      "--weights_role",
-      "model_x",
-      "--train",
-      "llm",
-      "--llm",
-      "latent",
-      "--corpus_objective",
-      "phase1_pretrain",
-      "--model_type",
-      "Qwen/Qwen2.5-7B-Instruct",
-      "--llm_torch_dtype",
-      "bfloat16",
-      "--per_device_train_batch_size",
-      "8",
-      "--gradient_accumulation_steps",
-      "4",
-      "--num_workers",
-      "8",
-      "--llm_learning_rate",
-      "0.0001",
-      "--llm_scheduler",
-      "OneCycleLR",
-      "--early_stopping_patience",
-      "3",
-      "--early_stopping_min_delta",
-      "0.005",
-      "--seq_len",
-      "1024",
-      "--num_train_epochs",
-      "3",
-      "--use_peft",
-      "--lora_r",
-      "32",
-      "--lora_alpha",
-      "64",
-      "--lora_dropout",
-      "0.05",
-      "--adapter_method",
-      "rslora",
-      "--lora_init",
-      "default",
-      "--corpus_dir",
-      "/models/igc/phase1_corpus/phase1-redfish-full-mapped-20260715T044325Z",
-      "--json_data_dir",
-      "/root/.json_responses",
-      "--output_dir",
-      "/models/igc/phase1_runs/phase1-finetune-qwen2_5-7b-rslora-slot2-689b4c7-20260715T083423Z",
-      "--metric_report",
-      "wandb"
-    ],
-    "checkpoint_path": "/models/igc/phase1_runs/phase1-finetune-qwen2_5-7b-rslora-slot2-689b4c7-20260715T083423Z/state_encoder",
-    "data_manifest": "bb557a537fce1b27",
-    "dataset": {},
-    "ended_at": "2026-07-15T08:39:10",
-    "environment": {
-      "accelerate": "1.14.0",
-      "cuda": "13.2",
-      "deepspeed": "0.19.2",
-      "gpu_count": 4,
-      "gpu_name": "NVIDIA GB300",
-      "numpy": "2.1.0",
-      "peft": "0.19.1",
-      "platform": "Linux",
-      "python": "3.12.3",
-      "torch": "2.11.0a0+a6c236b9fd.nv26.03.46836102",
-      "transformers": "5.13.1"
-    },
-    "eval_split": "floor=REAL:frac=0.15:seed=0",
-    "git_commit": "",
-    "max_steps": null,
-    "model": "Qwen/Qwen2.5-7B-Instruct",
-    "peak_mem_gb": null,
-    "profile": "phase1_7b_rslora_r32",
-    "run_id": "phase1-Qwen2.5-7B-Instruct-20260715T083524",
-    "seq_len": 1024,
-    "settings": {
-      "corpus_objective": "phase1_pretrain",
-      "early_stopping_min_delta": "0.005",
-      "early_stopping_patience": "3",
-      "gradient_accumulation_steps": "4",
-      "llm_learning_rate": "0.0001",
-      "llm_optimizer": "AdamW",
-      "llm_scheduler": "OneCycleLR",
-      "lora_alpha": "64",
-      "lora_dropout": "0.05",
-      "lora_r": "32",
-      "masking_type": "MaskingType.MASK_SECTION",
-      "mixed_precision": "bf16",
-      "num_train_epochs": "3",
-      "num_workers": "8",
-      "per_device_train_batch_size": "8",
-      "profile": "phase1_7b_rslora_r32",
-      "seed": "42",
-      "sharding": "ddp",
-      "use_accelerator": "True",
-      "use_peft": "True",
-      "weights_role": "model_x"
-    },
-    "started_at": "2026-07-15T08:35:24",
-    "tokenizer": "Qwen/Qwen2.5-7B-Instruct",
-    "tokens_per_sec": null,
-    "training": {
-      "best_eval": 0.16095295281575797,
-      "epochs_done": 3,
-      "final_epoch_loss": 0.09027580278022965,
-      "optimizer_steps": 87
-    },
-    "wall_clock_sec": 225.9,
-    "warnings": []
+  "schema_version": "igc.phase1_report.v1",
+  "phase": "phase1_finetune",
+  "model_name": "model_x",
+  "base_model": "Qwen/Qwen2.5-7B-Instruct",
+  "objective": "Redfish JSON reconstruction",
+  "training_method": "rsLoRA adapter fine-tuning",
+  "source_commit": "689b4c7738931f850b786f357056e4431fb2fad7",
+  "publishing_commit": "351ebd8a1cca4f755809ab95393ca09edffc398e",
+  "corpus_summary": {
+    "source": "redfish_ctl full_corpus Git LFS tarballs",
+    "json_files": 5451,
+    "vendors": [
+      "dell",
+      "hpe",
+      "supermicro"
+    ]
   },
-  "metrics": {
-    "eval/accuracy": 96.3607480684526,
-    "eval/loss": 0.16095295281575797
+  "best_checkpoint": {
+    "selected_by": "phase1_finetune/eval/loss",
+    "epoch": 3,
+    "validation_loss": 0.160953,
+    "validation_token_accuracy_percent": 96.3607
   },
-  "plots_dir": "",
-  "worst_examples": []
+  "validation_history": [
+    {
+      "epoch": 1,
+      "validation_loss": 0.208625,
+      "validation_token_accuracy_percent": 95.2181
+    },
+    {
+      "epoch": 2,
+      "validation_loss": 0.16748,
+      "validation_token_accuracy_percent": 96.1669
+    },
+    {
+      "epoch": 3,
+      "validation_loss": 0.160953,
+      "validation_token_accuracy_percent": 96.3607
+    }
+  ],
+  "artifact_files": {
+    "adapter_model.safetensors": {
+      "sha256": "98243e5a7d5311bfac4856fa56684eea38327b5e3d4ab806d6b53f07a764d5e4",
+      "size_bytes": 323014168
+    }
+  },
+  "acceptance": {
+    "artifact_is_git_lfs_pointer": true,
+    "raw_full_checkpoints_copied_to_laptop": false,
+    "public_metadata_sanitized": true
+  }
 }
