@@ -269,7 +269,9 @@ def parse_rest_api_list_y_pred(y_pred: Mapping[str, Any] | str) -> list[str]:
     rest_api_list = value.get("rest_api_list")
     if not isinstance(rest_api_list, list):
         raise ValueError("y_pred.rest_api_list must be a list")
-    return [str(rest_api) for rest_api in rest_api_list]
+    if not all(isinstance(rest_api, str) for rest_api in rest_api_list):
+        raise ValueError("each y_pred.rest_api_list item must be a string")
+    return list(rest_api_list)
 
 
 def parse_ordered_calls_y_pred(y_pred: Mapping[str, Any] | str) -> list[dict[str, Any]]:
@@ -295,10 +297,16 @@ def parse_ordered_calls_y_pred(y_pred: Mapping[str, Any] | str) -> list[dict[str
         ]
         if missing:
             raise ValueError(f"y_pred.calls item missing required field(s): {missing}")
+        if not isinstance(call["rest_api"], str):
+            raise ValueError("y_pred.calls.rest_api must be a string")
         if not isinstance(call["allowed_methods"], list):
             raise ValueError("y_pred.calls.allowed_methods must be a list")
-        allowed_methods = [str(method).upper() for method in call["allowed_methods"]]
-        method = str(call["method"]).upper()
+        if not all(isinstance(method, str) for method in call["allowed_methods"]):
+            raise ValueError("each y_pred.calls.allowed_methods item must be a string")
+        if not isinstance(call["method"], str):
+            raise ValueError("y_pred.calls.method must be a string")
+        allowed_methods = [method.upper() for method in call["allowed_methods"]]
+        method = call["method"].upper()
         if method not in allowed_methods:
             raise ValueError(
                 f"y_pred.calls.method {method} is not in allowed_methods "
@@ -307,7 +315,7 @@ def parse_ordered_calls_y_pred(y_pred: Mapping[str, Any] | str) -> list[dict[str
         if not isinstance(call["arguments"], Mapping):
             raise ValueError("y_pred.calls.arguments must be an object")
         parsed.append({
-            "rest_api": str(call["rest_api"]),
+            "rest_api": call["rest_api"],
             "allowed_methods": allowed_methods,
             "method": method,
             "arguments": dict(call["arguments"]),

@@ -641,6 +641,14 @@ def test_y_pred_parsers_preserve_order_and_report_bad_contracts() -> None:
         })
 
 
+def test_rest_api_list_parser_rejects_non_string_items() -> None:
+    """Phase 2 y_pred parsing rejects non-string REST API labels."""
+    with pytest.raises(ValueError, match="rest_api_list item"):
+        parse_rest_api_list_y_pred({
+            "y_pred": {"rest_api_list": ["/redfish/v1/Systems", 42]},
+        })
+
+
 def test_ordered_calls_parser_preserves_multiple_call_order() -> None:
     """Phase 3 y_pred parsing keeps the model-emitted call sequence intact."""
     calls = [
@@ -659,6 +667,37 @@ def test_ordered_calls_parser_preserves_multiple_call_order() -> None:
     ]
 
     assert parse_ordered_calls_y_pred({"calls": calls}) == calls
+
+
+def test_ordered_calls_parser_rejects_non_string_contract_fields() -> None:
+    """Phase 3 y_pred parsing rejects non-string REST API, method, and allowed methods."""
+    with pytest.raises(ValueError, match="rest_api"):
+        parse_ordered_calls_y_pred({
+            "calls": [{
+                "rest_api": 42,
+                "allowed_methods": ["GET"],
+                "method": "GET",
+                "arguments": {},
+            }],
+        })
+    with pytest.raises(ValueError, match="allowed_methods"):
+        parse_ordered_calls_y_pred({
+            "calls": [{
+                "rest_api": "/redfish/v1/Systems",
+                "allowed_methods": ["GET", 42],
+                "method": "GET",
+                "arguments": {},
+            }],
+        })
+    with pytest.raises(ValueError, match="method"):
+        parse_ordered_calls_y_pred({
+            "calls": [{
+                "rest_api": "/redfish/v1/Systems",
+                "allowed_methods": ["GET"],
+                "method": 42,
+                "arguments": {},
+            }],
+        })
 
 
 def test_ordered_calls_parser_rejects_invalid_method_and_arguments_shape() -> None:
