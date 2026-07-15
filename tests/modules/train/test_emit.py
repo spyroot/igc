@@ -27,6 +27,7 @@ def _spec(**over):
         "per_device_train_batch_size": 8, "gradient_accumulation_steps": 4,
         "num_train_epochs": 3, "llm_learning_rate": 5e-5,
         "llm_scheduler": "OneCycleLR", "llm_optimizer": "AdamW",
+        "early_stopping_patience": 3, "early_stopping_min_delta": 0.005,
         "mixed_precision": "bf16", "sharding": "none", "use_accelerator": False,
         "masking_type": "NO_MASK", "num_workers": 8, "seed": 42,
         "weights_role": "model_x",
@@ -78,6 +79,8 @@ def test_settings_scrubbed_of_sensitive_keys():
     # the allowlisted run knobs made it through
     assert m.settings["gradient_accumulation_steps"] == "4"
     assert m.settings["llm_scheduler"] == "OneCycleLR"
+    assert m.settings["early_stopping_patience"] == "3"
+    assert m.settings["early_stopping_min_delta"] == "0.005"
     assert m.settings["weights_role"] == "model_x"
 
 

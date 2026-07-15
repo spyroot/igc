@@ -408,6 +408,18 @@ def add_trainer_group(parser):
              " If provided, overrides num_train_epochs.")
 
     trainer_group.add_argument(
+        "--early_stopping_patience",
+        type=int, default=3,
+        help="Number of evaluation calls without meaningful improvement before"
+             " stopping Phase 1 fine-tuning.")
+
+    trainer_group.add_argument(
+        "--early_stopping_min_delta",
+        type=float, default=0.005,
+        help="Minimum validation-loss improvement required to reset Phase 1"
+             " early-stopping patience.")
+
+    trainer_group.add_argument(
         "--output_dir",
         type=str, default=None,
         help="Where to store the model.")

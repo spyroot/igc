@@ -89,6 +89,8 @@ class TrainingProfile:
     warmup_ratio: float = 0.03
     epochs: int = 3                  # used when max_steps is None
     max_steps: Optional[int] = None  # hard step cap (overrides epochs when set)
+    early_stopping_patience: int = 3
+    early_stopping_min_delta: float = 0.005
     sharding: str = "none"           # none | zero3 | fsdp
     seq_len: int = 1024
     num_workers: int = 8
@@ -102,7 +104,10 @@ class TrainingProfile:
             "precision": self.precision, "torch_dtype": self.torch_dtype,
             "batch_size": self.batch_size, "grad_accum": self.grad_accum, "lr": self.lr,
             "scheduler": self.scheduler, "warmup_ratio": self.warmup_ratio,
-            "epochs": self.epochs, "max_steps": self.max_steps, "sharding": self.sharding,
+            "epochs": self.epochs, "max_steps": self.max_steps,
+            "early_stopping_patience": self.early_stopping_patience,
+            "early_stopping_min_delta": self.early_stopping_min_delta,
+            "sharding": self.sharding,
             "seq_len": self.seq_len, "num_workers": self.num_workers,
         }
         if self.use_peft and self.adapter is not None:

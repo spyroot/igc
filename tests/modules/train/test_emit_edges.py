@@ -28,6 +28,8 @@ def _spec(**overrides):
         "max_train_steps": 120,
         "seq_len": 1024,
         "gradient_accumulation_steps": 4,
+        "early_stopping_patience": 3,
+        "early_stopping_min_delta": 0.005,
         "llm_scheduler": "OneCycleLR",
         "seed": 7,
     }
@@ -97,6 +99,8 @@ def test_settings_include_only_allowlisted_run_knobs():
 
     assert bundle.manifest.settings == {
         "gradient_accumulation_steps": "4",
+        "early_stopping_patience": "3",
+        "early_stopping_min_delta": "0.005",
         "llm_scheduler": "OneCycleLR",
         "seed": "7",
         "profile": "phase1_7b_rslora_r32",

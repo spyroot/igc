@@ -106,8 +106,12 @@ cross-entropy only on the `y_true` JSON completion.
 ## Phase 1 W&B Metrics
 
 Use the `PHASE1_WANDB_METRIC_KEYS` registry, defined in
-`igc/modules/base/metric_keys.py`, for metrics that the current trainer can emit.
+`igc/modules/base/metric_keys.py`, for metrics that the current Phase 1 training
+surface tracks or reserves.
 The live registry keeps Phase 1 curves separate from goal extraction or RL:
+
+Current Phase 1 has the W&B namespace and basic training/eval metrics, but it does
+not yet have the full train/validation/test/calibration gate.
 
 - `phase1_finetune/train/loss`
 - `phase1_finetune/train/epoch_loss`
@@ -140,6 +144,29 @@ lands:
 - `phase1_finetune/test/latency_sec_p50`
 - `phase1_finetune/test/latency_sec_p95`
 - `phase1_finetune/test/memory_peak_mb`
+
+## Phase 1 Stopping Rule
+
+Full Phase 1 fine-tuning should select `model_x` by validation loss, not by the
+test split and not by token accuracy alone:
+
+- primary metric: `phase1_finetune/eval/loss`
+- mode: minimize
+- patience: 3 evaluation calls
+- min delta: 0.005 to 0.01 validation loss
+- max epochs: 5 to 10 for small corpora unless the validation curve still improves
+- evaluation cadence: 4 evaluations per epoch as the starting point
+- save cadence: every evaluation call
+
+For example, if one epoch has 100 optimizer steps, start with `eval_steps=25`
+and `save_steps=25`. Save a checkpoint at every evaluation, track the lowest
+validation loss, stop after three evaluations without a meaningful improvement,
+and restore the checkpoint with the lowest validation loss.
+
+Secondary and diagnostic metrics:
+
+- secondary: `phase1_finetune/eval/perplexity`
+- diagnostic: `phase1_finetune/eval/token_accuracy`
 
 ## Acceptance Gate
 

@@ -92,6 +92,8 @@ def test_profile_matrix_matches_plan_contract(
     assert p.weights_role == "model_x"
     assert p.llm_stage == "latent"
     assert p.corpus_objective == "phase1_pretrain"
+    assert p.early_stopping_patience == 3
+    assert p.early_stopping_min_delta == 0.005
 
 
 def test_7b_rslora_matches_plan_spec():
@@ -177,6 +179,8 @@ def test_describe_is_flat_log_safe_dict():
     assert d["phase"] == "phase1_finetune"
     assert d["weights_role"] == "model_x"
     assert d["corpus_objective"] == "phase1_pretrain"
+    assert d["early_stopping_patience"] == 3
+    assert d["early_stopping_min_delta"] == 0.005
     assert d["adapter"]["method"] == "rslora" and d["adapter"]["r"] == 32
     full = resolve_profile("phase1_7b_full_zero3").describe()
     assert full["adapter"]["method"] == "full_finetune" and full["sharding"] == "zero3"

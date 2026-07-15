@@ -30,6 +30,8 @@ def test_smoke_is_step_capped_full_ft():
     assert _val(argv, "--corpus_objective") == "phase1_pretrain"
     assert _val(argv, "--weights_role") == "model_x"
     assert _val(argv, "--llm") == "latent"
+    assert _val(argv, "--early_stopping_patience") == "3"
+    assert _val(argv, "--early_stopping_min_delta") == "0.005"
     assert "--use_peft" not in argv and "--num_train_epochs" not in argv
 
 
@@ -78,6 +80,7 @@ def test_main_print_argv_applies_typed_set_overrides(capsys):
     assert _val(argv, "--per_device_train_batch_size") == "12"
     assert _val(argv, "--llm_learning_rate") == "0.0002"
     assert _val(argv, "--max_train_steps") == "25"
+    assert _val(argv, "--early_stopping_patience") == "3"
     assert "--num_train_epochs" not in argv
 
 
@@ -92,6 +95,8 @@ def test_main_prints_public_safe_profile_json(capsys):
     assert payload["phase"] == "phase1_finetune"
     assert payload["weights_role"] == "model_x"
     assert payload["corpus_objective"] == "phase1_pretrain"
+    assert payload["early_stopping_patience"] == 3
+    assert payload["early_stopping_min_delta"] == 0.005
     assert payload["adapter"]["method"] == "full_finetune"
     assert "json_data_dir" not in payload and "output_dir" not in payload
 
