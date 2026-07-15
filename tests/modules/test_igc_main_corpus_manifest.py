@@ -30,10 +30,11 @@ class _FakeCorpusDataset:
 
     instances = []
 
-    def __init__(self, corpus_dir, default_tokenize=None, max_len=None):
+    def __init__(self, corpus_dir, default_tokenize=None, max_len=None, objective=None):
         self.corpus_dir = Path(corpus_dir)
         self.default_tokenize = default_tokenize
         self.max_len = max_len
+        self.objective = objective
         self.tokenizer = object()
         _FakeCorpusDataset.instances.append(self)
 
@@ -123,6 +124,7 @@ def test_redfish_ctl_manifest_materializes_live_corpus(tmp_path, monkeypatch):
     assert dataset is _FakeCorpusDataset.instances[0]
     assert dataset.default_tokenize == "gpt2"
     assert dataset.max_len == 32
+    assert dataset.objective == "legacy"
     examples_path = dataset.corpus_dir / "examples.jsonl"
     manifest_path = dataset.corpus_dir / "manifest.json"
     assert examples_path.is_file()

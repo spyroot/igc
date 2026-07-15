@@ -1,6 +1,6 @@
 """Tool-teaching: LLM-taught few-shot tool acquisition (``docs/ARCHITECTURE.md`` §12).
 
-The teacher (the DeepSeek-V4-Flash endpoint M3 reuses) induces a
+The teacher induces a
 :class:`~igc.core.tool_card.ToolCard` for an unknown tool from a few real
 ``(call -> result/error)`` interactions; this package grounds the card against
 real evidence (:mod:`igc.modules.teach.grounding`) and gates safe cold-start

@@ -61,8 +61,8 @@ the proposed first compact-state schema: a JSON-serializable structured payload 
 
 ```mermaid
 flowchart LR
-    Goal["Goal\nigc/core/types.py\ninstruction + spec + constraints + plan"]
-    Planner["Planner / casting layer\nplanned M3"]
+    Goal["GoalEnvelope\noperator text -> GoalRefs + explicit dependencies"]
+    Extractor["GoalExtractor / GoalEncoder\ntext -> atomic z_sub_goal(s)"]
     State["RedfishStateV0\nstructured resources, links,\nstatus, tasks, settings, telemetry"]
     Catalog["ToolCatalog.available_actions(obs)\nplanned Redfish adapter\nlegal ToolAction candidates"]
     Codec["ActionCodec\nigc/modules/policy/action_codec.py\nrender + cache candidate templates"]
@@ -74,11 +74,11 @@ flowchart LR
     Step["StepResult / Transition\nigc/core/types.py\nthin step + rich replay record"]
     Replay["Replay / HER\nterminal masks + achieved_goal"]
 
-    Goal --> Planner --> Catalog
+    Goal --> Extractor --> Pointer
     State --> Catalog --> Codec --> Pointer --> Args --> Guard --> Sim
     Sim --> State
     State --> Eval --> Step --> Replay --> Pointer
-    Goal --> Eval
+    Extractor --> Eval
 ```
 
 ### Model dependency map
@@ -93,7 +93,7 @@ flowchart TD
     M1["M1 backbone encoder\nconfig-driven causal/decoder model"]
     S0["RedfishStateV0 extractor\nstructured state contract + fixtures"]
     M2["M2 state pooler / autoencoder\npooled structured/text state"]
-    M3["M3 planner\ninstruction -> sub-goal plan"]
+    GE["GoalExtractor / GoalEncoder\ninstruction -> atomic goals + z_sub_goal"]
     M4["M4 evaluator / reward\nstructured verify + dense reward"]
     M5["M5 world model\nnext-state + status/task phase"]
     M6["M6 RL policy\ncandidate scoring + replay/HER"]
@@ -101,12 +101,12 @@ flowchart TD
 
     S0 --> M2
     M1 --> M2
-    M1 --> M3
+    M1 --> GE
     S0 --> M4
     M2 --> M5
     M4 --> M5
     M2 --> M6
-    M3 --> M6
+    GE --> M6
     M4 --> M6
     M5 --> M6
     M6 --> Gate
@@ -234,11 +234,11 @@ machine (Current→Pending→Applied, job Scheduled→Running→Done).
 
 ![Hierarchical workload plan](diagrams/04-hierarchical-workload-plan.svg)
 
-Design consequences: `Goal` carries a `plan` (sub-goal DAG); `ToolAction` carries `preconditions`
-and `effects`; the simulator models deferred/async state; reward is decomposed (terminal +
-per-sub-goal + progress shaping) with HER over reachable sub-goals; the planner ("casting" layer)
-generalizes `GoalExtractorTrainer` from one action to an ordered plan; and API/state discovery become
-explicit pipeline stages.
+Design consequences: `GoalEnvelope` carries atomic `GoalRef` targets and only the dependency hints
+explicitly stated in text; `ToolAction` carries `preconditions` and `effects`; the simulator models
+deferred/async state; reward is decomposed (terminal + per-sub-goal + progress shaping) with HER over
+reachable sub-goals; and API/state discovery become explicit pipeline stages. The RL policy learns
+the concrete action ordering; the language model does not emit a strategy.
 
 ### Meta-learning: a transferable multi-step agent
 
@@ -247,8 +247,8 @@ API (or filesystem/SQL/GitHub) and it should operate that backend with little or
 is the target hypothesis; it becomes a claim only after offline eval traces and metrics support it.
 The design makes the hypothesis concrete, layer by layer:
 
-1. **Extract the goal.** The planner (the "casting" layer) maps a high-level instruction to a `Goal`
-   and an ordered sub-goal `plan` (the hierarchical decomposition above).
+1. **Extract the goal.** `GoalExtractor` maps a high-level instruction to atomic `GoalRef` targets
+   and explicit dependency hints; `GoalEncoder` aligns the text with concrete Redfish goal surfaces.
 2. **Discover the action space.** A new backend exposes its tools/ops through `ToolCatalog` +
    `available_actions(obs)` (for Redfish, derived from the `redfish_ctl` crawl + the `.npy` map). The
    agent never needs a fixed, pre-enumerated action set — it reads what is legal *now*.
@@ -256,16 +256,16 @@ The design makes the hypothesis concrete, layer by layer:
    it has never seen is still scorable: its `tool_name/op/schema` text is embedded by the shared
    backbone, so there is no output-layer resize, no re-index, no head retrain. This is what turns "a
    new API" from a retraining event into an inference-time lookup.
-4. **Find an optimal strategy.** Goal-conditioned RL (DQN + HER) over the sub-goal plan learns the
-   ordering and the fewest-steps path; the world model supplies preconditions/dynamics so the agent
-   plans rather than flails.
+4. **Find an optimal strategy.** Goal-conditioned RL (DQN + HER) over the active `z_sub_goal` learns
+   the ordering and the fewest-steps path; the world model supplies preconditions/dynamics so the
+   agent plans rather than flails.
 5. **Adapt on the new environment.** Trained across *multiple* environments (filesystem, SQL, GitHub,
    Redfish) — the meta-training distribution — the shared backbone, pointer policy, and state encoder
    transfer; a short interaction (plus an optional LoRA / world-model update) adapts to the new
    backend's quirks. This is the meta-learning ("learn to learn") payoff: capability acquired on known
    APIs carries to unknown ones.
 
-In short: **extract → plan → discover → execute → transfer.** Every layer is built so the unit of
+In short: **extract → discover → execute → transfer.** Every layer is built so the unit of
 generalization is *the skill of operating a tool API*, not *a specific API*.
 
 ## 4. The six models and the training curriculum
@@ -280,7 +280,7 @@ de-hardcoded before the first backbone fit.
 | --- | --- | --- | --- | --- |
 | 0 | — | make it runnable + de-hardcode dims + backbone config-driven | `pytest -q` green, ruff clean | CPU |
 | 1 | M1 backbone / state encoder | causal-LM SFT over Redfish JSON → checkpoint A | held-out token acc ↑ vs measured GPT-2 baseline | 1-GPU |
-| 2 | M2 autoencoder · M3 planner · M4 reward | pool→latent 64 · NL→sub-goal DAG · decomposed reward | recon MSE · DAG topo-validity · reward AUC | 1-GPU ×3 |
+| 2 | M2 autoencoder · GoalExtractor/GoalEncoder · M4 reward | pool→latent 64 · NL→atomic goals · decomposed reward | recon MSE · extraction exact match · reward AUC | 1-GPU ×3 |
 | 3 | M5 world/transition | next-latent + status/job-phase classification | 1-step error, phase accuracy, rollout drift | 1-GPU |
 | 4 | M6 RL agent | goal-cond. DQN + HER on `ToolAction`, learned reward | success_rate per workload, episode_length | 1-GPU (longest) |
 
@@ -314,8 +314,8 @@ The target loader should use `AutoTokenizer` + a class arg, and `ValueHead` shou
 | 3 · Offline prover envs | filesystem + sqlite plugins (real args, dynamic actions, exact verify, dry-run, destructive blocked) | per-env offline tests |
 | 4 · Trajectory + github | recorder + `TrajectoryDataset`; `CassetteSimulator`; github plugin (offline replay, live-gated) | record→load round-trip; github offline via cassette |
 | 5 · Backbone + M1/M2 | backbone-agnostic refactor; `StatePooler`; train M1 + M2 on NVL72 | small-model CPU green → 1-GPU overfit-a-batch smoke |
-| 6 · Learning layer | planner (M3) + reward (M4) + world model (M5) + evaluators + preference data → RL agent (M6) | offline eval harness scores traces; GPU-marked training |
-| 7 · Guardrail + deploy | dry-run/approval/executor over `_is_live`; serve backbone+planner via vLLM (TP=1); live Redfish canary behind the gate | guardrail blocks destructive-without-approval; offline gate stays green |
+| 6 · Learning layer | GoalExtractor/GoalEncoder + reward (M4) + world model (M5) + evaluators + preference data → RL agent (M6) | offline eval harness scores traces; GPU-marked training |
+| 7 · Guardrail + deploy | dry-run/approval/executor over `_is_live`; serve backbone + goal extractor via vLLM (TP=1); live Redfish canary behind the gate | guardrail blocks destructive-without-approval; offline gate stays green |
 
 ## 7. Infra · monitoring · deploy (NVL72)
 
@@ -329,7 +329,7 @@ NVL72 through a one-GPU-first Slurm/pyxis workflow.
 - **Training-loop sanity checks:** overfit-a-batch, grad-norm clip + `isfinite` guard, LR
   warmup/cosine, deterministic seed, resume-from-checkpoint, early stop, a startup dim-contract
   assertion (`observation_space == latent_dim + goal_dim`), and a Buffer arity check.
-- **Deploy, two paths:** (A) backbone + planner served OpenAI-compatible via vLLM, **TP=1 mandatory**
+- **Deploy, two paths:** (A) backbone + GoalExtractor served OpenAI-compatible via vLLM, **TP=1 mandatory**
   (blocked until the backbone refactor lands); (B) the RL policy runs in the mock-env eval harness,
   never wired to a live BMC by default. Any real-Redfish move is read-only GET/HEAD first, paced,
   approved non-prod host, behind the guardrail.
@@ -354,7 +354,7 @@ Found in-tree during design review:
 ## 9. Open decisions
 
 1. Trainable base model id (the `--model_type` value for the flash-class backbone).
-2. Planner build — learned (`GoalExtractor`→planner), LLM-via-Flash, or both.
+2. Goal extraction build — learned `GoalExtractor`/`GoalEncoder`, teacher-generated text drafts, or both.
 3. `--raw_data_dir` — new flag or alias of the existing `--json_data_dir`.
 4. Reward decomposition — how per-sub-goal rewards sum-consistently with the terminal reward.
 
@@ -402,18 +402,21 @@ first; MoE is a later upgrade** (upcycle/distill once there are many APIs + data
 — MoE adds capacity/specialization, not the meta-learning (which lives in attention-over-history).
 
 **Backbone sizing — decoupled.** Small dense bf16 backbone for the hot-loop encoder/RL (M1/M2/M6,
-runs every step); a larger 14–32B for the goal extractor (M3, runs once per episode). Trainable =
+runs every step); a larger model may be used for the GoalExtractor if extraction metrics justify it
+(runs once per episode). Trainable =
 small/mid dense bf16 + LoRA + ZeRO-3 (`--sharding zero3`). DeepSeek-V4-Flash (284B FP8/FP4 MoE) is the
 **inference/teacher** only (deployed NVFP4), never the trainable backbone.
 
-**M3 — Design B (standalone distillation).** Own backbone + tokenizer + DeepSeek-distilled
-`(instruction → goal + params)` data, reusing the existing `GoalExtractorTrainer`; bootstrap by calling
-DeepSeek directly. Verify teacher outputs against `Goal.spec` before distilling.
+**Goal extraction — standalone distillation.** Own backbone + tokenizer + Redfish-corpus-backed
+`(operator text -> atomic GoalRef set + explicit dependency hints)` data. A teacher model may draft
+operator text, but deterministic code owns `true_y`; verify generated text against the current
+GoalExtractor before using it as supervised data.
 
 **Training curriculum.**
 1. **Represent** (supervised, separate): M1 backbone SFT + M2 autoencoder → compact states. Pretrained
    first; RL LoRA-adapts on top (do not co-train the whole backbone with RL).
-2. **Plan** (distill) + **Reward** (build, parallel): M3 from DeepSeek; M4 schema-driven verifier.
+2. **Extract** (distill) + **Reward** (build, parallel): GoalExtractor/GoalEncoder from the
+   generated goal dataset; M4 schema-driven verifier.
 3. **Meta-RL — ONE optimization path:** the in-context RL²-Transformer policy over the API-sim
    distribution, with HER, a **BC/SFT warm-start** (imitate teacher demos before RL — the main lever
    against the sparse-reward cold start), and a **narrow→broad task curriculum**. Meta is not a phase
@@ -432,8 +435,8 @@ Four views of the agreed design (§10). Maintainable mermaid; render on GitHub.
 ```mermaid
 flowchart TB
     NL["Natural-language goal<br/>(set boot=PXE, power-cycle)"]
-    NL --> M3["M3 planner / goal extractor<br/>distilled from DeepSeek<br/>-> Goal(spec, params, sub-goals)"]
-    M3 -->|goal-conditions| AGENT
+    NL --> GE["GoalExtractor / GoalEncoder<br/>-> atomic GoalRefs + z_sub_goal"]
+    GE -->|goal-conditions| AGENT
 
     subgraph AGENT["Goal-conditioned RL2 agent (one shared policy)"]
         ENC["M1/M2 encoder<br/>API response -> compact state vector"]
@@ -484,7 +487,7 @@ flowchart LR
 flowchart TB
     subgraph SEP["Separate prerequisite phases"]
         REP["Represent<br/>M1 backbone SFT + M2 autoencoder<br/>small dense, pretrained first"]
-        PLAN["Plan<br/>M3 distilled from DeepSeek"]
+        PLAN["Extract<br/>GoalExtractor / GoalEncoder"]
         REW["Reward<br/>M4 schema-driven verifier"]
     end
     REP --> META
@@ -500,14 +503,14 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    DS["DeepSeek-V4-Flash<br/>284B MoE, NVFP4<br/>DEPLOYED inference endpoint"]
-    DS -->|teacher: generate goal/param data| DISTILL["distillation set<br/>verified Goal objects"]
-    DISTILL -->|SFT| M3B["M3 goal extractor<br/>14-32B dense, OWN backbone<br/>(runs once per episode)"]
+    DS["Teacher LLM<br/>inference-only bootstrap"]
+    DS -->|draft operator text X only| DISTILL["goal text set<br/>deterministic true_y labels"]
+    DISTILL -->|SFT / contrastive| GEB["GoalExtractor / GoalEncoder<br/>(runs once per episode)"]
     SMALL["small dense bf16 backbone 1-7B<br/>+ LoRA + ZeRO-3 (hot loop)"]
     SMALL --> M1["M1 state encoder"]
     SMALL --> M2["M2 autoencoder"]
     SMALL --> M6["M6 RL policy heads"]
-    DS -.->|direct call for bootstrap| M3B
+    DS -.->|direct call for bootstrap| GEB
 ```
 
 ## 12. Tool-teaching (LLM-taught few-shot tool acquisition)
@@ -521,7 +524,7 @@ brand-new tool is *scorable* with no head resize — `Igc_PointerQNetwork`
 fan-out (§3.3, step 3). But that signal is only the tool's *declared surface*; the agent
 still learns *how to actually drive* the tool by sparse-reward trial-and-error (reward
 arrives only at goal completion — §10). **Tool-teaching adds an active loop**: the
-DeepSeek-V4-Flash teacher M3 already reuses (the deployed NVFP4 endpoint, §11.4) reads
+same gated LLM-teacher path used for goal-dataset bootstrapping reads
 the agent's own `k` real `(call → result/error)` interactions with an unknown op and
 induces a grounded, versioned **ToolCard**, which flows through the *exact existing*
 render→cache→pointer→argument pipeline to accelerate few-shot acquisition. Passive
@@ -586,11 +589,11 @@ grounding tallies so a counter tick does not churn the embedding cache), and
 `spec_fingerprint` (blake2b of `ToolSpec.arg_schema[op]` — a moved op schema
 auto-invalidates a stale card).
 
-### 12.3 Induction — ToolTeacher (reuse M3's teacher)
+### 12.3 Induction — ToolTeacher
 
 `ToolTeacher.induce()` (`igc/modules/teach/tool_teacher.py`, slice 6b) issues a
-JSON-schema'd, **evidence-bound** prompt against the *same* DeepSeek-V4-Flash endpoint
-M3 distills from (§11.4 "direct call for bootstrap") — a reuse, not a new LLM. Inputs are
+JSON-schema'd, **evidence-bound** prompt against the same gated LLM-teacher path used for
+goal-dataset bootstrapping — a reuse, not a new LLM. Inputs are
 the discovery facts (`ToolSpec`, and for Redfish the `.npy` `allowed_methods_mapping` +
 `@Redfish.ActionInfo` enums) plus the `k` observed `Transition` records
 (`.action`, `.next_observation.status/.error`, truncated `.text/.structured`,
@@ -651,7 +654,7 @@ and must not be reported as already-enforced.
 
 Tool-teaching is **not a new phase**; it rides §10's single meta-RL optimization path
 (§11.3) inside Phase 6, and depends on M1/M2 (compress so `k` interactions + card fit the
-RL² budget), M3 (the teacher), and M4 (the grounder). The interplay:
+RL² budget), the gated teacher path, and M4 (the grounder). The interplay:
 
 - **BC/SFT warm-start** (§10's main lever against the sparse-reward cold start): teacher
   demos enter BC *only after* M4 confirms they reached a sub-goal, carrying their ToolCard

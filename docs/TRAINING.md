@@ -40,17 +40,20 @@ values into repo files.
 
 ## 2. Data
 
-Training reads captured Redfish JSON from a materialized `redfish_ctl` dataset artifact. Use
-`redfish_ctl` to pull, strictly verify, and materialize the selected dataset into a stable
-vendor/model/capture layout, then point IGC at the manifest and materialized root:
+Training reads captured Redfish JSON from a materialized `redfish_ctl` dataset artifact. Use the
+corpus workflow in the `redfish_ctl` checkout to pull, strictly verify, and materialize the selected
+dataset into a stable vendor/model/capture layout. Then point IGC at the manifest and materialized
+root with `--corpus_manifest`, `--corpus_root`, and `--corpus_kind`, which are parser flags defined in
+`igc/shared/shared_arg_parser.py`:
 
 ```bash
-python tools/corpus.py pull --kind dataset --vendor dell --model xr8620t
-python tools/corpus.py verify --kind dataset --vendor dell --model xr8620t --require-materialized
-python tools/corpus.py materialize --kind dataset --vendor dell --model xr8620t --dest ./build/corpus
-python -m igc.ds.sources.redfish_fixture_source \
-  --corpus-manifest ./corpora/manifest.v1.json \
-  --corpus-root ./build/corpus
+IGC_PROFILE=m1_gpt2_smoke \
+IGC_METRIC_REPORT=tensorboard \
+bash scripts/run_profile.sh \
+  --corpus_manifest /path/to/redfish_ctl/corpora/manifest.v1.json \
+  --corpus_root /path/to/materialized/corpus \
+  --corpus_kind dataset \
+  --corpus_objective phase1_pretrain
 ```
 
 The legacy `~/.json_responses` capture layout remains a compatibility input; its `.npy` map is the

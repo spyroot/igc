@@ -10,7 +10,7 @@ The teacher (``docs/ARCHITECTURE.md`` §12.3) turns the agent's own ``k`` real
   an error taxonomy, the spec -> the signature). It is the offline test double *and*
   the honest rule-based baseline the curve eval (§12.7) measures the LLM teacher
   against; it never reaches the network.
-* A live DeepSeek-V4-Flash teacher (the endpoint M3 reuses, §11.4) is the gated
+* A live LLM teacher (the gated bootstrap path from §11.4) is the
   follow-on — it shares this interface so the offline plumbing is identical.
 
 :func:`teach_tool` is the induce -> ground -> confirm -> store pipeline used by both.

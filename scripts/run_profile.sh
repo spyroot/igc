@@ -20,6 +20,8 @@ set -euo pipefail
 
 PROFILE="${IGC_PROFILE:?set IGC_PROFILE (e.g. m1_7b_rslora_r32)}"
 DATA_DIR="${IGC_DATA_DIR:-$HOME/.json_responses}"
+CORPUS_DIR="${IGC_CORPUS_DIR:-}"
+CORPUS_OBJECTIVE="${IGC_CORPUS_OBJECTIVE:-legacy}"
 OUT_DIR="${IGC_OUTPUT_DIR:-experiments/${PROFILE}}"
 METRIC_REPORT="${IGC_METRIC_REPORT:-wandb}"
 
@@ -39,6 +41,10 @@ fi
 # Optional per-run overrides: IGC_SET="batch_size=16 lr=2e-4"
 SET_ARGS=()
 for kv in ${IGC_SET:-}; do SET_ARGS+=(--set "$kv"); done
+CORPUS_ARGS=()
+if [ -n "$CORPUS_DIR" ]; then
+    CORPUS_ARGS+=(--corpus_dir "$CORPUS_DIR" --corpus_objective "$CORPUS_OBJECTIVE")
+fi
 
 echo "== resolved profile: ${PROFILE} =="
 python -m igc.modules.train.launch --profile "$PROFILE" "${SET_ARGS[@]}"
@@ -51,6 +57,7 @@ echo "== launching igc_main.py (data=${DATA_DIR}, out=${OUT_DIR}) =="
 # shellcheck disable=SC2086  # ARGV is a shell-form argv emitted by the launcher.
 exec python igc_main.py $ARGV \
   --json_data_dir "$DATA_DIR" \
+  "${CORPUS_ARGS[@]}" \
   --output_dir "$OUT_DIR" \
   --metric_report "$METRIC_REPORT" \
   "$@"

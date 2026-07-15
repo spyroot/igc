@@ -65,6 +65,15 @@ def test_redfish_corpus_manifest_flags_are_defined(monkeypatch):
     assert args.corpus_kind == "dataset"
 
 
+def test_corpus_objective_defaults_legacy_and_phase1_selectable(monkeypatch):
+    """--corpus_objective selects the explicit Phase 1 prompt/completion objective."""
+    defaults = _parse(monkeypatch, [])
+    phase1 = _parse(monkeypatch, ["--corpus_objective", "phase1_pretrain"])
+
+    assert defaults.corpus_objective == "legacy"
+    assert phase1.corpus_objective == "phase1_pretrain"
+
+
 def test_rl_sizes_are_ints(monkeypatch):
     """rl batch/buffer sizes parse as ints, not floats."""
     args = _parse(monkeypatch, [])

@@ -1,18 +1,13 @@
 """
-This class is used to train a goal extractor from input query.
+Legacy permutation trainer for the old goal-extractor experiment.
 
-Given input text provided by the user, or external system.
-The goal is to extract a goal for the agent and parameters
-that agent need used.
+This module is kept only so historical ``--llm goal`` / ``--llm parameter``
+runs remain inspectable. New GoalExtractor / GoalEncoder work must use
+``igc.ds.goal_dataset*`` and ``igc.modules.goal_extractor`` instead.
 
-For example given input text: "Update raid with raid0"
-The goal here update raid configuration and the
-parameter is raid0.
-
-In downstream task the goal encoded as one hot vector.
-This what used to train RL agent.
-
-Parameters just passed to agent. i.e. we don't train on parameters.
+The legacy implementation creates synthetic word permutations from action names
+and emits one-hot-like labels. It is not the Redfish-corpus-backed latent-goal
+dataset design and should not be used for new training.
 
 Author:Mus mbayramo@stanford.edu
 """
@@ -821,4 +816,3 @@ class GoalExtractorTrainer(LlmModule):
             print(f"Input query with goal and parameters {goal_with_parameters_query}")
             goal, parameters = self.query_goal_and_parameters(goal_with_parameters_query)
             print(f"Agent goal: {goal} parameters {parameters}")
-

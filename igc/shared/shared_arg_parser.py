@@ -760,6 +760,14 @@ def add_dataset_dataloader(parser):
              "full is accepted as a legacy alias.")
 
     group.add_argument(
+        "--corpus_objective",
+        type=str, default="legacy",
+        choices=["legacy", "phase1_pretrain"],
+        help="Objective for --corpus_dir. 'legacy' preserves the historical whole-text "
+             "causal-LM bridge; 'phase1_pretrain' renders x={rest_api, allowed_methods, "
+             "json} and masks labels so loss applies only to the y_true JSON completion.")
+
+    group.add_argument(
         "--raw_data_dir",
         type=str, default="~/.json_responses",
         help="Raw captured Redfish responses the mock REST env serves; mirrors "

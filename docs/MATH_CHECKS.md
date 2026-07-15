@@ -126,7 +126,7 @@ flowchart LR
 | --- | --- | --- |
 | M1 backbone | language-model loss over Redfish text | tokenization mask, loss finite, small batch overfit, no hidden-size assumptions. |
 | M2 state pooler | pooled state reconstruction or auxiliary prediction | shape contract, no `seq_len * hidden_size` decoder blowup, finite gradients. |
-| M3 planner | instruction to sub-goal plan | plan validity metric, topological order, precondition satisfaction. |
+| GoalExtractor / GoalEncoder | instruction to atomic goal refs and latent sub-goals | atomic-goal exact match, dependency-edge F1, hard-negative retrieval, collapse checks. |
 | M4 evaluator/reward | structured success and dense reward | reward table for success/failure/progress/no-op; no embedding equality as final verifier. |
 | M5 world model | next state/status/task phase | one-step prediction target, terminal-state handling, rollout drift metric. |
 | M6 RL policy | candidate-action Q-learning with HER | terminal mask, legal-action mask, HER achieved-goal relabel, target sanity. |

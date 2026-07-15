@@ -55,17 +55,19 @@ and verification guide.
 
 ## Data flow
 
-The preferred input is a materialized `redfish_ctl` dataset artifact. Pull and verify the selected
-dataset archives in `redfish_ctl`, then materialize them into a stable vendor/model/capture layout:
+The preferred input is a materialized `redfish_ctl` dataset artifact. Use the corpus workflow in the
+`redfish_ctl` checkout to pull, verify, and materialize selected archives into a stable
+vendor/model/capture layout. IGC consumes that output through `--corpus_manifest`,
+`--corpus_root`, and `--corpus_kind`, which are defined in `igc/shared/shared_arg_parser.py`:
 
 ```bash
-git lfs install
-python tools/corpus.py pull --kind dataset --vendor dell --model xr8620t
-python tools/corpus.py verify --kind dataset --vendor dell --model xr8620t --require-materialized
-python tools/corpus.py materialize --kind dataset --vendor dell --model xr8620t --dest ./build/corpus
-python -m igc.ds.sources.redfish_fixture_source \
-  --corpus-manifest ./corpora/manifest.v1.json \
-  --corpus-root ./build/corpus
+IGC_PROFILE=m1_gpt2_smoke \
+IGC_METRIC_REPORT=tensorboard \
+bash scripts/run_profile.sh \
+  --corpus_manifest /path/to/redfish_ctl/corpora/manifest.v1.json \
+  --corpus_root /path/to/materialized/corpus \
+  --corpus_kind dataset \
+  --corpus_objective phase1_pretrain
 ```
 
 The legacy compatibility input is still supported: `redfish_ctl discovery` writes captured JSON to

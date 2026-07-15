@@ -2,10 +2,10 @@
 
 A ``ToolCard`` is what the tool-teaching layer (``docs/ARCHITECTURE.md`` §12)
 induces for a tool the agent does not yet know: from a few real ``(call ->
-result/error)`` interactions, the LLM teacher (the DeepSeek-V4-Flash endpoint M3
-reuses) distills the op's effective argument signature, the response fields to
-expect, an error taxonomy (what each status *means* — retriable / fatal /
-precondition-unmet), and preconditions. The card is a *refinement* of the
+result/error)`` interactions, the gated LLM teacher distills the op's effective
+argument signature, the response fields to expect, an error taxonomy (what each
+status *means* — retriable / fatal / precondition-unmet), and preconditions. The
+card is a *refinement* of the
 discovery-time :class:`~igc.core.types.ToolSpec`, never a replacement, and it is
 only ever advisory to scoring: per the safety invariant it may RAISE caution but
 can never lower a :class:`~igc.core.types.RiskLevel` or unlock a destructive op.
