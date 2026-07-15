@@ -656,6 +656,61 @@ def test_rendered_phase3_patch_example_keeps_explicit_arguments() -> None:
     assert "/redfish/v1/Systems/1/Bios/Settings" in rendered.prompt
 
 
+def test_rendered_and_inference_outputs_preserve_multi_item_order() -> None:
+    """Model-facing targets keep multi-item Phase 2/3 order unchanged."""
+    systems = _context(
+        "/redfish/v1/Systems",
+        ("GET", "HEAD"),
+        {"@odata.id": "/redfish/v1/Systems"},
+    )
+    tasks = _context(
+        "/redfish/v1/TaskService/Tasks",
+        ("GET", "HEAD"),
+        {"@odata.id": "/redfish/v1/TaskService/Tasks"},
+    )
+
+    phase2 = build_d1_rest_api_list_row(
+        text="check tasks, then list systems",
+        contexts=(systems, tasks),
+        rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems"),
+    )
+    phase3 = build_ordered_call_row(
+        text="check tasks, then list systems",
+        contexts=(systems, tasks),
+        rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems"),
+    )
+
+    assert json.loads(render_rest_api_list_example(phase2).target_json) == {
+        "rest_api_list": [
+            "/redfish/v1/TaskService/Tasks",
+            "/redfish/v1/Systems",
+        ],
+    }
+    assert json.loads(render_ordered_call_example(phase3).target_json) == {
+        "calls": [
+            {
+                "rest_api": "/redfish/v1/TaskService/Tasks",
+                "allowed_methods": ["GET", "HEAD"],
+                "method": "GET",
+                "arguments": {},
+            },
+            {
+                "rest_api": "/redfish/v1/Systems",
+                "allowed_methods": ["GET", "HEAD"],
+                "method": "GET",
+                "arguments": {},
+            },
+        ],
+    }
+    assert [
+        call["rest_api"]
+        for call in inference_target_calls_json(phase3)["target_calls"]
+    ] == [
+        "/redfish/v1/TaskService/Tasks",
+        "/redfish/v1/Systems",
+    ]
+
+
 def test_inference_json_uses_target_calls_shape() -> None:
     """The combined inference handoff uses target_calls with Phase 3 call fields."""
     context = _context(
