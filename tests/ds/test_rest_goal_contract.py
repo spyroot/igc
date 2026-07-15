@@ -27,6 +27,11 @@ from igc.ds.rest_goal_contract import (
     render_ordered_call_example,
     render_rest_api_list_example,
 )
+from igc.modules.base.metric_keys import (
+    PHASE2_WANDB_METRIC_KEYS,
+    PHASE3_WANDB_METRIC_KEYS,
+    PHASE23_WANDB_METRIC_KEYS,
+)
 
 
 def _context(rest_api: str, allowed_methods: tuple[str, ...], body: dict) -> RedfishContext:
@@ -249,6 +254,30 @@ def test_rows_reject_missing_and_duplicate_contexts() -> None:
         )
 
 
+def test_empty_ordered_rows_are_supported_for_noop_context() -> None:
+    """Empty mock rows encode no selected REST goals without inventing context."""
+    phase2 = build_d1_rest_api_list_row(
+        text="nothing to do",
+        contexts=(),
+        rest_api_list=(),
+        order_evidence="empty_request",
+    )
+    phase3 = build_ordered_call_row(
+        text="nothing to do",
+        contexts=(),
+        rest_api_list=(),
+    )
+
+    assert phase2["x"]["json"] == []
+    assert phase2["x"]["allowed_methods"] == {}
+    assert phase2["y_true"]["rest_api_list"] == []
+    assert phase2["y_true"]["order_evidence"] == "empty_request"
+    assert phase3["x"]["rest_api_list"] == []
+    assert phase3["x"]["json"] == []
+    assert phase3["x"]["allowed_methods"] == {}
+    assert phase3["y_true"]["calls"] == []
+
+
 def test_phase3_rejects_methods_outside_allowed_methods() -> None:
     """The selected method must be present in allowed_methods, including empty sets."""
     read_only = _context(
@@ -377,6 +406,22 @@ def test_y_pred_parsers_preserve_order_and_report_bad_contracts() -> None:
                 }],
             },
         })
+    with pytest.raises(ValueError, match="method"):
+        parse_ordered_calls_y_pred({
+            "calls": [{
+                "rest_api": "/redfish/v1/Systems",
+                "allowed_methods": ["GET"],
+                "arguments": {},
+            }],
+        })
+    with pytest.raises(ValueError, match="arguments"):
+        parse_ordered_calls_y_pred({
+            "calls": [{
+                "rest_api": "/redfish/v1/Systems",
+                "allowed_methods": ["GET"],
+                "method": "GET",
+            }],
+        })
 
 
 def test_ordered_calls_parser_preserves_multiple_call_order() -> None:
@@ -400,11 +445,26 @@ def test_ordered_calls_parser_preserves_multiple_call_order() -> None:
 
 
 def test_wandb_metric_keys_are_stage_scoped_and_not_m3_names() -> None:
-    """Phase 2/3 metric constants use dedicated W&B namespaces."""
-    assert "phase2_goal_extract/eval/ordered_exact_match_rate" in PHASE2_GOAL_EXTRACT_METRIC_KEYS
+    """Phase 2/3 contract constants reuse the shared W&B metric registry."""
+    assert PHASE2_GOAL_EXTRACT_METRIC_KEYS == PHASE2_WANDB_METRIC_KEYS
+    assert PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS == PHASE3_WANDB_METRIC_KEYS
+    assert (
+        PHASE2_GOAL_EXTRACT_METRIC_KEYS + PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS
+        == PHASE23_WANDB_METRIC_KEYS
+    )
+    assert (
+        "phase2_goal_extract/eval/ordered_exact_match_rate"
+        in PHASE2_GOAL_EXTRACT_METRIC_KEYS
+    )
     assert "phase2_goal_extract/eval/set_match_rate" in PHASE2_GOAL_EXTRACT_METRIC_KEYS
-    assert "phase3_argument_extract/eval/readonly_empty_arguments_rate" in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS
-    assert "phase3_argument_extract/eval/arguments_exact_match_rate" in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS
+    assert (
+        "phase3_argument_extract/eval/readonly_empty_arguments_rate"
+        in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS
+    )
+    assert (
+        "phase3_argument_extract/eval/arguments_exact_match_rate"
+        in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS
+    )
     assert all(k.startswith("phase2_goal_extract/") for k in PHASE2_GOAL_EXTRACT_METRIC_KEYS)
     assert all(k.startswith("phase3_argument_extract/") for k in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS)
     assert not any(k.startswith("m3_") for k in PHASE2_GOAL_EXTRACT_METRIC_KEYS)
@@ -418,10 +478,12 @@ def test_training_docs_pin_phase23_metric_constants() -> None:
 
     assert "PHASE2_GOAL_EXTRACT_METRIC_KEYS" in training_doc
     assert "PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS" in training_doc
-    assert "phase2_goal_extract/eval/{loss,perplexity,token_accuracy" in training_doc
-    assert "phase2_goal_extract/test/{latency_sec_p50,latency_sec_p95" in training_doc
-    assert "phase3_argument_extract/eval/{allowed_methods_exact_match_rate" in training_doc
-    assert "phase3_argument_extract/data/{avg_num_calls,avg_arguments_length" in training_doc
+    assert "PHASE2_WANDB_METRIC_KEYS" in training_doc
+    assert "PHASE3_WANDB_METRIC_KEYS" in training_doc
+    assert "phase2_goal_extract/eval/{ordered_exact_match_rate,set_match_rate" in training_doc
+    assert "phase2_goal_extract/order/{kendall_tau,edit_distance}" in training_doc
+    assert "phase3_argument_extract/eval/{call_ordered_exact_match_rate" in training_doc
+    assert "phase3_argument_extract/order/{kendall_tau,edit_distance}" in training_doc
 
 
 # Author: Mus mbayramo@stanford.edu

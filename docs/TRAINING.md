@@ -80,29 +80,18 @@ Current M1 state-encoder runs log `train/loss`, `train/lr`, `train/grad_norm`, `
 planned instrumentation unless a later change adds those exact metric keys.
 
 Phase 2/3 mock-plumbing metric names are constants only; no live W&B run is part of that lane.
-`PHASE2_GOAL_EXTRACT_METRIC_KEYS`, defined in `igc/ds/rest_goal_contract.py`, reserves:
+`PHASE2_GOAL_EXTRACT_METRIC_KEYS`, re-exported by `igc/ds/rest_goal_contract.py` from the shared
+`PHASE2_WANDB_METRIC_KEYS` registry in `igc/modules/base/metric_keys.py`, currently reserves:
 `phase2_goal_extract/train/{loss,perplexity,optimizer_step}`,
-`phase2_goal_extract/eval/{loss,perplexity,token_accuracy,ordered_exact_match_rate,set_match_rate}`,
-`phase2_goal_extract/eval/{precision,recall,f1,top_k_api_accuracy,invalid_api_rate}`,
-`phase2_goal_extract/eval/{missing_required_api_rate,missing_allowed_methods_rate,order_violation_rate}`,
-`phase2_goal_extract/order/{kendall_tau,edit_distance}`,
-`phase2_goal_extract/throughput/{train_tokens_per_sec,train_samples_per_sec,eval_tokens_per_sec,eval_samples_per_sec}`,
-`phase2_goal_extract/data/{avg_num_apis,max_num_apis,mean_sequence_length,padding_ratio}`,
-`phase2_goal_extract/calibration/{log_prob_per_sequence,ece}`, and
-`phase2_goal_extract/test/{latency_sec_p50,latency_sec_p95,memory_peak_mb}`.
-`PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS`, also defined in `igc/ds/rest_goal_contract.py`, reserves:
+`phase2_goal_extract/eval/{ordered_exact_match_rate,set_match_rate,precision,recall,f1,`
+`missing_allowed_methods_rate}`,
+and `phase2_goal_extract/order/{kendall_tau,edit_distance}`.
+`PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS`, re-exported by `igc/ds/rest_goal_contract.py` from the shared
+`PHASE3_WANDB_METRIC_KEYS` registry in `igc/modules/base/metric_keys.py`, currently reserves:
 `phase3_argument_extract/train/{loss,perplexity,optimizer_step}`,
-`phase3_argument_extract/eval/{loss,perplexity,token_accuracy,call_ordered_exact_match_rate}`,
-`phase3_argument_extract/eval/{call_order_correct_rate,step_exact_match_rate,rest_api_exact_match_rate}`,
-`phase3_argument_extract/eval/{allowed_methods_exact_match_rate,method_exact_match_rate}`,
-`phase3_argument_extract/eval/{arguments_json_parse_rate,arguments_exact_match_rate,invalid_method_rate}`,
-`phase3_argument_extract/eval/{readonly_empty_arguments_rate}`,
-`phase3_argument_extract/order/{kendall_tau,edit_distance}`,
-`phase3_argument_extract/throughput/{train_tokens_per_sec,train_samples_per_sec}`,
-`phase3_argument_extract/throughput/{eval_tokens_per_sec,eval_samples_per_sec}`,
-`phase3_argument_extract/data/{avg_num_calls,avg_arguments_length,mean_sequence_length,padding_ratio}`,
-`phase3_argument_extract/calibration/{log_prob_per_call,ece_method}`, and
-`phase3_argument_extract/test/{latency_sec_p50,latency_sec_p95,memory_peak_mb}`.
+`phase3_argument_extract/eval/{call_ordered_exact_match_rate,method_exact_match_rate,`
+`arguments_exact_match_rate,readonly_empty_arguments_rate}`,
+and `phase3_argument_extract/order/{kendall_tau,edit_distance}`.
 
 To use TensorBoard instead, choose the variable for the launcher you are using:
 `IGC_METRIC_REPORT=tensorboard bash scripts/run_profile.sh` for the profile wrapper, or

@@ -3,8 +3,8 @@
 Used by tests and future dataset builders as the narrow mock-plumbing seam for
 the Phase 2/3 Redfish instruction contracts: text/context to ordered REST APIs,
 then text/API list/context to ordered calls. This module owns row shape,
-canonical prompt/target rendering, and metric-key names; it does not train,
-decode, crawl, or infer labels from text.
+canonical prompt/target rendering, and re-exports shared metric-key names; it
+does not train, decode, crawl, or infer labels from text.
 
 Author:
 Mus mbayramo@stanford.edu
@@ -15,78 +15,18 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from igc.modules.base.metric_keys import (
+    PHASE2_WANDB_METRIC_KEYS,
+    PHASE3_WANDB_METRIC_KEYS,
+)
+
 
 MODEL_X = "model_x"
 D0 = "D0"
 D1 = "D1"
 
-PHASE2_GOAL_EXTRACT_METRIC_KEYS = (
-    "phase2_goal_extract/train/loss",
-    "phase2_goal_extract/train/perplexity",
-    "phase2_goal_extract/train/optimizer_step",
-    "phase2_goal_extract/eval/loss",
-    "phase2_goal_extract/eval/perplexity",
-    "phase2_goal_extract/eval/token_accuracy",
-    "phase2_goal_extract/eval/ordered_exact_match_rate",
-    "phase2_goal_extract/eval/set_match_rate",
-    "phase2_goal_extract/eval/precision",
-    "phase2_goal_extract/eval/recall",
-    "phase2_goal_extract/eval/f1",
-    "phase2_goal_extract/eval/top_k_api_accuracy",
-    "phase2_goal_extract/eval/invalid_api_rate",
-    "phase2_goal_extract/eval/missing_required_api_rate",
-    "phase2_goal_extract/eval/missing_allowed_methods_rate",
-    "phase2_goal_extract/eval/order_violation_rate",
-    "phase2_goal_extract/order/kendall_tau",
-    "phase2_goal_extract/order/edit_distance",
-    "phase2_goal_extract/throughput/train_tokens_per_sec",
-    "phase2_goal_extract/throughput/train_samples_per_sec",
-    "phase2_goal_extract/throughput/eval_tokens_per_sec",
-    "phase2_goal_extract/throughput/eval_samples_per_sec",
-    "phase2_goal_extract/data/avg_num_apis",
-    "phase2_goal_extract/data/max_num_apis",
-    "phase2_goal_extract/data/mean_sequence_length",
-    "phase2_goal_extract/data/padding_ratio",
-    "phase2_goal_extract/calibration/log_prob_per_sequence",
-    "phase2_goal_extract/calibration/ece",
-    "phase2_goal_extract/test/latency_sec_p50",
-    "phase2_goal_extract/test/latency_sec_p95",
-    "phase2_goal_extract/test/memory_peak_mb",
-)
-
-PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS = (
-    "phase3_argument_extract/train/loss",
-    "phase3_argument_extract/train/perplexity",
-    "phase3_argument_extract/train/optimizer_step",
-    "phase3_argument_extract/eval/loss",
-    "phase3_argument_extract/eval/perplexity",
-    "phase3_argument_extract/eval/token_accuracy",
-    "phase3_argument_extract/eval/call_ordered_exact_match_rate",
-    "phase3_argument_extract/eval/call_order_correct_rate",
-    "phase3_argument_extract/eval/step_exact_match_rate",
-    "phase3_argument_extract/eval/rest_api_exact_match_rate",
-    "phase3_argument_extract/eval/allowed_methods_exact_match_rate",
-    "phase3_argument_extract/eval/method_exact_match_rate",
-    "phase3_argument_extract/eval/arguments_json_parse_rate",
-    "phase3_argument_extract/eval/arguments_exact_match_rate",
-    "phase3_argument_extract/eval/invalid_method_rate",
-    "phase3_argument_extract/eval/readonly_empty_arguments_rate",
-    "phase3_argument_extract/order/kendall_tau",
-    "phase3_argument_extract/order/edit_distance",
-    "phase3_argument_extract/throughput/train_tokens_per_sec",
-    "phase3_argument_extract/throughput/train_samples_per_sec",
-    "phase3_argument_extract/throughput/eval_tokens_per_sec",
-    "phase3_argument_extract/throughput/eval_samples_per_sec",
-    "phase3_argument_extract/data/avg_num_calls",
-    "phase3_argument_extract/data/avg_arguments_length",
-    "phase3_argument_extract/data/mean_sequence_length",
-    "phase3_argument_extract/data/padding_ratio",
-    "phase3_argument_extract/calibration/log_prob_per_call",
-    "phase3_argument_extract/calibration/ece_method",
-    "phase3_argument_extract/test/latency_sec_p50",
-    "phase3_argument_extract/test/latency_sec_p95",
-    "phase3_argument_extract/test/memory_peak_mb",
-)
+PHASE2_GOAL_EXTRACT_METRIC_KEYS = PHASE2_WANDB_METRIC_KEYS
+PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS = PHASE3_WANDB_METRIC_KEYS
 
 
 @dataclass(frozen=True)
