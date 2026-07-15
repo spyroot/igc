@@ -188,6 +188,27 @@ def test_pro_judge_result_parser_counts_malformed_rest_api_fields_as_invalid(
     assert field_name in result.reason
 
 
+def test_pro_judge_result_parser_counts_missing_rest_api_field_as_invalid() -> None:
+    """A judge response with neither rest_api_list nor rest_api_set is invalid.
+
+    Regression: the parser used to substitute an empty list, so a bare
+    {"accepted": true} could accept a hard-negative row (expected []) with no
+    REST API evidence from the judge at all.
+    """
+    result = parse_pro_judge_result(
+        json.dumps({"accepted": True, "nonsense": False}),
+        expected_rest_apis=[],
+    )
+    assert not result.valid_json
+    assert result.invalid_json
+    assert not result.accepted
+    assert not result.pro_accept
+    assert not result.rest_api_set_match
+    assert not result.empty_set_match
+    assert result.rest_api_list == ()
+    assert "rest_api_list or rest_api_set" in result.reason
+
+
 def test_nonsense_invalid_and_acceptance_counters_emit_phase2_metrics() -> None:
     """Counters produce W&B-safe keys without opening a live W&B run."""
     spec = load_phase2_labelled_requests_spec(CONFIG_PATH)

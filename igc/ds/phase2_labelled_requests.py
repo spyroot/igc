@@ -377,8 +377,20 @@ def parse_pro_judge_result(
         rest_api_value = decoded["rest_api_set"]
         rest_api_field = "rest_api_set"
     else:
-        rest_api_value = []
-        rest_api_field = "rest_api_list"
+        # A judge response with NEITHER field is malformed output, not an empty
+        # set: silently substituting [] would let a bare {"accepted": true}
+        # accept a hard-negative row with no REST API evidence at all.
+        return ProJudgeResult(
+            valid_json=False,
+            accepted=False,
+            pro_accept=False,
+            rest_api_set_match=False,
+            empty_set_match=False,
+            nonsense=False,
+            invalid_json=True,
+            reason="missing rest_api_list or rest_api_set field",
+            raw=raw,
+        )
 
     try:
         rest_api_list = _string_tuple(rest_api_value, rest_api_field)
