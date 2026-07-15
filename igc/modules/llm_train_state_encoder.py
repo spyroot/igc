@@ -179,6 +179,49 @@ def validation_loss(value: Union[ValidationMetrics, float]) -> float:
     return float("inf")
 
 
+def resolve_early_stopping(spec) -> Tuple[int, float]:
+    """Resolve the early-stopping knobs from the run spec.
+
+    Missing/``None`` values fall back to the Phase 1 defaults; an explicit ``0`` is
+    honored — patience ``0`` (or negative) disables early stopping entirely, and
+    min_delta ``0.0`` means any improvement resets patience.
+
+    :param spec: argparse.Namespace-like run spec.
+    :return: ``(patience, min_delta)``.
+    """
+    patience = getattr(spec, "early_stopping_patience", None)
+    min_delta = getattr(spec, "early_stopping_min_delta", None)
+    return (
+        3 if patience is None else int(patience),
+        0.005 if min_delta is None else float(min_delta),
+    )
+
+
+def restored_best_metric(checkpoint_state, select_by_loss: bool) -> Optional[float]:
+    """Best-selection metric to resume best-checkpoint tracking from, or ``None``.
+
+    Only a checkpoint whose ``best_metric_mode`` matches the trainer's current
+    selection mode is trusted (a loss-mode best must never seed accuracy-mode
+    tracking, and vice versa). Accuracy mode additionally falls back to the legacy
+    ``best_accuracy`` channel that old checkpoints carry; loss mode has no legacy
+    channel and starts fresh at ``+inf``.
+
+    :param checkpoint_state: :class:`~igc.modules.base.igc_base_module.CheckpointState`.
+    :param select_by_loss: True when the trainer selects best by eval loss.
+    :return: the metric to seed ``_best_validation_metric`` with, or ``None``.
+    """
+    mode = "loss" if select_by_loss else "accuracy"
+    best_metric = getattr(checkpoint_state, "best_metric", None)
+    best_mode = getattr(checkpoint_state, "best_metric_mode", None)
+    if best_metric is not None and best_mode == mode and np.isfinite(best_metric):
+        return float(best_metric)
+    if not select_by_loss:
+        legacy = getattr(checkpoint_state, "best_accuracy", None)
+        if legacy is not None and np.isfinite(legacy):
+            return float(legacy)
+    return None
+
+
 def shifted_token_loss(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     """Return HF CausalLM-style shifted CE loss for full-length labels."""
     shifted_logits = logits[..., :-1, :].contiguous()
@@ -282,9 +325,10 @@ class LlmEmbeddingsTrainer(LlmModule):
         self._metric_namespace = getattr(dataset, "metric_namespace", "")
         self._select_best_by_eval_loss = bool(self._metric_namespace)
         self._best_validation_metric = float('inf') if self._select_best_by_eval_loss else float('-inf')
-        self._early_stopping_patience = int(getattr(spec, "early_stopping_patience", 3) or 3)
-        self._early_stopping_min_delta = float(
-            getattr(spec, "early_stopping_min_delta", 0.005) or 0.005)
+        # None-aware on purpose: an explicit 0 disables early stopping / zeroes the
+        # delta; a bare `or` default would silently swallow it.
+        self._early_stopping_patience, self._early_stopping_min_delta = (
+            resolve_early_stopping(spec))
 
         self.logger.info(
             f"Rank {self.rank} creating llm trainer, num epochs {self.num_epochs} "
@@ -658,6 +702,18 @@ class LlmEmbeddingsTrainer(LlmModule):
             loss=float("inf"),
             accuracy=checkpoint_state.best_accuracy,
         )
+        # Resume best-checkpoint tracking from the persisted best (mode-matched):
+        # without this, a resumed loss-mode run stays at +inf and flags the FIRST
+        # post-resume eval as "best" — overwriting the true best checkpoint and
+        # resetting early-stop patience.
+        _restored_best = restored_best_metric(
+            checkpoint_state, self._select_best_by_eval_loss)
+        if _restored_best is not None:
+            self._best_validation_metric = _restored_best
+            self.logger.info(
+                f"Rank {self.rank} resumed best validation metric "
+                f"{self._best_validation_metric} "
+                f"({'loss' if self._select_best_by_eval_loss else 'accuracy'} mode).")
         self._trainer_args.epochs = self.num_epochs - last_epoch
         _accum = max(1, int(getattr(self._trainer_args, "gradient_accumulation_steps", 1)))
         self._trainer_args.steps_per_epoch = optimizer_steps_per_epoch(
@@ -956,6 +1012,10 @@ class LlmEmbeddingsTrainer(LlmModule):
                                 last_accuracy=validation_accuracy(validation_result),
                                 initial_lr=self._lr,
                                 is_best_accuracy=is_best_checkpoint,
+                                best_metric=self._best_validation_metric,
+                                best_metric_mode=(
+                                    "loss" if self._select_best_by_eval_loss
+                                    else "accuracy"),
                             )
                         else:
                             self.save_checkpoint(
@@ -964,6 +1024,10 @@ class LlmEmbeddingsTrainer(LlmModule):
                                 last_accuracy=validation_accuracy(validation_result),
                                 initial_lr=self._lr,
                                 is_best_accuracy=is_best_checkpoint,
+                                best_metric=self._best_validation_metric,
+                                best_metric_mode=(
+                                    "loss" if self._select_best_by_eval_loss
+                                    else "accuracy"),
                             )
 
             # Epoch-boundary barrier: all ranks meet here AFTER the rank-0 checkpoint
@@ -977,6 +1041,7 @@ class LlmEmbeddingsTrainer(LlmModule):
             if (
                     did_eval
                     and self._select_best_by_eval_loss
+                    and self._early_stopping_patience > 0
                     and early_stop_bad_evals >= self._early_stopping_patience):
                 if self.is_rank_zero():
                     self.logger.info(
