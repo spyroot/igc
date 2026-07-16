@@ -196,15 +196,31 @@ def test_phase1_golden_rejects_reordered_positional_rows(tmp_path: Path) -> None
     baseline = _write_jsonl(
         tmp_path / "baseline.jsonl",
         [
-            _row(rest_a, _target(rest_a, "1")),
-            _row(rest_b, _target(rest_b, "2")),
+            {
+                "x": {"rest_api": rest_a, "json": _target(rest_a, "1")},
+                "y_true": {"json": _target(rest_a, "1")},
+                "y_pred": {"json": _target(rest_a, "1")},
+            },
+            {
+                "x": {"rest_api": rest_b, "json": _target(rest_b, "2")},
+                "y_true": {"json": _target(rest_b, "2")},
+                "y_pred": {"json": _target(rest_b, "2")},
+            },
         ],
     )
     model = _write_jsonl(
         tmp_path / "model_x.jsonl",
         [
-            _row(rest_b, _target(rest_b, "2")),
-            _row(rest_a, _target(rest_a, "1")),
+            {
+                "x": {"rest_api": rest_b, "json": _target(rest_b, "2")},
+                "y_true": {"json": _target(rest_b, "2")},
+                "y_pred": {"json": _target(rest_b, "2")},
+            },
+            {
+                "x": {"rest_api": rest_a, "json": _target(rest_a, "1")},
+                "y_true": {"json": _target(rest_a, "1")},
+                "y_pred": {"json": _target(rest_a, "1")},
+            },
         ],
     )
 
