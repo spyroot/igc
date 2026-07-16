@@ -2,7 +2,8 @@
 
 This module consumes already-produced Phase 1 prediction JSONL artifacts. It
 does not load a model, touch a GPU, call W&B, or read corpora. Rows are matched
-by an explicit row id when present, otherwise by JSONL position.
+by an explicit row id when present, otherwise by JSONL position plus a stable
+fingerprint of non-prediction row identity.
 
 Author:
 Mus mbayramo@stanford.edu
@@ -394,8 +395,9 @@ def _validate_unique_row_keys(records: Iterable[PredictionRecord], *, role: str)
             duplicates.add(record.key)
         seen.add(record.key)
     if duplicates:
-        preview = ", ".join(sorted(str(key) for key in duplicates)[:5])
-        raise Phase1GoldenError(f"{role}: duplicate prediction row keys: {preview}")
+        raise Phase1GoldenError(
+            f"{role}: duplicate prediction row keys ({len(duplicates)} duplicate keys)"
+        )
 
 
 def _validate_comparable_artifact_keys(
@@ -410,9 +412,9 @@ def _validate_comparable_artifact_keys(
         return
     details = []
     if missing_from_model:
-        details.append("missing from model_x: " + ", ".join(missing_from_model[:5]))
+        details.append(f"missing from model_x: {len(missing_from_model)}")
     if missing_from_baseline:
-        details.append("missing from baseline: " + ", ".join(missing_from_baseline[:5]))
+        details.append(f"missing from baseline: {len(missing_from_baseline)}")
     raise Phase1GoldenError(
         "baseline and model_x prediction artifacts cover different row keys; "
         + "; ".join(details)
@@ -603,7 +605,20 @@ def _row_key(row: Mapping[str, Any], index: int) -> str:
         row,
         (("id",), ("row_id",), ("sample_id",), ("example_id",), ("uid",)),
     )
-    return str(value) if value is not None else str(index)
+    if value is not None:
+        return f"id:{value}"
+    target = _target_json(row)
+    rest_api = _rest_api(row, target)
+    identity = {
+        "rest_api": rest_api,
+        "target_json": target,
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":"), default=str).encode(
+            "utf-8"
+        )
+    ).hexdigest()[:16]
+    return f"position:{index}:identity:{fingerprint}"
 
 
 def _odata_id_match(prediction: JsonValue | None, rest_api: str) -> bool | None:

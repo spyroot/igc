@@ -137,8 +137,11 @@ def test_phase1_golden_rejects_mismatched_artifact_row_keys(tmp_path: Path) -> N
         ],
     )
 
-    with pytest.raises(Phase1GoldenError, match="different row keys"):
+    with pytest.raises(Phase1GoldenError, match="different row keys") as excinfo:
         build_phase1_golden_payload(baseline_jsonl=baseline, model_jsonl=model)
+
+    assert "baseline-only" not in str(excinfo.value)
+    assert "model-only" not in str(excinfo.value)
 
 
 def test_phase1_golden_row_keys_do_not_expand_public_payload(tmp_path: Path) -> None:
@@ -175,13 +178,55 @@ def test_phase1_golden_rejects_duplicate_row_keys(tmp_path: Path) -> None:
     path = _write_jsonl(
         tmp_path / "duplicates.jsonl",
         [
-            _row(rest_api, _target(rest_api, "1"), id="duplicate"),
-            _row(rest_api, _target(rest_api, "1"), id="duplicate"),
+            _row(rest_api, _target(rest_api, "1"), id="raw-row-id"),
+            _row(rest_api, _target(rest_api, "1"), id="raw-row-id"),
         ],
     )
 
-    with pytest.raises(Phase1GoldenError, match="duplicate prediction row keys"):
+    with pytest.raises(Phase1GoldenError, match="duplicate prediction row keys") as excinfo:
         evaluate_prediction_jsonl(path, role="model_x")
+
+    assert "raw-row-id" not in str(excinfo.value)
+
+
+def test_phase1_golden_rejects_reordered_positional_rows(tmp_path: Path) -> None:
+    """Rows without explicit ids must still describe the same positional examples."""
+    rest_a = "/redfish/v1/Systems/1"
+    rest_b = "/redfish/v1/Systems/2"
+    baseline = _write_jsonl(
+        tmp_path / "baseline.jsonl",
+        [
+            _row(rest_a, _target(rest_a, "1")),
+            _row(rest_b, _target(rest_b, "2")),
+        ],
+    )
+    model = _write_jsonl(
+        tmp_path / "model_x.jsonl",
+        [
+            _row(rest_b, _target(rest_b, "2")),
+            _row(rest_a, _target(rest_a, "1")),
+        ],
+    )
+
+    with pytest.raises(Phase1GoldenError, match="different row keys"):
+        build_phase1_golden_payload(baseline_jsonl=baseline, model_jsonl=model)
+
+
+def test_phase1_golden_rejects_mixed_explicit_and_positional_keys(tmp_path: Path) -> None:
+    """An explicit-id artifact cannot be compared against positional rows."""
+    rest_api = "/redfish/v1/Systems/1"
+    target = _target(rest_api, "1")
+    baseline = _write_jsonl(
+        tmp_path / "baseline.jsonl",
+        [_row(rest_api, target, id="row-a")],
+    )
+    model = _write_jsonl(
+        tmp_path / "model_x.jsonl",
+        [_row(rest_api, target)],
+    )
+
+    with pytest.raises(Phase1GoldenError, match="different row keys"):
+        build_phase1_golden_payload(baseline_jsonl=baseline, model_jsonl=model)
 
 
 def test_prediction_parser_accepts_fenced_json_fragment() -> None:
