@@ -49,6 +49,13 @@ generation settings, sample widths, W&B namespace/key lists, and acceptance
 thresholds. Runtime Python must load those values rather than hardcoding prompt
 or model literals.
 
+The offline fixture CLI is `scripts/build_phase2_labelled_requests.py`. It
+loads the YAML spec, reads tiny JSONL records with `rest_api`,
+`allowed_methods`, `json`, `vendor`, and `source_corpus`, then writes accepted
+`phase2_labelled_requests` JSONL plus an aggregate metrics JSON. Its provider
+modes are local-only mock and file fixtures; real `model_x` or private judge
+adapters must be wired separately before any slot2/slot11 generation run.
+
 ## Build Input
 
 To build one `phase2_labelled_requests` row, sample one, two, or three Redfish
@@ -136,19 +143,19 @@ An accepted row stores the text label with the sampled REST API evidence:
   "task": "text_to_rest_api_list",
   "x": {
     "text": "check the available computer systems",
-    "records": [
+    "json": [
       {
-        "rest_api": "/redfish/v1/Systems",
-        "allowed_methods": ["GET", "HEAD"],
-        "json": {
-          "@odata.id": "/redfish/v1/Systems",
-          "@odata.type": "#ComputerSystemCollection.ComputerSystemCollection",
-          "Members": [],
-          "Members@odata.count": 0,
-          "Name": "Computer System Collection"
-        }
+        "@odata.id": "/redfish/v1/Systems",
+        "@odata.type": "#ComputerSystemCollection.ComputerSystemCollection",
+        "Members": [],
+        "Members@odata.count": 0,
+        "Name": "Computer System Collection"
       }
-    ]
+    ],
+    "allowed_methods": {
+      "/redfish/v1/Systems": ["GET", "HEAD"]
+    },
+    "rest_api_list": ["/redfish/v1/Systems"]
   },
   "y_true": {
     "rest_api_list": ["/redfish/v1/Systems"],
@@ -159,6 +166,11 @@ An accepted row stores the text label with the sampled REST API evidence:
     "review_judged": true,
     "set_coverage_preserved": true,
     "nonsense": false
+  },
+  "metadata": {
+    "prompt_spec_version": "phase2-labelled-requests-v1",
+    "vendor": ["fixture_vendor"],
+    "source_corpus": ["fixture_corpus"]
   }
 }
 ```
@@ -200,6 +212,11 @@ The labelled-request generation builder records these keys under the
 - `phase2_labelled_requests/model_x/artifact_sha`
 - `phase2_labelled_requests/judge/model`
 - `phase2_labelled_requests/judge/profile`
+
+`accepted_total` counts rows that pass JSON parsing, Pro acceptance, nonsense
+rejection, and unordered REST API set matching. `pro_accept_rate` is narrower:
+it tracks valid judge responses whose own `accepted` flag is true, even if the
+row later fails the set-match gate.
 
 ## Goal-Extractor Training W&B Metrics
 

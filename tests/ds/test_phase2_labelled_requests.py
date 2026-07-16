@@ -188,6 +188,69 @@ def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     with pytest.raises(Phase2LabelledRequestsSpecError, match="metric_keys"):
         load_phase2_labelled_requests_spec(wrong_metrics)
 
+    wrong_widths = _write_spec(tmp_path / "wrong-widths.yaml")
+    wrong_widths.write_text(
+        wrong_widths.read_text(encoding="utf-8").replace(
+            "sample_widths: [1, 2, 3]",
+            "sample_widths: [1, 2]",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="sample_widths"):
+        load_phase2_labelled_requests_spec(wrong_widths)
+
+    non_integer_widths = _write_spec(tmp_path / "non-integer-widths.yaml")
+    non_integer_widths.write_text(
+        non_integer_widths.read_text(encoding="utf-8").replace(
+            "sample_widths: [1, 2, 3]",
+            "sample_widths: [1, two, 3]",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="sample_widths"):
+        load_phase2_labelled_requests_spec(non_integer_widths)
+
+    wrong_namespace = _write_spec(tmp_path / "wrong-namespace.yaml")
+    wrong_namespace.write_text(
+        wrong_namespace.read_text(encoding="utf-8").replace(
+            "namespace: phase2_labelled_requests",
+            "namespace: wrong_phase2_namespace",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="wandb.namespace"):
+        load_phase2_labelled_requests_spec(wrong_namespace)
+
+    missing_judge_route = _write_spec(tmp_path / "missing-judge-route.yaml")
+    missing_judge_route.write_text(
+        missing_judge_route.read_text(encoding="utf-8").replace("  route: private_pro\n", ""),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="judge.route"):
+        load_phase2_labelled_requests_spec(missing_judge_route)
+
+    missing_prompt_section = _write_spec(tmp_path / "missing-prompt-section.yaml")
+    missing_prompt_section.write_text(
+        missing_prompt_section.read_text(encoding="utf-8").replace(
+            "  model_x_draft:",
+            "  model_x_missing:",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="model_x_draft"):
+        load_phase2_labelled_requests_spec(missing_prompt_section)
+
+    malformed_generation = _write_spec(tmp_path / "malformed-generation.yaml")
+    malformed_generation.write_text(
+        malformed_generation.read_text(encoding="utf-8").replace(
+            "generation:\n  max_new_tokens: 96\n  temperature: 0.2\n  top_p: 0.95\n",
+            "generation: []\n",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="generation"):
+        load_phase2_labelled_requests_spec(malformed_generation)
+
     missing_threshold = _write_spec(tmp_path / "missing-threshold.yaml")
     missing_threshold.write_text(
         missing_threshold.read_text(encoding="utf-8").replace(
@@ -238,10 +301,24 @@ def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Pat
     assert "/redfish/v1/Systems/1" in model_prompt
     assert "show both systems" in judge_prompt
 
-    source = Path("igc/ds/phase2_labelled_requests.py").read_text(encoding="utf-8")
-    assert "phase2 test model-x system prompt from YAML" not in source
-    assert "${PHASE1_MODEL_X_MODEL_ID}" not in source
-    assert "${PHASE2_JUDGE_MODEL_ID}" not in source
+    runtime_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            Path("igc/ds/phase2_labelled_requests.py"),
+            Path("scripts/build_phase2_labelled_requests.py"),
+        )
+    )
+    forbidden_literals = (
+        "phase2 test model-x system prompt from YAML",
+        "${PHASE1_MODEL_X_MODEL_ID}",
+        "${PHASE2_JUDGE_MODEL_ID}",
+        "Qwen/Qwen2.5",
+        "deepseek",
+        "You draft one concise",
+        "Return JSON with accepted",
+    )
+    for literal in forbidden_literals:
+        assert literal not in runtime_sources
 
 
 def test_sampling_accepts_only_k_1_2_3_and_preserves_record_payloads() -> None:
@@ -300,6 +377,18 @@ def test_pro_judge_result_parsing_accepts_plain_and_wrapped_json() -> None:
     assert wrapped.invalid_json is False
     assert wrapped.nonsense is False
     assert wrapped.order_evidence == "none"
+
+    rejected = parse_pro_judge_result(
+        _judge_json(
+            accepted=False,
+            rest_api_list=["/redfish/v1/A"],
+            nonsense=False,
+        ),
+    )
+    assert rejected.accepted is False
+    assert rejected.invalid_json is False
+    assert rejected.rest_api_list == ("/redfish/v1/A",)
+    assert rejected.nonsense is False
 
     invalid = parse_pro_judge_result("{not json")
     assert invalid.accepted is False
@@ -472,6 +561,10 @@ def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -
     assert data["dataset"] == PHASE2_LABELLED_REQUESTS
     assert data["task"] == "text_to_rest_api_list"
     assert data["x"]["text"] == "show both sampled systems"
+    assert "records" not in data["x"]
+    assert len(data["x"]["json"]) == 2
+    assert data["x"]["rest_api_list"] == data["y_true"]["rest_api_list"]
+    assert set(data["x"]["allowed_methods"]) == set(data["y_true"]["rest_api_list"])
     assert data["y_true"]["order_evidence"] == "explicit_then"
     assert data["validation"]["set_coverage_preserved"] is True
     assert data["validation"]["review_judged"] is True
@@ -489,6 +582,7 @@ def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -
     assert seen["draft"]["generation"]["max_new_tokens"] == 96
     assert seen["judge"]["model_id"] == "${PHASE2_JUDGE_MODEL_ID}"
     assert seen["judge"]["profile"] == "${PHASE2_JUDGE_PROFILE}"
+    assert seen["judge"]["route"] == "private_pro"
 
 
 def test_builder_returns_none_and_counts_rejection_on_set_mismatch(tmp_path: Path) -> None:
@@ -510,6 +604,7 @@ def test_builder_returns_none_and_counts_rejection_on_set_mismatch(tmp_path: Pat
     assert summary[_phase2_metric("draft_total")] == 1
     assert summary[_phase2_metric("accepted_total")] == 0
     assert summary[_phase2_metric("rejected_total")] == 1
+    assert summary[_phase2_metric("pro_accept_rate")] == 1.0
     assert summary[_phase2_metric("rest_api_set_match_rate")] == 0.0
 
 
@@ -547,6 +642,7 @@ def test_counter_summary_binds_semantic_metric_names() -> None:
         draft_total=7,
         accepted_total=5,
         rejected_total=2,
+        pro_accept_total=6,
         nonsense_total=1,
         invalid_json_total=2,
         rest_api_set_match_total=4,
@@ -567,7 +663,7 @@ def test_counter_summary_binds_semantic_metric_names() -> None:
     assert summary[_phase2_metric("rejected_total")] == 2
     assert summary[_phase2_metric("nonsense_rate")] == pytest.approx(1 / 7)
     assert summary[_phase2_metric("invalid_json_rate")] == pytest.approx(2 / 7)
-    assert summary[_phase2_metric("pro_accept_rate")] == pytest.approx(5 / 7)
+    assert summary[_phase2_metric("pro_accept_rate")] == pytest.approx(6 / 7)
     assert summary[_phase2_metric("rest_api_set_match_rate")] == pytest.approx(4 / 7)
     assert summary[_phase2_metric("empty_set_match_rate")] == pytest.approx(2 / 3)
     assert summary[_phase2_metric("sample_width", "k")] == 3

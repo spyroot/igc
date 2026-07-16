@@ -213,7 +213,12 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
         )
 
     sampling = _mapping(raw, "sampling", required=True)
-    sample_widths = tuple(int(width) for width in _sequence(sampling, "sample_widths"))
+    raw_sample_widths = _sequence(sampling, "sample_widths")
+    if not all(isinstance(width, int) and not isinstance(width, bool) for width in raw_sample_widths):
+        raise Phase2LabelledRequestsSpecError(
+            "sampling.sample_widths must be integer sequence [1, 2, 3]",
+        )
+    sample_widths = tuple(raw_sample_widths)
     if sample_widths != (1, 2, 3):
         raise Phase2LabelledRequestsSpecError("sampling.sample_widths must be [1, 2, 3]")
 
@@ -416,6 +421,7 @@ class Phase2LabelledRequestCounters:
     draft_total: int = 0  # number of draft text attempts.
     accepted_total: int = 0  # number of rows accepted into the dataset.
     rejected_total: int = 0  # number of rows rejected by parser/judge/set check.
+    pro_accept_total: int = 0  # number of valid judge responses with accepted=true.
     nonsense_total: int = 0  # number of drafts flagged as nonsense.
     invalid_json_total: int = 0  # number of judge responses with invalid JSON.
     rest_api_set_match_total: int = 0  # number of rows with matching API sets.
@@ -453,6 +459,8 @@ class Phase2LabelledRequestCounters:
             self.nonsense_total += 1
         if result.invalid_json:
             self.invalid_json_total += 1
+        if result.accepted and not result.invalid_json:
+            self.pro_accept_total += 1
         if set_match:
             self.rest_api_set_match_total += 1
         if not result.invalid_json and not expected_rest_api_list:
@@ -472,7 +480,7 @@ class Phase2LabelledRequestCounters:
             _REJECTED_TOTAL_KEY: self.rejected_total,
             _NONSENSE_RATE_KEY: _rate(self.nonsense_total, self.draft_total),
             _INVALID_JSON_RATE_KEY: _rate(self.invalid_json_total, self.draft_total),
-            _PRO_ACCEPT_RATE_KEY: _rate(self.accepted_total, self.draft_total),
+            _PRO_ACCEPT_RATE_KEY: _rate(self.pro_accept_total, self.draft_total),
             _REST_API_SET_MATCH_RATE_KEY: _rate(self.rest_api_set_match_total, self.draft_total),
             _EMPTY_SET_MATCH_RATE_KEY: _rate(
                 self.empty_set_match_total,
