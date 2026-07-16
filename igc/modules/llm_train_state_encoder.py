@@ -117,6 +117,49 @@ def optimizer_steps_per_epoch(num_micro_batches: int, accum_steps: int) -> int:
     return -(-num_micro_batches // accum_steps)
 
 
+def remaining_epochs(num_epochs: int, last_epoch: int) -> int:
+    """Epochs a (possibly resumed) run still owes, floored at zero.
+
+    A relaunch can resume from a checkpoint already at/beyond the target epoch
+    count (the epoch loop then runs zero iterations); the raw subtraction goes
+    negative for checkpoints from a longer prior run.
+
+    :param num_epochs: configured target epoch count for the run.
+    :param last_epoch: epochs already completed per the loaded checkpoint.
+    :return: ``max(0, num_epochs - last_epoch)``.
+    """
+    return max(0, int(num_epochs) - int(last_epoch))
+
+
+def scheduler_epoch_args(
+        num_epochs: int,
+        last_epoch: int,
+        num_micro_batches: int,
+        accum_steps: int,
+) -> tuple:
+    """Positive ``(epochs, steps_per_epoch)`` for scheduler construction.
+
+    OneCycleLR rejects ``epochs=0`` and ``steps_per_epoch=0``, so a resume over
+    a completed checkpoint — or an empty per-rank dataloader under
+    ``drop_last=True`` — crashed scheduler creation before the (no-op) epoch
+    loop could reach end-of-train finalization (the slot2 Phase 1 prebuild hit
+    exactly this: ``ValueError: Expected positive integer epochs, but got 0``).
+    Nothing steps the scheduler in those degenerate runs, so clamping both
+    values to at least 1 yields a valid never-consumed schedule while the real
+    remaining-work values pass through unchanged.
+
+    :param num_epochs: configured target epoch count for the run.
+    :param last_epoch: epochs already completed per the loaded checkpoint.
+    :param num_micro_batches: train dataloader length for one epoch.
+    :param accum_steps: gradient accumulation steps (coerced to >= 1).
+    :return: ``(epochs, steps_per_epoch)``, each floored at 1.
+    """
+    return (
+        max(1, remaining_epochs(num_epochs, last_epoch)),
+        max(1, optimizer_steps_per_epoch(num_micro_batches, accum_steps)),
+    )
+
+
 def measure_grad_norm(model) -> float:
     """Measure (never clip) the current global gradient norm.
 
@@ -696,6 +739,13 @@ class LlmEmbeddingsTrainer(LlmModule):
         )
 
         last_epoch = checkpoint_state.last_epoch
+        # A checkpoint at/beyond the target epoch count means the epoch loop
+        # below runs zero iterations: the run proceeds straight to end-of-train
+        # finalization (save/report), it must not crash in scheduler creation.
+        if remaining_epochs(self.num_epochs, last_epoch) == 0:
+            self.logger.info(
+                f"Rank {self.rank}: checkpoint already at epoch {last_epoch} "
+                f">= target {self.num_epochs}; no epochs left — finalizing only.")
         # Legacy runs seed best tracking from the checkpoint's accuracy channel. Phase 1
         # selects by validation loss, so a fresh run starts at +inf until the first eval.
         validation_result = ValidationMetrics(
@@ -714,10 +764,13 @@ class LlmEmbeddingsTrainer(LlmModule):
                 f"Rank {self.rank} resumed best validation metric "
                 f"{self._best_validation_metric} "
                 f"({'loss' if self._select_best_by_eval_loss else 'accuracy'} mode).")
-        self._trainer_args.epochs = self.num_epochs - last_epoch
         _accum = max(1, int(getattr(self._trainer_args, "gradient_accumulation_steps", 1)))
-        self._trainer_args.steps_per_epoch = optimizer_steps_per_epoch(
-            len(train_dataloader), _accum)
+        # Clamped to >= 1 so OneCycleLR construction survives degenerate runs
+        # (completed-checkpoint resume, empty per-rank dataloader) that step the
+        # scheduler zero times; real remaining work passes through unchanged.
+        self._trainer_args.epochs, self._trainer_args.steps_per_epoch = (
+            scheduler_epoch_args(
+                self.num_epochs, last_epoch, len(train_dataloader), _accum))
 
         self.logger.info(
             f"Rank {self.rank}: Data loader created: "
