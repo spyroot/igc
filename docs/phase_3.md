@@ -7,7 +7,12 @@ the ordered `rest_api_list` from Phase 2, the model must produce the method and 
 Names are fixed as follows:
 
 - `D1`: Phase 2 text-to-ordered-REST-goal data.
-- `model_x`: the Phase 1 Redfish-tuned LLM, cloned or continued for this fine-tune.
+- `model_x`: the Phase 1 Redfish-tuned LLM.
+- `goal_extractor`: the separate Phase 2 weight role, used upstream to produce `rest_api_list`.
+- `argument_extractor`: the separate Phase 3 fine-tuned weight role.
+- `profile`: a planned `phase3_argument_extractor_*` training profile.
+- `base_weights_role`: `model_x` or `goal_extractor`, whichever the run explicitly initializes from.
+- `weights_role`: `argument_extractor`; Phase 3 must not overwrite Phase 1 or Phase 2 checkpoints.
 - `x`: the input context shown to the model.
 - `y_true`: the exact target label stored in the dataset.
 - `y_pred`: the model output during inference or evaluation.
@@ -20,6 +25,10 @@ Names are fixed as follows:
 
 Phase 3 does not choose new REST APIs. It fills `method` and `arguments` for the ordered
 `rest_api_list` already produced by Phase 2.
+
+Checkpoint rule: Phase 3 writes only `argument_extractor` artifacts. A run config must record the
+input checkpoint path, the output path for `argument_extractor`, the `phase3_argument_extraction/*`
+W&B namespace, and the exact dataset manifest used for training.
 
 ## Phase 3 Row From D1
 
@@ -133,37 +142,37 @@ body is not proof that the resource accepts that value in a PATCH or POST body.
 
 ## Phase 3 W&B Metrics
 
-- `phase3_argument_extract/train/loss`
-- `phase3_argument_extract/train/perplexity`
-- `phase3_argument_extract/train/optimizer_step`
-- `phase3_argument_extract/eval/loss`
-- `phase3_argument_extract/eval/perplexity`
-- `phase3_argument_extract/eval/token_accuracy`
-- `phase3_argument_extract/eval/call_ordered_exact_match_rate`
-- `phase3_argument_extract/eval/call_order_correct_rate`
-- `phase3_argument_extract/eval/step_exact_match_rate`
-- `phase3_argument_extract/eval/rest_api_exact_match_rate`
-- `phase3_argument_extract/eval/allowed_methods_exact_match_rate`
-- `phase3_argument_extract/eval/method_exact_match_rate`
-- `phase3_argument_extract/eval/arguments_json_parse_rate`
-- `phase3_argument_extract/eval/arguments_exact_match_rate`
-- `phase3_argument_extract/eval/invalid_method_rate`
-- `phase3_argument_extract/eval/readonly_empty_arguments_rate`
-- `phase3_argument_extract/order/kendall_tau`
-- `phase3_argument_extract/order/edit_distance`
-- `phase3_argument_extract/throughput/train_tokens_per_sec`
-- `phase3_argument_extract/throughput/train_samples_per_sec`
-- `phase3_argument_extract/throughput/eval_tokens_per_sec`
-- `phase3_argument_extract/throughput/eval_samples_per_sec`
-- `phase3_argument_extract/data/avg_num_calls`
-- `phase3_argument_extract/data/avg_arguments_length`
-- `phase3_argument_extract/data/mean_sequence_length`
-- `phase3_argument_extract/data/padding_ratio`
-- `phase3_argument_extract/calibration/log_prob_per_call`
-- `phase3_argument_extract/calibration/ece_method`
-- `phase3_argument_extract/test/latency_sec_p50`
-- `phase3_argument_extract/test/latency_sec_p95`
-- `phase3_argument_extract/test/memory_peak_mb`
+- `phase3_argument_extraction/train/loss`
+- `phase3_argument_extraction/train/perplexity`
+- `phase3_argument_extraction/train/optimizer_step`
+- `phase3_argument_extraction/eval/loss`
+- `phase3_argument_extraction/eval/perplexity`
+- `phase3_argument_extraction/eval/token_accuracy`
+- `phase3_argument_extraction/eval/call_ordered_exact_match_rate`
+- `phase3_argument_extraction/eval/call_order_correct_rate`
+- `phase3_argument_extraction/eval/step_exact_match_rate`
+- `phase3_argument_extraction/eval/rest_api_exact_match_rate`
+- `phase3_argument_extraction/eval/allowed_methods_exact_match_rate`
+- `phase3_argument_extraction/eval/method_exact_match_rate`
+- `phase3_argument_extraction/eval/arguments_json_parse_rate`
+- `phase3_argument_extraction/eval/arguments_exact_match_rate`
+- `phase3_argument_extraction/eval/invalid_method_rate`
+- `phase3_argument_extraction/eval/readonly_empty_arguments_rate`
+- `phase3_argument_extraction/order/kendall_tau`
+- `phase3_argument_extraction/order/edit_distance`
+- `phase3_argument_extraction/throughput/train_tokens_per_sec`
+- `phase3_argument_extraction/throughput/train_samples_per_sec`
+- `phase3_argument_extraction/throughput/eval_tokens_per_sec`
+- `phase3_argument_extraction/throughput/eval_samples_per_sec`
+- `phase3_argument_extraction/data/avg_num_calls`
+- `phase3_argument_extraction/data/avg_arguments_length`
+- `phase3_argument_extraction/data/mean_sequence_length`
+- `phase3_argument_extraction/data/padding_ratio`
+- `phase3_argument_extraction/calibration/log_prob_per_call`
+- `phase3_argument_extraction/calibration/ece_method`
+- `phase3_argument_extraction/test/latency_sec_p50`
+- `phase3_argument_extraction/test/latency_sec_p95`
+- `phase3_argument_extraction/test/memory_peak_mb`
 
 When Phase 3 moves beyond mock plumbing, its acceptance gate must mirror Phase 1: approved full
 corpora, readable W&B plots, checkpoint/report storage, and reviewed Git LFS artifact metadata.

@@ -154,7 +154,7 @@ def test_phase1_items_mask_prompt_and_padding_labels(tmp_path: Path):
     assert active[0].item() > 0
     assert torch.equal(item["labels"][active], item["input_ids"][active])
     assert item["labels"][item["attention_mask"].eq(0)].eq(-100).all()
-    assert ds.metric_namespace == "phase1_pretrain"
+    assert ds.metric_namespace == "phase1_finetune"
 
 
 def test_phase1_tiny_sequence_keeps_prompt_and_completion(tmp_path: Path):

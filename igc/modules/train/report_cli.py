@@ -1,4 +1,4 @@
-"""CLI to summarize and compare M1 training runs.
+"""CLI to summarize and compare Phase 1 training runs.
 
 The training run writes a per-run ``report.json`` (a :class:`ResultBundle` from
 :mod:`igc.modules.train.report`); this command turns those into the human
@@ -64,7 +64,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     :return: process exit code (0 ok, 2 nothing matched).
     """
     parser = argparse.ArgumentParser(
-        description="Summarize and compare igc M1 training report.json files.")
+        description="Summarize and compare igc Phase 1 training report.json files.")
     parser.add_argument("reports", nargs="+", help="report.json paths or globs.")
     parser.add_argument(
         "--baseline", default="lora",

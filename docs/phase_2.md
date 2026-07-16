@@ -11,6 +11,10 @@ Names are fixed as follows:
 - `D0`: Phase 1 JSON reconstruction data.
 - `phase2_labelled_requests`: Phase 2 text-to-REST-API-set data.
 - `model_x`: the Phase 1 Redfish-tuned LLM.
+- `goal_extractor`: the separate Phase 2 fine-tuned weight role.
+- `profile`: a planned `phase2_goal_extractor_*` training profile.
+- `base_weights_role`: `model_x`, when Phase 2 initializes from the Phase 1 checkpoint.
+- `weights_role`: `goal_extractor`; Phase 2 must not overwrite the Phase 1 checkpoint.
 - `x`: the input context shown to the model.
 - `y_true`: the exact target label stored in the dataset.
 - `y_pred`: the model output during inference or evaluation.
@@ -27,6 +31,12 @@ treats `[A, B]` and `[B, A]` as the same target. Empty set equals empty set for
 hard-negative or no-action rows.
 
 ## Builder Spec
+
+Checkpoint rule: Phase 2 writes only `goal_extractor` artifacts. A run config must record the input
+checkpoint path for `model_x`, the output path for `goal_extractor`, the `phase2_goal_extraction/*`
+W&B namespace, and the exact `phase2_labelled_requests` dataset manifest used for training. Older
+coordination notes may call that manifest `D1`; new runtime code, configs, metrics, and docs use the
+canonical `phase2_labelled_requests` name.
 
 The offline builder spec lives in `configs/phase2_labelled_requests.yaml`.
 That spec owns prompt text, `model_x` identifiers, judge route/profile fields,
@@ -114,7 +124,7 @@ This is the row used to fine-tune text-to-REST-goal extraction:
 {
   "phase": 2,
   "dataset": "phase2_labelled_requests",
-  "task": "text_to_rest_api_set",
+  "task": "text_to_rest_api_list",
   "x": {
     "text": "check the task queue, then list the available computer systems",
     "json": [
@@ -213,37 +223,37 @@ After accepted labelled-request rows exist, the later `goal_extractor` training
 path may emit these legacy trainer metrics. They are separate from
 `phase2_labelled_requests/*` generation metrics above.
 
-- `phase2_goal_extract/train/loss`
-- `phase2_goal_extract/train/perplexity`
-- `phase2_goal_extract/train/optimizer_step`
-- `phase2_goal_extract/eval/loss`
-- `phase2_goal_extract/eval/perplexity`
-- `phase2_goal_extract/eval/token_accuracy`
-- `phase2_goal_extract/eval/ordered_exact_match_rate`
-- `phase2_goal_extract/eval/set_match_rate`
-- `phase2_goal_extract/eval/precision`
-- `phase2_goal_extract/eval/recall`
-- `phase2_goal_extract/eval/f1`
-- `phase2_goal_extract/eval/top_k_api_accuracy`
-- `phase2_goal_extract/eval/invalid_api_rate`
-- `phase2_goal_extract/eval/missing_required_api_rate`
-- `phase2_goal_extract/eval/missing_allowed_methods_rate`
-- `phase2_goal_extract/eval/order_violation_rate`
-- `phase2_goal_extract/order/kendall_tau`
-- `phase2_goal_extract/order/edit_distance`
-- `phase2_goal_extract/throughput/train_tokens_per_sec`
-- `phase2_goal_extract/throughput/train_samples_per_sec`
-- `phase2_goal_extract/throughput/eval_tokens_per_sec`
-- `phase2_goal_extract/throughput/eval_samples_per_sec`
-- `phase2_goal_extract/data/avg_num_apis`
-- `phase2_goal_extract/data/max_num_apis`
-- `phase2_goal_extract/data/mean_sequence_length`
-- `phase2_goal_extract/data/padding_ratio`
-- `phase2_goal_extract/calibration/log_prob_per_sequence`
-- `phase2_goal_extract/calibration/ece`
-- `phase2_goal_extract/test/latency_sec_p50`
-- `phase2_goal_extract/test/latency_sec_p95`
-- `phase2_goal_extract/test/memory_peak_mb`
+- `phase2_goal_extraction/train/loss`
+- `phase2_goal_extraction/train/perplexity`
+- `phase2_goal_extraction/train/optimizer_step`
+- `phase2_goal_extraction/eval/loss`
+- `phase2_goal_extraction/eval/perplexity`
+- `phase2_goal_extraction/eval/token_accuracy`
+- `phase2_goal_extraction/eval/ordered_exact_match_rate`
+- `phase2_goal_extraction/eval/set_match_rate`
+- `phase2_goal_extraction/eval/precision`
+- `phase2_goal_extraction/eval/recall`
+- `phase2_goal_extraction/eval/f1`
+- `phase2_goal_extraction/eval/top_k_api_accuracy`
+- `phase2_goal_extraction/eval/invalid_api_rate`
+- `phase2_goal_extraction/eval/missing_required_api_rate`
+- `phase2_goal_extraction/eval/missing_allowed_methods_rate`
+- `phase2_goal_extraction/eval/order_violation_rate`
+- `phase2_goal_extraction/order/kendall_tau`
+- `phase2_goal_extraction/order/edit_distance`
+- `phase2_goal_extraction/throughput/train_tokens_per_sec`
+- `phase2_goal_extraction/throughput/train_samples_per_sec`
+- `phase2_goal_extraction/throughput/eval_tokens_per_sec`
+- `phase2_goal_extraction/throughput/eval_samples_per_sec`
+- `phase2_goal_extraction/data/avg_num_apis`
+- `phase2_goal_extraction/data/max_num_apis`
+- `phase2_goal_extraction/data/mean_sequence_length`
+- `phase2_goal_extraction/data/padding_ratio`
+- `phase2_goal_extraction/calibration/log_prob_per_sequence`
+- `phase2_goal_extraction/calibration/ece`
+- `phase2_goal_extraction/test/latency_sec_p50`
+- `phase2_goal_extraction/test/latency_sec_p95`
+- `phase2_goal_extraction/test/memory_peak_mb`
 
 When Phase 2 moves beyond mock plumbing, its acceptance gate must mirror Phase 1: approved full
 corpora, readable W&B plots, checkpoint/report storage, and reviewed Git LFS artifact metadata.

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -27,6 +28,7 @@ from igc.ds.phase2_labelled_requests import (
     empty_set_matches,
     load_phase2_labelled_requests_spec,
     parse_pro_judge_result,
+    phase2_acceptance_thresholds_pass,
     render_model_x_prompt,
     render_pro_judge_prompt,
     sample_phase2_contexts,
@@ -184,6 +186,17 @@ def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     with pytest.raises(Phase2LabelledRequestsSpecError, match="metric_keys"):
         load_phase2_labelled_requests_spec(wrong_metrics)
 
+    missing_threshold = _write_spec(tmp_path / "missing-threshold.yaml")
+    missing_threshold.write_text(
+        missing_threshold.read_text(encoding="utf-8").replace(
+            "  max_invalid_json_rate: 0.01\n",
+            "",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="acceptance missing"):
+        load_phase2_labelled_requests_spec(missing_threshold)
+
 
 def test_committed_phase2_labelled_requests_config_loads() -> None:
     """The checked-in builder spec stays aligned with the metric registry."""
@@ -232,6 +245,8 @@ def test_sampling_accepts_only_k_1_2_3_and_preserves_record_payloads() -> None:
         sample_phase2_contexts(records, k=0, rng=random.Random(1))
     with pytest.raises(ValueError, match="sample width"):
         sample_phase2_contexts(records, k=4, rng=random.Random(1))
+    with pytest.raises(ValueError, match="not enough records"):
+        sample_phase2_contexts(records[:1], k=2, rng=random.Random(1))
 
 
 def test_unordered_set_comparison_and_empty_set_equality() -> None:
@@ -269,6 +284,72 @@ def test_pro_judge_result_parsing_accepts_plain_and_wrapped_json() -> None:
     assert invalid.invalid_json is True
     assert invalid.rest_api_list == ()
 
+    non_object = parse_pro_judge_result(json.dumps(["not", "a", "mapping"]))
+    assert non_object.accepted is False
+    assert non_object.invalid_json is True
+    assert non_object.rest_api_list == ()
+    assert "not a mapping" in non_object.reason
+
+
+def test_pro_judge_result_parsing_accepts_rest_api_set_alias() -> None:
+    """The parser accepts the judge's legacy rest_api_set alias."""
+    result = parse_pro_judge_result(
+        json.dumps({
+            "accepted": True,
+            "rest_api_set": ["/redfish/v1/Systems/2", "/redfish/v1/Systems/1"],
+            "nonsense": False,
+            "reason": "fixture",
+        }),
+    )
+
+    assert result.accepted is True
+    assert result.invalid_json is False
+    assert result.rest_api_list == (
+        "/redfish/v1/Systems/2",
+        "/redfish/v1/Systems/1",
+    )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "field_value"),
+    (
+        ("rest_api_list", "/redfish/v1/Systems"),
+        ("rest_api_list", ["/redfish/v1/Systems", 7]),
+        ("rest_api_list", None),
+        ("rest_api_set", "/redfish/v1/Systems"),
+        ("rest_api_set", ["/redfish/v1/Systems", 7]),
+        ("rest_api_set", None),
+    ),
+)
+def test_pro_judge_result_parsing_counts_malformed_rest_api_fields_as_invalid(
+    field_name: str,
+    field_value: Any,
+) -> None:
+    """Malformed judge REST API fields are invalid output, not exceptions."""
+    result = parse_pro_judge_result(
+        json.dumps({
+            "accepted": True,
+            field_name: field_value,
+            "nonsense": False,
+            "reason": "fixture",
+        }),
+    )
+
+    assert result.accepted is False
+    assert result.invalid_json is True
+    assert result.rest_api_list == ()
+    assert field_name in result.reason
+
+
+def test_pro_judge_result_parsing_requires_rest_api_field() -> None:
+    """A bare accepted judge result is malformed, not an accepted empty set."""
+    result = parse_pro_judge_result(json.dumps({"accepted": True, "nonsense": False}))
+
+    assert result.accepted is False
+    assert result.invalid_json is True
+    assert result.rest_api_list == ()
+    assert "rest_api_list" in result.reason
+
 
 def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -> None:
     """Offline build plumbing calls injected providers and summarizes draft quality."""
@@ -285,7 +366,7 @@ def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -
         """Accept exactly the sampled REST API set in a different order."""
         seen["judge"] = request
         expected = list(reversed(request["expected_rest_api_list"]))
-        return _judge_json(rest_api_list=expected)
+        return _judge_json(rest_api_list=expected, order_evidence="explicit_then")
 
     builder = Phase2LabelledRequestBuilder(
         spec,
@@ -293,17 +374,26 @@ def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -
         judge_provider=judge_provider,
     )
     row, counters = builder.build_one(records, k=2, rng=random.Random(3))
+    summary = counters.summary()
 
     assert row is not None
     data = row.to_dict()
     assert data["dataset"] == PHASE2_LABELLED_REQUESTS
-    assert data["task"] == "text_to_rest_api_set"
+    assert data["task"] == "text_to_rest_api_list"
     assert data["x"]["text"] == "show both sampled systems"
+    assert data["y_true"]["order_evidence"] == "explicit_then"
     assert data["validation"]["set_coverage_preserved"] is True
     assert data["validation"]["review_judged"] is True
-    assert counters.summary()[_phase2_metric("draft_total")] == 1
-    assert counters.summary()[_phase2_metric("accepted_total")] == 1
-    assert counters.summary()[_phase2_metric("rest_api_set_match_rate")] == 1.0
+    assert set(summary) == set(PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS)
+    assert summary[_phase2_metric("draft_total")] == 1
+    assert summary[_phase2_metric("accepted_total")] == 1
+    assert summary[_phase2_metric("rest_api_set_match_rate")] == 1.0
+    assert summary[_phase2_metric("sample_width", "k")] == 2
+    assert summary[_phase2_metric("vendor", "source_corpus")] == "fixture_vendor:fixture_corpus"
+    assert summary[_phase2_metric("prompt_spec_version")] == "phase2-labelled-requests-test-v1"
+    assert summary[_phase2_metric("model_x", "artifact_sha")] == "${PHASE1_MODEL_X_ARTIFACT_SHA}"
+    assert summary[_phase2_metric("judge", "model")] == "${PHASE2_JUDGE_MODEL_ID}"
+    assert summary[_phase2_metric("judge", "profile")] == "${PHASE2_JUDGE_PROFILE}"
     assert seen["draft"]["model_id"] == "${PHASE1_MODEL_X_MODEL_ID}"
     assert seen["draft"]["generation"]["max_new_tokens"] == 96
     assert seen["judge"]["model_id"] == "${PHASE2_JUDGE_MODEL_ID}"
@@ -349,7 +439,7 @@ def test_counters_track_nonsense_invalid_json_and_empty_set_matches() -> None:
     counters.observe_judge(parse_pro_judge_result("not-json"), expected_rest_api_list=())
 
     summary = counters.summary()
-    assert set(summary) <= set(PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS)
+    assert set(summary) == set(PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS)
     assert summary[_phase2_metric("draft_total")] == 3
     assert summary[_phase2_metric("accepted_total")] == 1
     assert summary[_phase2_metric("rejected_total")] == 2
@@ -358,6 +448,63 @@ def test_counters_track_nonsense_invalid_json_and_empty_set_matches() -> None:
     assert summary[_phase2_metric("pro_accept_rate")] == pytest.approx(1 / 3)
     assert summary[_phase2_metric("rest_api_set_match_rate")] == pytest.approx(1 / 3)
     assert summary[_phase2_metric("empty_set_match_rate")] == 1.0
+
+
+def test_counter_summary_binds_semantic_metric_names() -> None:
+    """Summary values are keyed by metric names, not tuple positions."""
+    counters = Phase2LabelledRequestCounters(
+        draft_total=7,
+        accepted_total=5,
+        rejected_total=2,
+        nonsense_total=1,
+        invalid_json_total=2,
+        rest_api_set_match_total=4,
+        empty_set_expected_total=3,
+        empty_set_match_total=2,
+        sample_width_k=3,
+        vendor_source_corpus="vendor:corpus",
+        prompt_spec_version="spec-v1",
+        model_x_artifact_sha="sha256:abc",
+        judge_model="pro",
+        judge_profile="think-max",
+    )
+
+    summary = counters.summary()
+
+    assert summary[_phase2_metric("draft_total")] == 7
+    assert summary[_phase2_metric("accepted_total")] == 5
+    assert summary[_phase2_metric("rejected_total")] == 2
+    assert summary[_phase2_metric("nonsense_rate")] == pytest.approx(1 / 7)
+    assert summary[_phase2_metric("invalid_json_rate")] == pytest.approx(2 / 7)
+    assert summary[_phase2_metric("pro_accept_rate")] == pytest.approx(5 / 7)
+    assert summary[_phase2_metric("rest_api_set_match_rate")] == pytest.approx(4 / 7)
+    assert summary[_phase2_metric("empty_set_match_rate")] == pytest.approx(2 / 3)
+    assert summary[_phase2_metric("sample_width", "k")] == 3
+    assert summary[_phase2_metric("vendor", "source_corpus")] == "vendor:corpus"
+    assert summary[_phase2_metric("prompt_spec_version")] == "spec-v1"
+    assert summary[_phase2_metric("model_x", "artifact_sha")] == "sha256:abc"
+    assert summary[_phase2_metric("judge", "model")] == "pro"
+    assert summary[_phase2_metric("judge", "profile")] == "think-max"
+
+
+def test_acceptance_thresholds_are_enforced_from_yaml(tmp_path: Path) -> None:
+    """Configured acceptance thresholds decide whether summary metrics pass."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    passing = {
+        _phase2_metric("pro_accept_rate"): 0.91,
+        _phase2_metric("rest_api_set_match_rate"): 0.99,
+        _phase2_metric("nonsense_rate"): 0.0,
+        _phase2_metric("invalid_json_rate"): 0.0,
+    }
+    failing = {
+        _phase2_metric("pro_accept_rate"): 0.89,
+        _phase2_metric("rest_api_set_match_rate"): 0.99,
+        _phase2_metric("nonsense_rate"): 0.0,
+        _phase2_metric("invalid_json_rate"): 0.0,
+    }
+
+    assert phase2_acceptance_thresholds_pass(spec, passing)
+    assert not phase2_acceptance_thresholds_pass(spec, failing)
 
 
 def test_phase2_labelled_request_wandb_keys_have_required_namespace_shape() -> None:

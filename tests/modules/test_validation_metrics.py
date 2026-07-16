@@ -12,7 +12,11 @@ Mus mbayramo@stanford.edu
 
 import torch
 
-from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
+from igc.modules.llm_train_state_encoder import (
+    LlmEmbeddingsTrainer,
+    ValidationMetrics,
+    shifted_token_loss,
+)
 
 
 def _aligned_logits(targets, vocab=7):
@@ -61,6 +65,44 @@ def test_all_pad_batch_is_zero_not_nan():
         torch.zeros(1, 3, 7), targets, None
     )
     assert accuracy == 0.0
+
+
+class _ValidationModel(torch.nn.Module):
+    """Tiny model that exposes logits and CE loss when labels are passed."""
+
+    def __init__(self, logits: torch.Tensor):
+        super().__init__()
+        self._logits = logits
+
+    def forward(self, input_ids, attention_mask, labels=None):
+        """Return a Hugging Face-like object with logits and loss."""
+        loss = None
+        if labels is not None:
+            loss = shifted_token_loss(self._logits, labels)
+        return type("Output", (), {"logits": self._logits, "loss": loss})()
+
+
+def test_validate_returns_loss_and_accuracy_from_labels():
+    """Validation reports CE loss plus percent token accuracy from prompt-masked labels."""
+    labels = torch.tensor([[0, 1, 2, -100]])
+    logits = torch.zeros(1, 4, 5)
+    logits[0, 0, 1] = 5.0  # predicts labels[:, 1] correctly
+    logits[0, 1, 3] = 5.0  # predicts labels[:, 2] incorrectly
+    trainer = LlmEmbeddingsTrainer.__new__(LlmEmbeddingsTrainer)
+    trainer.model = _ValidationModel(logits)
+    trainer._device = torch.device("cpu")
+    trainer.tokenizer = type("Tok", (), {"pad_token_id": 0})()
+    trainer.is_accelerator = False
+
+    metrics = trainer.validate([{
+        "input_ids": torch.tensor([[0, 1, 2, 3]]),
+        "attention_mask": torch.ones(1, 4, dtype=torch.long),
+        "labels": labels,
+    }])
+
+    assert isinstance(metrics, ValidationMetrics)
+    assert metrics.accuracy == 50.0
+    assert torch.isclose(torch.tensor(metrics.loss), shifted_token_loss(logits, labels))
 
 
 # Author: Mus mbayramo@stanford.edu

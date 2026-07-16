@@ -223,13 +223,13 @@ def add_scheduler_group(parser):
 
     scheduler_group.add_argument(
         "--base_lr",
-        type=int, default=0.01,
+        type=float, default=0.01,
         help="Initial learning rate which is the lower boundary in the cycle for each parameter group.."
     )
 
     scheduler_group.add_argument(
         "--max_lr",
-        type=int, default=5e-5,
+        type=float, default=None,
         help="Upper learning rate boundaries in the cycle for each parameter group. ."
     )
 
@@ -408,6 +408,18 @@ def add_trainer_group(parser):
              " If provided, overrides num_train_epochs.")
 
     trainer_group.add_argument(
+        "--early_stopping_patience",
+        type=int, default=3,
+        help="Number of evaluation calls without meaningful improvement before"
+             " stopping Phase 1 fine-tuning.")
+
+    trainer_group.add_argument(
+        "--early_stopping_min_delta",
+        type=float, default=0.005,
+        help="Minimum validation-loss improvement required to reset Phase 1"
+             " early-stopping patience.")
+
+    trainer_group.add_argument(
         "--output_dir",
         type=str, default=None,
         help="Where to store the model.")
@@ -421,6 +433,20 @@ def add_trainer_group(parser):
         "--data_seed",
         type=int, default=42,
         help="Random seed to be used with data samplers."
+    )
+
+    parser.add_argument(
+        "--profile",
+        type=str, default="",
+        help="Resolved named training profile, such as phase1_7b_rslora_r32. "
+             "Used for run metadata and reports; launch behavior still comes "
+             "from the explicit CLI flags."
+    )
+    parser.add_argument(
+        "--weights_role",
+        type=str, default="",
+        help="Named checkpoint role written by this run, such as model_x, "
+             "goal_extractor, or argument_extractor."
     )
 
     # indicate that we train
@@ -921,8 +947,10 @@ def shared_arg_parser(
         args.device = None
 
     # set defaults
+    if args.max_lr is None:
+        args.max_lr = args.llm_learning_rate
     if args.div_factor is None:
-        args.div_factor = args.max_lr / 0.008
+        args.div_factor = 25.0
 
     # args.device = get_device(rank=int(os.environ.get('LOCAL_RANK', -1))) \
     #     if args.device == "auto" else args.device

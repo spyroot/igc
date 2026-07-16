@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# lfs_push_from_slot.sh — push large artifacts (captured corpora, built datasets, tarballs)
+# lfs_push_from_slot.sh — push explicitly supplied large artifacts (captured corpora, built
+# datasets, model adapters, tarballs)
 # from a GB300 slot DIRECTLY to the git-LFS remote over the node's own uplink, so the data
 # never crosses the shared VPN. Only the operator has GB300 access; run this ON the slot.
 #

@@ -22,16 +22,30 @@ import yaml
 from igc.modules.base.metric_keys import (
     PHASE2_LABELLED_REQUESTS,
     PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS,
+    phase_metric,
 )
 
-_DRAFT_TOTAL_KEY = PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS[0]
-_ACCEPTED_TOTAL_KEY = PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS[1]
-_REJECTED_TOTAL_KEY = PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS[2]
-_NONSENSE_RATE_KEY = PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS[3]
-_INVALID_JSON_RATE_KEY = PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS[4]
-_PRO_ACCEPT_RATE_KEY = PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS[5]
-_REST_API_SET_MATCH_RATE_KEY = PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS[6]
-_EMPTY_SET_MATCH_RATE_KEY = PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS[7]
+_DRAFT_TOTAL_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "draft_total")
+_ACCEPTED_TOTAL_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "accepted_total")
+_REJECTED_TOTAL_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "rejected_total")
+_NONSENSE_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "nonsense_rate")
+_INVALID_JSON_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "invalid_json_rate")
+_PRO_ACCEPT_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "pro_accept_rate")
+_REST_API_SET_MATCH_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "rest_api_set_match_rate")
+_EMPTY_SET_MATCH_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_match_rate")
+_SAMPLE_WIDTH_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "sample_width", "k")
+_VENDOR_SOURCE_CORPUS_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "vendor", "source_corpus")
+_PROMPT_SPEC_VERSION_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "prompt_spec_version")
+_MODEL_X_ARTIFACT_SHA_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "model_x", "artifact_sha")
+_JUDGE_MODEL_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "judge", "model")
+_JUDGE_PROFILE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "judge", "profile")
+
+_REQUIRED_ACCEPTANCE_KEYS = (
+    "min_pro_accept_rate",
+    "min_rest_api_set_match_rate",
+    "max_nonsense_rate",
+    "max_invalid_json_rate",
+)
 
 
 class Phase2LabelledRequestsSpecError(ValueError):
@@ -149,7 +163,7 @@ class Phase2LabelledRequestRow:
         return {
             "phase": 2,  # Phase number for labelled-request rows.
             "dataset": PHASE2_LABELLED_REQUESTS,  # canonical dataset name.
-            "task": "text_to_rest_api_set",  # Phase 2 extraction task.
+            "task": "text_to_rest_api_list",  # Phase 2 list field, evaluated as an API set.
             "x": {
                 "text": self.text,  # accepted human request text.
                 "json": [dict(record.json_body) for record in self.records],  # JSON context.
@@ -220,6 +234,13 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
             f"wandb.namespace must be {PHASE2_LABELLED_REQUESTS!r}",
         )
 
+    acceptance = _mapping(raw, "acceptance", required=True)
+    missing_acceptance = sorted(set(_REQUIRED_ACCEPTANCE_KEYS) - set(acceptance))
+    if missing_acceptance:
+        raise Phase2LabelledRequestsSpecError(
+            f"acceptance missing required keys: {', '.join(missing_acceptance)}",
+        )
+
     return Phase2LabelledRequestsSpec(
         dataset_name=dataset_name,
         prompt_spec_version=_required_string(
@@ -248,10 +269,7 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
         judge_template=_required_string(judge_prompt, "template", "prompts.pro_judge.template"),
         wandb_namespace=wandb_namespace,
         metric_keys=metric_keys,
-        acceptance_thresholds={
-            key: float(value)
-            for key, value in _mapping(raw, "acceptance", required=True).items()
-        },
+        acceptance_thresholds={key: float(value) for key, value in acceptance.items()},
     )
 
 
@@ -311,13 +329,35 @@ def parse_pro_judge_result(raw: str) -> ProJudgeResult:
     if not isinstance(parsed, Mapping):
         return ProJudgeResult(accepted=False, invalid_json=True, reason="judge result is not a mapping")
 
-    rest_api_list = parsed.get("rest_api_list", ())
-    if not isinstance(rest_api_list, Sequence) or isinstance(rest_api_list, (str, bytes)):
-        return ProJudgeResult(accepted=False, invalid_json=True, reason="rest_api_list is not a list")
+    if "rest_api_list" in parsed:
+        rest_api_value = parsed["rest_api_list"]
+        rest_api_field = "rest_api_list"
+    elif "rest_api_set" in parsed:
+        rest_api_value = parsed["rest_api_set"]
+        rest_api_field = "rest_api_set"
+    else:
+        return ProJudgeResult(
+            accepted=False,
+            invalid_json=True,
+            reason="rest_api_list or rest_api_set is required",
+        )
+
+    if not isinstance(rest_api_value, list):
+        return ProJudgeResult(
+            accepted=False,
+            invalid_json=True,
+            reason=f"{rest_api_field} is not a list",
+        )
+    if not all(isinstance(item, str) for item in rest_api_value):
+        return ProJudgeResult(
+            accepted=False,
+            invalid_json=True,
+            reason=f"{rest_api_field} must contain only strings",
+        )
 
     return ProJudgeResult(
         accepted=bool(parsed.get("accepted", False)),
-        rest_api_list=tuple(str(item) for item in rest_api_list),
+        rest_api_list=tuple(rest_api_value),
         nonsense=bool(parsed.get("nonsense", False)),
         invalid_json=False,
         reason=str(parsed.get("reason", "")),
@@ -347,6 +387,12 @@ class Phase2LabelledRequestCounters:
     rest_api_set_match_total: int = 0  # number of rows with matching API sets.
     empty_set_expected_total: int = 0  # number of valid judged no-action rows.
     empty_set_match_total: int = 0  # number of valid judged no-action matches.
+    sample_width_k: int = 0  # sampled REST API count for this candidate.
+    vendor_source_corpus: str = ""  # compact vendor/corpus provenance label.
+    prompt_spec_version: str = ""  # prompt spec version copied from YAML.
+    model_x_artifact_sha: str = ""  # Phase 1 model_x artifact SHA or placeholder.
+    judge_model: str = ""  # private judge model identifier or placeholder.
+    judge_profile: str = ""  # private judge profile identifier or placeholder.
 
     def observe_draft(self, text: str) -> None:
         """Count one draft attempt.
@@ -384,8 +430,8 @@ class Phase2LabelledRequestCounters:
         else:
             self.rejected_total += 1
 
-    def summary(self) -> dict[str, float | int]:
-        """Return scalar metrics suitable for W&B/TensorBoard logging."""
+    def summary(self) -> dict[str, float | int | str]:
+        """Return all registered builder metrics for W&B/TensorBoard logging."""
         return {
             _DRAFT_TOTAL_KEY: self.draft_total,
             _ACCEPTED_TOTAL_KEY: self.accepted_total,
@@ -398,6 +444,12 @@ class Phase2LabelledRequestCounters:
                 self.empty_set_match_total,
                 self.empty_set_expected_total,
             ),
+            _SAMPLE_WIDTH_KEY: self.sample_width_k,
+            _VENDOR_SOURCE_CORPUS_KEY: self.vendor_source_corpus,
+            _PROMPT_SPEC_VERSION_KEY: self.prompt_spec_version,
+            _MODEL_X_ARTIFACT_SHA_KEY: self.model_x_artifact_sha,
+            _JUDGE_MODEL_KEY: self.judge_model,
+            _JUDGE_PROFILE_KEY: self.judge_profile,
         }
 
 
@@ -432,7 +484,14 @@ class Phase2LabelledRequestBuilder:
         """
         sampled = sample_phase2_contexts(records, k=k, rng=rng)
         expected_rest_api_list = tuple(record.rest_api for record in sampled)
-        counters = Phase2LabelledRequestCounters()
+        counters = Phase2LabelledRequestCounters(
+            sample_width_k=k,
+            vendor_source_corpus=_source_corpus_label(sampled),
+            prompt_spec_version=self._spec.prompt_spec_version,
+            model_x_artifact_sha=self._spec.model_x.artifact_sha,
+            judge_model=self._spec.judge.model_id,
+            judge_profile=self._spec.judge.profile,
+        )
 
         draft_request = {
             "prompt": render_model_x_prompt(self._spec, sampled),  # full configured prompt.
@@ -497,6 +556,34 @@ def to_minimal_phase3_input(row: Phase2LabelledRequestRow | None) -> dict[str, A
     }
 
 
+def phase2_acceptance_thresholds_pass(
+    spec: Phase2LabelledRequestsSpec,
+    summary: Mapping[str, float | int | str],
+) -> bool:
+    """Return true when observed builder metrics satisfy YAML thresholds.
+
+    :param spec: loaded Phase 2 labelled-request spec.
+    :param summary: summary returned by :meth:`Phase2LabelledRequestCounters.summary`.
+    :return: true when all configured min/max thresholds pass.
+    """
+    thresholds = spec.acceptance_thresholds
+    missing_acceptance = sorted(set(_REQUIRED_ACCEPTANCE_KEYS) - set(thresholds))
+    if missing_acceptance:
+        raise Phase2LabelledRequestsSpecError(
+            f"acceptance missing required keys: {', '.join(missing_acceptance)}",
+        )
+    return (
+        float(summary.get(_PRO_ACCEPT_RATE_KEY, 0.0))
+        >= thresholds["min_pro_accept_rate"]
+        and float(summary.get(_REST_API_SET_MATCH_RATE_KEY, 0.0))
+        >= thresholds["min_rest_api_set_match_rate"]
+        and float(summary.get(_NONSENSE_RATE_KEY, 1.0))
+        <= thresholds["max_nonsense_rate"]
+        and float(summary.get(_INVALID_JSON_RATE_KEY, 1.0))
+        <= thresholds["max_invalid_json_rate"]
+    )
+
+
 def _render_prompt(
     *,
     system: str,
@@ -545,6 +632,15 @@ def _rate(numerator: int, denominator: int) -> float:
     if denominator <= 0:
         return 0.0
     return numerator / denominator
+
+
+def _source_corpus_label(records: Sequence[RestApiRecord]) -> str:
+    """Return a compact stable vendor/source-corpus metric value."""
+    labels = {
+        f"{record.vendor or 'unknown'}:{record.source_corpus or 'unknown'}"
+        for record in records
+    }
+    return ",".join(sorted(labels))
 
 
 # Author: Mus mbayramo@stanford.edu
