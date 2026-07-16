@@ -229,6 +229,48 @@ class Phase2LabelledRequestCounters:
         return numerator / self.draft_total
 
 
+def build_phase2_labelled_request_row(
+    spec: Phase2LabelledRequestsSpec,
+    sample: Phase2RequestSample,
+    *,
+    draft_text: str,
+    judge_result: ProJudgeResult,
+) -> dict[str, Any]:
+    """Build one accepted Phase 2 labelled-request dataset row.
+
+    :param spec: YAML-backed Phase 2 labelled-request spec.
+    :param sample: sampled Redfish records that define the expected REST API set.
+    :param draft_text: natural operator request drafted by the configured provider.
+    :param judge_result: parsed private-judge result for ``draft_text``.
+    :return: JSON-compatible accepted row for ``phase2_labelled_requests``.
+    :raises ValueError: when the judge result is not accepted.
+    """
+    if not judge_result.accepted:
+        raise ValueError("cannot build accepted row from rejected judge result")
+    return {
+        "phase": 2,
+        "dataset": spec.dataset_name,
+        "task": "text_to_rest_api_set",
+        "x": {
+            "text": draft_text,
+            "records": sample.to_prompt_payload(),
+        },
+        "y_true": {
+            "rest_api_set": list(sample.rest_api_list),
+            "order_evidence": "none",
+        },
+        "validation": {
+            "text_source": "model_x_then_private_pro_judge",
+            "pro_judged": True,
+            "rest_api_set_match": judge_result.rest_api_set_match,
+            "empty_set_match": judge_result.empty_set_match,
+            "nonsense": judge_result.nonsense,
+            "invalid_json": judge_result.invalid_json,
+            "judge_reason": judge_result.reason,
+        },
+    }
+
+
 def load_phase2_labelled_requests_spec(
     path: str | Path,
 ) -> Phase2LabelledRequestsSpec:
