@@ -45,6 +45,25 @@ PHASE1_WANDB_METRIC_KEYS = (
     phase_metric(PHASE1_FINETUNE, "throughput", "train_samples_per_sec"),
 )
 
+PHASE1_ACCEPTANCE_METRIC_KEYS = (
+    phase_metric(PHASE1_FINETUNE, "eval", "top_k_accuracy"),
+    phase_metric(PHASE1_FINETUNE, "eval", "json_parse_rate"),
+    phase_metric(PHASE1_FINETUNE, "eval", "json_exact_match_rate"),
+    phase_metric(PHASE1_FINETUNE, "eval", "odata_id_match_rate"),
+    phase_metric(PHASE1_FINETUNE, "throughput", "eval_tokens_per_sec"),
+    phase_metric(PHASE1_FINETUNE, "throughput", "eval_samples_per_sec"),
+    phase_metric(PHASE1_FINETUNE, "data", "padding_ratio"),
+    phase_metric(PHASE1_FINETUNE, "data", "mean_sequence_length"),
+    phase_metric(PHASE1_FINETUNE, "data", "max_sequence_length"),
+    phase_metric(PHASE1_FINETUNE, "calibration", "log_prob_per_token"),
+    phase_metric(PHASE1_FINETUNE, "calibration", "ece"),
+    phase_metric(PHASE1_FINETUNE, "test", "latency_sec_p50"),
+    phase_metric(PHASE1_FINETUNE, "test", "latency_sec_p95"),
+    phase_metric(PHASE1_FINETUNE, "test", "memory_peak_mb"),
+)
+
+PHASE1_ALL_METRIC_KEYS = PHASE1_WANDB_METRIC_KEYS + PHASE1_ACCEPTANCE_METRIC_KEYS
+
 PHASE2_WANDB_METRIC_KEYS = (
     phase_metric(PHASE2_GOAL_EXTRACT, "train", "loss"),
     phase_metric(PHASE2_GOAL_EXTRACT, "train", "perplexity"),
