@@ -142,7 +142,9 @@ class VectorizedRestApiEnv(VectorEnv, RestApiBaseEnv):
         Sampling from action space.
         :return: Tuple containing random observation and method
         """
-        rest_api, supported_method, supported_method = self._discovered_rest_api.sample_rest_api()
+        rest_api, supported_method, _action_one_hot = (
+            self._discovered_rest_api.sample_rest_api()
+        )
         response = self._mock_rest.request(rest_api, supported_method)
         if 200 <= response.status_code <= 300:
             observation = response.json()

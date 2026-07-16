@@ -75,6 +75,9 @@ class TinyRestMapping(RestMappingInterface):
         action[self._uris.index(rest_api)] = 1.0
         return action
 
+    def sample_rest_api(self) -> tuple[str, str, torch.Tensor]:
+        return SYSTEM_URI, HttpMethod.GET.value, self.action_for(SYSTEM_URI)
+
 
 @pytest.fixture
 def vector_env(tmp_path: Path) -> VectorizedRestApiEnv:
@@ -118,6 +121,16 @@ def test_vector_reset_and_step_preserve_batch_axes(vector_env: VectorizedRestApi
     assert terminated.shape == (2,)
     assert truncated.shape == (2,)
     assert len(infos) == 2
+
+
+def test_vector_sample_observation_uses_sampled_http_method(
+    vector_env: VectorizedRestApiEnv,
+):
+    """Vector sample_observation passes the method string, not one-hot action."""
+    observation = vector_env.sample_observation()
+
+    expected = vector_env.encoder.encode(json.dumps({"@odata.id": SYSTEM_URI}))
+    assert torch.equal(observation, expected)
 
 
 def test_vector_step_limit_sets_truncated_not_terminal(vector_env: VectorizedRestApiEnv):

@@ -11,8 +11,10 @@ from pathlib import Path
 
 import pytest
 
+import igc.envs.rest_gym_base as rest_gym_base
 import igc.envs.rest_gym_env as rest_gym_env
 import torch
+from igc.envs.rest_gym_base import RestApiBaseEnv
 from igc.envs.rest_gym_env import GoalTypeState, RestApiEnv
 from igc.envs.rest_mock_server import MockServer
 from igc.interfaces.rest_mapping_interface import RestMappingInterface
@@ -85,6 +87,9 @@ class TinyRestMapping(RestMappingInterface):
         action[self._uris.index(rest_api)] = 1.0
         return action
 
+    def sample_rest_api(self) -> tuple[str, str, torch.Tensor]:
+        return SYSTEM_URI, "GET", self.action_for(SYSTEM_URI)
+
 
 @pytest.fixture
 def rest_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RestApiEnv:
@@ -145,6 +150,40 @@ def test_step_get_known_resource_returns_success_observation(rest_env: RestApiEn
     assert rest_env.step_count == 1
     assert torch.equal(observation, rest_env.encoder.encode(json.dumps(SYSTEM_PAYLOAD)))
     assert torch.equal(rest_env.last_observation, observation)
+
+
+def test_sample_observation_uses_sampled_http_method(rest_env: RestApiEnv):
+    """sample_observation passes the sampled method, not the one-hot tensor."""
+    observation = rest_env.sample_observation()
+
+    system_json = json.dumps(SYSTEM_PAYLOAD)
+    assert torch.equal(observation, rest_env.encoder.encode(system_json))
+    assert system_json in rest_env.encoder.calls
+
+
+def test_base_sample_observation_uses_sampled_http_method(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The base env keeps the sampled method separate from the action vector."""
+    system_path = tmp_path / "system.json"
+    system_path.write_text(json.dumps(SYSTEM_PAYLOAD), encoding="utf-8")
+    mapping = TinyRestMapping({SYSTEM_URI: system_path})
+    monkeypatch.setattr(rest_gym_base, "RestBaseEncoder", StubEncoder)
+
+    env = RestApiBaseEnv(
+        args=argparse.Namespace(raw_data_dir=str(tmp_path)),
+        model=None,
+        tokenizer=None,
+        discovered_rest_api=mapping,
+        max_episode=5,
+    )
+
+    observation = env.sample_observation()
+
+    system_json = json.dumps(SYSTEM_PAYLOAD)
+    assert torch.equal(observation, env.encoder.encode(system_json))
+    assert system_json in env.encoder.calls
 
 
 def test_step_http_500_returns_terminal_error_observation(rest_env: RestApiEnv):
