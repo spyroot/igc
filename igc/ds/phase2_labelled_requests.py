@@ -355,10 +355,26 @@ def parse_pro_judge_result(raw: str) -> ProJudgeResult:
             reason=f"{rest_api_field} must contain only strings",
         )
 
+    accepted_key = "accepted" if "accepted" in parsed else "accept"
+    accepted = _optional_bool(parsed, accepted_key)
+    if accepted is None:
+        return ProJudgeResult(
+            accepted=False,
+            invalid_json=True,
+            reason=f"{accepted_key} must be a boolean when present",
+        )
+    nonsense = _optional_bool(parsed, "nonsense")
+    if nonsense is None:
+        return ProJudgeResult(
+            accepted=False,
+            invalid_json=True,
+            reason="nonsense must be a boolean when present",
+        )
+
     return ProJudgeResult(
-        accepted=bool(parsed.get("accepted", False)),
+        accepted=accepted,
         rest_api_list=tuple(rest_api_value),
-        nonsense=bool(parsed.get("nonsense", False)),
+        nonsense=nonsense,
         invalid_json=False,
         reason=str(parsed.get("reason", "")),
         order_evidence=str(parsed.get("order_evidence", "none")),
@@ -624,6 +640,16 @@ def _required_string(source: Mapping[str, Any], key: str, label: str) -> str:
     value = source.get(key)
     if not isinstance(value, str) or not value.strip():
         raise Phase2LabelledRequestsSpecError(f"{label} must be a non-empty string")
+    return value
+
+
+def _optional_bool(source: Mapping[str, Any], key: str) -> bool | None:
+    """Read an optional judge boolean; return ``None`` for malformed values."""
+    if key not in source:
+        return False
+    value = source[key]
+    if not isinstance(value, bool):
+        return None
     return value
 
 

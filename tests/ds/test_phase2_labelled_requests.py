@@ -136,9 +136,9 @@ def _judge_json(
     )
 
 
-def _phase2_metric(name: str) -> str:
+def _phase2_metric(group: str, name: str | None = None) -> str:
     """Return a required Phase 2 labelled-request metric key."""
-    return phase_metric(PHASE2_LABELLED_REQUESTS, name)
+    return phase_metric(PHASE2_LABELLED_REQUESTS, group, name)
 
 
 def test_loads_prompt_model_judge_generation_and_thresholds_from_yaml(tmp_path: Path) -> None:
@@ -149,7 +149,9 @@ def test_loads_prompt_model_judge_generation_and_thresholds_from_yaml(tmp_path: 
     assert spec.prompt_spec_version == "phase2-labelled-requests-test-v1"
     assert spec.sample_widths == (1, 2, 3)
     assert spec.model_x.model_id == "${PHASE1_MODEL_X_MODEL_ID}"
+    assert spec.model_x.artifact_sha == "${PHASE1_MODEL_X_ARTIFACT_SHA}"
     assert spec.judge.route == "private_pro"
+    assert spec.judge.model_id == "${PHASE2_JUDGE_MODEL_ID}"
     assert spec.judge.profile == "${PHASE2_JUDGE_PROFILE}"
     assert spec.generation == {"max_new_tokens": 96, "temperature": 0.2, "top_p": 0.95}
     assert spec.wandb_namespace == PHASE2_LABELLED_REQUESTS
@@ -205,6 +207,11 @@ def test_committed_phase2_labelled_requests_config_loads() -> None:
     assert spec.dataset_name == PHASE2_LABELLED_REQUESTS
     assert spec.metric_keys == PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS
     assert spec.sample_widths == (1, 2, 3)
+    assert spec.model_x.model_id == "${PHASE1_MODEL_X_MODEL_ID}"
+    assert spec.model_x.artifact_sha == "${PHASE1_MODEL_X_ARTIFACT_SHA}"
+    assert spec.judge.route == "${PHASE2_JUDGE_ROUTE}"
+    assert spec.judge.model_id == "${PHASE2_JUDGE_MODEL_ID}"
+    assert spec.judge.profile == "${PHASE2_JUDGE_PROFILE}"
 
 
 def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Path) -> None:
@@ -256,10 +263,12 @@ def test_unordered_set_comparison_and_empty_set_equality() -> None:
 
     assert compare_rest_api_sets(expected, predicted)
     assert not compare_rest_api_sets(expected, ["/redfish/v1/A"])
+    assert not compare_rest_api_sets(expected, expected + ["/redfish/v1/C"])
     assert compare_rest_api_sets([], [])
     assert empty_set_matches([], [])
     assert not empty_set_matches([], ["/redfish/v1/A"])
     assert not empty_set_matches(["/redfish/v1/A"], [])
+    assert not empty_set_matches(["/redfish/v1/A"], ["/redfish/v1/A"])
 
 
 def test_pro_judge_result_parsing_accepts_plain_and_wrapped_json() -> None:
@@ -278,6 +287,8 @@ def test_pro_judge_result_parsing_accepts_plain_and_wrapped_json() -> None:
     wrapped = parse_pro_judge_result(json.dumps({"y_pred": json.loads(_judge_json())}))
     assert wrapped.accepted is True
     assert wrapped.invalid_json is False
+    assert wrapped.nonsense is False
+    assert wrapped.order_evidence == "none"
 
     invalid = parse_pro_judge_result("{not json")
     assert invalid.accepted is False
@@ -308,6 +319,22 @@ def test_pro_judge_result_parsing_accepts_rest_api_set_alias() -> None:
         "/redfish/v1/Systems/2",
         "/redfish/v1/Systems/1",
     )
+
+
+def test_pro_judge_result_parsing_accepts_accept_boolean_alias() -> None:
+    """The parser accepts the judge's legacy accept boolean alias."""
+    result = parse_pro_judge_result(
+        json.dumps({
+            "accept": True,
+            "rest_api_list": ["/redfish/v1/Systems/1"],
+            "nonsense": False,
+            "reason": "fixture",
+        }),
+    )
+
+    assert result.accepted is True
+    assert result.invalid_json is False
+    assert result.rest_api_list == ("/redfish/v1/Systems/1",)
 
 
 @pytest.mark.parametrize(
@@ -349,6 +376,43 @@ def test_pro_judge_result_parsing_requires_rest_api_field() -> None:
     assert result.invalid_json is True
     assert result.rest_api_list == ()
     assert "rest_api_list" in result.reason
+
+
+@pytest.mark.parametrize(
+    ("field_name", "field_value"),
+    (
+        ("accepted", "true"),
+        ("accepted", 1),
+        ("accepted", None),
+        ("accept", "true"),
+        ("accept", 1),
+        ("accept", None),
+        ("nonsense", "false"),
+        ("nonsense", 0),
+        ("nonsense", None),
+    ),
+)
+def test_pro_judge_result_parsing_counts_malformed_booleans_as_invalid(
+    field_name: str,
+    field_value: Any,
+) -> None:
+    """Malformed judge booleans are invalid output, not truthy/falsy coercions."""
+    payload: dict[str, Any] = {
+        "rest_api_list": ["/redfish/v1/Systems"],
+        "nonsense": False,
+        field_name: field_value,
+    }
+    if field_name not in {"accept", "accepted"}:
+        payload["accepted"] = True
+
+    result = parse_pro_judge_result(
+        json.dumps(payload),
+    )
+
+    assert result.accepted is False
+    assert result.invalid_json is True
+    assert result.rest_api_list == ()
+    assert field_name in result.reason
 
 
 def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -> None:

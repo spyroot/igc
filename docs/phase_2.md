@@ -6,7 +6,12 @@ New code, configs, metrics, and docs use the canonical dataset name
 Redfish JSON pretraining before real generation runs; offline plumbing may use
 tiny fixtures and injected providers only.
 
-Names are fixed as follows:
+`model_x`, produced by Phase 1 Redfish JSON pretraining, drafts the missing
+operator text. The private Pro judge, selected by the `judge` section in
+`configs/phase2_labelled_requests.yaml`, decides whether that text maps back to
+the same unordered REST API set. Empty set equals empty set. Order is recorded
+only as secondary evidence when the text explicitly says things like "then",
+"before", "after", or uses numbered steps.
 
 - `D0`: Phase 1 JSON reconstruction data.
 - `phase2_labelled_requests`: Phase 2 text-to-REST-API-set data.
@@ -95,16 +100,15 @@ The following block is an intermediate synthetic-text generation request, not th
       "/redfish/v1/Systems"
     ]
   },
-  "y_pred": {
-    "text": "check the task queue, then list the available computer systems"
-  }
+  "vendor": "fixture",
+  "source_corpus": "unit_fixture"
 }
 ```
 
 `y_pred.text` is only a draft. If `model_x` emits junk text, that text must not
 enter `phase2_labelled_requests`. It must be cleaned or rejected.
 
-## Review Cleanup And Judge
+## Draft And Judge
 
 The generated text should be passed through a review/judge step with the same `json`,
 `allowed_methods`, and canonical `rest_api_list`. The reviewer has two jobs:
@@ -118,7 +122,14 @@ output is not used for fine-tuning.
 
 ## Final Row
 
-This is the row used to fine-tune text-to-REST-goal extraction:
+The offline parser accepts a row only when the judge JSON parses, the judge did
+not mark the draft as nonsense, and the judged REST API set equals the expected
+set after ignoring order. If the expected and judged sets are both empty, the
+row counts as an empty-set match.
+
+## Final Row
+
+An accepted row stores the text label with the sampled REST API evidence:
 
 ```json
 {
@@ -126,71 +137,48 @@ This is the row used to fine-tune text-to-REST-goal extraction:
   "dataset": "phase2_labelled_requests",
   "task": "text_to_rest_api_list",
   "x": {
-    "text": "check the task queue, then list the available computer systems",
-    "json": [
+    "text": "check the available computer systems",
+    "records": [
       {
-        "@odata.context": "/redfish/v1/$metadata#TaskCollection.TaskCollection",
-        "@odata.id": "/redfish/v1/TaskService/Tasks",
-        "@odata.type": "#TaskCollection.TaskCollection",
-        "Description": "Collection of Tasks",
-        "Members": [],
-        "Members@odata.count": 0,
-        "Name": "Task Collection"
-      },
-      {
-        "@odata.context": "/redfish/v1/$metadata#ComputerSystemCollection.ComputerSystemCollection",
-        "@odata.id": "/redfish/v1/Systems",
-        "@odata.type": "#ComputerSystemCollection.ComputerSystemCollection",
-        "Description": "Collection of Computer Systems",
-        "Members": [
-          {
-            "@odata.id": "/redfish/v1/Systems/System.Embedded.1"
-          }
-        ],
-        "Members@odata.count": 1,
-        "Name": "Computer System Collection"
+        "rest_api": "/redfish/v1/Systems",
+        "allowed_methods": ["GET", "HEAD"],
+        "json": {
+          "@odata.id": "/redfish/v1/Systems",
+          "@odata.type": "#ComputerSystemCollection.ComputerSystemCollection",
+          "Members": [],
+          "Members@odata.count": 0,
+          "Name": "Computer System Collection"
+        }
       }
-    ],
-    "allowed_methods": {
-      "/redfish/v1/TaskService/Tasks": [
-        "GET",
-        "HEAD"
-      ],
-      "/redfish/v1/Systems": [
-        "GET",
-        "HEAD"
-      ]
-    }
+    ]
   },
   "y_true": {
-    "rest_api_list": [
-      "/redfish/v1/TaskService/Tasks",
-      "/redfish/v1/Systems"
-    ],
-    "order_evidence": "explicit_then"
+    "rest_api_set": ["/redfish/v1/Systems"],
+    "order_evidence": "none"
   },
   "validation": {
-    "text_source": "model_x_then_review",
-    "review_judged": true,
-    "all_rest_api_present": true,
-    "extra_rest_api_present": false,
-    "order_preserved": true
+    "text_source": "model_x_then_private_pro_judge",
+    "pro_judged": true,
+    "rest_api_set_match": true,
+    "empty_set_match": false,
+    "nonsense": false,
+    "invalid_json": false
   }
 }
 ```
 
-## Fine-Tuning Target
+The row may preserve a deterministic list order for storage, but Phase 2
+acceptance is set-based unless the text itself carries explicit ordering
+language. Phase 3 argument extraction remains a separate phase and consumes
+accepted request labels only after a downstream contract chooses how to preserve
+or infer call order.
 
-The rendered training target is canonical JSON:
+## Metrics
 
-```json
-{
-  "rest_api_list": [
-    "/redfish/v1/TaskService/Tasks",
-    "/redfish/v1/Systems"
-  ]
-}
-```
+`PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS`, defined in
+`igc/modules/base/metric_keys.py`, records the metric keys used by the offline
+builder seam. The canonical namespace comes from `wandb.namespace` in
+`configs/phase2_labelled_requests.yaml` and is `phase2_labelled_requests`.
 
 Cross-entropy is computed on the target JSON tokens. Evaluation parses `y_pred`,
 reads `y_pred.rest_api_list`, and treats unordered set match as the primary
@@ -255,8 +243,24 @@ path may emit these legacy trainer metrics. They are separate from
 - `phase2_goal_extraction/test/latency_sec_p95`
 - `phase2_goal_extraction/test/memory_peak_mb`
 
-When Phase 2 moves beyond mock plumbing, its acceptance gate must mirror Phase 1: approved full
-corpora, readable W&B plots, checkpoint/report storage, and reviewed Git LFS artifact metadata.
+## Acceptance Gate
+
+The offline plumbing is accepted when focused pytest coverage proves:
+
+- sample widths `k=1`, `k=2`, and `k=3` are supported;
+- prompt specs load from YAML and render sampled record payloads;
+- REST API set comparison is unordered;
+- empty set equals empty set;
+- Pro judge JSON parsing handles accepted, rejected, nonsense, and invalid JSON
+  outcomes;
+- nonsense, invalid JSON, Pro accept, REST API set match, and empty-set match
+  counters emit the required keys;
+- Phase 3 argument extraction remains outside this builder.
+
+A later approved run can point the YAML route metadata at the fine-tuned
+`model_x` artifact and private Pro judge. That run is outside the local CPU
+plumbing gate and must not be simulated with live GPU inference, live W&B, live
+Redfish crawls, model downloads, or cluster jobs.
 
 Author:
 Mus mbayramo@stanford.edu
