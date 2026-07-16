@@ -110,6 +110,80 @@ def test_build_phase1_golden_payload_compares_baseline_and_model(tmp_path: Path)
     assert "sha256" in payload["evidence"]["model_x"]["artifact"]
 
 
+def test_phase1_golden_rejects_mismatched_artifact_row_keys(tmp_path: Path) -> None:
+    """Baseline/model_x deltas fail closed when row ids do not describe the same rows."""
+    rest_api = "/redfish/v1/Systems/1"
+    target = _target(rest_api, "1")
+    baseline = _write_jsonl(
+        tmp_path / "baseline.jsonl",
+        [
+            {
+                "id": "baseline-only",
+                "x": {"rest_api": rest_api, "json": target},
+                "y_true": {"json": target},
+                "y_pred": {"json": {"@odata.id": rest_api, "Name": "Wrong"}},
+            }
+        ],
+    )
+    model = _write_jsonl(
+        tmp_path / "model_x.jsonl",
+        [
+            {
+                "id": "model-only",
+                "x": {"rest_api": rest_api, "json": target},
+                "y_true": {"json": target},
+                "y_pred": {"json": target},
+            }
+        ],
+    )
+
+    with pytest.raises(Phase1GoldenError, match="different row keys"):
+        build_phase1_golden_payload(baseline_jsonl=baseline, model_jsonl=model)
+
+
+def test_phase1_golden_row_keys_do_not_expand_public_payload(tmp_path: Path) -> None:
+    """Row-key bookkeeping is internal and not part of metric/evidence JSON."""
+    rest_a = "/redfish/v1/Systems/1"
+    rest_b = "/redfish/v1/Systems/2"
+    baseline = _write_jsonl(
+        tmp_path / "baseline.jsonl",
+        [
+            _row(rest_a, _target(rest_a, "1"), id="row-a"),
+            _row(rest_b, _target(rest_b, "2"), id="row-b"),
+        ],
+    )
+    model = _write_jsonl(
+        tmp_path / "model_x.jsonl",
+        [
+            _row(rest_b, _target(rest_b, "2"), id="row-b"),
+            _row(rest_a, _target(rest_a, "1"), id="row-a"),
+        ],
+    )
+
+    payload = build_phase1_golden_payload(baseline_jsonl=baseline, model_jsonl=model)
+    rendered = json.dumps(payload)
+
+    assert "row_keys" not in rendered
+    assert "row-a" not in rendered
+    assert "row-b" not in rendered
+    assert payload["comparison"]["row_count_delta"] == 0
+
+
+def test_phase1_golden_rejects_duplicate_row_keys(tmp_path: Path) -> None:
+    """Duplicate explicit ids are ambiguous and cannot feed acceptance evidence."""
+    rest_api = "/redfish/v1/Systems/1"
+    path = _write_jsonl(
+        tmp_path / "duplicates.jsonl",
+        [
+            _row(rest_api, _target(rest_api, "1"), id="duplicate"),
+            _row(rest_api, _target(rest_api, "1"), id="duplicate"),
+        ],
+    )
+
+    with pytest.raises(Phase1GoldenError, match="duplicate prediction row keys"):
+        evaluate_prediction_jsonl(path, role="model_x")
+
+
 def test_prediction_parser_accepts_fenced_json_fragment() -> None:
     """Model outputs wrapped in text still parse when they contain one JSON object."""
     parsed, ok, error = parse_json_value('prefix ```json\n{"a": 1}\n``` suffix')
