@@ -120,8 +120,6 @@ The generated text should be passed through a review/judge step with the same `j
 Accepted output becomes the final `phase2_labelled_requests` row. Rejected
 output is not used for fine-tuning.
 
-## Final Row
-
 The offline parser accepts a row only when the judge JSON parses, the judge did
 not mark the draft as nonsense, and the judged REST API set equals the expected
 set after ignoring order. If the expected and judged sets are both empty, the
@@ -153,16 +151,14 @@ An accepted row stores the text label with the sampled REST API evidence:
     ]
   },
   "y_true": {
-    "rest_api_set": ["/redfish/v1/Systems"],
+    "rest_api_list": ["/redfish/v1/Systems"],
     "order_evidence": "none"
   },
   "validation": {
-    "text_source": "model_x_then_private_pro_judge",
-    "pro_judged": true,
-    "rest_api_set_match": true,
-    "empty_set_match": false,
-    "nonsense": false,
-    "invalid_json": false
+    "text_source": "model_x_then_private_judge",
+    "review_judged": true,
+    "set_coverage_preserved": true,
+    "nonsense": false
   }
 }
 ```
