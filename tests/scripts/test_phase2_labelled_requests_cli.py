@@ -384,6 +384,24 @@ def test_cli_live_provider_blocks_dataset_scale_without_gate(tmp_path: Path) -> 
         )
 
 
+def test_cli_one_sided_live_provider_override_blocks_dataset_scale_without_gate(
+    tmp_path: Path,
+) -> None:
+    """A single live adapter override still activates the dataset-scale gate."""
+    script = _load_script()
+
+    with pytest.raises(SystemExit, match="live provider runs"):
+        script.main(
+            _base_args(tmp_path, sample_width=1, count=4)
+            + [
+                "--draft-provider-adapter",
+                "openai-compatible",
+                "--judge-provider-adapter",
+                "mock",
+            ],
+        )
+
+
 def test_cli_live_override_requires_live_provider_config(tmp_path: Path) -> None:
     """CLI live overrides fail before HTTP when the YAML lacks live routing fields."""
     script = _load_script()
