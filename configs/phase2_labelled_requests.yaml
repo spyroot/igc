@@ -1,88 +1,92 @@
-version: phase2_labelled_requests.v1
-dataset_name: phase2_labelled_requests
+dataset:
+  name: phase2_labelled_requests
+  prompt_spec_version: phase2-labelled-requests-v1
 
-sample_widths:
-  - 1
-  - 2
-  - 3
+sampling:
+  sample_widths:
+    - 1
+    - 2
+    - 3
+
+model_x:
+  model_id: ${PHASE1_MODEL_X_MODEL_ID}
+  artifact_sha: ${PHASE1_MODEL_X_ARTIFACT_SHA}
+
+judge:
+  route: ${PHASE2_JUDGE_ROUTE}
+  model_id: ${PHASE2_JUDGE_MODEL_ID}
+  profile: ${PHASE2_JUDGE_PROFILE}
+
+safety:
+  live_without_gate_max_candidates: 3
+
+providers:
+  draft:
+    adapter: mock
+    base_url_env: PHASE2_MODEL_X_BASE_URL
+    api_key_env: PHASE2_MODEL_X_API_KEY
+    endpoint_path: /v1/chat/completions
+    timeout_seconds: 30
+    response_text_path: choices.0.message.content
+  judge:
+    adapter: mock
+    base_url_env: PHASE2_JUDGE_BASE_URL
+    api_key_env: PHASE2_JUDGE_API_KEY
+    endpoint_path: /v1/chat/completions
+    timeout_seconds: 30
+    response_text_path: choices.0.message.content
+    payload_request_fields:
+      - route
+      - profile
+
+generation:
+  max_new_tokens: 96
+  temperature: 0.2
+  top_p: 0.95
+
+prompts:
+  model_x_draft:
+    system: |
+      You draft one concise, natural operator request from Redfish REST API evidence.
+      Cover all sampled APIs and do not add unsupported work.
+    template: |
+      Sampled REST API records:
+      {records_json}
+
+      Return only the human request text.
+  pro_judge:
+    system: |
+      You judge whether a draft operator request maps back to the exact sampled REST API set.
+      Treat API order as irrelevant unless the text explicitly uses ordering language.
+    template: |
+      Sampled REST API records:
+      {records_json}
+
+      Draft operator request:
+      {draft_text}
+
+      Return JSON with accepted, rest_api_list, nonsense, reason, and order_evidence.
 
 wandb:
   namespace: phase2_labelled_requests
-  project: igc
-  run_group: phase2_labelled_requests_offline_plumbing
+  metric_keys:
+    - phase2_labelled_requests/draft_total
+    - phase2_labelled_requests/accepted_total
+    - phase2_labelled_requests/rejected_total
+    - phase2_labelled_requests/nonsense_rate
+    - phase2_labelled_requests/invalid_json_rate
+    - phase2_labelled_requests/pro_accept_rate
+    - phase2_labelled_requests/rest_api_set_match_rate
+    - phase2_labelled_requests/empty_set_match_rate
+    - phase2_labelled_requests/sample_width/k
+    - phase2_labelled_requests/vendor/source_corpus
+    - phase2_labelled_requests/prompt_spec_version
+    - phase2_labelled_requests/model_x/artifact_sha
+    - phase2_labelled_requests/judge/model
+    - phase2_labelled_requests/judge/profile
 
-model_x:
-  id: phase1_redfish_model_x
-  artifact_sha: fixture-model-x-sha256
-  artifact_source: approved_model_store_placeholder
-
-judge:
-  route:
-    name: private_pro_judge
-    transport: configured_private_runtime
-    endpoint_env: PHASE2_PRO_JUDGE_ENDPOINT
-  model: private_pro
-  profile: max_reasoning
-
-generation:
-  draft_human_request:
-    temperature: 0.2
-    top_p: 0.9
-    max_tokens: 256
-  pro_judge_set_match:
-    temperature: 0.0
-    top_p: 1.0
-    max_tokens: 512
-
-acceptance_thresholds:
-  pro_accept_rate_min: 0.95
-  rest_api_set_match_rate_min: 0.98
-  empty_set_match_rate_min: 1.0
-  nonsense_rate_max: 0.02
-  invalid_json_rate_max: 0.01
-
-prompts:
-  draft_human_request:
-    version: phase2_labelled_requests.prompt.draft.v1
-    template: |
-      You generate one natural operator request for the dataset {dataset_name}.
-      The request must ask for all and only the sampled REST API records.
-      Do not include endpoint URLs in the request text.
-      Do not invent actions, arguments, hosts, credentials, or ordering language.
-      If there are multiple records, use a natural compound request.
-
-      Sample width: {sample_width}
-      REST API records:
-      {records_json}
-
-      Return JSON only with this shape:
-      {{
-        "text": "natural operator request"
-      }}
-  pro_judge_set_match:
-    version: phase2_labelled_requests.prompt.judge.v1
-    template: |
-      You judge whether drafted operator text maps back to the same unordered
-      REST API set for the dataset {dataset_name}. Empty set equals empty set.
-      Order is not the primary objective unless the text explicitly carries
-      ordering language such as "then", "before", "after", or numbered steps.
-
-      Draft text:
-      {draft_text}
-
-      Expected REST API set:
-      {rest_api_list_json}
-
-      Allowed methods by REST API:
-      {allowed_methods_json}
-
-      REST API records:
-      {records_json}
-
-      Return JSON only with this shape:
-      {{
-        "accepted": true,
-        "rest_api_list": ["/redfish/v1/example"],
-        "nonsense": false,
-        "reason": "short evidence-backed reason"
-      }}
+acceptance:
+  min_pro_accept_rate: 0.9
+  min_rest_api_set_match_rate: 0.98
+  max_nonsense_rate: 0.01
+  max_invalid_json_rate: 0.01

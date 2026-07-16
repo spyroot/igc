@@ -22,8 +22,9 @@ scripts/lfs_push_from_slot.sh models/model_x/adapter.safetensors # push a review
 
 It:
 
-1. verifies the artifact is matched by an LFS filter (warns if `.gitattributes` won't catch it —
-   add the pattern via a PR first, so the file lands as an LFS object, not a huge git blob);
+1. verifies the artifact is matched by an LFS filter and fails before staging if
+   `.gitattributes` will not catch it. Add the pattern via a PR first, so the
+   file lands as an LFS object, not a huge git blob;
 2. creates a `data/<basename>-<UTC>` branch, stages **only** the given paths (never `git add -A`),
    commits, `git lfs push`es the objects, and pushes the branch;
 3. prints the **PR URL** — integration is PR-only, so the artifact branch is reviewed and merged

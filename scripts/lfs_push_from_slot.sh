@@ -40,7 +40,24 @@ cd "$REPO_ROOT"
 CUR_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 [ "$CUR_BRANCH" = "main" ] || note "current branch is '$CUR_BRANCH' (a data/* branch will be created)"
 
-# 1. Ensure git-lfs is available (no OS change unless opted in).
+# 1. Verify each artifact exists and is LFS-tracked. This happens before the
+# git-lfs binary check so a path that would become a normal Git blob fails even
+# on hosts where git-lfs is not installed yet.
+for path in "$@"; do
+  [ -e "$path" ] || die "no such artifact: $path"
+  if ! git check-attr filter -- "$path" 2>/dev/null | grep -q 'filter: lfs'; then
+    ext="$(basename "$path" | sed 's/^[^.]*//')"
+    pattern_note="an exact path"
+    if [ -n "$ext" ]; then
+      pattern_note="an exact path or extension pattern such as '${ext}'"
+    fi
+    die "'$path' is not matched by an LFS filter in .gitattributes.
+Add ${pattern_note} via PR, then rerun.
+Refusing to stage this artifact as a normal Git object."
+  fi
+done
+
+# 2. Ensure git-lfs is available (no OS change unless opted in).
 ensure_lfs() {
   if git lfs version >/dev/null 2>&1; then
     LFS_RUN=(git lfs)
@@ -71,16 +88,6 @@ ensure_lfs() {
   esac
 }
 ensure_lfs "$@"
-
-# 2. Verify each artifact exists and is LFS-tracked (warn if .gitattributes won't catch it).
-for path in "$@"; do
-  [ -e "$path" ] || die "no such artifact: $path"
-  if ! git check-attr filter -- "$path" 2>/dev/null | grep -q 'filter: lfs'; then
-    note "WARNING: '$path' is not matched by an LFS filter in .gitattributes — it would commit as
-       a normal (large) git object. Add a pattern to .gitattributes first (via PR), e.g.
-       '$(basename "$path" | sed 's/^[^.]*//')' or the exact path, then rerun."
-  fi
-done
 
 # 3. Confirm the push (large, outbound).
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
