@@ -16,18 +16,19 @@ PHASE2_LABELLED_REQUESTS = "phase2_labelled_requests"
 PHASE3_ARGUMENT_EXTRACT = "phase3_argument_extraction"
 
 
-def phase_metric(namespace: str, group: str, name: str) -> str:
-    """Return a stable ``<namespace>/<group>/<name>`` metric key.
+def phase_metric(namespace: str, group: str, name: str | None = None) -> str:
+    """Return a stable slash-separated metric key.
 
     :param namespace: Phase namespace, for example :data:`PHASE1_FINETUNE`.
-    :param group: Metric group such as ``train`` or ``eval``.
-    :param name: Metric name inside the group.
+    :param group: Metric group or metric name.
+    :param name: Optional metric name inside the group.
     :return: Slash-separated W&B/TensorBoard metric key.
     :raises ValueError: if any component is empty.
     """
-    if not namespace or not group or not name:
-        raise ValueError("metric namespace, group, and name must be non-empty")
-    return f"{namespace}/{group}/{name}"
+    parts = (namespace, group) if name is None else (namespace, group, name)
+    if any(not part for part in parts):
+        raise ValueError("metric key components must be non-empty")
+    return "/".join(parts)
 
 
 PHASE1_WANDB_METRIC_KEYS = (
@@ -59,18 +60,18 @@ PHASE2_WANDB_METRIC_KEYS = (
 )
 
 PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS = (
-    phase_metric(PHASE2_LABELLED_REQUESTS, "build", "draft_total"),
-    phase_metric(PHASE2_LABELLED_REQUESTS, "build", "accepted_total"),
-    phase_metric(PHASE2_LABELLED_REQUESTS, "build", "rejected_total"),
-    phase_metric(PHASE2_LABELLED_REQUESTS, "eval", "nonsense_rate"),
-    phase_metric(PHASE2_LABELLED_REQUESTS, "eval", "invalid_json_rate"),
-    phase_metric(PHASE2_LABELLED_REQUESTS, "eval", "pro_accept_rate"),
-    phase_metric(PHASE2_LABELLED_REQUESTS, "eval", "rest_api_set_match_rate"),
-    phase_metric(PHASE2_LABELLED_REQUESTS, "eval", "empty_set_match_rate"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "draft_total"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "accepted_total"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "rejected_total"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "nonsense_rate"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "invalid_json_rate"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "pro_accept_rate"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "rest_api_set_match_rate"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_match_rate"),
     phase_metric(PHASE2_LABELLED_REQUESTS, "sample_width", "k"),
     phase_metric(PHASE2_LABELLED_REQUESTS, "vendor", "source_corpus"),
-    phase_metric(PHASE2_LABELLED_REQUESTS, "spec", "prompt_spec_version"),
-    phase_metric(PHASE2_LABELLED_REQUESTS, "model", "model_x_artifact_sha"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "prompt_spec_version"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "model_x", "artifact_sha"),
     phase_metric(PHASE2_LABELLED_REQUESTS, "judge", "model"),
     phase_metric(PHASE2_LABELLED_REQUESTS, "judge", "profile"),
 )
