@@ -1,0 +1,15 @@
+# Repo-committed Git LFS defaults (git-lfs reads .lfsconfig from the checkout).
+#
+# Model weights (*.pt checkpoints, *.safetensors adapters) are committed to this
+# repo only as LFS POINTER metadata; the bulky objects live on the LFS remote and
+# BeeGFS /models. This default keeps `git lfs pull` / CI checkouts / laptop clones
+# from ever materializing them by accident — weights stay on the GB300 side.
+#
+# To stage weights deliberately (on a GB300 node, never a laptop), override both
+# filters for that invocation: include the target path and clear this exclude.
+#   git lfs pull --include='path/to/artifact.safetensors' --exclude=''
+#
+# Dataset/corpus tarballs (*.tar.gz) are NOT excluded: offline tests may read the
+# small committed corpus artifacts.
+[lfs]
+fetchexclude = *.pt,*.safetensors
