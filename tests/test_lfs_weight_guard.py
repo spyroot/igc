@@ -5,7 +5,7 @@ that sets ``lfs.fetchexclude`` for model weight formats, so ``git lfs pull``,
 ``actions/checkout`` with ``lfs: true``, and laptop clones download pointer
 metadata only — the bulky ``*.pt``/``*.safetensors`` objects stay on the LFS
 remote/GB300 side unless a node explicitly overrides with
-``git lfs pull --include=...``. Also pins that the weight formats remain
+``git lfs pull --include=... --exclude=''``. Also pins that the weight formats remain
 LFS-tracked in ``.gitattributes`` (the guard is meaningless if weights ever
 become plain git blobs). Pure file reads; no network, GPU, or git-lfs binary.
 
@@ -29,6 +29,11 @@ def _fetchexclude_patterns() -> list[str]:
     return [p.strip() for p in raw.split(",") if p.strip()]
 
 
+def _lfsconfig_text() -> str:
+    """Return the committed .lfsconfig text."""
+    return (REPO_ROOT / ".lfsconfig").read_text(encoding="utf-8")
+
+
 def test_lfsconfig_excludes_model_weight_formats():
     """Checkpoints (*.pt) and adapters (*.safetensors) are fetch-excluded."""
     patterns = _fetchexclude_patterns()
@@ -41,6 +46,13 @@ def test_lfsconfig_does_not_exclude_corpus_tarballs():
     patterns = _fetchexclude_patterns()
     assert "*.tar.gz" not in patterns
     assert "*" not in patterns  # a blanket exclude would break corpus fetching
+
+
+def test_documented_weight_restore_clears_fetchexclude():
+    """A deliberate weight restore must clear the repo-level exclude filter."""
+    lfsconfig = _lfsconfig_text()
+    assert "--include='path/to/artifact.safetensors'" in lfsconfig
+    assert "--exclude=''" in lfsconfig
 
 
 def test_weight_formats_remain_lfs_tracked():
