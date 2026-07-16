@@ -11,6 +11,8 @@ setup() {
     git -C "${tmp}" config user.email test@example.invalid
     git -C "${tmp}" config user.name "IGC Test"
     printf '*.safetensors filter=lfs diff=lfs merge=lfs -text\n' >"${tmp}/.gitattributes"
+    git -C "${tmp}" add .gitattributes
+    git -C "${tmp}" commit -q -m "add lfs attributes"
     printf 'payload\n' >"${tmp}/raw.bin"
     before_branch="$(git -C "${tmp}" symbolic-ref --short HEAD)"
 
