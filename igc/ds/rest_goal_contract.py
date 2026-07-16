@@ -334,6 +334,132 @@ def parse_ordered_calls_y_pred(y_pred: Mapping[str, Any] | str) -> list[dict[str
     return parsed
 
 
+def evaluate_ordered_calls_y_pred(
+    row: Mapping[str, Any],
+    y_pred: Mapping[str, Any] | str,
+) -> dict[str, Any]:
+    """Evaluate one Phase 3 prediction against a row's ordered calls.
+
+    :param row: row from :func:`build_ordered_call_row`.
+    :param y_pred: model output as a mapping or JSON string.
+    :return: parse status plus strict ordered-call comparison metrics.
+    """
+    expected_calls = list(row["y_true"]["calls"])
+    try:
+        predicted_calls = parse_ordered_calls_y_pred(y_pred)
+    except json.JSONDecodeError as exc:
+        return _failed_ordered_call_evaluation(expected_calls, f"invalid_json: {exc.msg}")
+    except ValueError as exc:
+        return _failed_ordered_call_evaluation(expected_calls, str(exc))
+    return evaluate_ordered_calls(expected_calls, predicted_calls)
+
+
+def evaluate_ordered_calls(
+    expected_calls: Sequence[Mapping[str, Any]],
+    predicted_calls: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Compare expected and predicted Phase 3 calls without truncating extras.
+
+    :param expected_calls: target call sequence.
+    :param predicted_calls: parsed prediction call sequence.
+    :return: strict ordered-call comparison metrics.
+    """
+    expected = [dict(call) for call in expected_calls]
+    predicted = [dict(call) for call in predicted_calls]
+    comparison_count = max(len(expected), len(predicted))
+    paired_count = min(len(expected), len(predicted))
+
+    rest_api_matches = 0
+    allowed_methods_matches = 0
+    method_matches = 0
+    argument_matches = 0
+    for index in range(paired_count):
+        expected_call = expected[index]
+        predicted_call = predicted[index]
+        if predicted_call.get("rest_api") == expected_call.get("rest_api"):
+            rest_api_matches += 1
+        if predicted_call.get("allowed_methods") == expected_call.get("allowed_methods"):
+            allowed_methods_matches += 1
+        if predicted_call.get("method") == expected_call.get("method"):
+            method_matches += 1
+        if predicted_call.get("arguments") == expected_call.get("arguments"):
+            argument_matches += 1
+
+    readonly_expected = [
+        call
+        for call in expected
+        if str(call.get("method", "")).upper() in ("GET", "HEAD")
+    ]
+    readonly_empty_matches = 0
+    for index, expected_call in enumerate(expected[:paired_count]):
+        expected_method = str(expected_call.get("method", "")).upper()
+        predicted_call = predicted[index]
+        predicted_method = str(predicted_call.get("method", "")).upper()
+        if (
+            expected_method in ("GET", "HEAD")
+            and predicted_method in ("GET", "HEAD")
+            and not predicted_call.get("arguments")
+        ):
+            readonly_empty_matches += 1
+
+    ordered_exact = expected == predicted
+    return {
+        "parsed": True,
+        "parse_error": "",
+        "expected_call_count": len(expected),
+        "predicted_call_count": len(predicted),
+        "call_count_match": len(expected) == len(predicted),
+        "call_ordered_exact_match": ordered_exact,
+        "call_ordered_exact_match_rate": 1.0 if ordered_exact else 0.0,
+        "call_order_correct_rate": _comparison_rate(rest_api_matches, comparison_count),
+        "rest_api_exact_match_rate": _comparison_rate(rest_api_matches, comparison_count),
+        "allowed_methods_exact_match_rate": _comparison_rate(
+            allowed_methods_matches,
+            comparison_count,
+        ),
+        "method_exact_match_rate": _comparison_rate(method_matches, comparison_count),
+        "arguments_exact_match_rate": _comparison_rate(argument_matches, comparison_count),
+        "arguments_json_parse_rate": 1.0,
+        "invalid_method_rate": 0.0,
+        "readonly_empty_arguments_rate": _comparison_rate(
+            readonly_empty_matches,
+            len(readonly_expected),
+        ),
+    }
+
+
+def _failed_ordered_call_evaluation(
+    expected_calls: Sequence[Mapping[str, Any]],
+    parse_error: str,
+) -> dict[str, Any]:
+    """Return a zeroed comparison result for an unparseable Phase 3 prediction."""
+    invalid_method = "not in allowed_methods" in parse_error
+    return {
+        "parsed": False,
+        "parse_error": parse_error,
+        "expected_call_count": len(expected_calls),
+        "predicted_call_count": 0,
+        "call_count_match": False,
+        "call_ordered_exact_match": False,
+        "call_ordered_exact_match_rate": 0.0,
+        "call_order_correct_rate": 0.0,
+        "rest_api_exact_match_rate": 0.0,
+        "allowed_methods_exact_match_rate": 0.0,
+        "method_exact_match_rate": 0.0,
+        "arguments_exact_match_rate": 0.0,
+        "arguments_json_parse_rate": 0.0,
+        "invalid_method_rate": 1.0 if invalid_method else 0.0,
+        "readonly_empty_arguments_rate": 0.0,
+    }
+
+
+def _comparison_rate(matches: int, total: int) -> float:
+    """Return a comparison rate, treating two empty sequences as a perfect match."""
+    if total == 0:
+        return 1.0
+    return matches / total
+
+
 def inference_target_calls_json(row: Mapping[str, Any]) -> dict[str, Any]:
     """Build the combined inference JSON handoff from a Phase 3 row.
 
