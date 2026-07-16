@@ -188,6 +188,36 @@ def test_pro_judge_result_parser_counts_malformed_rest_api_fields_as_invalid(
     assert field_name in result.reason
 
 
+@pytest.mark.parametrize(
+    ("field_name", "field_value"),
+    (
+        ("accepted", "false"),
+        ("accept", "false"),
+        ("nonsense", "false"),
+        ("accepted", 0),
+        ("nonsense", 0),
+    ),
+)
+def test_pro_judge_result_parser_counts_malformed_boolean_fields_as_invalid(
+    field_name: str,
+    field_value: Any,
+) -> None:
+    """Malformed judge boolean fields are invalid output, not truthy/falsy."""
+    result = parse_pro_judge_result(
+        json.dumps({
+            field_name: field_value,
+            "rest_api_list": ["/redfish/v1/Systems"],
+        }),
+        expected_rest_apis=["/redfish/v1/Systems"],
+    )
+    assert not result.valid_json
+    assert result.invalid_json
+    assert not result.accepted
+    assert not result.pro_accept
+    assert not result.nonsense
+    assert field_name in result.reason
+
+
 def test_pro_judge_result_parser_counts_missing_rest_api_field_as_invalid() -> None:
     """A judge response with neither rest_api_list nor rest_api_set is invalid.
 
