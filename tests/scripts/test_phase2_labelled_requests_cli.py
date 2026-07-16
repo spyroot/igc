@@ -384,6 +384,31 @@ def test_cli_live_provider_blocks_dataset_scale_without_gate(tmp_path: Path) -> 
         )
 
 
+@pytest.mark.parametrize(
+    "adapter_args",
+    (
+        ["--draft-provider-adapter", "openai-compatible"],
+        ["--judge-provider-adapter", "openai-compatible"],
+    ),
+)
+def test_cli_live_provider_override_blocks_dataset_scale_without_gate(
+    tmp_path: Path,
+    adapter_args: list[str],
+) -> None:
+    """One-sided live adapter overrides also require the explicit live gate."""
+    script = _load_script()
+    spec = script.load_phase2_labelled_requests_spec(
+        "configs/phase2_labelled_requests.yaml",
+    )
+    gated_count = spec.live_without_gate_max_candidates + 1
+
+    with pytest.raises(SystemExit, match="live provider runs"):
+        script.main(
+            _base_args(tmp_path, sample_width=1, count=gated_count)
+            + adapter_args,
+        )
+
+
 def test_cli_live_override_requires_live_provider_config(tmp_path: Path) -> None:
     """CLI live overrides fail before HTTP when the YAML lacks live routing fields."""
     script = _load_script()
