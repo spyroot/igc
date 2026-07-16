@@ -107,11 +107,12 @@ cross-entropy only on the `y_true` JSON completion.
 
 Use the `PHASE1_WANDB_METRIC_KEYS` registry, defined in
 `igc/modules/base/metric_keys.py`, for metrics that the current Phase 1 training
-surface tracks or reserves.
+surface tracks directly.
 The live registry keeps Phase 1 curves separate from goal extraction or RL:
 
-Current Phase 1 has the W&B namespace and basic training/eval metrics, but it does
-not yet have the full train/validation/test/calibration gate.
+Current Phase 1 has the W&B namespace, basic training/eval metrics, and the
+offline held-out prediction producer for reconstruction, throughput, data-shape,
+calibration, and test-time evidence.
 
 - `phase1_finetune/train/loss`
 - `phase1_finetune/train/epoch_loss`
@@ -125,10 +126,12 @@ not yet have the full train/validation/test/calibration gate.
 - `phase1_finetune/throughput/train_tokens_per_sec`
 - `phase1_finetune/throughput/train_samples_per_sec`
 
-The acceptance gate below still requires reconstruction, throughput, data-shape,
-calibration, and test-time evidence before a full Phase 1 run is accepted. These
-metric names are intentionally not in the live registry until the producer code
-lands:
+The held-out producer in `scripts/phase1_inference_gate.py` consumes existing
+baseline and `model_x` prediction JSONL artifacts, compares them under the
+spec in `configs/inference/phase1_golden_acceptance.yaml`, and writes compact
+metrics/evidence to caller-supplied paths. These keys are listed in
+`PHASE1_ACCEPTANCE_METRIC_KEYS`, defined in
+`igc/modules/base/metric_keys.py`, and emitted by the producer:
 
 - `phase1_finetune/eval/top_k_accuracy`
 - `phase1_finetune/eval/json_parse_rate`

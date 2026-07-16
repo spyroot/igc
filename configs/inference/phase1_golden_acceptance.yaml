@@ -1,0 +1,20 @@
+schema_version: phase1_golden_acceptance.v1
+name: phase1_golden_acceptance
+phase: 1
+task: redfish_json_reconstruction
+metrics:
+  ece_bins: 10
+thresholds:
+  min_rows: 1
+  max_missing_target_rows: 0
+  max_missing_prediction_rows: 0
+  min_model_json_parse_rate: 1.0
+  min_model_json_exact_match_rate: 0.0
+  min_model_odata_id_match_rate: 1.0
+  min_model_eval_tokens_per_sec:
+  min_model_eval_samples_per_sec:
+  max_model_ece:
+  max_model_latency_sec_p95:
+  min_exact_match_delta_vs_baseline: 0.0
+  min_parse_rate_delta_vs_baseline: 0.0
+  min_odata_id_delta_vs_baseline: 0.0
