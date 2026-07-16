@@ -406,6 +406,24 @@ def parse_pro_judge_result(
             reason=str(exc),
             raw=raw,
         )
+    try:
+        nonsense = _optional_bool(decoded, "nonsense", default=False)
+        if "accepted" in decoded:
+            requested_accept = _optional_bool(decoded, "accepted", default=False)
+        else:
+            requested_accept = _optional_bool(decoded, "accept", default=False)
+    except Phase2LabelledRequestsSpecError as exc:
+        return ProJudgeResult(
+            valid_json=False,
+            accepted=False,
+            pro_accept=False,
+            rest_api_set_match=False,
+            empty_set_match=False,
+            nonsense=False,
+            invalid_json=True,
+            reason=str(exc),
+            raw=raw,
+        )
     computed_set_match = rest_api_sets_equal(expected_rest_apis, rest_api_list)
     judge_set_match = decoded.get("rest_api_set_match")
     rest_api_set_match = (
@@ -413,8 +431,6 @@ def parse_pro_judge_result(
         else judge_set_match and computed_set_match
     )
     empty_set_match = not expected_rest_apis and not rest_api_list
-    nonsense = bool(decoded.get("nonsense", False))
-    requested_accept = bool(decoded.get("accepted", decoded.get("accept", False)))
     pro_accept = requested_accept and rest_api_set_match and not nonsense
 
     return ProJudgeResult(
@@ -501,6 +517,21 @@ def _string_tuple(value: Any, context: str) -> tuple[str, ...]:
     if not all(isinstance(item, str) for item in value):
         raise Phase2LabelledRequestsSpecError(f"{context} entries must be strings")
     return tuple(value)
+
+
+def _optional_bool(
+    raw: Mapping[str, Any],
+    key: str,
+    *,
+    default: bool,
+) -> bool:
+    """Return an optional judge boolean without Python truthiness coercion."""
+    if key not in raw:
+        return default
+    value = raw[key]
+    if not isinstance(value, bool):
+        raise Phase2LabelledRequestsSpecError(f"{key} must be a boolean")
+    return value
 
 
 def _json(value: Any) -> str:

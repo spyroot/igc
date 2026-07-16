@@ -188,6 +188,90 @@ def test_pro_judge_result_parser_counts_malformed_rest_api_fields_as_invalid(
     assert field_name in result.reason
 
 
+@pytest.mark.parametrize(
+    ("field_name", "field_value"),
+    (
+        ("accepted", "false"),
+        ("accepted", "true"),
+        ("accept", "false"),
+        ("accept", "true"),
+        ("nonsense", "false"),
+        ("accepted", 0),
+        ("accepted", 1),
+        ("accepted", None),
+        ("accepted", []),
+        ("nonsense", 0),
+        ("nonsense", 1),
+        ("nonsense", None),
+        ("nonsense", []),
+    ),
+)
+def test_pro_judge_result_parser_counts_malformed_boolean_fields_as_invalid(
+    field_name: str,
+    field_value: Any,
+) -> None:
+    """Malformed judge boolean fields are invalid output, not truthy/falsy."""
+    result = parse_pro_judge_result(
+        json.dumps({
+            field_name: field_value,
+            "rest_api_list": ["/redfish/v1/Systems"],
+        }),
+        expected_rest_apis=["/redfish/v1/Systems"],
+    )
+    assert not result.valid_json
+    assert result.invalid_json
+    assert not result.accepted
+    assert not result.pro_accept
+    assert not result.nonsense
+    assert field_name in result.reason
+
+
+def test_pro_judge_result_parser_accepts_only_real_json_booleans() -> None:
+    """Valid judge booleans still work, including the legacy accept field."""
+    accepted = parse_pro_judge_result(
+        json.dumps({
+            "accept": True,
+            "rest_api_set": ["/redfish/v1/Systems"],
+            "nonsense": False,
+        }),
+        expected_rest_apis=["/redfish/v1/Systems"],
+    )
+    assert accepted.valid_json
+    assert accepted.accepted
+    assert accepted.pro_accept
+    assert accepted.rest_api_set_match
+    assert not accepted.nonsense
+
+    rejected = parse_pro_judge_result(
+        json.dumps({
+            "accepted": False,
+            "rest_api_list": ["/redfish/v1/Systems"],
+            "nonsense": False,
+        }),
+        expected_rest_apis=["/redfish/v1/Systems"],
+    )
+    assert rejected.valid_json
+    assert not rejected.accepted
+    assert not rejected.pro_accept
+    assert rejected.rest_api_set_match
+
+
+def test_pro_judge_result_parser_defaults_missing_boolean_fields_to_reject() -> None:
+    """Absent judge boolean fields are valid JSON but do not imply acceptance."""
+    result = parse_pro_judge_result(
+        json.dumps({
+            "rest_api_list": ["/redfish/v1/Systems"],
+        }),
+        expected_rest_apis=["/redfish/v1/Systems"],
+    )
+    assert result.valid_json
+    assert not result.invalid_json
+    assert not result.accepted
+    assert not result.pro_accept
+    assert result.rest_api_set_match
+    assert not result.nonsense
+
+
 def test_pro_judge_result_parser_counts_missing_rest_api_field_as_invalid() -> None:
     """A judge response with neither rest_api_list nor rest_api_set is invalid.
 
