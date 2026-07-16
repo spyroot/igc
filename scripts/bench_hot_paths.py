@@ -19,13 +19,21 @@ Mus mbayramo@stanford.edu
 """
 from __future__ import annotations
 
+# ruff: noqa: E402
+
 import argparse
 import cProfile
 import io
 import json
 import pstats
+import sys
 import time
+from pathlib import Path
 from typing import Callable, Dict, List, Tuple
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from igc.ds.sources import RedfishFixtureSource, TrustLevel
 from igc.ds.sources.candidate_features import build_candidate_cache
