@@ -17,6 +17,28 @@ judge:
   model_id: ${PHASE2_JUDGE_MODEL_ID}
   profile: ${PHASE2_JUDGE_PROFILE}
 
+safety:
+  live_without_gate_max_candidates: 3
+
+providers:
+  draft:
+    adapter: mock
+    base_url_env: PHASE2_MODEL_X_BASE_URL
+    api_key_env: PHASE2_MODEL_X_API_KEY
+    endpoint_path: /v1/chat/completions
+    timeout_seconds: 30
+    response_text_path: choices.0.message.content
+  judge:
+    adapter: mock
+    base_url_env: PHASE2_JUDGE_BASE_URL
+    api_key_env: PHASE2_JUDGE_API_KEY
+    endpoint_path: /v1/chat/completions
+    timeout_seconds: 30
+    response_text_path: choices.0.message.content
+    payload_request_fields:
+      - route
+      - profile
+
 generation:
   max_new_tokens: 96
   temperature: 0.2

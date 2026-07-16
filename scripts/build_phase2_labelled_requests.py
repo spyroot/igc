@@ -16,6 +16,8 @@ import json
 import os
 import random
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
@@ -29,6 +31,7 @@ from igc.ds.phase2_labelled_requests import (
     Phase2LabelledRequestBuilder,
     Phase2LabelledRequestCounters,
     Phase2LabelledRequestsSpec,
+    ProviderAdapterSpec,
     RestApiRecord,
     load_phase2_labelled_requests_spec,
     phase2_acceptance_thresholds_pass,
@@ -36,6 +39,7 @@ from igc.ds.phase2_labelled_requests import (
 
 DraftProvider = Callable[[dict[str, Any]], str]
 JudgeProvider = Callable[[dict[str, Any]], str]
+JsonTransport = Callable[[str, Mapping[str, Any], Mapping[str, str], float], Mapping[str, Any]]
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -81,19 +85,39 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--provider-mode",
-        choices=("mock", "file"),
-        default="mock",
-        help="Use deterministic local mock providers or local fixture files.",
+        choices=("config", "mock", "file", "openai-compatible"),
+        default="config",
+        help=(
+            "Select providers from YAML, local mocks, local files, "
+            "or live OpenAI-compatible HTTP."
+        ),
+    )
+    parser.add_argument(
+        "--draft-provider-adapter",
+        choices=("mock", "file", "openai-compatible"),
+        default="",
+        help="Override only the model_x draft provider adapter from YAML.",
+    )
+    parser.add_argument(
+        "--judge-provider-adapter",
+        choices=("mock", "file", "openai-compatible"),
+        default="",
+        help="Override only the private judge provider adapter from YAML.",
     )
     parser.add_argument(
         "--drafts-jsonl",
         default="",
-        help="Provider-mode file: one draft text line per candidate.",
+        help="File adapter: one draft text line per candidate.",
     )
     parser.add_argument(
         "--judges-jsonl",
         default="",
-        help="Provider-mode file: one raw judge JSON line per candidate.",
+        help="File adapter: one raw judge JSON line per candidate.",
+    )
+    parser.add_argument(
+        "--live-provider-gate-passed",
+        action="store_true",
+        help="Allow live provider runs above the YAML safety.live_without_gate_max_candidates cap.",
     )
     parser.add_argument(
         "--allow-threshold-failure",
@@ -208,7 +232,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     spec = load_phase2_labelled_requests_spec(args.spec)
     records = load_rest_api_records(Path(args.records_jsonl))
-    draft_provider, judge_provider = _providers(args)
+    draft_adapter, judge_adapter = _selected_adapters(args, spec)
+    _enforce_live_provider_gate(
+        args,
+        spec=spec,
+        draft_adapter=draft_adapter,
+        judge_adapter=judge_adapter,
+    )
+    draft_provider, judge_provider = _providers(
+        args,
+        spec=spec,
+        draft_adapter=draft_adapter,
+        judge_adapter=judge_adapter,
+    )
     rows, metrics = build_phase2_labelled_requests(
         spec=spec,
         records=records,
@@ -257,16 +293,86 @@ def _record_from_mapping(row: Mapping[str, Any], *, path: Path, line_number: int
     )
 
 
-def _providers(args: argparse.Namespace) -> tuple[DraftProvider, JudgeProvider]:
-    """Return local draft and judge providers for the requested mode."""
-    if args.provider_mode == "mock":
-        return _mock_draft_provider, _mock_judge_provider
-    if not args.drafts_jsonl or not args.judges_jsonl:
-        raise SystemExit("--drafts-jsonl and --judges-jsonl are required for provider-mode file")
+def _selected_adapters(
+    args: argparse.Namespace,
+    spec: Phase2LabelledRequestsSpec,
+) -> tuple[str, str]:
+    """Resolve draft and judge adapter names from YAML plus CLI overrides."""
+    if args.provider_mode == "config":
+        draft_adapter = spec.draft_provider.adapter
+        judge_adapter = spec.judge_provider.adapter
+    else:
+        draft_adapter = args.provider_mode
+        judge_adapter = args.provider_mode
+    if args.draft_provider_adapter:
+        draft_adapter = args.draft_provider_adapter
+    if args.judge_provider_adapter:
+        judge_adapter = args.judge_provider_adapter
+    return draft_adapter, judge_adapter
+
+
+def _enforce_live_provider_gate(
+    args: argparse.Namespace,
+    *,
+    spec: Phase2LabelledRequestsSpec,
+    draft_adapter: str,
+    judge_adapter: str,
+) -> None:
+    """Block dataset-scale live provider runs until an explicit gate flag is passed."""
+    uses_live_adapter = "openai-compatible" in {draft_adapter, judge_adapter}
+    if not uses_live_adapter or args.live_provider_gate_passed:
+        return
+    if args.count > spec.live_without_gate_max_candidates:
+        raise SystemExit(
+            "live provider runs above safety.live_without_gate_max_candidates "
+            "require --live-provider-gate-passed",
+        )
+
+
+def _providers(
+    args: argparse.Namespace,
+    *,
+    spec: Phase2LabelledRequestsSpec,
+    draft_adapter: str,
+    judge_adapter: str,
+) -> tuple[DraftProvider, JudgeProvider]:
+    """Return draft and judge providers for the resolved adapters."""
     return (
-        _TextLineProvider(Path(args.drafts_jsonl), label="draft"),
-        _TextLineProvider(Path(args.judges_jsonl), label="judge"),
+        _provider_for_adapter(
+            draft_adapter,
+            config=spec.draft_provider,
+            text_path=args.drafts_jsonl,
+            label="draft",
+        ),
+        _provider_for_adapter(
+            judge_adapter,
+            config=spec.judge_provider,
+            text_path=args.judges_jsonl,
+            label="judge",
+        ),
     )
+
+
+def _provider_for_adapter(
+    adapter: str,
+    *,
+    config: ProviderAdapterSpec,
+    text_path: str,
+    label: str,
+) -> DraftProvider:
+    """Build one provider callable for the selected adapter."""
+    if adapter == "mock":
+        if label == "draft":
+            return _mock_draft_provider
+        return _mock_judge_provider
+    if adapter == "file":
+        if not text_path:
+            raise SystemExit(f"--{label}s-jsonl is required for {label} file provider")
+        return _TextLineProvider(Path(text_path), label=label)
+    if adapter == "openai-compatible":
+        _require_live_provider_config(config, label=label)
+        return _OpenAICompatibleChatProvider(config, label=label)
+    raise SystemExit(f"unknown {label} provider adapter {adapter!r}")
 
 
 def _mock_draft_provider(request: dict[str, Any]) -> str:
@@ -285,6 +391,83 @@ def _mock_judge_provider(request: dict[str, Any]) -> str:
     })
 
 
+def _require_live_provider_config(config: ProviderAdapterSpec, *, label: str) -> None:
+    """Fail early when a CLI override selects live HTTP without YAML routing fields."""
+    missing = [
+        field_name
+        for field_name in ("base_url_env", "endpoint_path", "response_text_path")
+        if not getattr(config, field_name)
+    ]
+    if missing:
+        joined = ", ".join(f"providers.{label}.{field_name}" for field_name in missing)
+        raise SystemExit(
+            f"{label} openai-compatible provider requires {joined}",
+        )
+
+
+class _OpenAICompatibleChatProvider:
+    """Small OpenAI-compatible chat-completions provider with injectable HTTP."""
+
+    def __init__(
+        self,
+        config: ProviderAdapterSpec,
+        *,
+        label: str,
+        env: Mapping[str, str] | None = None,
+        transport: JsonTransport | None = None,
+    ) -> None:
+        """Create a live provider from YAML config and environment variables."""
+        self._config = config
+        self._label = label
+        self._env = os.environ if env is None else env
+        self._transport = _urlopen_json_transport if transport is None else transport
+
+    def __call__(self, request: dict[str, Any]) -> str:
+        """Send one prompt to an OpenAI-compatible endpoint and return text."""
+        base_url = _required_env(
+            self._env,
+            self._config.base_url_env,
+            f"{self._label}.base_url_env",
+        )
+        model_id = _resolve_env_value(
+            str(request["model_id"]),
+            self._env,
+            f"{self._label}.model_id",
+        )
+        payload: dict[str, Any] = {
+            "model": model_id,
+            "messages": [{"role": "user", "content": request["prompt"]}],
+        }
+        generation = request.get("generation")
+        if isinstance(generation, Mapping):
+            payload.update(
+                _resolve_env_values(
+                    dict(generation),
+                    self._env,
+                    f"{self._label}.generation",
+                ),
+            )
+        for field_name in self._config.payload_request_fields:
+            if field_name in request:
+                payload[field_name] = _resolve_env_values(
+                    request[field_name],
+                    self._env,
+                    f"{self._label}.{field_name}",
+                )
+
+        response = self._transport(
+            _join_url(base_url, self._config.endpoint_path),
+            payload,
+            _headers(self._config, self._env),
+            self._config.timeout_seconds,
+        )
+        return _extract_response_text(
+            response,
+            self._config.response_text_path,
+            label=self._label,
+        )
+
+
 class _TextLineProvider:
     """Sequential provider backed by non-blank local text lines."""
 
@@ -292,7 +475,11 @@ class _TextLineProvider:
         """Load provider fixture lines."""
         self._path = path
         self._label = label
-        self._lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self._lines = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
         self._index = 0
         if not self._lines:
             raise SystemExit(f"{path}: no {label} provider lines found")
@@ -305,6 +492,116 @@ class _TextLineProvider:
         line = self._lines[self._index]
         self._index += 1
         return line
+
+
+def _urlopen_json_transport(
+    url: str,
+    payload: Mapping[str, Any],
+    headers: Mapping[str, str],
+    timeout: float,
+) -> Mapping[str, Any]:
+    """POST JSON to a live provider and parse the JSON response."""
+    data = json.dumps(dict(payload)).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers=dict(headers),
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"live provider request failed: {exc.reason}") from exc
+    except OSError as exc:
+        raise SystemExit(f"live provider request failed: {exc}") from exc
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"live provider returned invalid JSON: {exc.msg}") from exc
+    if not isinstance(parsed, Mapping):
+        raise SystemExit("live provider response must be a JSON object")
+    return parsed
+
+
+def _headers(config: ProviderAdapterSpec, env: Mapping[str, str]) -> dict[str, str]:
+    """Build HTTP headers without exposing bearer values."""
+    headers = {"Content-Type": "application/json"}
+    if config.api_key_env:
+        api_key = env.get(config.api_key_env, "")
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+def _join_url(base_url: str, endpoint_path: str) -> str:
+    """Join a configured base URL and endpoint path."""
+    return f"{base_url.rstrip('/')}/{endpoint_path.lstrip('/')}"
+
+
+def _required_env(env: Mapping[str, str], key: str, label: str) -> str:
+    """Read a required environment variable named by YAML."""
+    if not key:
+        raise SystemExit(f"{label} must name an environment variable")
+    value = env.get(key, "")
+    if not value:
+        raise SystemExit(f"missing environment variable {key} for {label}")
+    return value
+
+
+def _resolve_env_values(value: Any, env: Mapping[str, str], label: str) -> Any:
+    """Resolve exact ``${VAR}`` placeholders in nested provider values."""
+    if isinstance(value, str):
+        return _resolve_env_value(value, env, label)
+    if isinstance(value, Mapping):
+        return {
+            str(child_key): _resolve_env_values(child_value, env, f"{label}.{child_key}")
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _resolve_env_values(child_value, env, f"{label}[]")
+            for child_value in value
+        ]
+    return value
+
+
+def _resolve_env_value(value: str, env: Mapping[str, str], label: str) -> str:
+    """Resolve an exact ``${VAR}`` placeholder or return a literal string."""
+    if not value.startswith("${") or not value.endswith("}"):
+        return value
+    key = value[2:-1]
+    if not key:
+        raise SystemExit(f"{label} contains an empty environment placeholder")
+    resolved = env.get(key, "")
+    if not resolved:
+        raise SystemExit(f"missing environment variable {key} for {label}")
+    return resolved
+
+
+def _extract_response_text(response: Mapping[str, Any], path: str, *, label: str) -> str:
+    """Extract generated text from a JSON response by dotted path."""
+    current: Any = response
+    for part in path.split("."):
+        if isinstance(current, Mapping):
+            if part not in current:
+                raise SystemExit(f"{label} provider response missing {path}")
+            current = current[part]
+            continue
+        if isinstance(current, list):
+            try:
+                index = int(part)
+            except ValueError as exc:
+                raise SystemExit(f"{label} provider response path {path} is not valid") from exc
+            try:
+                current = current[index]
+            except IndexError as exc:
+                raise SystemExit(f"{label} provider response path {path} is out of range") from exc
+            continue
+        raise SystemExit(f"{label} provider response path {path} cannot be traversed")
+    if not isinstance(current, str) or not current.strip():
+        raise SystemExit(f"{label} provider response path {path} did not contain text")
+    return current.strip()
 
 
 def _merge_counters(

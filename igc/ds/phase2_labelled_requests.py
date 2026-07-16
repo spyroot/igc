@@ -46,6 +46,7 @@ _REQUIRED_ACCEPTANCE_KEYS = (
     "max_nonsense_rate",
     "max_invalid_json_rate",
 )
+_PROVIDER_ADAPTERS = frozenset({"mock", "file", "openai-compatible"})
 
 
 class Phase2LabelledRequestsSpecError(ValueError):
@@ -98,6 +99,28 @@ class JudgeSpec:
 
 
 @dataclass(frozen=True)
+class ProviderAdapterSpec:
+    """Configured provider adapter for draft or judge calls.
+
+    :param adapter: adapter selector loaded from YAML, for example ``mock``.
+    :param base_url_env: environment variable that supplies a live HTTP base URL.
+    :param api_key_env: optional environment variable that supplies a bearer token.
+    :param endpoint_path: HTTP path appended to the configured base URL.
+    :param timeout_seconds: request timeout for live HTTP calls.
+    :param response_text_path: dotted path to text in the provider JSON response.
+    :param payload_request_fields: request fields copied into the live HTTP JSON body.
+    """
+
+    adapter: str  # provider selector; live modes are opt-in by config/CLI.
+    base_url_env: str = ""  # env var containing the live provider base URL.
+    api_key_env: str = ""  # optional env var containing a provider bearer token.
+    endpoint_path: str = ""  # provider endpoint path such as a chat-completions route.
+    timeout_seconds: float = 30.0  # live request timeout.
+    response_text_path: str = ""  # dotted JSON path to generated text.
+    payload_request_fields: tuple[str, ...] = ()  # extra request fields copied to payload.
+
+
+@dataclass(frozen=True)
 class Phase2LabelledRequestsSpec:
     """Loaded YAML contract for labelled-request generation.
 
@@ -111,6 +134,9 @@ class Phase2LabelledRequestsSpec:
     :param model_x_template: prompt template for sampled records.
     :param judge_system: system prompt text for the judge provider.
     :param judge_template: prompt template for records plus draft text.
+    :param draft_provider: configured adapter metadata for model_x drafts.
+    :param judge_provider: configured adapter metadata for private judging.
+    :param live_without_gate_max_candidates: max live candidates allowed without gate flag.
     :param wandb_namespace: W&B namespace for builder metrics.
     :param metric_keys: complete metric-key list from the spec.
     :param acceptance_thresholds: configured acceptance thresholds.
@@ -126,6 +152,9 @@ class Phase2LabelledRequestsSpec:
     model_x_template: str  # YAML prompt template for sampled records.
     judge_system: str  # YAML system prompt for private judge review.
     judge_template: str  # YAML prompt template for judge input.
+    draft_provider: ProviderAdapterSpec  # draft adapter config from YAML.
+    judge_provider: ProviderAdapterSpec  # judge adapter config from YAML.
+    live_without_gate_max_candidates: int  # live candidate cap before gate flag is required.
     wandb_namespace: str  # W&B metric namespace.
     metric_keys: tuple[str, ...]  # metric keys declared by the spec.
     acceptance_thresholds: Mapping[str, float]  # acceptance threshold values.
@@ -178,7 +207,10 @@ class Phase2LabelledRequestRow:
             "metadata": {
                 "prompt_spec_version": self.prompt_spec_version,  # prompt/config version.
                 "vendor": [record.vendor for record in self.records],  # vendor provenance.
-                "source_corpus": [record.source_corpus for record in self.records],  # corpus provenance.
+                "source_corpus": [
+                    record.source_corpus
+                    for record in self.records
+                ],  # corpus provenance.
             },
         }
 
@@ -214,7 +246,10 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
 
     sampling = _mapping(raw, "sampling", required=True)
     raw_sample_widths = _sequence(sampling, "sample_widths")
-    if not all(isinstance(width, int) and not isinstance(width, bool) for width in raw_sample_widths):
+    if not all(
+        isinstance(width, int) and not isinstance(width, bool)
+        for width in raw_sample_widths
+    ):
         raise Phase2LabelledRequestsSpecError(
             "sampling.sample_widths must be integer sequence [1, 2, 3]",
         )
@@ -227,6 +262,22 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
     prompts = _mapping(raw, "prompts", required=True)
     model_prompt = _mapping(prompts, "model_x_draft", required=True)
     judge_prompt = _mapping(prompts, "pro_judge", required=True)
+    providers = _mapping(raw, "providers", required=True)
+    draft_provider = _provider_adapter_spec(
+        _mapping(providers, "draft"),
+        label="providers.draft",
+    )
+    judge_provider = _provider_adapter_spec(
+        _mapping(providers, "judge"),
+        label="providers.judge",
+    )
+    safety = _mapping(raw, "safety")
+    live_without_gate_max_candidates = _optional_non_negative_int(
+        safety,
+        "live_without_gate_max_candidates",
+        default=3,
+        label="safety.live_without_gate_max_candidates",
+    )
     wandb = _mapping(raw, "wandb", required=True)
 
     metric_keys = tuple(str(key) for key in _sequence(wandb, "metric_keys"))
@@ -281,6 +332,9 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
         ),
         judge_system=_required_string(judge_prompt, "system", "prompts.pro_judge.system"),
         judge_template=_required_string(judge_prompt, "template", "prompts.pro_judge.template"),
+        draft_provider=draft_provider,
+        judge_provider=judge_provider,
+        live_without_gate_max_candidates=live_without_gate_max_candidates,
         wandb_namespace=wandb_namespace,
         metric_keys=metric_keys,
         acceptance_thresholds=acceptance_thresholds,
@@ -341,7 +395,11 @@ def parse_pro_judge_result(raw: str) -> ProJudgeResult:
     if isinstance(parsed, Mapping) and isinstance(parsed.get("y_pred"), Mapping):
         parsed = parsed["y_pred"]
     if not isinstance(parsed, Mapping):
-        return ProJudgeResult(accepted=False, invalid_json=True, reason="judge result is not a mapping")
+        return ProJudgeResult(
+            accepted=False,
+            invalid_json=True,
+            reason="judge result is not a mapping",
+        )
 
     if "rest_api_list" in parsed:
         rest_api_value = parsed["rest_api_list"]
@@ -573,8 +631,12 @@ class Phase2LabelledRequestBuilder:
             validation={
                 "text_source": "model_x_then_private_judge",  # draft then judge path.
                 "review_judged": True,  # private judge parsed successfully.
-                "all_rest_api_present": set(expected_rest_api_list) <= set(judge_result.rest_api_list),
-                "extra_rest_api_present": not set(judge_result.rest_api_list) <= set(expected_rest_api_list),
+                "all_rest_api_present": (
+                    set(expected_rest_api_list) <= set(judge_result.rest_api_list)
+                ),
+                "extra_rest_api_present": (
+                    not set(judge_result.rest_api_list) <= set(expected_rest_api_list)
+                ),
                 "set_coverage_preserved": set_match,  # unordered API set contract.
                 "nonsense": judge_result.nonsense,  # judge nonsense flag.
             },
@@ -661,12 +723,102 @@ def _sequence(source: Mapping[str, Any], key: str) -> Sequence[Any]:
     return value
 
 
+def _optional_sequence(source: Mapping[str, Any], key: str) -> Sequence[Any]:
+    """Read an optional YAML sequence field."""
+    value = source.get(key, ())
+    if value == ():
+        return ()
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise Phase2LabelledRequestsSpecError(f"{key} must be a sequence")
+    return value
+
+
 def _required_string(source: Mapping[str, Any], key: str, label: str) -> str:
     """Read a required non-empty YAML string field."""
     value = source.get(key)
     if not isinstance(value, str) or not value.strip():
         raise Phase2LabelledRequestsSpecError(f"{label} must be a non-empty string")
     return value
+
+
+def _optional_string(source: Mapping[str, Any], key: str) -> str:
+    """Read an optional YAML string field."""
+    value = source.get(key, "")
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise Phase2LabelledRequestsSpecError(f"{key} must be a string")
+    return value.strip()
+
+
+def _optional_non_negative_int(
+    source: Mapping[str, Any],
+    key: str,
+    *,
+    default: int,
+    label: str,
+) -> int:
+    """Read an optional non-negative integer YAML field."""
+    value = source.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise Phase2LabelledRequestsSpecError(f"{label} must be a non-negative integer")
+    return value
+
+
+def _optional_positive_float(source: Mapping[str, Any], key: str, *, default: float) -> float:
+    """Read an optional positive numeric YAML field."""
+    value = source.get(key, default)
+    if isinstance(value, bool):
+        raise Phase2LabelledRequestsSpecError(f"{key} must be numeric")
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise Phase2LabelledRequestsSpecError(f"{key} must be numeric") from exc
+    if result <= 0:
+        raise Phase2LabelledRequestsSpecError(f"{key} must be positive")
+    return result
+
+
+def _provider_adapter_spec(raw: Mapping[str, Any], *, label: str) -> ProviderAdapterSpec:
+    """Load one provider adapter block from YAML."""
+    adapter = _optional_string(raw, "adapter") or "mock"
+    if adapter not in _PROVIDER_ADAPTERS:
+        raise Phase2LabelledRequestsSpecError(
+            f"{label}.adapter must be one of {', '.join(sorted(_PROVIDER_ADAPTERS))}",
+        )
+    payload_values = _optional_sequence(raw, "payload_request_fields")
+    if not all(isinstance(item, str) and item.strip() for item in payload_values):
+        raise Phase2LabelledRequestsSpecError(
+            f"{label}.payload_request_fields must contain strings",
+        )
+    payload_fields = tuple(item.strip() for item in payload_values)
+
+    endpoint_path = _optional_string(raw, "endpoint_path")
+    response_text_path = _optional_string(raw, "response_text_path")
+    base_url_env = _optional_string(raw, "base_url_env")
+    if adapter == "openai-compatible":
+        if not base_url_env:
+            raise Phase2LabelledRequestsSpecError(
+                f"{label}.base_url_env is required for live providers",
+            )
+        if not endpoint_path:
+            raise Phase2LabelledRequestsSpecError(
+                f"{label}.endpoint_path is required for live providers",
+            )
+        if not response_text_path:
+            raise Phase2LabelledRequestsSpecError(
+                f"{label}.response_text_path is required for live providers",
+            )
+
+    return ProviderAdapterSpec(
+        adapter=adapter,
+        base_url_env=base_url_env,
+        api_key_env=_optional_string(raw, "api_key_env"),
+        endpoint_path=endpoint_path,
+        timeout_seconds=_optional_positive_float(raw, "timeout_seconds", default=30.0),
+        response_text_path=response_text_path,
+        payload_request_fields=payload_fields,
+    )
 
 
 def _optional_bool(source: Mapping[str, Any], key: str) -> bool | None:

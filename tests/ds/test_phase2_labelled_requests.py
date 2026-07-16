@@ -71,6 +71,26 @@ judge:
   route: private_pro
   model_id: ${PHASE2_JUDGE_MODEL_ID}
   profile: ${PHASE2_JUDGE_PROFILE}
+safety:
+  live_without_gate_max_candidates: 2
+providers:
+  draft:
+    adapter: mock
+    base_url_env: PHASE2_MODEL_X_BASE_URL
+    api_key_env: PHASE2_MODEL_X_API_KEY
+    endpoint_path: /v1/chat/completions
+    timeout_seconds: 10
+    response_text_path: choices.0.message.content
+  judge:
+    adapter: mock
+    base_url_env: PHASE2_JUDGE_BASE_URL
+    api_key_env: PHASE2_JUDGE_API_KEY
+    endpoint_path: /v1/chat/completions
+    timeout_seconds: 10
+    response_text_path: choices.0.message.content
+    payload_request_fields:
+      - route
+      - profile
 generation:
   max_new_tokens: 96
   temperature: 0.2
@@ -153,6 +173,13 @@ def test_loads_prompt_model_judge_generation_and_thresholds_from_yaml(tmp_path: 
     assert spec.judge.route == "private_pro"
     assert spec.judge.model_id == "${PHASE2_JUDGE_MODEL_ID}"
     assert spec.judge.profile == "${PHASE2_JUDGE_PROFILE}"
+    assert spec.live_without_gate_max_candidates == 2
+    assert spec.draft_provider.adapter == "mock"
+    assert spec.draft_provider.base_url_env == "PHASE2_MODEL_X_BASE_URL"
+    assert spec.draft_provider.endpoint_path == "/v1/chat/completions"
+    assert spec.draft_provider.response_text_path == "choices.0.message.content"
+    assert spec.judge_provider.adapter == "mock"
+    assert spec.judge_provider.payload_request_fields == ("route", "profile")
     assert spec.generation == {"max_new_tokens": 96, "temperature": 0.2, "top_p": 0.95}
     assert spec.wandb_namespace == PHASE2_LABELLED_REQUESTS
     assert spec.metric_keys == PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS
@@ -229,6 +256,79 @@ def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     with pytest.raises(Phase2LabelledRequestsSpecError, match="judge.route"):
         load_phase2_labelled_requests_spec(missing_judge_route)
 
+    missing_providers = _write_spec(tmp_path / "missing-providers.yaml")
+    missing_providers.write_text(
+        missing_providers.read_text(encoding="utf-8").replace(
+            """providers:
+  draft:
+    adapter: mock
+    base_url_env: PHASE2_MODEL_X_BASE_URL
+    api_key_env: PHASE2_MODEL_X_API_KEY
+    endpoint_path: /v1/chat/completions
+    timeout_seconds: 10
+    response_text_path: choices.0.message.content
+  judge:
+    adapter: mock
+    base_url_env: PHASE2_JUDGE_BASE_URL
+    api_key_env: PHASE2_JUDGE_API_KEY
+    endpoint_path: /v1/chat/completions
+    timeout_seconds: 10
+    response_text_path: choices.0.message.content
+    payload_request_fields:
+      - route
+      - profile
+""",
+            "",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="providers"):
+        load_phase2_labelled_requests_spec(missing_providers)
+
+    bad_provider = _write_spec(tmp_path / "bad-provider.yaml")
+    bad_provider.write_text(
+        bad_provider.read_text(encoding="utf-8").replace(
+            "    adapter: mock\n",
+            "    adapter: unknown\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="providers.draft.adapter"):
+        load_phase2_labelled_requests_spec(bad_provider)
+
+    live_without_base_url = _write_spec(tmp_path / "live-without-base-url.yaml")
+    live_without_base_url.write_text(
+        live_without_base_url.read_text(encoding="utf-8")
+        .replace("    adapter: mock\n", "    adapter: openai-compatible\n", 1)
+        .replace("    base_url_env: PHASE2_MODEL_X_BASE_URL\n", "", 1),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="providers.draft.base_url_env"):
+        load_phase2_labelled_requests_spec(live_without_base_url)
+
+    malformed_payload_fields = _write_spec(tmp_path / "malformed-payload-fields.yaml")
+    malformed_payload_fields.write_text(
+        malformed_payload_fields.read_text(encoding="utf-8").replace(
+            "      - route\n      - profile",
+            "      - route\n      - 7",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="payload_request_fields"):
+        load_phase2_labelled_requests_spec(malformed_payload_fields)
+
+    malformed_live_gate = _write_spec(tmp_path / "malformed-live-gate.yaml")
+    malformed_live_gate.write_text(
+        malformed_live_gate.read_text(encoding="utf-8").replace(
+            "  live_without_gate_max_candidates: 2",
+            "  live_without_gate_max_candidates: many",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="live_without_gate_max_candidates"):
+        load_phase2_labelled_requests_spec(malformed_live_gate)
+
     missing_prompt_section = _write_spec(tmp_path / "missing-prompt-section.yaml")
     missing_prompt_section.write_text(
         missing_prompt_section.read_text(encoding="utf-8").replace(
@@ -286,6 +386,12 @@ def test_committed_phase2_labelled_requests_config_loads() -> None:
     assert spec.judge.route == "${PHASE2_JUDGE_ROUTE}"
     assert spec.judge.model_id == "${PHASE2_JUDGE_MODEL_ID}"
     assert spec.judge.profile == "${PHASE2_JUDGE_PROFILE}"
+    assert spec.live_without_gate_max_candidates == 3
+    assert spec.draft_provider.adapter == "mock"
+    assert spec.draft_provider.base_url_env == "PHASE2_MODEL_X_BASE_URL"
+    assert spec.judge_provider.adapter == "mock"
+    assert spec.judge_provider.base_url_env == "PHASE2_JUDGE_BASE_URL"
+    assert spec.judge_provider.payload_request_fields == ("route", "profile")
 
 
 def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Path) -> None:

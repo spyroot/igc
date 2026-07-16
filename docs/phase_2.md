@@ -44,17 +44,28 @@ coordination notes may call that manifest `D1`; new runtime code, configs, metri
 canonical `phase2_labelled_requests` name.
 
 The offline builder spec lives in `configs/phase2_labelled_requests.yaml`.
-That spec owns prompt text, `model_x` identifiers, judge route/profile fields,
-generation settings, sample widths, W&B namespace/key lists, and acceptance
-thresholds. Runtime Python must load those values rather than hardcoding prompt
-or model literals.
+That spec owns prompt text, `model_x` identifiers, provider adapter metadata,
+judge route/profile fields, generation settings, sample widths, W&B
+namespace/key lists, safety caps, and acceptance thresholds. Runtime Python
+must load those values rather than hardcoding prompt or model literals.
 
 The offline fixture CLI is `scripts/build_phase2_labelled_requests.py`. It
 loads the YAML spec, reads tiny JSONL records with `rest_api`,
 `allowed_methods`, `json`, `vendor`, and `source_corpus`, then writes accepted
 `phase2_labelled_requests` JSONL plus an aggregate metrics JSON. Its provider
-modes are local-only mock and file fixtures; real `model_x` or private judge
-adapters must be wired separately before any slot2/slot11 generation run.
+modes are YAML-selected config, local-only mock, local file fixtures, and an
+OpenAI-compatible live adapter. The checked-in config keeps both draft and
+judge adapters on `mock`; operators must explicitly select the live adapter by
+YAML or CLI and provide the environment variables named by the spec before any
+live `model_x` or private Pro judge call is possible.
+
+The live adapter is only a provider surface. It resolves the model and route
+placeholders from environment variables, reads base URLs from the spec's
+`base_url_env` fields, extracts text from the configured response JSON path,
+and sends no W&B, Redfish, GPU, or dataset-scale work on its own. A live run
+whose `--count` exceeds `safety.live_without_gate_max_candidates` must pass
+`--live-provider-gate-passed`; otherwise the CLI exits before opening a live
+provider connection.
 
 ## Build Input
 
@@ -270,10 +281,11 @@ The offline plumbing is accepted when focused pytest coverage proves:
   counters emit the required keys;
 - Phase 3 argument extraction remains outside this builder.
 
-A later approved run can point the YAML route metadata at the fine-tuned
+A later approved run can point the YAML provider metadata at the restored
 `model_x` artifact and private Pro judge. That run is outside the local CPU
 plumbing gate and must not be simulated with live GPU inference, live W&B, live
-Redfish crawls, model downloads, or cluster jobs.
+Redfish crawls, model downloads, cluster jobs, or dataset-scale generation
+until the provider and launch gates have passed.
 
 Author:
 Mus mbayramo@stanford.edu
