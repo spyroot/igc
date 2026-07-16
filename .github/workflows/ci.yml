@@ -11,7 +11,67 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Path-aware change detection so downstream jobs skip when a change cannot
+  # affect them (docs-only PRs run nothing heavy; docker only rebuilds when the
+  # image inputs changed). Plain git diff — no third-party actions. A skipped
+  # job reports Success to branch protection, so required checks still pass.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      shell: ${{ steps.filter.outputs.shell }}
+      python: ${{ steps.filter.outputs.python }}
+      perf: ${{ steps.filter.outputs.perf }}
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need history to diff against the base/previous ref
+      - name: Detect changed areas
+        id: filter
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.base_ref }}"
+            git fetch -q origin "${{ github.base_ref }}"
+            files=$(git diff --name-only "$(git merge-base "$base" HEAD)"...HEAD)
+          else
+            # push to main: diff against the pre-push head; fall back to the
+            # first parent (merge commits) and finally to run-everything.
+            before="${{ github.event.before }}"
+            if [ -n "$before" ] && git cat-file -e "$before" 2>/dev/null; then
+              files=$(git diff --name-only "$before"..HEAD)
+            elif git rev-parse -q --verify HEAD^ >/dev/null; then
+              files=$(git diff --name-only HEAD^..HEAD)
+            else
+              files=""
+            fi
+          fi
+          if [ -z "$files" ]; then
+            # unknown diff (new branch, force push): be safe, run everything
+            {
+              echo "shell=true"
+              echo "python=true"
+              echo "perf=true"
+              echo "docker=true"
+            } >> "$GITHUB_OUTPUT"
+            echo "no diff base found — running all jobs"
+            exit 0
+          fi
+          echo "$files"
+          match() { echo "$files" | grep -qE "$1" && echo true || echo false; }
+          # the workflow itself changing re-runs everything
+          wf='^\.github/workflows/'
+          {
+            echo "shell=$(match "$wf|^scripts/.*\.(sh|sbatch)$|^tests/bats/|^collector\.sh$")"
+            echo "python=$(match "$wf|^igc/|^tests/|^configs/|^scripts/.*\.py$|^docker/requirements|^pytest\.ini$|^setup\.py$|^igc_main\.py$|^igc_ctl\.py$|^redfish_ctl")"
+            echo "perf=$(match "$wf|^igc/|^tests/perf/|^scripts/bench_hot_paths\.py$|^redfish_ctl")"
+            echo "docker=$(match "$wf|^docker/|^requirements|^setup\.py$|^conda-recipe\.yaml$")"
+          } >> "$GITHUB_OUTPUT"
+
   shell:
+    needs: changes
+    if: needs.changes.outputs.shell == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +93,8 @@ jobs:
         run: bats tests/bats
 
   gate:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -84,7 +146,13 @@ jobs:
           retention-days: 90
 
   perf:
-    needs: [shell, gate]
+    needs: [changes, shell, gate]
+    # run only when hot-path inputs changed; tolerate skipped (not failed) deps
+    if: >-
+      !cancelled() &&
+      needs.changes.outputs.perf == 'true' &&
+      needs.shell.result != 'failure' &&
+      needs.gate.result != 'failure'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -106,8 +174,16 @@ jobs:
           KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 python -m pytest -m perf -q
 
   docker:
-    needs: [shell, gate]
-    if: github.event_name == 'push'
+    needs: [changes, shell, gate]
+    # rebuild/push the image only when its inputs changed (Dockerfiles,
+    # requirements, packaging) — a docs or pure-Python merge no longer mints a
+    # new sha-tagged image on every push to main.
+    if: >-
+      !cancelled() &&
+      github.event_name == 'push' &&
+      needs.changes.outputs.docker == 'true' &&
+      needs.shell.result != 'failure' &&
+      needs.gate.result != 'failure'
     runs-on: ubuntu-latest
     # secrets are NOT available in `if:` conditionals; surface them as env, then gate on env.
     env:
