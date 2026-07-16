@@ -29,23 +29,23 @@ jobs:
       - name: Detect changed areas
         id: filter
         shell: bash
+        env:
+          # interpolate GitHub context via env, never inline in the script
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="origin/${{ github.base_ref }}"
-            git fetch -q origin "${{ github.base_ref }}"
-            files=$(git diff --name-only "$(git merge-base "$base" HEAD)"...HEAD)
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git fetch -q origin "$BASE_REF"
+            files=$(git diff --name-only "$(git merge-base "origin/$BASE_REF" HEAD)"...HEAD)
+          elif [ -n "$BEFORE_SHA" ] && git cat-file -e "$BEFORE_SHA" 2>/dev/null; then
+            # push to main: diff against the pre-push head
+            files=$(git diff --name-only "$BEFORE_SHA"..HEAD)
           else
-            # push to main: diff against the pre-push head; fall back to the
-            # first parent (merge commits) and finally to run-everything.
-            before="${{ github.event.before }}"
-            if [ -n "$before" ] && git cat-file -e "$before" 2>/dev/null; then
-              files=$(git diff --name-only "$before"..HEAD)
-            elif git rev-parse -q --verify HEAD^ >/dev/null; then
-              files=$(git diff --name-only HEAD^..HEAD)
-            else
-              files=""
-            fi
+            # no usable diff base (new branch, force push): HEAD^..HEAD would
+            # under-count a multi-commit push, so run everything instead.
+            files=""
           fi
           if [ -z "$files" ]; then
             # unknown diff (new branch, force push): be safe, run everything
@@ -66,7 +66,7 @@ jobs:
             echo "shell=$(match "$wf|^scripts/.*\.(sh|sbatch)$|^tests/bats/|^collector\.sh$")"
             echo "python=$(match "$wf|^igc/|^tests/|^configs/|^scripts/.*\.py$|^docker/requirements|^pytest\.ini$|^setup\.py$|^igc_main\.py$|^igc_ctl\.py$|^redfish_ctl")"
             echo "perf=$(match "$wf|^igc/|^tests/perf/|^scripts/bench_hot_paths\.py$|^redfish_ctl")"
-            echo "docker=$(match "$wf|^docker/|^requirements|^setup\.py$|^conda-recipe\.yaml$")"
+            echo "docker=$(match "$wf|^docker/|^\.dockerignore$|^requirements|^setup\.py$|^conda-recipe\.yaml$")"
           } >> "$GITHUB_OUTPUT"
 
   shell:
