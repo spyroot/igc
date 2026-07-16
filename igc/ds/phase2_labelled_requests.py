@@ -241,6 +241,15 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
             f"acceptance missing required keys: {', '.join(missing_acceptance)}",
         )
 
+    acceptance_thresholds: dict[str, float] = {}
+    for key, value in acceptance.items():
+        try:
+            acceptance_thresholds[str(key)] = float(value)
+        except (TypeError, ValueError) as exc:
+            raise Phase2LabelledRequestsSpecError(
+                f"acceptance.{key} must be numeric",
+            ) from exc
+
     return Phase2LabelledRequestsSpec(
         dataset_name=dataset_name,
         prompt_spec_version=_required_string(
@@ -269,7 +278,7 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
         judge_template=_required_string(judge_prompt, "template", "prompts.pro_judge.template"),
         wandb_namespace=wandb_namespace,
         metric_keys=metric_keys,
-        acceptance_thresholds={key: float(value) for key, value in acceptance.items()},
+        acceptance_thresholds=acceptance_thresholds,
     )
 
 
@@ -355,7 +364,16 @@ def parse_pro_judge_result(raw: str) -> ProJudgeResult:
             reason=f"{rest_api_field} must contain only strings",
         )
 
-    accepted_key = "accepted" if "accepted" in parsed else "accept"
+    if "accepted" in parsed:
+        accepted_key = "accepted"
+    elif "accept" in parsed:
+        accepted_key = "accept"
+    else:
+        return ProJudgeResult(
+            accepted=False,
+            invalid_json=True,
+            reason="accepted or accept is required",
+        )
     accepted = _optional_bool(parsed, accepted_key)
     if accepted is None:
         return ProJudgeResult(

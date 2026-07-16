@@ -199,6 +199,17 @@ def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     with pytest.raises(Phase2LabelledRequestsSpecError, match="acceptance missing"):
         load_phase2_labelled_requests_spec(missing_threshold)
 
+    malformed_threshold = _write_spec(tmp_path / "malformed-threshold.yaml")
+    malformed_threshold.write_text(
+        malformed_threshold.read_text(encoding="utf-8").replace(
+            "  min_pro_accept_rate: 0.9\n",
+            "  min_pro_accept_rate: high\n",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="must be numeric"):
+        load_phase2_labelled_requests_spec(malformed_threshold)
+
 
 def test_committed_phase2_labelled_requests_config_loads() -> None:
     """The checked-in builder spec stays aligned with the metric registry."""
@@ -376,6 +387,22 @@ def test_pro_judge_result_parsing_requires_rest_api_field() -> None:
     assert result.invalid_json is True
     assert result.rest_api_list == ()
     assert "rest_api_list" in result.reason
+
+
+def test_pro_judge_result_parsing_requires_acceptance_boolean() -> None:
+    """A judge result without accepted or accept is malformed output."""
+    result = parse_pro_judge_result(
+        json.dumps({
+            "rest_api_list": ["/redfish/v1/Systems"],
+            "nonsense": False,
+            "reason": "fixture",
+        }),
+    )
+
+    assert result.accepted is False
+    assert result.invalid_json is True
+    assert result.rest_api_list == ()
+    assert "accepted" in result.reason
 
 
 @pytest.mark.parametrize(
