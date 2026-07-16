@@ -21,6 +21,7 @@ from igc.ds.rest_goal_contract import (
     RedfishContext,
     build_d1_rest_api_list_row,
     build_ordered_call_row,
+    evaluate_ordered_calls_y_pred,
     inference_target_calls_json,
     parse_ordered_calls_y_pred,
     parse_rest_api_list_y_pred,
@@ -1023,6 +1024,66 @@ def test_ordered_calls_parser_rejects_readonly_arguments() -> None:
                     "arguments": {"PowerState": "On"},
                 }],
             })
+
+
+def test_ordered_call_evaluation_counts_extra_predictions_as_failures() -> None:
+    """Phase 3 evaluation must not hide extra predictions by zipping shorter lists."""
+    systems = _context(
+        "/redfish/v1/Systems",
+        ("GET", "HEAD"),
+        {"@odata.id": "/redfish/v1/Systems"},
+    )
+    tasks = _context(
+        "/redfish/v1/TaskService/Tasks",
+        ("GET", "HEAD"),
+        {"@odata.id": "/redfish/v1/TaskService/Tasks"},
+    )
+    row = build_ordered_call_row(
+        text="check tasks, then list systems",
+        contexts=(systems, tasks),
+        rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems"),
+    )
+    predicted_calls = list(row["y_true"]["calls"]) + [row["y_true"]["calls"][0]]
+
+    evaluation = evaluate_ordered_calls_y_pred(row, {"calls": predicted_calls})
+
+    assert evaluation["parsed"] is True
+    assert evaluation["expected_call_count"] == 2
+    assert evaluation["predicted_call_count"] == 3
+    assert evaluation["call_count_match"] is False
+    assert evaluation["call_ordered_exact_match_rate"] == 0.0
+    assert evaluation["method_exact_match_rate"] == pytest.approx(2 / 3)
+
+
+def test_ordered_call_evaluation_reports_invalid_method_parse_failure() -> None:
+    """Invalid predicted methods become explicit evaluation failures."""
+    context = _context(
+        "/redfish/v1/Systems",
+        ("GET", "HEAD"),
+        {"@odata.id": "/redfish/v1/Systems"},
+    )
+    row = build_ordered_call_row(
+        text="list systems",
+        contexts=(context,),
+        rest_api_list=("/redfish/v1/Systems",),
+    )
+
+    evaluation = evaluate_ordered_calls_y_pred(
+        row,
+        {
+            "calls": [{
+                "rest_api": "/redfish/v1/Systems",
+                "allowed_methods": ["GET", "HEAD"],
+                "method": "PATCH",
+                "arguments": {},
+            }],
+        },
+    )
+
+    assert evaluation["parsed"] is False
+    assert "not in allowed_methods" in evaluation["parse_error"]
+    assert evaluation["arguments_json_parse_rate"] == 0.0
+    assert evaluation["invalid_method_rate"] == 1.0
 
 
 def test_wandb_metric_keys_are_stage_scoped_and_not_m3_names() -> None:

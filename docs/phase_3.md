@@ -216,5 +216,33 @@ The combined inference JSON should be easy to test:
 }
 ```
 
+## Offline Smoke Profile
+
+`configs/inference/phase3_argument_extractor_smoke.yaml` defines the first
+runnable `argument_extractor` smoke profile. It is a tiny offline profile for
+the existing ordered-call contract, not a training or GPU launch profile. The
+profile locks `weights_role: argument_extractor`, the
+`text_and_rest_api_list_to_calls` task, the `render_ordered_call_example`
+renderer, and acceptance thresholds for ordered calls, method validity,
+argument JSON, and read-only empty arguments.
+
+Run the smoke through `scripts/build_phase3_argument_smoke.py`. In default mock
+mode it renders two built-in fixtures: a read-only ordered GET/HEAD sequence and
+a PATCH row with explicit arguments. File mode accepts one local fake
+`argument_extractor` JSON prediction per fixture via `--predictions-jsonl`.
+Both modes write JSONL row evidence plus metrics JSON; neither mode loads model
+weights, opens W&B, downloads corpora, calls Redfish, or uses a GPU.
+
+Example:
+
+```bash
+python scripts/build_phase3_argument_smoke.py \
+  --output-jsonl /tmp/phase3_argument_smoke.jsonl \
+  --metrics-out /tmp/phase3_argument_smoke_metrics.json
+```
+
+Do not launch the bounded GPU smoke until this profile, runner, and offline
+gates pass in the approved remote CPU-only validation environment.
+
 Author:
 Mus mbayramo@stanford.edu
