@@ -179,6 +179,64 @@ def validation_loss(value: Union[ValidationMetrics, float]) -> float:
     return float("inf")
 
 
+def emit_final_run_report(
+        *,
+        trainer_args,
+        dataset,
+        final_epoch_loss,
+        epochs_done: int,
+        optimizer_steps: int,
+        best_eval: float,
+        validation_result: Union[ValidationMetrics, float],
+        started_at: str,
+        ended_at: str,
+        wall_clock_sec: float,
+        checkpoint_path: str,
+        output_dir: str) -> str:
+    """Build and write the final training ``report.json``.
+
+    Report emission is part of the Phase 1 acceptance evidence, so construction
+    or write failures propagate to the caller instead of being downgraded to a
+    warning.
+
+    :param trainer_args: Parsed training args used to populate the manifest.
+    :param dataset: Dataset object, optionally exposing ``run_manifest_fields``.
+    :param final_epoch_loss: Last epoch average loss, or ``None`` if no epoch ran.
+    :param epochs_done: Number of completed epochs.
+    :param optimizer_steps: Number of optimizer steps taken in this run.
+    :param best_eval: Best validation metric observed by the trainer.
+    :param validation_result: Last validation result used for report metrics.
+    :param started_at: ISO-like run start timestamp.
+    :param ended_at: ISO-like run end timestamp.
+    :param wall_clock_sec: Run duration in seconds.
+    :param checkpoint_path: Final checkpoint path recorded in the manifest.
+    :param output_dir: Directory where ``report.json`` is written.
+    :return: Path to the written report.
+    """
+    from igc.modules.train.emit import build_run_bundle, emit_run_report
+
+    manifest_fields = getattr(dataset, "run_manifest_fields", None)
+    bundle = build_run_bundle(
+        vars(trainer_args),
+        training={
+            "final_epoch_loss": final_epoch_loss,
+            "epochs_done": epochs_done,
+            "optimizer_steps": optimizer_steps,
+            "best_eval": best_eval,
+        },
+        metrics={
+            "eval/accuracy": validation_accuracy(validation_result),
+            "eval/loss": validation_loss(validation_result),
+        },
+        dataset_fields=manifest_fields() if callable(manifest_fields) else None,
+        started_at=started_at,
+        ended_at=ended_at,
+        wall_clock_sec=wall_clock_sec,
+        checkpoint_path=checkpoint_path,
+    )
+    return emit_run_report(bundle, output_dir)
+
+
 def resolve_early_stopping(spec) -> Tuple[int, float]:
     """Resolve the early-stopping knobs from the run spec.
 
@@ -1056,34 +1114,24 @@ class LlmEmbeddingsTrainer(LlmModule):
         self._save_final_checkpoint()
 
         # Emit the self-describing run report (report.json) next to the checkpoint so
-        # every run is comparable through igc.modules.train.report.compare(). Emission
-        # must never take down a finished training run, hence the broad guard.
+        # every run is comparable through igc.modules.train.report.compare(). Report
+        # emission is a hard Phase 1 evidence gate: failures propagate.
         if self.is_rank_zero():
-            try:
-                from igc.modules.train.emit import build_run_bundle, emit_run_report
-                manifest_fields = getattr(self.dataset, "run_manifest_fields", None)
-                bundle = build_run_bundle(
-                    vars(self._trainer_args),
-                    training={
-                        "final_epoch_loss": final_epoch_loss,
-                        "epochs_done": epochs_done,
-                        "optimizer_steps": global_opt_steps,
-                        "best_eval": self._best_validation_metric,
-                    },
-                    metrics={
-                        "eval/accuracy": validation_accuracy(validation_result),
-                        "eval/loss": validation_loss(validation_result),
-                    },
-                    dataset_fields=manifest_fields() if callable(manifest_fields) else None,
-                    started_at=run_started_at,
-                    ended_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    wall_clock_sec=round(time.time() - run_started_clock, 1),
-                    checkpoint_path=str(self._module_checkpoint_dir or ""),
-                )
-                report_path = emit_run_report(bundle, str(self._module_checkpoint_dir or "."))
-                self.logger.info(f"Run report written: {report_path}")
-            except Exception as report_err:  # noqa: BLE001 — report loss < run loss
-                self.logger.warning(f"run-report emission failed: {report_err}")
+            report_path = emit_final_run_report(
+                trainer_args=self._trainer_args,
+                dataset=self.dataset,
+                final_epoch_loss=final_epoch_loss,
+                epochs_done=epochs_done,
+                optimizer_steps=global_opt_steps,
+                best_eval=self._best_validation_metric,
+                validation_result=validation_result,
+                started_at=run_started_at,
+                ended_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                wall_clock_sec=round(time.time() - run_started_clock, 1),
+                checkpoint_path=str(self._module_checkpoint_dir or ""),
+                output_dir=str(self._module_checkpoint_dir or "."),
+            )
+            self.logger.info(f"Run report written: {report_path}")
 
         del train_dataloader
         del eval_dataloader
