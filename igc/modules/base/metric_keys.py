@@ -12,6 +12,7 @@ from __future__ import annotations
 PHASE1_OBJECTIVE_PRETRAIN = "phase1_pretrain"
 PHASE1_FINETUNE = "phase1_finetune"
 PHASE2_GOAL_EXTRACT = "phase2_goal_extraction"
+PHASE2_LABELLED_REQUESTS = "phase2_labelled_requests"
 PHASE3_ARGUMENT_EXTRACT = "phase3_argument_extraction"
 
 
@@ -55,6 +56,23 @@ PHASE2_WANDB_METRIC_KEYS = (
     phase_metric(PHASE2_GOAL_EXTRACT, "eval", "missing_allowed_methods_rate"),
     phase_metric(PHASE2_GOAL_EXTRACT, "order", "kendall_tau"),
     phase_metric(PHASE2_GOAL_EXTRACT, "order", "edit_distance"),
+)
+
+PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS = (
+    phase_metric(PHASE2_LABELLED_REQUESTS, "build", "draft_total"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "build", "accepted_total"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "build", "rejected_total"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "eval", "nonsense_rate"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "eval", "invalid_json_rate"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "eval", "pro_accept_rate"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "eval", "rest_api_set_match_rate"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "eval", "empty_set_match_rate"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "sample_width", "k"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "vendor", "source_corpus"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "spec", "prompt_spec_version"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "model", "model_x_artifact_sha"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "judge", "model"),
+    phase_metric(PHASE2_LABELLED_REQUESTS, "judge", "profile"),
 )
 
 PHASE3_WANDB_METRIC_KEYS = (
