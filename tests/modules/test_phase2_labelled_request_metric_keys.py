@@ -21,6 +21,7 @@ def test_phase2_labelled_request_registry_keeps_required_metric_names() -> None:
         phase_metric(PHASE2_LABELLED_REQUESTS, "pro_accept_rate"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "rest_api_set_match_rate"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_match_rate"),
+        phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_expected_total"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "sample_width", "k"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "vendor", "source_corpus"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "prompt_spec_version"),

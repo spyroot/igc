@@ -67,6 +67,25 @@ whose `--count` exceeds `safety.live_without_gate_max_candidates` must pass
 `--live-provider-gate-passed`; otherwise the CLI exits before opening a live
 provider connection.
 
+The P2-LABELS-002 live launch uses the `providers:` block in
+`configs/phase2_labelled_requests.yaml`; `igc/ds/phase2_labelled_requests.py`
+resolves each provider's `base_url_env` and `api_key_env` value before it builds
+the OpenAI-compatible provider clients. The concrete environment variables are:
+
+- `PHASE2_MODEL_X_BASE_URL`: the draft provider base URL named by
+  `providers.draft.base_url_env` in `configs/phase2_labelled_requests.yaml`.
+- `PHASE2_MODEL_X_API_KEY`: the draft provider API key named by
+  `providers.draft.api_key_env` in `configs/phase2_labelled_requests.yaml`.
+- `PHASE2_JUDGE_BASE_URL`: the judge provider base URL named by
+  `providers.judge.base_url_env` in `configs/phase2_labelled_requests.yaml`.
+- `PHASE2_JUDGE_API_KEY`: the judge provider API key named by
+  `providers.judge.api_key_env` in `configs/phase2_labelled_requests.yaml`.
+
+If any required live-provider variable is unset, the builder fails closed before
+generation instead of silently falling back to mock providers or hardcoded
+endpoints; `scripts/build_phase2_labelled_requests.py` enforces that check when
+it constructs the live OpenAI-compatible provider.
+
 ## Build Input
 
 To build one `phase2_labelled_requests` row, sample one, two, or three Redfish
@@ -217,6 +236,7 @@ The labelled-request generation builder records these keys under the
 - `phase2_labelled_requests/pro_accept_rate`
 - `phase2_labelled_requests/rest_api_set_match_rate`
 - `phase2_labelled_requests/empty_set_match_rate`
+- `phase2_labelled_requests/empty_set_expected_total`
 - `phase2_labelled_requests/sample_width/k`
 - `phase2_labelled_requests/vendor/source_corpus`
 - `phase2_labelled_requests/prompt_spec_version`
