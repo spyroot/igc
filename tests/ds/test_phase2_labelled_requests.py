@@ -121,6 +121,7 @@ wandb:
     - phase2_labelled_requests/pro_accept_rate
     - phase2_labelled_requests/rest_api_set_match_rate
     - phase2_labelled_requests/empty_set_match_rate
+    - phase2_labelled_requests/empty_set_expected_total
     - phase2_labelled_requests/sample_width/k
     - phase2_labelled_requests/vendor/source_corpus
     - phase2_labelled_requests/prompt_spec_version
@@ -560,6 +561,34 @@ def test_pro_judge_result_parsing_accepts_plain_and_wrapped_json() -> None:
     assert "not a mapping" in non_object.reason
 
 
+def test_pro_judge_result_parsing_requires_nonsense_boolean() -> None:
+    """Judge output must carry an explicit nonsense verdict."""
+    missing = parse_pro_judge_result(
+        json.dumps({
+            "accepted": True,
+            "rest_api_list": ["/redfish/v1/Systems/1"],
+        }),
+    )
+    assert missing.accepted is False
+    assert missing.invalid_json is True
+    assert "nonsense" in missing.reason
+
+
+def test_pro_judge_result_parsing_rejects_unknown_order_evidence() -> None:
+    """Order evidence is a controlled enum, not arbitrary judge text."""
+    result = parse_pro_judge_result(
+        json.dumps({
+            "accepted": True,
+            "rest_api_list": ["/redfish/v1/Systems/1"],
+            "nonsense": False,
+            "order_evidence": "maybe_later",
+        }),
+    )
+    assert result.accepted is False
+    assert result.invalid_json is True
+    assert "order_evidence" in result.reason
+
+
 def test_pro_judge_result_parsing_accepts_rest_api_set_alias() -> None:
     """The parser accepts the judge's legacy rest_api_set alias."""
     result = parse_pro_judge_result(
@@ -817,6 +846,7 @@ def test_counters_track_nonsense_invalid_json_and_empty_set_matches() -> None:
     assert summary[_phase2_metric("pro_accept_rate")] == pytest.approx(1 / 3)
     assert summary[_phase2_metric("rest_api_set_match_rate")] == pytest.approx(1 / 3)
     assert summary[_phase2_metric("empty_set_match_rate")] == 1.0
+    assert summary[_phase2_metric("empty_set_expected_total")] == 1
 
 
 def test_counter_summary_binds_semantic_metric_names() -> None:
@@ -849,6 +879,7 @@ def test_counter_summary_binds_semantic_metric_names() -> None:
     assert summary[_phase2_metric("pro_accept_rate")] == pytest.approx(6 / 7)
     assert summary[_phase2_metric("rest_api_set_match_rate")] == pytest.approx(4 / 7)
     assert summary[_phase2_metric("empty_set_match_rate")] == pytest.approx(2 / 3)
+    assert summary[_phase2_metric("empty_set_expected_total")] == 3
     assert summary[_phase2_metric("sample_width", "k")] == 3
     assert summary[_phase2_metric("vendor", "source_corpus")] == "vendor:corpus"
     assert summary[_phase2_metric("prompt_spec_version")] == "spec-v1"
@@ -889,6 +920,7 @@ def test_phase2_labelled_request_wandb_keys_have_required_namespace_shape() -> N
         phase_metric(PHASE2_LABELLED_REQUESTS, "pro_accept_rate"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "rest_api_set_match_rate"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_match_rate"),
+        phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_expected_total"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "sample_width", "k"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "vendor", "source_corpus"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "prompt_spec_version"),
