@@ -217,6 +217,7 @@ The labelled-request generation builder records these keys under the
 - `phase2_labelled_requests/pro_accept_rate`
 - `phase2_labelled_requests/rest_api_set_match_rate`
 - `phase2_labelled_requests/empty_set_match_rate`
+- `phase2_labelled_requests/empty_set_expected_total`
 - `phase2_labelled_requests/sample_width/k`
 - `phase2_labelled_requests/vendor/source_corpus`
 - `phase2_labelled_requests/prompt_spec_version`

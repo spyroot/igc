@@ -37,6 +37,7 @@ _INVALID_JSON_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "invalid_json_ra
 _PRO_ACCEPT_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "pro_accept_rate")
 _REST_API_SET_MATCH_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "rest_api_set_match_rate")
 _EMPTY_SET_MATCH_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_match_rate")
+_EMPTY_SET_EXPECTED_TOTAL_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_expected_total")
 _SAMPLE_WIDTH_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "sample_width", "k")
 _VENDOR_SOURCE_CORPUS_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "vendor", "source_corpus")
 _PROMPT_SPEC_VERSION_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "prompt_spec_version")
@@ -51,6 +52,13 @@ _REQUIRED_ACCEPTANCE_KEYS = (
     "max_invalid_json_rate",
 )
 _PROVIDER_ADAPTERS = frozenset({"mock", "file", "openai-compatible"})
+_ORDER_EVIDENCE_VALUES = frozenset((
+    "none",
+    "explicit_then",
+    "explicit_before",
+    "explicit_after",
+    "numbered_steps",
+))
 
 
 class Phase2LabelledRequestsSpecError(ValueError):
@@ -469,7 +477,15 @@ def parse_pro_judge_result(raw: str) -> ProJudgeResult:
         return ProJudgeResult(
             accepted=False,
             invalid_json=True,
-            reason="nonsense must be a boolean when present",
+            reason="nonsense must be a boolean",
+        )
+    order_evidence = parsed.get("order_evidence", "none")
+    if not isinstance(order_evidence, str) or order_evidence not in _ORDER_EVIDENCE_VALUES:
+        return ProJudgeResult(
+            accepted=False,
+            invalid_json=True,
+            reason="order_evidence must be one of "
+            f"{', '.join(sorted(_ORDER_EVIDENCE_VALUES))}",
         )
 
     return ProJudgeResult(
@@ -478,7 +494,7 @@ def parse_pro_judge_result(raw: str) -> ProJudgeResult:
         nonsense=nonsense,
         invalid_json=False,
         reason=str(parsed.get("reason", "")),
-        order_evidence=str(parsed.get("order_evidence", "none")),
+        order_evidence=order_evidence,
     )
 
 
@@ -564,6 +580,7 @@ class Phase2LabelledRequestCounters:
                 self.empty_set_match_total,
                 self.empty_set_expected_total,
             ),
+            _EMPTY_SET_EXPECTED_TOTAL_KEY: self.empty_set_expected_total,
             _SAMPLE_WIDTH_KEY: self.sample_width_k,
             _VENDOR_SOURCE_CORPUS_KEY: self.vendor_source_corpus,
             _PROMPT_SPEC_VERSION_KEY: self.prompt_spec_version,
@@ -874,7 +891,7 @@ def _provider_adapter_spec(raw: Mapping[str, Any], *, label: str) -> ProviderAda
 def _optional_bool(source: Mapping[str, Any], key: str) -> bool | None:
     """Read an optional judge boolean; return ``None`` for malformed values."""
     if key not in source:
-        return False
+        return None
     value = source[key]
     if not isinstance(value, bool):
         return None
