@@ -480,6 +480,19 @@ def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Pat
         assert literal not in lowercase_runtime_sources
 
 
+def test_prompt_templates_reject_unnamed_placeholders(tmp_path: Path) -> None:
+    """Spec load fails closed for unnamed format slots such as ``{}``."""
+    spec_path = _write_spec(tmp_path / "phase2.yaml")
+    spec_text = spec_path.read_text(encoding="utf-8")
+    spec_path.write_text(
+        spec_text.replace("{records_json}", "{}"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="unnamed format"):
+        load_phase2_labelled_requests_spec(spec_path)
+
+
 def test_sampling_accepts_only_k_1_2_3_and_preserves_record_payloads() -> None:
     """The builder samples one, two, or three REST records with deterministic RNG."""
     records = tuple(_record(index) for index in range(5))

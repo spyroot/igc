@@ -784,11 +784,14 @@ def _validate_prompt_template(
 ) -> None:
     """Validate configured prompt placeholders before a build starts."""
     try:
-        parsed_fields = {
-            field_name
-            for _, field_name, _, _ in Formatter().parse(template)
-            if field_name
-        }
+        parsed_fields: set[str] = set()
+        for _, field_name, _, _ in Formatter().parse(template):
+            if field_name == "":
+                raise Phase2LabelledRequestsSpecError(
+                    f"{label} has unnamed format fields",
+                )
+            if field_name:
+                parsed_fields.add(field_name)
     except ValueError as exc:
         raise Phase2LabelledRequestsSpecError(f"{label} has malformed format fields") from exc
 
