@@ -41,7 +41,12 @@ profile-rl: ## Profile only the RL training hot paths
 	$(PYTHON) scripts/bench_hot_paths.py --section rl --profile
 
 profile-dataset-cuda: ## Profile Redfish corpus/tokenizer/DataLoader/H2D/CUDA train step
-	$(PYTHON) scripts/profile_dataset_to_cuda.py
+	@test "$${PROFILE_DATASET_ARGS}" || ( \
+		echo "ERROR: set PROFILE_DATASET_ARGS='--corpus-dir /path/to/corpus"; \
+		echo "       --output-dir /models/igc/profile_runs/<run_id> ...'"; \
+		exit 2; \
+	)
+	$(PYTHON) scripts/profile_dataset_to_cuda.py $${PROFILE_DATASET_ARGS}
 
 docker-test: ## Build the CPU test image and run the gate inside it
 	docker build -f docker/Dockerfile.test -t igc-test:cpu . && docker run --rm igc-test:cpu python -m pytest -q
