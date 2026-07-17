@@ -24,7 +24,6 @@ from igc.modules.base.metric_keys import (
 
 MODEL_X = "model_x"
 D0 = "D0"
-D1 = PHASE2_LABELLED_REQUESTS
 
 PHASE2_GOAL_EXTRACT_METRIC_KEYS = PHASE2_WANDB_METRIC_KEYS
 PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS = PHASE3_WANDB_METRIC_KEYS
@@ -101,7 +100,7 @@ def _allowed_methods_map(contexts: Sequence[RedfishContext]) -> dict[str, list[s
     }
 
 
-def build_d1_rest_api_list_row(
+def build_phase2_labelled_request_row(
     *,
     text: str,
     contexts: Sequence[RedfishContext],
@@ -211,7 +210,7 @@ def build_ordered_call_row(
 def render_rest_api_list_example(row: Mapping[str, Any]) -> RenderedContractExample:
     """Render a Phase 2 row into prompt and target JSON text.
 
-    :param row: row from :func:`build_d1_rest_api_list_row`.
+    :param row: row from :func:`build_phase2_labelled_request_row`.
     :return: rendered prompt/target split.
     """
     x = row["x"]
