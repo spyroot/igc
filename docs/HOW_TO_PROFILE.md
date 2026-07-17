@@ -61,8 +61,100 @@ make gate          # ruff + the offline pytest gate (what CI runs)
 make perf          # the budget tripwires
 make profile       # bench_hot_paths.py --profile (both sections)
 make profile-rl    # RL section only
+make profile-remote      # remote snapshot only, no profiler
+make profile-remote-cpu  # remote CPU hot-path profiler
+make profile-remote-cuda # remote CUDA profiler, requires ALLOW_GPU_PROFILE=1
+make profile-remote-all  # remote CPU + CUDA profiler, requires ALLOW_GPU_PROFILE=1
 make docker-test   # build the CPU test image and run pytest inside it
 ```
+
+## Remote GB300/NV72 profiling
+
+Bugfix and slow-path workers should profile on the lab nodes instead of running
+tests, Docker, or CUDA work on the laptop. The remote wrapper is
+`scripts/nv72_profile_from_slot.sh`, defined in this repo, and writes every run
+bundle under `/models/igc/profile_runs/<run_id>` on the selected slot.
+
+The default mode is snapshot-only. It captures Brain/Fleet reachability,
+`/models` mount state, Docker/container state, `nvidia-smi` utilization, `pmon`,
+git commit, Python/Accelerate availability, and Torch CUDA visibility. It does
+not launch a profiler:
+
+```bash
+HOST=<slot> make profile-remote
+```
+
+CPU slow-path profiling runs the existing hot-path harness inside the remote IGC
+container and still does not use a GPU:
+
+```bash
+HOST=<slot> make profile-remote-cpu
+HOST=<slot> CPU_SECTION=all make profile-remote-cpu
+```
+
+CUDA profiling is opt-in and requires `ALLOW_GPU_PROFILE=1`. The wrapper checks
+live `nvidia-smi` memory and utilization over a sustained idle window before
+selecting GPUs. By default it requires three samples, five seconds apart,
+memory usage at or below 1024 MiB, and utilization at or below 5%. It also takes
+a per-slot lock, refuses to overwrite an existing run directory unless
+`ALLOW_OVERWRITE=1`, writes sanitized Docker metadata, and checks for at least
+20 GiB free under `/models`.
+
+On a slot where GPUs 0 and 3 are holding memory but GPUs 1 and 2 are free, use
+either automatic selection:
+
+```bash
+HOST=<slot> ALLOW_GPU_PROFILE=1 GPU_COUNT=2 make profile-remote-cuda
+```
+
+or pin the exact GPU IDs:
+
+```bash
+HOST=<slot> ALLOW_GPU_PROFILE=1 GPU_IDS=1,2 GPU_COUNT=2 make profile-remote-cuda
+```
+
+Useful knobs:
+
+```bash
+RUN_ID=bugfix-pointer-cache-001
+CONTAINER=igc-phase1-pretrain
+CUDA_MODEL=gpt2
+CUDA_BATCH_SIZE=4
+CUDA_SEQ_LEN=1024
+CUDA_PRECISION=bf16
+CUDA_STEPS=10
+CUDA_WARMUP=3
+CUDA_TRACE=1
+GPU_IDLE_SAMPLES=3
+GPU_IDLE_INTERVAL=5
+MIN_MODELS_FREE_GB=20
+```
+
+Workers that need a dedicated profiling container can create one first with the
+existing private Docker deployment path, then point the profiler at it:
+
+```bash
+HOST=<slot> CONTAINER=igc-profile-my-branch \
+  IGC_CODE_DIR=/models/igc/profile_worktrees/my-branch/igc \
+  IGC_BRANCH=my-branch RECREATE=1 make docker-igc-deploy
+
+HOST=<slot> CONTAINER=igc-profile-my-branch \
+  ALLOW_GPU_PROFILE=1 GPU_IDS=1,2 GPU_COUNT=2 make profile-remote-cuda
+```
+
+When done with a dedicated profiling container:
+
+```bash
+HOST=<slot> CONTAINER=igc-profile-my-branch make docker-igc-stop
+```
+
+Each bundle contains `summary.json`, `run.env`, `fleet_state.json` when the
+dashboard is reachable, `nvidia_smi_query.log`, `nvidia_smi_pmon.log`,
+`docker_ps.log`, `docker_inspect.json`, `container_preflight.log`, and, by mode,
+`cpu_hot_paths.log` and/or `cuda_train_profile.log` plus
+`cuda_train_profile/profile_summary.json`. If a slow path is identified, push a
+small branch from the remote Docker checkout and mark it READY-FOR-PR in
+`COORDINATION.md`; Claude opens/merges the PR.
 
 ## In CI
 
