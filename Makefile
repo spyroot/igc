@@ -10,7 +10,8 @@ TRAIN_TAG   ?= ngc$(NGC_TAG)
 PLATFORM    ?= linux/arm64
 SAVE        ?= /models/images/$(TRAIN_IMAGE)-$(TRAIN_TAG).tar.zst
 
-.PHONY: help gate test lint perf coverage metrics profile profile-rl docker-test docker-push \
+.PHONY: help gate test lint perf coverage metrics profile profile-rl profile-dataset-cuda \
+        docker-test docker-push \
         train-image train-image-arm64 train-image-amd64 train-image-multi train-image-save clean
 
 help: ## List available targets and their descriptions
@@ -38,6 +39,14 @@ profile: ## Profile all hot paths with cProfile critical sections
 
 profile-rl: ## Profile only the RL training hot paths
 	$(PYTHON) scripts/bench_hot_paths.py --section rl --profile
+
+profile-dataset-cuda: ## Profile Redfish corpus/tokenizer/DataLoader/H2D/CUDA train step
+	@test "$${PROFILE_DATASET_ARGS}" || ( \
+		echo "ERROR: set PROFILE_DATASET_ARGS='--corpus-dir /path/to/corpus"; \
+		echo "       --output-dir /models/igc/profile_runs/<run_id> ...'"; \
+		exit 2; \
+	)
+	$(PYTHON) scripts/profile_dataset_to_cuda.py $${PROFILE_DATASET_ARGS}
 
 docker-test: ## Build the CPU test image and run the gate inside it
 	docker build -f docker/Dockerfile.test -t igc-test:cpu . && docker run --rm igc-test:cpu python -m pytest -q
