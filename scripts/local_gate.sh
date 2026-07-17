@@ -20,7 +20,7 @@
 # Env knobs:
 #   IGC_GATE_PYTHON        python to use (default: python3 on PATH)
 #   IGC_GATE_TIMEOUT_SECS  kill a wedged suite after this many seconds (1800)
-#   IGC_GATE_LOCK_DIR      lock location (default $TMPDIR/igc-local-gate.lock)
+#   IGC_GATE_LOCK_DIR      exact lock location override
 #   IGC_GATE_CMD           full override of the gated command (tests use this)
 #
 # Used by: agent coordination passes as the default local gate entry point
@@ -31,7 +31,8 @@
 # Mus mbayramo@stanford.edu
 set -uo pipefail
 
-LOCK_DIR="${IGC_GATE_LOCK_DIR:-${TMPDIR:-/tmp}/igc-local-gate.lock}"
+LOCK_OWNER="$(id -u 2>/dev/null || printf '%s' "${USER:-unknown}")"
+LOCK_DIR="${IGC_GATE_LOCK_DIR:-${TMPDIR:-/tmp}/igc-local-gate.${LOCK_OWNER}.lock}"
 TIMEOUT_SECS="${IGC_GATE_TIMEOUT_SECS:-1800}"
 PYTHON_BIN="${IGC_GATE_PYTHON:-python3}"
 

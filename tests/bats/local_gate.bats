@@ -28,6 +28,21 @@ setup() {
     [ ! -d "$LOCK" ]
 }
 
+@test "default lock path is scoped by user id" {
+    old_default="$BATS_TEST_TMPDIR/igc-local-gate.lock"
+    current_uid="$(id -u)"
+    scoped_default="$BATS_TEST_TMPDIR/igc-local-gate.${current_uid}.lock"
+    mkdir -p "$old_default"
+    echo 99999999 > "$old_default/pid"
+
+    run env TMPDIR="$BATS_TEST_TMPDIR" IGC_GATE_CMD="echo scoped-ok" bash "$SCRIPT"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *scoped-ok* ]]
+    [ -d "$old_default" ]
+    [ ! -d "$scoped_default" ]
+}
+
 @test "steals a stale lock left by a dead process" {
     mkdir -p "$LOCK"
     echo 99999999 > "$LOCK/pid"   # certainly-dead pid
