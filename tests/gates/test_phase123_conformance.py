@@ -3,7 +3,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.gates.phase123_conformance import assert_report, build_report
+import pytest
+
+pytest.importorskip("igc.ds.phase1_render")  # phase1_render ships with the P1-GOLDEN merge
+
+from scripts.gates.phase123_conformance import assert_report, build_report  # noqa: E402
 
 
 def test_phase123_conformance_report_has_expected_keys_and_shapes(tmp_path: Path) -> None:

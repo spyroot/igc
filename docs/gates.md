@@ -37,14 +37,14 @@ live Redfish host. Real-model behavior is checked only by the envelope test's
   checkpoint and checks only the response **envelope** — model loadability,
   request/response keys present, JSON parse succeeds, output shape — never
   stochastic answer quality. It skips unless a GPU and `IGC_ENVELOPE_MODEL_DIR`
-  are both present. It is **BLOCKED while the GB300/NV72 surface is powered off**
+  are both present. It is **BLOCKED while the approved remote GPU surface is powered off**
   and, when unblocked, runs only inside an approved remote container, never on the
   operator laptop.
 
 ## Execution surface
 
 The runner is intended for **CI** (`.github/workflows/ci.yml` gate job) or an
-**approved remote GB300/NV72 container**. It performs no GPU work itself and does
+**approved remote approved remote GPU container**. It performs no GPU work itself and does
 no laptop detection; the execution surface is enforced by where it is invoked. The
 report is sanitized (check names, statuses, return codes, and a scrubbed
 one-line summary only — no IPs, hostnames, tokens, or file bodies).
@@ -70,6 +70,6 @@ A **Phase 2 or Phase 3 PR** — anything touching the contract, dataset builders
 renderers, parsers, evaluators, or their metric namespaces — **must include the
 observed contract-authority gate output** (the `overall: pass` report, or the
 console summary) in the PR body. If the gate cannot be run on an approved surface,
-the PR is marked **`BLOCKED:`** with the exact reason (for example, GB300 powered
+the PR is marked **`BLOCKED:`** with the exact reason (for example, the GPU surface powered
 off for the envelope profile). A Phase 2/3 PR with no observed gate output and no
 `BLOCKED:` note is not accepted.
