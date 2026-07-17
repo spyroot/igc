@@ -437,6 +437,31 @@ def test_cli_live_provider_blocks_dataset_scale_without_gate(tmp_path: Path) -> 
         )
 
 
+def test_cli_live_provider_gate_counts_no_action_candidates(tmp_path: Path) -> None:
+    """No-action judge calls count toward the live provider safety cap."""
+    script = _load_script()
+    spec = script.load_phase2_labelled_requests_spec(
+        "configs/phase2_labelled_requests.yaml",
+    )
+
+    with pytest.raises(SystemExit, match="live provider runs"):
+        script.main(
+            _base_args(
+                tmp_path,
+                sample_width=1,
+                count=spec.live_without_gate_max_candidates,
+            )
+            + [
+                "--provider-mode",
+                "openai-compatible",
+                "--no-action-text",
+                "do not change anything on this server",
+                "--no-action-count",
+                "1",
+            ],
+        )
+
+
 @pytest.mark.parametrize(
     "adapter_args",
     (

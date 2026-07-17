@@ -351,7 +351,8 @@ def _enforce_live_provider_gate(
     uses_live_adapter = "openai-compatible" in {draft_adapter, judge_adapter}
     if not uses_live_adapter or args.live_provider_gate_passed:
         return
-    if args.count > spec.live_without_gate_max_candidates:
+    candidate_count = args.count + args.no_action_count
+    if candidate_count > spec.live_without_gate_max_candidates:
         raise SystemExit(
             "live provider runs above safety.live_without_gate_max_candidates "
             "require --live-provider-gate-passed",
