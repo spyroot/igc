@@ -751,15 +751,15 @@ def test_rendered_and_inference_outputs_preserve_multi_item_order() -> None:
     }
     assert [
         call["rest_api"]
-        for call in inference_ordered_goals_json(phase3)["ordered_goals"]
+        for call in inference_ordered_goals_json(phase3)["target_calls"]
     ] == [
         "/redfish/v1/TaskService/Tasks",
         "/redfish/v1/Systems",
     ]
 
 
-def test_inference_json_uses_ordered_goals_shape() -> None:
-    """The combined inference handoff uses documented ordered_goals call fields."""
+def test_inference_json_uses_target_calls_shape() -> None:
+    """The combined inference handoff uses documented target_calls fields."""
     context = _context(
         "/redfish/v1/TaskService/Tasks",
         ("GET", "HEAD"),
@@ -773,7 +773,7 @@ def test_inference_json_uses_ordered_goals_shape() -> None:
 
     assert inference_ordered_goals_json(row) == {
         "text": "check task queue",
-        "ordered_goals": row["y_true"]["calls"],
+        "target_calls": row["y_true"]["calls"],
     }
 
 
@@ -801,7 +801,7 @@ def test_inference_ordered_goals_json_preserves_mutation_arguments() -> None:
 
     assert inference_ordered_goals_json(row) == {
         "text": "set bios boot mode to Uefi",
-        "ordered_goals": [{
+        "target_calls": [{
             "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
             "allowed_methods": ["GET", "PATCH"],
             "method": "PATCH",

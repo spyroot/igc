@@ -465,11 +465,11 @@ def inference_ordered_goals_json(row: Mapping[str, Any]) -> dict[str, Any]:
     """Build the combined inference JSON handoff from a Phase 3 row.
 
     :param row: row from :func:`build_ordered_call_row`.
-    :return: ``{"text": ..., "ordered_goals": [...]}``.
+    :return: ``{"text": ..., "target_calls": [...]}``.
     """
     return {
         "text": str(row["x"]["text"]),        # Operator sentence tied to the call sequence.
-        "ordered_goals": list(row["y_true"]["calls"]),  # Ordered calls for the RL handoff.
+        "target_calls": list(row["y_true"]["calls"]),  # Ordered calls for the RL handoff.
     }
 
 

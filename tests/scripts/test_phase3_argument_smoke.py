@@ -84,10 +84,10 @@ def test_cli_mock_mode_writes_rendered_rows_and_metrics(
     assert rows[0]["rendered"]["renderer"] == "render_ordered_call_example"
     assert rows[0]["rendered"]["target_char_start"] == rows[0]["rendered"]["prompt_char_count"]
     assert json.loads(rows[0]["rendered"]["target_json"]) == rows[0]["y_true"]
-    assert "ordered_goals" in rows[0]["inference"]
-    assert "target_calls" not in rows[0]["inference"]
-    assert rows[0]["inference"]["ordered_goals"] == rows[0]["y_true"]["calls"]
-    patch_call = rows[1]["inference"]["ordered_goals"][0]
+    assert "target_calls" in rows[0]["inference"]
+    assert "ordered_goals" not in rows[0]["inference"]
+    assert rows[0]["inference"]["target_calls"] == rows[0]["y_true"]["calls"]
+    patch_call = rows[1]["inference"]["target_calls"][0]
     assert patch_call["method"] == "PATCH"
     assert patch_call["arguments"] == {"Attributes": {"BootMode": "Uefi"}}
     assert metrics["dataset"] == "phase3_argument_extractor_smoke"
