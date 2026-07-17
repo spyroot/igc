@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import random
+from string import Formatter
 from typing import Any, Callable, Mapping, Sequence
 
 import yaml
@@ -265,6 +266,26 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
     prompts = _mapping(raw, "prompts", required=True)
     model_prompt = _mapping(prompts, "model_x_draft", required=True)
     judge_prompt = _mapping(prompts, "pro_judge", required=True)
+    model_x_system = _required_string(model_prompt, "system", "prompts.model_x_draft.system")
+    model_x_template = _required_string(
+        model_prompt,
+        "template",
+        "prompts.model_x_draft.template",
+    )
+    judge_system = _required_string(judge_prompt, "system", "prompts.pro_judge.system")
+    judge_template = _required_string(judge_prompt, "template", "prompts.pro_judge.template")
+    _validate_prompt_template(
+        model_x_template,
+        label="prompts.model_x_draft.template",
+        required_fields=("records_json",),
+        allowed_fields=("records_json",),
+    )
+    _validate_prompt_template(
+        judge_template,
+        label="prompts.pro_judge.template",
+        required_fields=("records_json", "draft_text"),
+        allowed_fields=("records_json", "draft_text"),
+    )
     providers = _mapping(raw, "providers", required=True)
     draft_provider = _provider_adapter_spec(
         _mapping(providers, "draft"),
@@ -327,14 +348,10 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
             profile=_required_string(judge_raw, "profile", "judge.profile"),
         ),
         generation=dict(_mapping(raw, "generation", required=True)),
-        model_x_system=_required_string(model_prompt, "system", "prompts.model_x_draft.system"),
-        model_x_template=_required_string(
-            model_prompt,
-            "template",
-            "prompts.model_x_draft.template",
-        ),
-        judge_system=_required_string(judge_prompt, "system", "prompts.pro_judge.system"),
-        judge_template=_required_string(judge_prompt, "template", "prompts.pro_judge.template"),
+        model_x_system=model_x_system,
+        model_x_template=model_x_template,
+        judge_system=judge_system,
+        judge_template=judge_template,
         draft_provider=draft_provider,
         judge_provider=judge_provider,
         live_without_gate_max_candidates=live_without_gate_max_candidates,
@@ -742,6 +759,36 @@ def _required_string(source: Mapping[str, Any], key: str, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise Phase2LabelledRequestsSpecError(f"{label} must be a non-empty string")
     return value
+
+
+def _validate_prompt_template(
+    template: str,
+    *,
+    label: str,
+    required_fields: Sequence[str],
+    allowed_fields: Sequence[str],
+) -> None:
+    """Validate configured prompt placeholders before a build starts."""
+    try:
+        parsed_fields = {
+            field_name
+            for _, field_name, _, _ in Formatter().parse(template)
+            if field_name
+        }
+    except ValueError as exc:
+        raise Phase2LabelledRequestsSpecError(f"{label} has malformed format fields") from exc
+
+    unknown_fields = sorted(parsed_fields - set(allowed_fields))
+    if unknown_fields:
+        raise Phase2LabelledRequestsSpecError(
+            f"{label} has unknown fields: {', '.join(unknown_fields)}",
+        )
+
+    missing_fields = sorted(set(required_fields) - parsed_fields)
+    if missing_fields:
+        raise Phase2LabelledRequestsSpecError(
+            f"{label} missing required fields: {', '.join(missing_fields)}",
+        )
 
 
 def _optional_string(source: Mapping[str, Any], key: str) -> str:
