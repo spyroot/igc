@@ -84,7 +84,11 @@ jobs:
           sudo apt-get install -y bats shellcheck
       - name: Bash syntax
         shell: bash
-        run: bash -n scripts/*.sh scripts/*.sbatch
+        run: |
+          set -euo pipefail
+          for f in scripts/*.sh scripts/*.sbatch; do
+            bash -n "$f"
+          done
       - name: ShellCheck
         shell: bash
         run: shellcheck scripts/*.sh scripts/*.sbatch tests/bats/*.bats
