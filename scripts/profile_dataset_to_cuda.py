@@ -78,7 +78,11 @@ def _load_rest_map(
         data = fh.read()
     try:
         loaded = np.load(io.BytesIO(data), allow_pickle=True).item()
-    except Exception:
+    except Exception as exc:
+        print(
+            f"WARNING: could not load {member_name}: {exc}",
+            file=sys.stderr,
+        )
         return {}
     return loaded if isinstance(loaded, Mapping) else {}
 
