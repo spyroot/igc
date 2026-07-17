@@ -76,6 +76,55 @@ EOF
     [ "$(git -C "${tmp}" symbolic-ref --short HEAD)" = "${before_branch}" ]
 }
 
+@test "slot LFS push reports check-attr command failure distinctly" {
+    tmp="$(mktemp -d)"
+    git -C "${tmp}" init -q
+    git -C "${tmp}" config user.email test@example.invalid
+    git -C "${tmp}" config user.name "IGC Test"
+    printf '*.bin filter=lfs diff=lfs merge=lfs -text\n' >"${tmp}/.gitattributes"
+    git -C "${tmp}" add .gitattributes
+    git -C "${tmp}" commit -q -m "add committed lfs attributes"
+    printf 'payload\n' >"${tmp}/raw.bin"
+    before_branch="$(git -C "${tmp}" symbolic-ref --short HEAD)"
+    real_git="$(command -v git)"
+    mkdir "${tmp}/fake-bin"
+    # Mimic a git without check-attr --source: usage error on stderr, exit 129.
+    cat >"${tmp}/fake-bin/git" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = "check-attr" ] && [ "\${2:-}" = "--source" ]; then
+    echo "error: unknown option \\\`source'" >&2
+    exit 129
+fi
+exec "${real_git}" "\$@"
+EOF
+    chmod +x "${tmp}/fake-bin/git"
+
+    run bash -c 'cd "$1" && env PATH="$1/fake-bin:$PATH" IGC_YES=1 IGC_REMOTE=origin "$2/scripts/lfs_push_from_slot.sh" raw.bin' \
+        _ "${tmp}" "${REPO_ROOT}"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"cannot read committed LFS attributes"* ]]
+    [[ "$output" == *"unknown option"* ]]
+    [[ "$output" != *"not matched by a committed LFS filter"* ]]
+    [ "$(git -C "${tmp}" symbolic-ref --short HEAD)" = "${before_branch}" ]
+}
+
+@test "slot LFS push reports unborn HEAD distinctly instead of a filter mismatch" {
+    tmp="$(mktemp -d)"
+    git -C "${tmp}" init -q
+    git -C "${tmp}" config user.email test@example.invalid
+    git -C "${tmp}" config user.name "IGC Test"
+    printf '*.bin filter=lfs diff=lfs merge=lfs -text\n' >"${tmp}/.gitattributes"
+    printf 'payload\n' >"${tmp}/raw.bin"
+
+    run bash -c 'cd "$1" && env IGC_YES=1 IGC_REMOTE=origin "$2/scripts/lfs_push_from_slot.sh" raw.bin' \
+        _ "${tmp}" "${REPO_ROOT}"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"cannot read committed LFS attributes"* ]]
+    [[ "$output" != *"not matched by a committed LFS filter"* ]]
+}
+
 @test "model adapter safetensors files are tracked by Git LFS" {
     run git -C "${REPO_ROOT}" check-attr filter -- models/model_x/adapter.safetensors
 
