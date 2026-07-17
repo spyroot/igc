@@ -29,7 +29,7 @@ from igc.ds.rest_goal_contract import (
     RedfishContext,
     build_ordered_call_row,
     evaluate_ordered_calls_y_pred,
-    inference_target_calls_json,
+    inference_ordered_goals_json,
     render_ordered_call_example,
 )
 from igc.modules.base.metric_keys import PHASE3_ARGUMENT_EXTRACT, phase_metric
@@ -319,7 +319,7 @@ def build_phase3_argument_smoke(
             },
             "y_pred_raw": raw_prediction,
             "evaluation": evaluation,
-            "inference": inference_target_calls_json(row),
+            "inference": inference_ordered_goals_json(row),
         })
 
     summary = aggregate_phase3_argument_smoke_metrics(spec, evaluations)

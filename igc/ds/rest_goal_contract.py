@@ -460,7 +460,7 @@ def _comparison_rate(matches: int, total: int) -> float:
     return matches / total
 
 
-def inference_target_calls_json(row: Mapping[str, Any]) -> dict[str, Any]:
+def inference_ordered_goals_json(row: Mapping[str, Any]) -> dict[str, Any]:
     """Build the combined inference JSON handoff from a Phase 3 row.
 
     :param row: row from :func:`build_ordered_call_row`.

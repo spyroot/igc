@@ -22,7 +22,7 @@ from igc.ds.rest_goal_contract import (
     build_d1_rest_api_list_row,
     build_ordered_call_row,
     evaluate_ordered_calls_y_pred,
-    inference_target_calls_json,
+    inference_ordered_goals_json,
     parse_ordered_calls_y_pred,
     parse_rest_api_list_y_pred,
     render_ordered_call_example,
@@ -749,7 +749,7 @@ def test_rendered_and_inference_outputs_preserve_multi_item_order() -> None:
     }
     assert [
         call["rest_api"]
-        for call in inference_target_calls_json(phase3)["ordered_goals"]
+        for call in inference_ordered_goals_json(phase3)["ordered_goals"]
     ] == [
         "/redfish/v1/TaskService/Tasks",
         "/redfish/v1/Systems",
@@ -769,13 +769,13 @@ def test_inference_json_uses_ordered_goals_shape() -> None:
         rest_api_list=("/redfish/v1/TaskService/Tasks",),
     )
 
-    assert inference_target_calls_json(row) == {
+    assert inference_ordered_goals_json(row) == {
         "text": "check task queue",
         "ordered_goals": row["y_true"]["calls"],
     }
 
 
-def test_inference_target_calls_json_preserves_mutation_arguments() -> None:
+def test_inference_ordered_goals_json_preserves_mutation_arguments() -> None:
     """The inference handoff keeps explicit non-GET arguments unchanged."""
     context = _context(
         "/redfish/v1/Systems/1/Bios/Settings",
@@ -797,7 +797,7 @@ def test_inference_target_calls_json_preserves_mutation_arguments() -> None:
         },
     )
 
-    assert inference_target_calls_json(row) == {
+    assert inference_ordered_goals_json(row) == {
         "text": "set bios boot mode to Uefi",
         "ordered_goals": [{
             "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
