@@ -365,6 +365,18 @@ def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     with pytest.raises(Phase2LabelledRequestsSpecError, match="unknown_field"):
         load_phase2_labelled_requests_spec(unknown_judge_prompt_field)
 
+    malformed_model_prompt_field = _write_spec(tmp_path / "malformed-model-prompt-field.yaml")
+    malformed_model_prompt_field.write_text(
+        malformed_model_prompt_field.read_text(encoding="utf-8").replace(
+            "      {records_json}",
+            "      {records_json",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="malformed format fields"):
+        load_phase2_labelled_requests_spec(malformed_model_prompt_field)
+
     malformed_generation = _write_spec(tmp_path / "malformed-generation.yaml")
     malformed_generation.write_text(
         malformed_generation.read_text(encoding="utf-8").replace(
