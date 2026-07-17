@@ -29,6 +29,7 @@ from igc.ds.rest_goal_contract import (
     render_rest_api_list_example,
 )
 from igc.modules.base.metric_keys import (
+    PHASE2_LABELLED_REQUESTS,
     PHASE2_WANDB_METRIC_KEYS,
     PHASE3_WANDB_METRIC_KEYS,
     PHASE23_WANDB_METRIC_KEYS,
@@ -44,7 +45,7 @@ def test_phase23_locked_name_constants_use_literal_contract_values() -> None:
     """Locked Phase 2/3 names stay literal, not only internally self-consistent."""
     assert MODEL_X == "model_x"
     assert D0 == "D0"
-    assert D1 == "D1"
+    assert D1 == PHASE2_LABELLED_REQUESTS
 
 
 def test_d1_row_preserves_operator_order_independent_of_context_order() -> None:
@@ -67,7 +68,7 @@ def test_d1_row_preserves_operator_order_independent_of_context_order() -> None:
     )
 
     assert row["phase"] == 2
-    assert row["dataset"] == D1
+    assert row["dataset"] == PHASE2_LABELLED_REQUESTS
     assert row["source_dataset"] == D0
     assert row["model_x"] == MODEL_X
     assert row["x"]["text"] == "check the task queue, then list the systems"
@@ -163,10 +164,12 @@ def test_phase23_rows_pin_locked_field_names() -> None:
         "validation",
     }
     assert phase2["task"] == "text_to_rest_api_list"
+    assert phase2["dataset"] == PHASE2_LABELLED_REQUESTS
     assert set(phase2["x"]) == {"text", "json", "allowed_methods"}
     assert set(phase2["y_true"]) == {"rest_api_list", "order_evidence"}
     assert set(phase3) == {"phase", "source_dataset", "model_x", "task", "x", "y_true"}
     assert phase3["task"] == "text_and_rest_api_list_to_calls"
+    assert phase3["source_dataset"] == PHASE2_LABELLED_REQUESTS
     assert set(phase3["x"]) == {"text", "rest_api_list", "json", "allowed_methods"}
     assert set(phase3["y_true"]) == {"calls"}
     assert set(phase3["y_true"]["calls"][0]) == {
