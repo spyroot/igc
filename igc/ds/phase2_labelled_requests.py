@@ -1,7 +1,10 @@
 """Offline Phase 2 labelled-request dataset plumbing.
 
-Used by tests and future dataset-build scripts when constructing
-``phase2_labelled_requests`` rows from Redfish REST API evidence. The module is
+Used by ``scripts/build_phase2_labelled_requests.py`` (the ``P2-LABELS`` dataset
+CLI), which drives ``Phase2LabelledRequestBuilder`` with
+``load_phase2_labelled_requests_spec`` and provider adapters to write accepted
+``phase2_labelled_requests`` JSONL rows plus a metrics summary; focused tests run
+through ``scripts/validate_phase2_labelled_requests.sh``. The module is
 pure: it loads YAML specs, renders configured prompts, samples tiny records, and
 parses injected judge responses without opening W&B, loading a model, or calling
 the network.
