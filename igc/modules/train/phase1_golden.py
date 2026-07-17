@@ -2,7 +2,8 @@
 
 This module consumes already-produced Phase 1 prediction JSONL artifacts. It
 does not load a model, touch a GPU, call W&B, or read corpora. Rows are matched
-by an explicit row id when present, otherwise by JSONL position.
+by an explicit row id when present, otherwise by JSONL position plus a stable
+fingerprint of non-prediction row identity.
 
 Author:
 Mus mbayramo@stanford.edu
@@ -82,6 +83,7 @@ class ArtifactMetrics:
     top_k_rows: int
     total_generated_tokens: int
     total_latency_sec: float
+    row_keys: tuple[str, ...]
     sequence_lengths: list[int] = field(default_factory=list)
     padding_ratios: list[float] = field(default_factory=list)
     latencies_sec: list[float] = field(default_factory=list)
@@ -270,6 +272,7 @@ def evaluate_prediction_jsonl(
     """Evaluate one Phase 1 prediction JSONL artifact."""
     raw_rows = load_prediction_rows(path)
     records = [normalize_prediction_row(row, index) for index, row in enumerate(raw_rows)]
+    _validate_unique_row_keys(records, role=role)
     metrics = _metrics_from_records(
         role=role,
         records=records,
@@ -301,6 +304,7 @@ def _metrics_from_records(
         top_k_rows=sum(1 for record in records if record.top_k_match is not None),
         total_generated_tokens=sum(record.generated_tokens or 0 for record in records),
         total_latency_sec=sum(record.latency_sec or 0.0 for record in records),
+        row_keys=tuple(record.key for record in records),
     )
     metrics.latencies_sec.extend(
         record.latency_sec for record in records if record.latency_sec is not None
@@ -365,6 +369,7 @@ def compare_prediction_artifacts(
     ece_bins: int = 10,
 ) -> dict[str, Any]:
     """Compare baseline and ``model_x`` metrics."""
+    _validate_comparable_artifact_keys(baseline, model)
     baseline_metrics = baseline.to_metric_dict(ece_bins=ece_bins)
     model_metrics = model.to_metric_dict(ece_bins=ece_bins)
     delta: dict[str, float | None] = {}
@@ -380,6 +385,40 @@ def compare_prediction_artifacts(
         "row_count_delta": model.row_count - baseline.row_count,
         "delta": delta,
     }
+
+
+def _validate_unique_row_keys(records: Iterable[PredictionRecord], *, role: str) -> None:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for record in records:
+        if record.key in seen:
+            duplicates.add(record.key)
+        seen.add(record.key)
+    if duplicates:
+        raise Phase1GoldenError(
+            f"{role}: duplicate prediction row keys ({len(duplicates)} duplicate keys)"
+        )
+
+
+def _validate_comparable_artifact_keys(
+    baseline: ArtifactMetrics,
+    model: ArtifactMetrics,
+) -> None:
+    baseline_keys = set(baseline.row_keys)
+    model_keys = set(model.row_keys)
+    missing_from_model = sorted(baseline_keys - model_keys)
+    missing_from_baseline = sorted(model_keys - baseline_keys)
+    if not missing_from_model and not missing_from_baseline:
+        return
+    details = []
+    if missing_from_model:
+        details.append(f"missing from model_x: {len(missing_from_model)}")
+    if missing_from_baseline:
+        details.append(f"missing from baseline: {len(missing_from_baseline)}")
+    raise Phase1GoldenError(
+        "baseline and model_x prediction artifacts cover different row keys; "
+        + "; ".join(details)
+    )
 
 
 def build_phase1_golden_payload(
@@ -566,7 +605,20 @@ def _row_key(row: Mapping[str, Any], index: int) -> str:
         row,
         (("id",), ("row_id",), ("sample_id",), ("example_id",), ("uid",)),
     )
-    return str(value) if value is not None else str(index)
+    if value is not None:
+        return f"id:{value}"
+    target = _target_json(row)
+    rest_api = _rest_api(row, target)
+    identity = {
+        "rest_api": rest_api,
+        "target_json": target,
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":"), default=str).encode(
+            "utf-8"
+        )
+    ).hexdigest()[:16]
+    return f"position:{index}:identity:{fingerprint}"
 
 
 def _odata_id_match(prediction: JsonValue | None, rest_api: str) -> bool | None:
