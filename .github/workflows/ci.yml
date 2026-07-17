@@ -91,7 +91,7 @@ jobs:
           done
       - name: ShellCheck
         shell: bash
-        run: shellcheck scripts/*.sh scripts/*.sbatch tests/bats/*.bats
+        run: shellcheck scripts/*.sh scripts/*.sbatch tests/bats/*.bats tests/shell/*.sh
       - name: Bats
         shell: bash
         run: bats tests/bats
