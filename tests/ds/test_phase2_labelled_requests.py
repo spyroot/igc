@@ -11,6 +11,7 @@ Mus mbayramo@stanford.edu
 
 from __future__ import annotations
 
+import ast
 import json
 import random
 from pathlib import Path
@@ -120,6 +121,7 @@ wandb:
     - phase2_labelled_requests/pro_accept_rate
     - phase2_labelled_requests/rest_api_set_match_rate
     - phase2_labelled_requests/empty_set_match_rate
+    - phase2_labelled_requests/empty_set_expected_total
     - phase2_labelled_requests/sample_width/k
     - phase2_labelled_requests/vendor/source_corpus
     - phase2_labelled_requests/prompt_spec_version
@@ -340,6 +342,54 @@ def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     with pytest.raises(Phase2LabelledRequestsSpecError, match="model_x_draft"):
         load_phase2_labelled_requests_spec(missing_prompt_section)
 
+    missing_model_prompt_field = _write_spec(tmp_path / "missing-model-prompt-field.yaml")
+    missing_model_prompt_field.write_text(
+        missing_model_prompt_field.read_text(encoding="utf-8").replace(
+            "      {records_json}",
+            "      no record placeholder",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="records_json"):
+        load_phase2_labelled_requests_spec(missing_model_prompt_field)
+
+    unknown_judge_prompt_field = _write_spec(tmp_path / "unknown-judge-prompt-field.yaml")
+    unknown_judge_prompt_field.write_text(
+        unknown_judge_prompt_field.read_text(encoding="utf-8").replace(
+            "      {draft_text}",
+            "      {draft_text}\n      {unknown_field}",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="unknown_field"):
+        load_phase2_labelled_requests_spec(unknown_judge_prompt_field)
+
+    malformed_model_prompt_field = _write_spec(tmp_path / "malformed-model-prompt-field.yaml")
+    malformed_model_prompt_field.write_text(
+        malformed_model_prompt_field.read_text(encoding="utf-8").replace(
+            "      {records_json}",
+            "      {records_json",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="malformed format fields"):
+        load_phase2_labelled_requests_spec(malformed_model_prompt_field)
+
+    unnamed_model_prompt_field = _write_spec(tmp_path / "unnamed-model-prompt-field.yaml")
+    unnamed_model_prompt_field.write_text(
+        unnamed_model_prompt_field.read_text(encoding="utf-8").replace(
+            "      {records_json}",
+            "      {records_json}\n      {}",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="unnamed format fields"):
+        load_phase2_labelled_requests_spec(unnamed_model_prompt_field)
+
     malformed_generation = _write_spec(tmp_path / "malformed-generation.yaml")
     malformed_generation.write_text(
         malformed_generation.read_text(encoding="utf-8").replace(
@@ -394,6 +444,23 @@ def test_committed_phase2_labelled_requests_config_loads() -> None:
     assert spec.judge_provider.payload_request_fields == ("route", "profile")
 
 
+def test_committed_phase2_labelled_requests_prompts_render_from_yaml() -> None:
+    """The checked-in prompt spec renders without leaving template placeholders."""
+    spec = load_phase2_labelled_requests_spec("configs/phase2_labelled_requests.yaml")
+    records = (_record(1), _record(2))
+
+    model_prompt = render_model_x_prompt(spec, records)
+    judge_prompt = render_pro_judge_prompt(spec, records, "show both fixture systems")
+
+    assert spec.model_x_system in model_prompt
+    assert spec.judge_system in judge_prompt
+    assert "/redfish/v1/Systems/1" in model_prompt
+    assert "/redfish/v1/Systems/2" in judge_prompt
+    assert "show both fixture systems" in judge_prompt
+    assert "{records_json}" not in model_prompt
+    assert "{draft_text}" not in judge_prompt
+
+
 def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Path) -> None:
     """Prompt text comes from the loaded spec and can be changed without code edits."""
     spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
@@ -425,6 +492,16 @@ def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Pat
     )
     for literal in forbidden_literals:
         assert literal not in runtime_sources
+
+    lowercase_runtime_sources = runtime_sources.lower()
+    forbidden_lowercase_literals = (
+        "phase2 test model-x system prompt from yaml",
+        "qwen/qwen2.5",
+        "deepseek-v4",
+        "return json with accepted",
+    )
+    for literal in forbidden_lowercase_literals:
+        assert literal not in lowercase_runtime_sources
 
 
 def test_sampling_accepts_only_k_1_2_3_and_preserves_record_payloads() -> None:
@@ -506,6 +583,59 @@ def test_pro_judge_result_parsing_accepts_plain_and_wrapped_json() -> None:
     assert non_object.invalid_json is True
     assert non_object.rest_api_list == ()
     assert "not a mapping" in non_object.reason
+
+
+def test_pro_judge_result_parsing_requires_nonsense_boolean() -> None:
+    """Judge output must carry an explicit nonsense verdict."""
+    missing = parse_pro_judge_result(
+        json.dumps({
+            "accepted": True,
+            "rest_api_list": ["/redfish/v1/Systems/1"],
+        }),
+    )
+    assert missing.accepted is False
+    assert missing.invalid_json is True
+    assert "nonsense" in missing.reason
+
+
+def test_pro_judge_result_parsing_requires_accepted_boolean() -> None:
+    """Judge output must carry an explicit accepted verdict."""
+    missing = parse_pro_judge_result(
+        json.dumps({
+            "rest_api_list": ["/redfish/v1/Systems/1"],
+            "nonsense": False,
+        }),
+    )
+    assert missing.accepted is False
+    assert missing.invalid_json is True
+    assert "accepted or accept" in missing.reason
+
+    malformed = parse_pro_judge_result(
+        json.dumps({
+            "accepted": "yes",
+            "rest_api_list": ["/redfish/v1/Systems/1"],
+            "nonsense": False,
+        }),
+    )
+    assert malformed.accepted is False
+    assert malformed.invalid_json is True
+    assert "accepted" in malformed.reason
+    assert "boolean" in malformed.reason
+
+
+def test_pro_judge_result_parsing_rejects_unknown_order_evidence() -> None:
+    """Order evidence is a controlled enum, not arbitrary judge text."""
+    result = parse_pro_judge_result(
+        json.dumps({
+            "accepted": True,
+            "rest_api_list": ["/redfish/v1/Systems/1"],
+            "nonsense": False,
+            "order_evidence": "maybe_later",
+        }),
+    )
+    assert result.accepted is False
+    assert result.invalid_json is True
+    assert "order_evidence" in result.reason
 
 
 def test_pro_judge_result_parsing_accepts_rest_api_set_alias() -> None:
@@ -714,6 +844,31 @@ def test_builder_returns_none_and_counts_rejection_on_set_mismatch(tmp_path: Pat
     assert summary[_phase2_metric("rest_api_set_match_rate")] == 0.0
 
 
+def test_builder_rejects_accepted_nonsense_even_when_set_matches(tmp_path: Path) -> None:
+    """A contradictory judge response cannot enter accepted labelled requests."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    builder = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=lambda request: "???",
+        judge_provider=lambda request: _judge_json(
+            accepted=True,
+            rest_api_list=request["expected_rest_api_list"],
+            nonsense=True,
+        ),
+    )
+
+    row, counters = builder.build_one((_record(1),), k=1, rng=random.Random(1))
+    summary = counters.summary()
+
+    assert row is None
+    assert summary[_phase2_metric("draft_total")] == 1
+    assert summary[_phase2_metric("accepted_total")] == 0
+    assert summary[_phase2_metric("rejected_total")] == 1
+    assert summary[_phase2_metric("nonsense_rate")] == 1.0
+    assert summary[_phase2_metric("pro_accept_rate")] == 1.0
+    assert summary[_phase2_metric("rest_api_set_match_rate")] == 1.0
+
+
 def test_counters_track_nonsense_invalid_json_and_empty_set_matches() -> None:
     """Counters expose the generation-quality metrics required for W&B."""
     counters = Phase2LabelledRequestCounters()
@@ -740,6 +895,7 @@ def test_counters_track_nonsense_invalid_json_and_empty_set_matches() -> None:
     assert summary[_phase2_metric("pro_accept_rate")] == pytest.approx(1 / 3)
     assert summary[_phase2_metric("rest_api_set_match_rate")] == pytest.approx(1 / 3)
     assert summary[_phase2_metric("empty_set_match_rate")] == 1.0
+    assert summary[_phase2_metric("empty_set_expected_total")] == 1
 
 
 def test_counter_summary_binds_semantic_metric_names() -> None:
@@ -772,6 +928,7 @@ def test_counter_summary_binds_semantic_metric_names() -> None:
     assert summary[_phase2_metric("pro_accept_rate")] == pytest.approx(6 / 7)
     assert summary[_phase2_metric("rest_api_set_match_rate")] == pytest.approx(4 / 7)
     assert summary[_phase2_metric("empty_set_match_rate")] == pytest.approx(2 / 3)
+    assert summary[_phase2_metric("empty_set_expected_total")] == 3
     assert summary[_phase2_metric("sample_width", "k")] == 3
     assert summary[_phase2_metric("vendor", "source_corpus")] == "vendor:corpus"
     assert summary[_phase2_metric("prompt_spec_version")] == "spec-v1"
@@ -812,6 +969,7 @@ def test_phase2_labelled_request_wandb_keys_have_required_namespace_shape() -> N
         phase_metric(PHASE2_LABELLED_REQUESTS, "pro_accept_rate"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "rest_api_set_match_rate"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_match_rate"),
+        phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_expected_total"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "sample_width", "k"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "vendor", "source_corpus"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "prompt_spec_version"),
@@ -850,6 +1008,25 @@ def test_minimal_phase3_fixture_rejects_missing_phase2_row() -> None:
     """Phase 3 compatibility helpers fail before fabricating labels."""
     with pytest.raises(ValueError, match="phase2 row is required"):
         to_minimal_phase3_input(None)
+
+
+def test_phase2_module_does_not_import_phase3_argument_runtime() -> None:
+    """The labelled-request builder stays independent from Phase 3 call logic."""
+    source = Path("igc/ds/phase2_labelled_requests.py").read_text(encoding="utf-8")
+    module = ast.parse(source)
+    imported_modules: set[str] = set()
+    imported_names: set[str] = set()
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            imported_modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                imported_modules.add(node.module)
+            imported_names.update(alias.name for alias in node.names)
+
+    assert "igc.ds.rest_goal_contract" not in imported_modules
+    assert "build_ordered_call_row" not in imported_names
+    assert "parse_ordered_calls_y_pred" not in imported_names
 
 
 # Author: Mus mbayramo@stanford.edu

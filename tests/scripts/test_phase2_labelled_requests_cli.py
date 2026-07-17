@@ -125,6 +125,10 @@ def test_cli_mock_mode_writes_accepted_jsonl_and_metrics(
     assert metrics[_metric("sample_width", "k")] == 3
     assert metrics[_metric("vendor", "source_corpus")] == "fixture_vendor:fixture_corpus"
     assert metrics["thresholds_pass"] is True
+    assert all(
+        not key.startswith("phase2_goal_extraction/")
+        for key in metrics
+    )
 
 
 @pytest.mark.parametrize("sample_width", (1, 2, 3))
@@ -431,6 +435,43 @@ def test_cli_live_override_requires_live_provider_config(tmp_path: Path) -> None
                 "openai-compatible",
             ],
         )
+
+
+def test_openai_compatible_provider_requires_env_placeholders() -> None:
+    """Live providers fail closed instead of falling back to hardcoded models."""
+    script = _load_script()
+    config = script.ProviderAdapterSpec(
+        adapter="openai-compatible",
+        base_url_env="PHASE2_MODEL_X_BASE_URL",
+        endpoint_path="/v1/chat/completions",
+        response_text_path="choices.0.message.content",
+    )
+    provider = script._OpenAICompatibleChatProvider(
+        config,
+        label="draft",
+        env={},
+        transport=lambda *_args: {},
+    )
+
+    with pytest.raises(SystemExit, match="PHASE2_MODEL_X_BASE_URL"):
+        provider({
+            "prompt": "offline prompt",
+            "model_id": "${PHASE1_MODEL_X_MODEL_ID}",
+            "generation": {},
+        })
+
+    provider = script._OpenAICompatibleChatProvider(
+        config,
+        label="draft",
+        env={"PHASE2_MODEL_X_BASE_URL": "http://model.invalid"},
+        transport=lambda *_args: {},
+    )
+    with pytest.raises(SystemExit, match="PHASE1_MODEL_X_MODEL_ID"):
+        provider({
+            "prompt": "offline prompt",
+            "model_id": "${PHASE1_MODEL_X_MODEL_ID}",
+            "generation": {},
+        })
 
 
 def test_cli_rejects_mismatch_nonsense_and_invalid_judge_json(tmp_path: Path) -> None:

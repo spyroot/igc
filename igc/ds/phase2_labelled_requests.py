@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import random
+from string import Formatter
 from typing import Any, Callable, Mapping, Sequence
 
 import yaml
@@ -36,6 +37,7 @@ _INVALID_JSON_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "invalid_json_ra
 _PRO_ACCEPT_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "pro_accept_rate")
 _REST_API_SET_MATCH_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "rest_api_set_match_rate")
 _EMPTY_SET_MATCH_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_match_rate")
+_EMPTY_SET_EXPECTED_TOTAL_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_expected_total")
 _SAMPLE_WIDTH_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "sample_width", "k")
 _VENDOR_SOURCE_CORPUS_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "vendor", "source_corpus")
 _PROMPT_SPEC_VERSION_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "prompt_spec_version")
@@ -50,6 +52,13 @@ _REQUIRED_ACCEPTANCE_KEYS = (
     "max_invalid_json_rate",
 )
 _PROVIDER_ADAPTERS = frozenset({"mock", "file", "openai-compatible"})
+_ORDER_EVIDENCE_VALUES = frozenset((
+    "none",
+    "explicit_then",
+    "explicit_before",
+    "explicit_after",
+    "numbered_steps",
+))
 
 
 class Phase2LabelledRequestsSpecError(ValueError):
@@ -265,6 +274,26 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
     prompts = _mapping(raw, "prompts", required=True)
     model_prompt = _mapping(prompts, "model_x_draft", required=True)
     judge_prompt = _mapping(prompts, "pro_judge", required=True)
+    model_x_system = _required_string(model_prompt, "system", "prompts.model_x_draft.system")
+    model_x_template = _required_string(
+        model_prompt,
+        "template",
+        "prompts.model_x_draft.template",
+    )
+    judge_system = _required_string(judge_prompt, "system", "prompts.pro_judge.system")
+    judge_template = _required_string(judge_prompt, "template", "prompts.pro_judge.template")
+    _validate_prompt_template(
+        model_x_template,
+        label="prompts.model_x_draft.template",
+        required_fields=("records_json",),
+        allowed_fields=("records_json",),
+    )
+    _validate_prompt_template(
+        judge_template,
+        label="prompts.pro_judge.template",
+        required_fields=("records_json", "draft_text"),
+        allowed_fields=("records_json", "draft_text"),
+    )
     providers = _mapping(raw, "providers", required=True)
     draft_provider = _provider_adapter_spec(
         _mapping(providers, "draft"),
@@ -327,14 +356,10 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
             profile=_required_string(judge_raw, "profile", "judge.profile"),
         ),
         generation=dict(_mapping(raw, "generation", required=True)),
-        model_x_system=_required_string(model_prompt, "system", "prompts.model_x_draft.system"),
-        model_x_template=_required_string(
-            model_prompt,
-            "template",
-            "prompts.model_x_draft.template",
-        ),
-        judge_system=_required_string(judge_prompt, "system", "prompts.pro_judge.system"),
-        judge_template=_required_string(judge_prompt, "template", "prompts.pro_judge.template"),
+        model_x_system=model_x_system,
+        model_x_template=model_x_template,
+        judge_system=judge_system,
+        judge_template=judge_template,
         draft_provider=draft_provider,
         judge_provider=judge_provider,
         live_without_gate_max_candidates=live_without_gate_max_candidates,
@@ -440,19 +465,27 @@ def parse_pro_judge_result(raw: str) -> ProJudgeResult:
             invalid_json=True,
             reason="accepted or accept is required",
         )
-    accepted = _optional_bool(parsed, accepted_key)
-    if accepted is None:
+    accepted = parsed[accepted_key]
+    if not isinstance(accepted, bool):
         return ProJudgeResult(
             accepted=False,
             invalid_json=True,
-            reason=f"{accepted_key} must be a boolean when present",
+            reason=f"{accepted_key} must be a boolean",
         )
     nonsense = _optional_bool(parsed, "nonsense")
     if nonsense is None:
         return ProJudgeResult(
             accepted=False,
             invalid_json=True,
-            reason="nonsense must be a boolean when present",
+            reason="nonsense must be a boolean",
+        )
+    order_evidence = parsed.get("order_evidence", "none")
+    if not isinstance(order_evidence, str) or order_evidence not in _ORDER_EVIDENCE_VALUES:
+        return ProJudgeResult(
+            accepted=False,
+            invalid_json=True,
+            reason="order_evidence must be one of "
+            f"{', '.join(sorted(_ORDER_EVIDENCE_VALUES))}",
         )
 
     return ProJudgeResult(
@@ -461,7 +494,7 @@ def parse_pro_judge_result(raw: str) -> ProJudgeResult:
         nonsense=nonsense,
         invalid_json=False,
         reason=str(parsed.get("reason", "")),
-        order_evidence=str(parsed.get("order_evidence", "none")),
+        order_evidence=order_evidence,
     )
 
 
@@ -547,6 +580,7 @@ class Phase2LabelledRequestCounters:
                 self.empty_set_match_total,
                 self.empty_set_expected_total,
             ),
+            _EMPTY_SET_EXPECTED_TOTAL_KEY: self.empty_set_expected_total,
             _SAMPLE_WIDTH_KEY: self.sample_width_k,
             _VENDOR_SOURCE_CORPUS_KEY: self.vendor_source_corpus,
             _PROMPT_SPEC_VERSION_KEY: self.prompt_spec_version,
@@ -744,6 +778,42 @@ def _required_string(source: Mapping[str, Any], key: str, label: str) -> str:
     return value
 
 
+def _validate_prompt_template(
+    template: str,
+    *,
+    label: str,
+    required_fields: Sequence[str],
+    allowed_fields: Sequence[str],
+) -> None:
+    """Validate configured prompt placeholders before a build starts."""
+    try:
+        parsed_fields: set[str] = set()
+        for _, field_name, _, _ in Formatter().parse(template):
+            if field_name is None:
+                continue
+            if not field_name:
+                raise Phase2LabelledRequestsSpecError(
+                    f"{label} has unnamed format fields",
+                )
+            parsed_fields.add(field_name)
+    except Phase2LabelledRequestsSpecError:
+        raise
+    except ValueError as exc:
+        raise Phase2LabelledRequestsSpecError(f"{label} has malformed format fields") from exc
+
+    unknown_fields = sorted(parsed_fields - set(allowed_fields))
+    if unknown_fields:
+        raise Phase2LabelledRequestsSpecError(
+            f"{label} has unknown fields: {', '.join(unknown_fields)}",
+        )
+
+    missing_fields = sorted(set(required_fields) - parsed_fields)
+    if missing_fields:
+        raise Phase2LabelledRequestsSpecError(
+            f"{label} missing required fields: {', '.join(missing_fields)}",
+        )
+
+
 def _optional_string(source: Mapping[str, Any], key: str) -> str:
     """Read an optional YAML string field."""
     value = source.get(key, "")
@@ -827,7 +897,7 @@ def _provider_adapter_spec(raw: Mapping[str, Any], *, label: str) -> ProviderAda
 def _optional_bool(source: Mapping[str, Any], key: str) -> bool | None:
     """Read an optional judge boolean; return ``None`` for malformed values."""
     if key not in source:
-        return False
+        return None
     value = source[key]
     if not isinstance(value, bool):
         return None
