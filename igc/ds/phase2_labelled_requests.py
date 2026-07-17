@@ -412,13 +412,20 @@ def sample_phase2_contexts(
 
 def parse_pro_judge_result(raw: str) -> ProJudgeResult:
     """Parse a private judge JSON result without raising on malformed output."""
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
+    sentinel = object()
+    parsed: Any = sentinel
+    last_error = "invalid JSON"
+    for candidate in _judge_json_candidates(raw):
+        try:
+            parsed = json.loads(candidate)
+            break
+        except json.JSONDecodeError as exc:
+            last_error = exc.msg
+    if parsed is sentinel:
         return ProJudgeResult(
             accepted=False,
             invalid_json=True,
-            reason=f"invalid_json: {exc.msg}",
+            reason=f"invalid_json: {last_error}",
         )
     if isinstance(parsed, Mapping) and isinstance(parsed.get("y_pred"), Mapping):
         parsed = parsed["y_pred"]
@@ -680,6 +687,69 @@ class Phase2LabelledRequestBuilder:
         )
         return row, counters
 
+    def build_no_action(
+        self,
+        *,
+        draft_text: str,
+        context_records: Sequence[RestApiRecord] = (),
+    ) -> tuple[Phase2LabelledRequestRow | None, Phase2LabelledRequestCounters]:
+        """Build and judge one hard-negative row with an empty REST API target.
+
+        No-action rows are not part of the one-, two-, or three-record sampler.
+        They carry an explicit empty target set and are accepted only when the
+        private judge also maps the draft text to an empty REST API set.
+        """
+        records = tuple(context_records)
+        expected_rest_api_list: tuple[str, ...] = ()
+        counters = Phase2LabelledRequestCounters(
+            sample_width_k=0,
+            vendor_source_corpus=_source_corpus_label(records),
+            prompt_spec_version=self._spec.prompt_spec_version,
+            model_x_artifact_sha=self._spec.model_x.artifact_sha,
+            judge_model=self._spec.judge.model_id,
+            judge_profile=self._spec.judge.profile,
+        )
+        counters.observe_draft(draft_text)
+
+        judge_request = {
+            "prompt": render_pro_judge_prompt(self._spec, records, draft_text),
+            "model_id": self._spec.judge.model_id,
+            "profile": self._spec.judge.profile,
+            "route": self._spec.judge.route,
+            "expected_rest_api_list": [],
+        }
+        judge_result = parse_pro_judge_result(self._judge_provider(judge_request))
+        counters.observe_judge(judge_result, expected_rest_api_list=expected_rest_api_list)
+
+        set_match = empty_set_matches(expected_rest_api_list, judge_result.rest_api_list)
+        accepted = (
+            judge_result.accepted
+            and set_match
+            and not judge_result.nonsense
+            and not judge_result.invalid_json
+        )
+        if not accepted:
+            return None, counters
+
+        return (
+            Phase2LabelledRequestRow(
+                text=draft_text,
+                records=records,
+                rest_api_list=expected_rest_api_list,
+                order_evidence=judge_result.order_evidence,
+                prompt_spec_version=self._spec.prompt_spec_version,
+                validation={
+                    "text_source": "hard_negative_no_action",
+                    "review_judged": True,
+                    "all_rest_api_present": True,
+                    "extra_rest_api_present": False,
+                    "set_coverage_preserved": True,
+                    "nonsense": judge_result.nonsense,
+                },
+            ),
+            counters,
+        )
+
 
 def to_minimal_phase3_input(row: Phase2LabelledRequestRow | None) -> dict[str, Any]:
     """Convert an accepted Phase 2 row into a Phase 3 input fixture."""
@@ -740,6 +810,31 @@ def _render_prompt(
     )
     body = template.format(records_json=records_json, draft_text=draft_text)
     return f"{system.rstrip()}\n\n{body.strip()}"
+
+
+def _judge_json_candidates(raw: str) -> tuple[str, ...]:
+    """Return plausible JSON payloads from common model response wrappers."""
+    stripped = raw.strip()
+    candidates = [stripped]
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        fenced = "\n".join(lines).strip()
+        if fenced:
+            candidates.append(fenced)
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(raw[start:end + 1])
+
+    unique: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in unique:
+            unique.append(candidate)
+    return tuple(unique)
 
 
 def _mapping(source: Mapping[str, Any], key: str, *, required: bool = False) -> Mapping[str, Any]:

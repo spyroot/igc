@@ -125,10 +125,8 @@ def test_cli_mock_mode_writes_accepted_jsonl_and_metrics(
     assert metrics[_metric("sample_width", "k")] == 3
     assert metrics[_metric("vendor", "source_corpus")] == "fixture_vendor:fixture_corpus"
     assert metrics["thresholds_pass"] is True
-    assert all(
-        not key.startswith("phase2_goal_extraction/")
-        for key in metrics
-    )
+    metric_shaped_keys = {key for key in metrics if "/" in key}
+    assert metric_shaped_keys == set(PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS)
 
 
 @pytest.mark.parametrize("sample_width", (1, 2, 3))

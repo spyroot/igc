@@ -239,6 +239,39 @@ def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     with pytest.raises(Phase2LabelledRequestsSpecError, match="sample_widths"):
         load_phase2_labelled_requests_spec(non_integer_widths)
 
+    boolean_width = _write_spec(tmp_path / "boolean-width.yaml")
+    boolean_width.write_text(
+        boolean_width.read_text(encoding="utf-8").replace(
+            "sample_widths: [1, 2, 3]",
+            "sample_widths: [1, true, 3]",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="sample_widths"):
+        load_phase2_labelled_requests_spec(boolean_width)
+
+    reordered_widths = _write_spec(tmp_path / "reordered-widths.yaml")
+    reordered_widths.write_text(
+        reordered_widths.read_text(encoding="utf-8").replace(
+            "sample_widths: [1, 2, 3]",
+            "sample_widths: [3, 2, 1]",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="sample_widths"):
+        load_phase2_labelled_requests_spec(reordered_widths)
+
+    duplicate_widths = _write_spec(tmp_path / "duplicate-widths.yaml")
+    duplicate_widths.write_text(
+        duplicate_widths.read_text(encoding="utf-8").replace(
+            "sample_widths: [1, 2, 3]",
+            "sample_widths: [1, 2, 2]",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="sample_widths"):
+        load_phase2_labelled_requests_spec(duplicate_widths)
+
     wrong_namespace = _write_spec(tmp_path / "wrong-namespace.yaml")
     wrong_namespace.write_text(
         wrong_namespace.read_text(encoding="utf-8").replace(
@@ -585,6 +618,17 @@ def test_pro_judge_result_parsing_accepts_plain_and_wrapped_json() -> None:
     assert "not a mapping" in non_object.reason
 
 
+def test_pro_judge_result_parsing_accepts_fenced_or_explained_json() -> None:
+    """Common model wrappers are stripped before judge JSON validation."""
+    fenced = parse_pro_judge_result(f"```json\n{_judge_json()}\n```")
+    assert fenced.accepted is True
+    assert fenced.invalid_json is False
+
+    explained = parse_pro_judge_result(f"Here is the verdict:\n{_judge_json()}\nThanks.")
+    assert explained.accepted is True
+    assert explained.invalid_json is False
+
+
 def test_pro_judge_result_parsing_requires_nonsense_boolean() -> None:
     """Judge output must carry an explicit nonsense verdict."""
     missing = parse_pro_judge_result(
@@ -819,6 +863,41 @@ def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -
     assert seen["judge"]["model_id"] == "${PHASE2_JUDGE_MODEL_ID}"
     assert seen["judge"]["profile"] == "${PHASE2_JUDGE_PROFILE}"
     assert seen["judge"]["route"] == "private_pro"
+
+
+def test_builder_accepts_no_action_empty_set_rows(tmp_path: Path) -> None:
+    """No-action rows use an explicit empty-set path outside the 1/2/3 sampler."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    seen: dict[str, dict] = {}
+
+    def judge_provider(request: dict) -> str:
+        seen["judge"] = request
+        return _judge_json(rest_api_list=[])
+
+    builder = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=lambda request: "unused",
+        judge_provider=judge_provider,
+    )
+    row, counters = builder.build_no_action(draft_text="do nothing to this server")
+    summary = counters.summary()
+
+    assert row is not None
+    data = row.to_dict()
+    assert data["dataset"] == PHASE2_LABELLED_REQUESTS
+    assert data["task"] == "text_to_rest_api_list"
+    assert data["x"]["text"] == "do nothing to this server"
+    assert data["x"]["json"] == []
+    assert data["x"]["allowed_methods"] == {}
+    assert data["x"]["rest_api_list"] == []
+    assert data["y_true"]["rest_api_list"] == []
+    assert data["validation"]["text_source"] == "hard_negative_no_action"
+    assert seen["judge"]["expected_rest_api_list"] == []
+    assert summary[_phase2_metric("draft_total")] == 1
+    assert summary[_phase2_metric("accepted_total")] == 1
+    assert summary[_phase2_metric("empty_set_match_rate")] == 1.0
+    assert summary[_phase2_metric("empty_set_expected_total")] == 1
+    assert summary[_phase2_metric("sample_width", "k")] == 0
 
 
 def test_builder_returns_none_and_counts_rejection_on_set_mismatch(tmp_path: Path) -> None:

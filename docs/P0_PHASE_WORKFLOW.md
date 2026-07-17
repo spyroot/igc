@@ -80,15 +80,15 @@ Real dataset build waits for the Phase 1 checkpoint. The accepted row shape is:
 }
 ```
 
-Evaluation treats REST API set match as primary; ordered exact match is
-reported separately only for rows with explicit order evidence.
-W&B metrics live under `phase2_goal_extraction/*`, with train/eval/order/throughput/data/calibration/test
-subgroups.
+Evaluation treats REST API set match as primary; ordered exact match is reported
+separately only for rows with explicit order evidence. W&B metrics live under
+`phase2_goal_extraction/*`, with train/eval/order/throughput/data/calibration/test
+subgroups, while dataset-builder metrics use `phase2_labelled_requests/*`.
 
 ## Phase 3: Method And Argument Extraction
 
-Purpose: after Phase 2, fine-tune a specialized model that maps operator text plus the ordered
-`rest_api_list` to ordered calls with `rest_api`, `allowed_methods`, `method`, and `arguments`.
+Purpose: after Phase 2, fine-tune a specialized model that maps operator text plus the canonical
+`rest_api_list` to calls with `rest_api`, `allowed_methods`, `method`, and `arguments`.
 
 Current P0 scope: mock-dataset plumbing and offline tests only.
 W&B metrics live under `phase3_argument_extraction/*`, with train/eval/order/throughput/data/calibration/test
@@ -141,7 +141,7 @@ After Phase 2 and Phase 3, a sentence should produce testable JSON:
 ```json
 {
   "text": "check the task queue, then list the available computer systems",
-  "ordered_goals": [
+  "target_calls": [
     {
       "rest_api": "/redfish/v1/TaskService/Tasks",
       "allowed_methods": [
@@ -164,8 +164,8 @@ After Phase 2 and Phase 3, a sentence should produce testable JSON:
 }
 ```
 
-Order matters in this JSON. RL can still learn execution strategy, retries, and recovery from the
-environment, but the language pipeline should preserve operator-stated order whenever it is present.
+Order is explicit only when the operator text carries order evidence. RL can
+still learn execution strategy, retries, and recovery from the environment.
 
 Author:
 Mus mbayramo@stanford.edu
