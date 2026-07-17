@@ -40,18 +40,18 @@ cd "$REPO_ROOT"
 CUR_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 [ "$CUR_BRANCH" = "main" ] || note "current branch is '$CUR_BRANCH' (a data/* branch will be created)"
 
-# 1. Verify each artifact exists and is LFS-tracked. This happens before the
-# git-lfs binary check so a path that would become a normal Git blob fails even
-# on hosts where git-lfs is not installed yet.
+# 1. Verify each artifact exists and is LFS-tracked by committed attributes.
+# This happens before the git-lfs binary check so a path that would become a
+# normal Git blob fails even on hosts where git-lfs is not installed yet.
 for path in "$@"; do
   [ -e "$path" ] || die "no such artifact: $path"
-  if ! git check-attr filter -- "$path" 2>/dev/null | grep -q 'filter: lfs'; then
+  if ! git check-attr --source HEAD filter -- "$path" 2>/dev/null | grep -q 'filter: lfs'; then
     ext="$(basename "$path" | sed 's/^[^.]*//')"
     pattern_note="an exact path"
     if [ -n "$ext" ]; then
       pattern_note="an exact path or extension pattern such as '${ext}'"
     fi
-    die "'$path' is not matched by an LFS filter in .gitattributes.
+    die "'$path' is not matched by a committed LFS filter in HEAD .gitattributes.
 Add ${pattern_note} via PR, then rerun.
 Refusing to stage this artifact as a normal Git object."
   fi
