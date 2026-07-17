@@ -19,6 +19,22 @@ import sys
 from typing import List, Optional, Tuple
 
 
+def _required_int_count(
+        section: dict,
+        key: str,
+        *,
+        context: str,
+        reasons: List[str],
+        min_value: int = 0,
+) -> Optional[int]:
+    """Read a dashboard count field, rejecting missing or nonsensical values."""
+    value = section.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < min_value:
+        reasons.append(f"{context} has invalid {key}: {value!r}")
+        return None
+    return value
+
+
 def evaluate_state(
         state: dict,
         require_endpoint: Optional[str] = None,
@@ -36,16 +52,24 @@ def evaluate_state(
     roce = summaries.get("roce") or {}
     if not roce:
         reasons.append("state has no summaries.roce section (dashboard degraded?)")
-    elif roce.get("rdma_active") != roce.get("nodes"):
-        reasons.append(
-            f"RoCE degraded: rdma_active {roce.get('rdma_active')}/{roce.get('nodes')}")
+    else:
+        nodes = _required_int_count(
+            roce, "nodes", context="summaries.roce", reasons=reasons, min_value=1)
+        rdma_active = _required_int_count(
+            roce, "rdma_active", context="summaries.roce", reasons=reasons)
+        if nodes is not None and rdma_active is not None and rdma_active != nodes:
+            reasons.append(f"RoCE degraded: rdma_active {rdma_active}/{nodes}")
 
     mount = summaries.get("models_mount") or {}
     if not mount:
         reasons.append("state has no summaries.models_mount section")
-    elif mount.get("mounted") != mount.get("nodes"):
-        reasons.append(
-            f"/models mount degraded: mounted {mount.get('mounted')}/{mount.get('nodes')}")
+    else:
+        nodes = _required_int_count(
+            mount, "nodes", context="summaries.models_mount", reasons=reasons, min_value=1)
+        mounted = _required_int_count(
+            mount, "mounted", context="summaries.models_mount", reasons=reasons)
+        if nodes is not None and mounted is not None and mounted != nodes:
+            reasons.append(f"/models mount degraded: mounted {mounted}/{nodes}")
 
     if require_endpoint is not None:
         endpoints = (state.get("model_endpoints") or {}).get(require_endpoint) or []

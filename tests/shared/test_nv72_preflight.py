@@ -73,4 +73,30 @@ def test_empty_state_blocks_on_missing_sections():
     assert len(reasons) == 2  # roce + models_mount sections missing
 
 
+def test_zero_node_summaries_block():
+    """Equal zero counts are not a healthy fleet."""
+    ok, reasons = evaluate_state({
+        "summaries": {
+            "roce": {"rdma_active": 0, "nodes": 0},
+            "models_mount": {"mounted": 0, "nodes": 0},
+        }
+    })
+    assert not ok
+    assert any("summaries.roce" in reason and "nodes" in reason for reason in reasons)
+    assert any("summaries.models_mount" in reason and "nodes" in reason for reason in reasons)
+
+
+def test_malformed_summary_counts_block():
+    """Dashboard count fields must be real integer counts."""
+    ok, reasons = evaluate_state({
+        "summaries": {
+            "roce": {"rdma_active": "18", "nodes": 18},
+            "models_mount": {"mounted": True, "nodes": 18},
+        }
+    })
+    assert not ok
+    assert any("rdma_active" in reason for reason in reasons)
+    assert any("mounted" in reason for reason in reasons)
+
+
 # Author: Mus mbayramo@stanford.edu
