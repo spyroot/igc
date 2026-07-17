@@ -136,6 +136,8 @@ jobs:
           python scripts/slurm_sanity_from_spec.py --spec configs/run/examples/slurm-smoke.yaml --dry-run >/tmp/slurm-sanity-plan.txt
       - name: Lint
         run: ruff check igc tests
+      - name: Contract single-source gate
+        run: python scripts/gates/contract_single_source.py
       - name: Offline gate with coverage
         shell: bash
         run: |

@@ -1,0 +1,53 @@
+# Single source of truth for the Phase 2/3 REST-goal contract.
+#
+# Used by:
+#   scripts/gates/contract_single_source.py  (gate repo.contract-single-source)
+#   scripts/gates/schema_snapshot.py          (gate repo.schema-snapshot)
+#
+# Why this exists: PR #108 shipped a PARALLEL Phase 2/3 contract module
+# (igc/ds/mock_inference_contract.py) with a FORKED namespace
+# (phase2_goal_extract vs the canonical phase2_goal_extraction). Its own
+# isolated tests were green, so per-module tests could not catch it. These
+# repo-level gates assert ONE canonical contract and ONE frozen schema.
+version: 1
+name: rest_goal_contract
+
+# THE one module that owns the Phase 2/3 REST-goal contract. Any canonical
+# symbol (below) defined in a different module is a parallel island -> fail.
+canonical_module: igc/ds/rest_goal_contract.py
+
+# Tree searched for violations (live package, excludes tests/scripts).
+search_root: igc
+
+# Canonical metric namespaces (the accepted values on main).
+canonical_namespaces:
+  - phase2_goal_extraction      # Phase 2 goal extractor namespace.
+  - phase3_argument_extraction  # Phase 3 argument extractor namespace.
+  - phase2_labelled_requests    # Phase 2 labelled-request builder namespace.
+
+# Forked namespace tokens that must NEVER appear under search_root. Matched as
+# whole tokens (\bTOKEN\b), so the canonical *_extraction values do NOT trip
+# them. These two are exactly what #108 introduced.
+forbidden_namespace_literals:
+  - phase2_goal_extract      # forked short form of phase2_goal_extraction
+  - phase3_argument_extract  # forked short form of phase3_argument_extraction
+
+# def/class names that may be DEFINED only inside canonical_module. A second
+# definition anywhere under search_root is a duplicate contract island.
+canonical_symbols:
+  - build_d1_rest_api_list_row
+  - build_ordered_call_row
+  - render_rest_api_list_example
+  - render_ordered_call_example
+  - parse_rest_api_list_y_pred
+  - parse_ordered_calls_y_pred
+  - evaluate_ordered_calls
+  - inference_ordered_goals_json
+  - RenderedContractExample
+  - RedfishContext
+
+# Locked task strings emitted in the canonical rows (informational; the schema
+# gate freezes the full shape).
+canonical_tasks:
+  - text_to_rest_api_list
+  - text_and_rest_api_list_to_calls
