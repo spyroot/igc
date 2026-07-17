@@ -11,7 +11,7 @@ table into the PR (TEAM_GUIDE: "Hot-path code ships with numbers").
 
 Usage:
     python scripts/bench_hot_paths.py                       # default corpus
-    python scripts/bench_hot_paths.py --corpus idrac_ctl/tests/hpe_fixtures
+    python scripts/bench_hot_paths.py --corpus redfish_ctl/tests/hpe_fixtures
     python scripts/bench_hot_paths.py --profile             # + cProfile critical sections
 
 Author:
@@ -40,7 +40,7 @@ from igc.ds.sources.candidate_features import build_candidate_cache
 from igc.ds.sources.resource_graph import RedfishResourceGraph
 from igc.modules.eval.zero_shot_ranking import embed_candidates, top_k_hit_rate
 
-DEFAULT_CORPUS = "idrac_ctl/tests/supermicro_fixtures"
+DEFAULT_CORPUS = "redfish_ctl/tests/supermicro_fixtures"
 
 
 def timed(label: str, fn: Callable, results: List[Tuple[str, float]]):
