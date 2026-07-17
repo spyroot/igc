@@ -1,0 +1,30 @@
+version: 1
+name: igc-model-artifact-cache
+default_root: /Volumes/k8s-sata-stripe/igc
+
+models:
+  - role: model_x
+    phase: phase1
+    run_id: phase1-finetune-qwen2_5-7b-rslora-slot2-689b4c7
+    lfs_ref: origin/data/model-x-phase1-adapter-20260715T1024Z
+    base_model:
+      id: Qwen/Qwen2.5-7B-Instruct
+      cache_subdir: models--Qwen--Qwen2.5-7B-Instruct
+    files:
+      - kind: weight
+        source_path: models/model_x/phase1-finetune-qwen2_5-7b-rslora-slot2-689b4c7/adapter_model.safetensors
+        dest: artifacts/adapter_model.safetensors
+        lfs: true
+        sha256: 98243e5a7d5311bfac4856fa56684eea38327b5e3d4ab806d6b53f07a764d5e4
+        size_bytes: 323014168
+      - kind: report
+        source_path: models/model_x/phase1-finetune-qwen2_5-7b-rslora-slot2-689b4c7/report.json
+        dest: reports/report.json
+        sha256: e8f52ee23075ef848f36ff0b9ed7439d7efec23057e10bbedc667af9e2a95779
+      - kind: parameters
+        source_path: models/model_x/phase1-finetune-qwen2_5-7b-rslora-slot2-689b4c7/parameters.json
+        dest: reports/parameters.json
+        sha256: 7325ccc7729869c920d304f5e5dd82dcd16fb051b2130d548a88f4d77aa54113
+      - kind: checksum
+        source_path: models/model_x/phase1-finetune-qwen2_5-7b-rslora-slot2-689b4c7/SHA256SUMS.txt
+        dest: reports/SHA256SUMS.txt
