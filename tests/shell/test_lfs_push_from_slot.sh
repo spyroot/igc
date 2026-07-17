@@ -85,4 +85,95 @@ fi
 grep -q "git-lfs not found" "$tracked_out"
 test "$(git -C "$tracked" symbolic-ref --short HEAD)" = "$tracked_branch"
 
+# A committed *.bin filter matches raw.bin, so the path check would pass; but a
+# git whose `check-attr --source` errors (e.g. git < 2.40, no --source option)
+# must die with its own distinct message, not the misleading committed-filter
+# refusal. Mirrors the bats "check-attr command failure" regression so the slot
+# validator covers it without bats installed.
+attrfail="$tmp/attrfail"
+mkdir "$attrfail"
+git -C "$attrfail" init -q
+git -C "$attrfail" config user.email test@example.invalid
+git -C "$attrfail" config user.name "IGC Test"
+printf '*.bin filter=lfs diff=lfs merge=lfs -text\n' >"$attrfail/.gitattributes"
+git -C "$attrfail" add .gitattributes
+git -C "$attrfail" commit -q -m "add committed lfs attributes"
+printf 'payload\n' >"$attrfail/raw.bin"
+attrfail_branch="$(git -C "$attrfail" symbolic-ref --short HEAD)"
+mkdir "$attrfail/fake-bin"
+cat >"$attrfail/fake-bin/git" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = "check-attr" ] && [ "\${2:-}" = "--source" ]; then
+    echo "error: unknown option --source" >&2
+    exit 129
+fi
+exec "$real_git" "\$@"
+EOF
+chmod +x "$attrfail/fake-bin/git"
+
+attrfail_out="$attrfail/lfs_push.out"
+set +e
+(
+    cd "$attrfail"
+    PATH="$attrfail/fake-bin:$PATH" IGC_YES=1 IGC_REMOTE=origin \
+        "$repo_root/scripts/lfs_push_from_slot.sh" raw.bin
+) >"$attrfail_out" 2>&1
+attrfail_status=$?
+set -e
+
+cat "$attrfail_out"
+
+if [ "$attrfail_status" -eq 0 ]; then
+    echo "expected lfs_push_from_slot.sh to fail when check-attr --source errors" >&2
+    exit 1
+fi
+
+grep -q "cannot read committed LFS attributes" "$attrfail_out"
+grep -q "unknown option --source" "$attrfail_out"
+if grep -q "not matched by a committed LFS filter" "$attrfail_out"; then
+    echo "check-attr command failure must not print the filter-mismatch refusal" >&2
+    exit 1
+fi
+test "$(git -C "$attrfail" symbolic-ref --short HEAD)" = "$attrfail_branch"
+
+# An unborn HEAD (git init, no commit yet) must fail closed before any artifact
+# is staged and must not print the misleading filter-mismatch refusal. Mirrors
+# the bats "fails closed on an unborn HEAD" regression.
+unborn="$tmp/unborn"
+mkdir "$unborn"
+git -C "$unborn" init -q
+git -C "$unborn" config user.email test@example.invalid
+git -C "$unborn" config user.name "IGC Test"
+printf '*.bin filter=lfs diff=lfs merge=lfs -text\n' >"$unborn/.gitattributes"
+printf 'payload\n' >"$unborn/raw.bin"
+
+unborn_out="$unborn/lfs_push.out"
+set +e
+(
+    cd "$unborn"
+    IGC_YES=1 IGC_REMOTE=origin \
+        "$repo_root/scripts/lfs_push_from_slot.sh" raw.bin
+) >"$unborn_out" 2>&1
+unborn_status=$?
+set -e
+
+cat "$unborn_out"
+
+if [ "$unborn_status" -eq 0 ]; then
+    echo "expected lfs_push_from_slot.sh to fail closed on an unborn HEAD" >&2
+    exit 1
+fi
+
+if grep -q "not matched by a committed LFS filter" "$unborn_out"; then
+    echo "unborn HEAD must not print the filter-mismatch refusal" >&2
+    exit 1
+fi
+unborn_staged="$(git -C "$unborn" status --porcelain -- raw.bin)"
+case "$unborn_staged" in
+    A*)
+        echo "unborn HEAD run must not stage the artifact" >&2
+        exit 1
+        ;;
+esac
+
 git diff --check
