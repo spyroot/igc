@@ -11,6 +11,7 @@ Mus mbayramo@stanford.edu
 
 from __future__ import annotations
 
+import ast
 import json
 import random
 from pathlib import Path
@@ -418,6 +419,23 @@ def test_committed_phase2_labelled_requests_config_loads() -> None:
     assert spec.judge_provider.payload_request_fields == ("route", "profile")
 
 
+def test_committed_phase2_labelled_requests_prompts_render_from_yaml() -> None:
+    """The checked-in prompt spec renders without leaving template placeholders."""
+    spec = load_phase2_labelled_requests_spec("configs/phase2_labelled_requests.yaml")
+    records = (_record(1), _record(2))
+
+    model_prompt = render_model_x_prompt(spec, records)
+    judge_prompt = render_pro_judge_prompt(spec, records, "show both fixture systems")
+
+    assert spec.model_x_system in model_prompt
+    assert spec.judge_system in judge_prompt
+    assert "/redfish/v1/Systems/1" in model_prompt
+    assert "/redfish/v1/Systems/2" in judge_prompt
+    assert "show both fixture systems" in judge_prompt
+    assert "{records_json}" not in model_prompt
+    assert "{draft_text}" not in judge_prompt
+
+
 def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Path) -> None:
     """Prompt text comes from the loaded spec and can be changed without code edits."""
     spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
@@ -449,6 +467,16 @@ def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Pat
     )
     for literal in forbidden_literals:
         assert literal not in runtime_sources
+
+    lowercase_runtime_sources = runtime_sources.lower()
+    forbidden_lowercase_literals = (
+        "phase2 test model-x system prompt from yaml",
+        "qwen/qwen2.5",
+        "deepseek-v4",
+        "return json with accepted",
+    )
+    for literal in forbidden_lowercase_literals:
+        assert literal not in lowercase_runtime_sources
 
 
 def test_sampling_accepts_only_k_1_2_3_and_preserves_record_payloads() -> None:
@@ -738,6 +766,31 @@ def test_builder_returns_none_and_counts_rejection_on_set_mismatch(tmp_path: Pat
     assert summary[_phase2_metric("rest_api_set_match_rate")] == 0.0
 
 
+def test_builder_rejects_accepted_nonsense_even_when_set_matches(tmp_path: Path) -> None:
+    """A contradictory judge response cannot enter accepted labelled requests."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    builder = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=lambda request: "???",
+        judge_provider=lambda request: _judge_json(
+            accepted=True,
+            rest_api_list=request["expected_rest_api_list"],
+            nonsense=True,
+        ),
+    )
+
+    row, counters = builder.build_one((_record(1),), k=1, rng=random.Random(1))
+    summary = counters.summary()
+
+    assert row is None
+    assert summary[_phase2_metric("draft_total")] == 1
+    assert summary[_phase2_metric("accepted_total")] == 0
+    assert summary[_phase2_metric("rejected_total")] == 1
+    assert summary[_phase2_metric("nonsense_rate")] == 1.0
+    assert summary[_phase2_metric("pro_accept_rate")] == 1.0
+    assert summary[_phase2_metric("rest_api_set_match_rate")] == 1.0
+
+
 def test_counters_track_nonsense_invalid_json_and_empty_set_matches() -> None:
     """Counters expose the generation-quality metrics required for W&B."""
     counters = Phase2LabelledRequestCounters()
@@ -874,6 +927,25 @@ def test_minimal_phase3_fixture_rejects_missing_phase2_row() -> None:
     """Phase 3 compatibility helpers fail before fabricating labels."""
     with pytest.raises(ValueError, match="phase2 row is required"):
         to_minimal_phase3_input(None)
+
+
+def test_phase2_module_does_not_import_phase3_argument_runtime() -> None:
+    """The labelled-request builder stays independent from Phase 3 call logic."""
+    source = Path("igc/ds/phase2_labelled_requests.py").read_text(encoding="utf-8")
+    module = ast.parse(source)
+    imported_modules: set[str] = set()
+    imported_names: set[str] = set()
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            imported_modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                imported_modules.add(node.module)
+            imported_names.update(alias.name for alias in node.names)
+
+    assert "igc.ds.rest_goal_contract" not in imported_modules
+    assert "build_ordered_call_row" not in imported_names
+    assert "parse_ordered_calls_y_pred" not in imported_names
 
 
 # Author: Mus mbayramo@stanford.edu
