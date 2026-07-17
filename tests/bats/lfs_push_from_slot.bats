@@ -109,7 +109,10 @@ EOF
     [ "$(git -C "${tmp}" symbolic-ref --short HEAD)" = "${before_branch}" ]
 }
 
-@test "slot LFS push reports unborn HEAD distinctly instead of a filter mismatch" {
+@test "slot LFS push fails closed on an unborn HEAD repository" {
+    # An unborn HEAD dies earlier, at the branch-name guard (rev-parse
+    # --abbrev-ref HEAD exits 128 under set -e), so no artifact is staged and
+    # the misleading filter-mismatch refusal is never printed.
     tmp="$(mktemp -d)"
     git -C "${tmp}" init -q
     git -C "${tmp}" config user.email test@example.invalid
@@ -121,8 +124,8 @@ EOF
         _ "${tmp}" "${REPO_ROOT}"
 
     [ "$status" -ne 0 ]
-    [[ "$output" == *"cannot read committed LFS attributes"* ]]
     [[ "$output" != *"not matched by a committed LFS filter"* ]]
+    [ -z "$(git -C "${tmp}" status --porcelain -- raw.bin | grep '^A')" ]
 }
 
 @test "model adapter safetensors files are tracked by Git LFS" {
