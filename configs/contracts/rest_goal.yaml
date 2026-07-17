@@ -32,6 +32,16 @@ forbidden_namespace_literals:
   - phase2_goal_extract      # forked short form of phase2_goal_extraction
   - phase3_argument_extract  # forked short form of phase3_argument_extraction
 
+# Retired parallel-contract module/symbol names. Unlike the whole-token text
+# scan above, these must never reappear under search_root as a FILENAME
+# (matched as the glob NAME*.py on the file stem), a def/class name, or an
+# import target (import ...NAME / from ...NAME import ...). This is exactly the
+# module PR #108 forked (igc/ds/mock_inference_contract.py) plus the phase23_mock
+# throwaway; renaming the file alone does not escape the gate.
+forbidden_module_names:
+  - mock_inference_contract  # the #108 parallel Phase 2/3 contract island module
+  - phase23_mock             # throwaway combined Phase 2/3 mock contract name
+
 # def/class names that may be DEFINED only inside canonical_module. A second
 # definition anywhere under search_root is a duplicate contract island.
 canonical_symbols:

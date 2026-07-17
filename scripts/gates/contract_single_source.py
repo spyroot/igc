@@ -5,7 +5,11 @@ change reintroduces the exact class of defect that PR #108 slipped past green
 per-module tests:
 
 * a forked namespace token (e.g. ``phase2_goal_extract`` instead of the canonical
-  ``phase2_goal_extraction``) appears anywhere under the live package, or
+  ``phase2_goal_extraction``) appears anywhere under the live package,
+* a retired parallel-contract module name (e.g. ``mock_inference_contract`` or
+  ``phase23_mock``) reappears under the live package as a *filename*, a
+  ``def``/``class`` symbol, or an ``import`` target — even if the physical file was
+  renamed to dodge a filename-only check, or
 * a canonical contract symbol (row builder / renderer / parser / schema class) is
   ``def``/``class``-defined in a module OTHER than the one canonical module, i.e. a
   parallel "contract island".
@@ -75,6 +79,79 @@ def _forbidden_hits(files: list[Path], literals: list[str]) -> list[str]:
     return hits
 
 
+def _forbidden_module_filename_hits(files: list[Path], module_names: list[str]) -> list[str]:
+    """Fail when a file under ``search_root`` is NAMED after a retired contract module.
+
+    A retired module such as ``mock_inference_contract`` must not reappear as a file,
+    including a renamed variant (``mock_inference_contract.py``,
+    ``mock_inference_contract_v2.py``, ...). The file *stem* is matched with a prefix
+    rule so the registry name behaves like the glob ``NAME*.py``.
+
+    :param files: source files to scan.
+    :param module_names: retired module/symbol names from the registry.
+    :return: list of ``path: forbidden module filename 'NAME'`` violation messages.
+    """
+    hits: list[str] = []
+    for path in files:
+        stem = path.stem
+        for name in module_names:
+            if stem.startswith(name):
+                hits.append(
+                    f"{path}: forbidden retired-contract module filename '{name}' "
+                    f"(renaming the file does not escape the gate)"
+                )
+                break
+    return hits
+
+
+def _forbidden_module_symbol_hits(files: list[Path], module_names: set[str]) -> list[str]:
+    """Fail when a retired contract module name reappears as a def/class or import.
+
+    Catches the #108 defect resurfacing under a new spelling: a ``def``/``class``
+    named after a retired contract module, an ``import ...mock_inference_contract``,
+    or a ``from igc.ds.phase23_mock import ...`` reference — anywhere under the live
+    package, even if the physical file itself was renamed away.
+
+    :param files: source files to scan.
+    :param module_names: retired module/symbol names (membership set).
+    :return: list of ``path:line: ... 'NAME'`` violation messages.
+    """
+    hits: list[str] = []
+    for path in files:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except SyntaxError:  # a broken source file is a separate gate's job
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if node.name in module_names:
+                    hits.append(
+                        f"{path}:{node.lineno}: forbidden retired-contract symbol '{node.name}'"
+                    )
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    for part in alias.name.split("."):
+                        if part in module_names:
+                            hits.append(
+                                f"{path}:{node.lineno}: forbidden import of retired contract "
+                                f"module '{part}'"
+                            )
+            elif isinstance(node, ast.ImportFrom):
+                for part in (node.module or "").split("."):
+                    if part in module_names:
+                        hits.append(
+                            f"{path}:{node.lineno}: forbidden import from retired contract "
+                            f"module '{part}'"
+                        )
+                for alias in node.names:
+                    if alias.name in module_names:
+                        hits.append(
+                            f"{path}:{node.lineno}: forbidden import of retired contract "
+                            f"symbol '{alias.name}'"
+                        )
+    return hits
+
+
 def _symbol_definitions(files: list[Path], symbols: set[str]) -> dict[str, list[str]]:
     """Map each canonical symbol to the files that ``def``/``class``-define it.
 
@@ -86,7 +163,7 @@ def _symbol_definitions(files: list[Path], symbols: set[str]) -> dict[str, list[
     for path in files:
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        except SyntaxError as exc:  # a broken source file is a separate gate's job
+        except SyntaxError:  # a broken source file is a separate gate's job
             continue
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -106,6 +183,7 @@ def check(registry_path: Path, repo_root: Path) -> list[str]:
     canonical_module = (repo_root / registry["canonical_module"]).resolve()
     search_root = (repo_root / registry["search_root"]).resolve()
     forbidden = list(registry["forbidden_namespace_literals"])
+    forbidden_modules = list(registry.get("forbidden_module_names", []))
     canonical_symbols = set(registry["canonical_symbols"])
 
     violations: list[str] = []
@@ -120,7 +198,13 @@ def check(registry_path: Path, repo_root: Path) -> list[str]:
     # (1) No forked namespace tokens anywhere in the live package.
     violations.extend(_forbidden_hits(files, forbidden))
 
-    # (2) Every canonical symbol is defined ONLY in the canonical module.
+    # (2) No retired parallel-contract module resurfaces as a filename, def/class,
+    #     or import target (the #108 module, and the phase23_mock throwaway).
+    if forbidden_modules:
+        violations.extend(_forbidden_module_filename_hits(files, forbidden_modules))
+        violations.extend(_forbidden_module_symbol_hits(files, set(forbidden_modules)))
+
+    # (3) Every canonical symbol is defined ONLY in the canonical module.
     definitions = _symbol_definitions(files, canonical_symbols)
     for symbol, where in definitions.items():
         outside = [w for w in where if Path(w).resolve() != canonical_module]
@@ -164,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     violations = check(repo_root / args.registry, repo_root)
     if violations:
         _fail(violations)
-    print("OK: single canonical Phase 2/3 REST-goal contract; no forked namespaces or islands.")
+    print("OK: single canonical Phase 2/3 REST-goal contract; no forked namespaces, islands, or retired modules.")
     return 0
 
 

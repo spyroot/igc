@@ -4,7 +4,9 @@
 own isolated tests were green. These tests exercise the two repo-level gates:
 
 * ``repo.contract-single-source`` passes on the live tree, and fails on a forked
-  namespace token or a canonical symbol defined in a second module.
+  namespace token, a canonical symbol defined in a second module, OR a retired
+  parallel-contract module name (``mock_inference_contract`` / ``phase23_mock``)
+  reappearing as a filename, a def/class, or an import target.
 * ``repo.schema-snapshot`` bootstraps, round-trips, and detects drift.
 
 Author:
@@ -46,6 +48,7 @@ def _fixture_tree(root: Path) -> Path:
         "search_root: igc\n"
         "canonical_namespaces: [phase2_goal_extraction]\n"
         "forbidden_namespace_literals: [phase2_goal_extract, phase3_argument_extract]\n"
+        "forbidden_module_names: [mock_inference_contract, phase23_mock]\n"
         "canonical_symbols: [build_d1_rest_api_list_row, RedfishContext]\n"
         "canonical_tasks: [text_to_rest_api_list]\n",
         encoding="utf-8",
@@ -70,7 +73,7 @@ def test_single_source_flags_forked_namespace(tmp_path: Path) -> None:
 def test_single_source_flags_parallel_island(tmp_path: Path) -> None:
     """A canonical symbol defined in a second module fails the gate (parallel island)."""
     registry = _fixture_tree(tmp_path)
-    (tmp_path / "igc" / "mock_inference_contract.py").write_text(
+    (tmp_path / "igc" / "other_island.py").write_text(
         "class RedfishContext:\n    pass\n", encoding="utf-8"
     )
     violations = css.check(registry, tmp_path)
@@ -83,6 +86,44 @@ def test_single_source_ignores_canonical_value(tmp_path: Path) -> None:
     (tmp_path / "igc" / "ok.py").write_text('NS = "phase2_goal_extraction"\n', encoding="utf-8")
     violations = css.check(registry, tmp_path)
     assert violations == [], violations
+
+
+def test_single_source_flags_retired_module_filename(tmp_path: Path) -> None:
+    """A file NAMED after a retired module fails even with innocuous contents (#108 module)."""
+    registry = _fixture_tree(tmp_path)
+    (tmp_path / "igc" / "ds" / "mock_inference_contract.py").write_text(
+        "VALUE = 1\n", encoding="utf-8"
+    )
+    violations = css.check(registry, tmp_path)
+    assert any("forbidden retired-contract module filename" in v for v in violations), violations
+
+
+def test_single_source_flags_retired_module_renamed_file(tmp_path: Path) -> None:
+    """A renamed variant (NAME*.py glob) of a retired module still fails on filename."""
+    registry = _fixture_tree(tmp_path)
+    (tmp_path / "igc" / "phase23_mock_v2.py").write_text("VALUE = 1\n", encoding="utf-8")
+    violations = css.check(registry, tmp_path)
+    assert any("forbidden retired-contract module filename" in v for v in violations), violations
+
+
+def test_single_source_flags_retired_module_import(tmp_path: Path) -> None:
+    """Importing a retired module fails even if its physical file was renamed away."""
+    registry = _fixture_tree(tmp_path)
+    (tmp_path / "igc" / "consumer.py").write_text(
+        "from igc.ds.mock_inference_contract import RedfishContext\n", encoding="utf-8"
+    )
+    violations = css.check(registry, tmp_path)
+    assert any("forbidden import" in v and "mock_inference_contract" in v for v in violations), violations
+
+
+def test_single_source_flags_retired_module_symbol_def(tmp_path: Path) -> None:
+    """A def/class named after a retired module fails the gate."""
+    registry = _fixture_tree(tmp_path)
+    (tmp_path / "igc" / "sneaky.py").write_text(
+        "def phase23_mock():\n    return None\n", encoding="utf-8"
+    )
+    violations = css.check(registry, tmp_path)
+    assert any("forbidden retired-contract symbol" in v for v in violations), violations
 
 
 def test_schema_snapshot_bootstrap_roundtrip_and_drift(tmp_path: Path) -> None:
