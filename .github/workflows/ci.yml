@@ -63,7 +63,7 @@ jobs:
           # the workflow itself changing re-runs everything
           wf='^\.github/workflows/'
           {
-            echo "shell=$(match "$wf|^scripts/.*\.(sh|sbatch)$|^tests/bats/|^collector\.sh$")"
+            echo "shell=$(match "$wf|^scripts/.*\.(sh|sbatch)$|^tests/bats/|^tests/shell/.*\.sh$|^collector\.sh$")"
             echo "python=$(match "$wf|^igc/|^tests/|^configs/|^scripts/.*\.py$|^docker/requirements|^pytest\.ini$|^setup\.py$|^igc_main\.py$|^igc_ctl\.py$|^redfish_ctl")"
             echo "perf=$(match "$wf|^igc/|^tests/perf/|^scripts/bench_hot_paths\.py$|^redfish_ctl")"
             echo "docker=$(match "$wf|^docker/|^\.dockerignore$|^requirements|^setup\.py$|^conda-recipe\.yaml$")"
@@ -95,6 +95,14 @@ jobs:
       - name: Bats
         shell: bash
         run: bats tests/bats
+      - name: Shell regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for t in tests/shell/*.sh; do
+            echo "== $t =="
+            bash "$t"
+          done
 
   gate:
     needs: changes
