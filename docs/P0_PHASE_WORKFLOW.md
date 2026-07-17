@@ -13,7 +13,7 @@ while model artifacts use explicit roles such as `model_x`, `goal_extractor`, an
 | Phase | Profile prefix | Weight role | W&B namespace | Dataset objective | Checkpoint rule |
 | --- | --- | --- | --- | --- | --- |
 | 1 | `phase1_*` | `model_x` | `phase1_finetune/*` | `phase1_pretrain` / Redfish JSON reconstruction | writes a separate Phase 1 checkpoint |
-| 2 | `phase2_goal_extractor_*` (planned) | `goal_extractor` | `phase2_goal_extraction/*` | `text_to_ordered_rest_api_list` | initializes from `model_x` only when requested; never overwrites it |
+| 2 | `phase2_goal_extractor_*` (planned) | `goal_extractor` | `phase2_goal_extraction/*` | `text_to_rest_api_list` | initializes from `model_x` only when requested; never overwrites it |
 | 3 | `phase3_argument_extractor_*` (planned) | `argument_extractor` | `phase3_argument_extraction/*` | `text_and_rest_api_list_to_calls` | initializes from `model_x` or `goal_extractor` only when requested; never overwrites either |
 
 Phase 2 and Phase 3 profile names are planned until their trainers land. Do not add live profiles
