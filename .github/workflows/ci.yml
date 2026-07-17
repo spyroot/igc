@@ -140,8 +140,20 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          # testpaths=tests + norecursedirs (pytest.ini) means tests/gates/* — including
+          # the offline inference-envelope layer — is discovered here automatically; the
+          # @pytest.mark.gpu envelope stage stays excluded by pytest.ini addopts.
           KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 \
             python -m pytest -q --cov=igc --cov-report=term --cov-report=xml --cov-report=json
+      - name: Contract-authority gate
+        shell: bash
+        run: |
+          set -o pipefail
+          # Composes the single-source + schema-snapshot gates with the offline
+          # contract/output/envelope tests and writes a sanitized JSON report.
+          # Exits non-zero if any check FAILED (schema-snapshot bootstrap is not a failure).
+          KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 \
+            python scripts/gates/contract_authority.py
       - name: Metrics snapshot
         shell: bash
         run: |
@@ -155,6 +167,8 @@ jobs:
             coverage.xml
             coverage.json
             metrics.json
+            reports/gate-report-contract-authority.json
+            reports/gate-report-phase123-conformance.json
           retention-days: 90
 
   perf:

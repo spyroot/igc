@@ -211,3 +211,5 @@ slurm-*.out
 coverage.json
 coverage.xml
 metrics.json
+reports/gate-report*.json
+.phase123-conformance-tmp/

@@ -472,4 +472,17 @@ def inference_ordered_goals_json(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def inference_target_calls_json(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Build the current Phase 3 inference handoff using ``target_calls``.
+
+    :param row: row from :func:`build_ordered_call_row`.
+    :return: ``{"text": ..., "target_calls": [...]}``.
+    """
+
+    return {
+        "text": str(row["x"]["text"]),
+        "target_calls": list(row["y_true"]["calls"]),
+    }
+
+
 # Author: Mus mbayramo@stanford.edu

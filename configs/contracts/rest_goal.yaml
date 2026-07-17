@@ -1,0 +1,41 @@
+version: 1
+name: rest-goal-contract-authority
+
+canonical_module: igc/ds/rest_goal_contract.py
+
+scan_paths:
+  - igc
+  - scripts
+  - tests
+  - configs
+  - docs
+
+file_suffixes:
+  - .py
+  - .yaml
+  - .yml
+  - .md
+
+allow_paths:
+  - configs/contracts/rest_goal.yaml
+  - docs/gates.md
+  - scripts/gates/contract_single_source.py
+  - tests/gates/test_contract_single_source.py
+
+required_symbols:
+  - RedfishContext
+  - TargetCall
+  - build_d1_rest_api_list_row
+  - build_ordered_call_row
+  - render_rest_api_list_example
+  - render_ordered_call_example
+  - parse_rest_api_list_y_pred
+  - parse_ordered_calls_y_pred
+  - evaluate_ordered_calls_y_pred
+  - inference_target_calls_json
+
+forbidden_regex:
+  - "\\bmock_inference_contract\\b"
+  - "\\bphase23_mock\\b"
+  - "[\"']phase2_goal_extract[\"']"
+  - "[\"']phase3_argument_extract[\"']"

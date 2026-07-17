@@ -1,0 +1,105 @@
+{
+  "phase2_rendered": {
+    "prompt": "str",
+    "target_char_start": "int",
+    "target_json": "str"
+  },
+  "phase2_row": {
+    "dataset": "str",
+    "model_x": "str",
+    "phase": "int",
+    "source_dataset": "str",
+    "task": "str",
+    "validation": {
+      "all_rest_api_present": "bool",
+      "extra_rest_api_present": "bool",
+      "order_preserved": "bool",
+      "review_judged": "bool",
+      "text_source": "str"
+    },
+    "x": {
+      "allowed_methods": {
+        "/redfish/v1/Managers/1/EthernetInterfaces/1": [
+          "str"
+        ],
+        "/redfish/v1/Systems/1": [
+          "str"
+        ]
+      },
+      "json": [
+        {
+          "@odata.id": "str",
+          "PowerState": "str"
+        }
+      ],
+      "text": "str"
+    },
+    "y_true": {
+      "order_evidence": "str",
+      "rest_api_list": [
+        "str"
+      ]
+    }
+  },
+  "phase3_inference": {
+    "target_calls": [
+      {
+        "allowed_methods": [
+          "str"
+        ],
+        "arguments": {
+          "Address": "str"
+        },
+        "method": "str",
+        "rest_api": "str"
+      }
+    ],
+    "text": "str"
+  },
+  "phase3_rendered": {
+    "prompt": "str",
+    "target_char_start": "int",
+    "target_json": "str"
+  },
+  "phase3_row": {
+    "model_x": "str",
+    "phase": "int",
+    "source_dataset": "str",
+    "task": "str",
+    "x": {
+      "allowed_methods": {
+        "/redfish/v1/Managers/1/EthernetInterfaces/1": [
+          "str"
+        ],
+        "/redfish/v1/Systems/1": [
+          "str"
+        ]
+      },
+      "json": [
+        {
+          "@odata.id": "str",
+          "PowerState": "str"
+        }
+      ],
+      "rest_api_list": [
+        "str"
+      ],
+      "text": "str"
+    },
+    "y_true": {
+      "calls": [
+        {
+          "allowed_methods": [
+            "str"
+          ],
+          "arguments": {
+            "Address": "str"
+          },
+          "method": "str",
+          "rest_api": "str"
+        }
+      ]
+    }
+  },
+  "schema": "igc.rest_goal_contract.shape.v1"
+}

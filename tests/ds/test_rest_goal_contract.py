@@ -23,6 +23,7 @@ from igc.ds.rest_goal_contract import (
     build_ordered_call_row,
     evaluate_ordered_calls_y_pred,
     inference_ordered_goals_json,
+    inference_target_calls_json,
     parse_ordered_calls_y_pred,
     parse_rest_api_list_y_pred,
     render_ordered_call_example,
@@ -772,6 +773,25 @@ def test_inference_json_uses_ordered_goals_shape() -> None:
     assert inference_ordered_goals_json(row) == {
         "text": "check task queue",
         "ordered_goals": row["y_true"]["calls"],
+    }
+
+
+def test_inference_json_uses_target_calls_shape() -> None:
+    """The current Phase 3 handoff names executable goals target_calls."""
+    context = _context(
+        "/redfish/v1/TaskService/Tasks",
+        ("GET", "HEAD"),
+        {"@odata.id": "/redfish/v1/TaskService/Tasks"},
+    )
+    row = build_ordered_call_row(
+        text="check task queue",
+        contexts=(context,),
+        rest_api_list=("/redfish/v1/TaskService/Tasks",),
+    )
+
+    assert inference_target_calls_json(row) == {
+        "text": "check task queue",
+        "target_calls": row["y_true"]["calls"],
     }
 
 
