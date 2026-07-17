@@ -45,7 +45,13 @@ CUR_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 # normal Git blob fails even on hosts where git-lfs is not installed yet.
 for path in "$@"; do
   [ -e "$path" ] || die "no such artifact: $path"
-  if ! git check-attr --source HEAD filter -- "$path" 2>/dev/null | grep -q 'filter: lfs'; then
+  # Run check-attr separately from the match test so a command failure (e.g.
+  # git older than 2.40, where --source does not exist) dies with its own
+  # message instead of masquerading as "attribute not matched".
+  attr_out="$(git check-attr --source HEAD filter -- "$path" 2>&1)" ||
+    die "cannot read committed LFS attributes for '$path'
+(git check-attr --source needs git >= 2.40 and a committed HEAD): ${attr_out}"
+  if ! printf '%s\n' "$attr_out" | grep -q 'filter: lfs'; then
     ext="$(basename "$path" | sed 's/^[^.]*//')"
     pattern_note="an exact path"
     if [ -n "$ext" ]; then
