@@ -629,6 +629,16 @@ def test_pro_judge_result_parsing_accepts_fenced_or_explained_json() -> None:
     assert explained.invalid_json is False
 
 
+def test_pro_judge_result_parsing_rejects_malformed_fenced_json() -> None:
+    """Malformed fenced judge output is counted as invalid JSON."""
+    result = parse_pro_judge_result("```json\n{not json}\n```")
+
+    assert result.accepted is False
+    assert result.invalid_json is True
+    assert result.rest_api_list == ()
+    assert result.reason.startswith("invalid_json:")
+
+
 def test_pro_judge_result_parsing_requires_nonsense_boolean() -> None:
     """Judge output must carry an explicit nonsense verdict."""
     missing = parse_pro_judge_result(
@@ -1034,6 +1044,33 @@ def test_acceptance_thresholds_are_enforced_from_yaml(tmp_path: Path) -> None:
 
     assert phase2_acceptance_thresholds_pass(spec, passing)
     assert not phase2_acceptance_thresholds_pass(spec, failing)
+
+
+@pytest.mark.parametrize(
+    ("metric_key", "bad_value"),
+    (
+        (_phase2_metric("pro_accept_rate"), 0.89),
+        (_phase2_metric("rest_api_set_match_rate"), 0.97),
+        (_phase2_metric("nonsense_rate"), 0.02),
+        (_phase2_metric("invalid_json_rate"), 0.02),
+    ),
+)
+def test_acceptance_thresholds_fail_each_configured_condition(
+    tmp_path: Path,
+    metric_key: str,
+    bad_value: float,
+) -> None:
+    """Every YAML acceptance threshold can independently fail a summary."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    summary = {
+        _phase2_metric("pro_accept_rate"): 0.91,
+        _phase2_metric("rest_api_set_match_rate"): 0.99,
+        _phase2_metric("nonsense_rate"): 0.0,
+        _phase2_metric("invalid_json_rate"): 0.0,
+    }
+    summary[metric_key] = bad_value
+
+    assert not phase2_acceptance_thresholds_pass(spec, summary)
 
 
 def test_phase2_labelled_request_wandb_keys_have_required_namespace_shape() -> None:

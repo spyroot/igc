@@ -150,6 +150,57 @@ def test_cli_mock_mode_accepts_all_configured_sample_widths(
     assert metrics[_metric("sample_width", "k")] == sample_width
 
 
+def test_cli_mock_mode_writes_no_action_empty_set_rows(tmp_path: Path) -> None:
+    """Hard-negative no-action rows enter CLI artifacts through an explicit flag."""
+    script = _load_script()
+    output = tmp_path / "out" / "phase2_labelled_requests.jsonl"
+    metrics_path = tmp_path / "out" / "metrics.json"
+
+    code = script.main(
+        _base_args(tmp_path, sample_width=1, count=1)
+        + [
+            "--no-action-text",
+            "do not change anything on this server",
+            "--no-action-count",
+            "1",
+        ],
+    )
+
+    rows = _read_jsonl(output)
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    no_action = rows[-1]
+    assert code == 0
+    assert len(rows) == 2
+    assert no_action["dataset"] == PHASE2_LABELLED_REQUESTS
+    assert no_action["task"] == "text_to_rest_api_list"
+    assert no_action["x"]["text"] == "do not change anything on this server"
+    assert no_action["x"]["json"] == []
+    assert no_action["x"]["allowed_methods"] == {}
+    assert no_action["x"]["rest_api_list"] == []
+    assert no_action["y_true"]["rest_api_list"] == []
+    assert no_action["validation"]["text_source"] == "hard_negative_no_action"
+    assert metrics["requested_candidates"] == 2
+    assert metrics["accepted_rows"] == 2
+    assert metrics[_metric("draft_total")] == 2
+    assert metrics[_metric("accepted_total")] == 2
+    assert metrics[_metric("empty_set_expected_total")] == 1
+    assert metrics[_metric("empty_set_match_rate")] == 1.0
+
+
+def test_cli_no_action_count_requires_text(tmp_path: Path) -> None:
+    """No-action artifacts fail closed when the hard-negative text is omitted."""
+    script = _load_script()
+
+    with pytest.raises(SystemExit, match="--no-action-text"):
+        script.main(
+            _base_args(tmp_path, sample_width=1, count=0)
+            + [
+                "--no-action-count",
+                "1",
+            ],
+        )
+
+
 def test_cli_file_providers_are_used_without_network(tmp_path: Path) -> None:
     """Local provider fixture files control draft text and judge acceptance."""
     script = _load_script()

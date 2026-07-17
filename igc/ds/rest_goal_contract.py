@@ -1,10 +1,11 @@
-"""REST-goal dataset contracts for ordered language-model targets.
+"""Mock REST-goal schema fixtures for Phase 2/3 compatibility tests.
 
 Used by tests and future dataset builders as the narrow mock-plumbing seam for
-the Phase 2/3 Redfish instruction contracts: text/context to ordered REST APIs,
-then text/API list/context to ordered calls. This module owns row shape,
-canonical prompt/target rendering, and re-exports shared metric-key names; it
-does not train, decode, crawl, or infer labels from text.
+the Phase 2/3 Redfish instruction contracts: text/context to REST APIs, then
+text/API list/context to method/argument calls. The production Phase 2
+``phase2_labelled_requests`` builder owns prompt/model/judge config; this module
+owns tiny schema examples, canonical renderers, and shared metric-key re-exports
+only. It does not train, decode, crawl, judge, or infer labels from text.
 
 Author:
 Mus mbayramo@stanford.edu
@@ -107,18 +108,18 @@ def build_phase2_labelled_request_row(
     rest_api_list: Sequence[str],
     order_evidence: str = "explicit_then",
 ) -> dict[str, Any]:
-    """Build one mock ``phase2_labelled_requests`` row.
+    """Build one mock ``phase2_labelled_requests`` schema row.
 
     :param text: operator sentence.
     :param contexts: current Redfish JSON/method context.
-    :param rest_api_list: target REST APIs in operator-stated order.
+    :param rest_api_list: target REST APIs, ordered only for explicit-order fixtures.
     :param order_evidence: label describing why order should be evaluated strictly.
     :return: JSON-compatible Phase 2 row with locked field names.
     """
     by_api = _contexts_by_api(contexts)
     _require_context(rest_api_list, by_api)
     return {
-        "phase": 2,                         # Phase 2: text -> ordered rest_api_list.
+        "phase": 2,                         # Phase 2: text -> rest_api_list.
         "dataset": PHASE2_LABELLED_REQUESTS,  # Canonical Phase 2 dataset name.
         "source_dataset": D0,               # D0 is the Phase 1 JSON reconstruction source.
         "model_x": MODEL_X,                 # model_x creates/reviews labels after Phase 1.

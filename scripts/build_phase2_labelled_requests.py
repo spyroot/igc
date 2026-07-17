@@ -78,6 +78,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Number of labelled-request candidates to attempt.",
     )
     parser.add_argument(
+        "--no-action-text",
+        default="",
+        help="Optional hard-negative request text that should map to an empty REST API set.",
+    )
+    parser.add_argument(
+        "--no-action-count",
+        type=int,
+        default=0,
+        help="Number of hard-negative/no-action rows to judge with --no-action-text.",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=0,
@@ -161,13 +172,21 @@ def build_phase2_labelled_requests(
     seed: int,
     draft_provider: DraftProvider,
     judge_provider: JudgeProvider,
+    no_action_text: str = "",
+    no_action_count: int = 0,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build accepted rows plus aggregate metrics using injected providers."""
     if sample_width not in spec.sample_widths:
         raise SystemExit("sample-width must be present in the YAML sampling.sample_widths")
-    if count < 1:
-        raise SystemExit("count must be positive")
-    if len(records) < sample_width:
+    if count < 0:
+        raise SystemExit("count must be non-negative")
+    if no_action_count < 0:
+        raise SystemExit("no-action-count must be non-negative")
+    if no_action_count and not no_action_text.strip():
+        raise SystemExit("--no-action-text is required when --no-action-count is positive")
+    if count + no_action_count < 1:
+        raise SystemExit("at least one sampled or no-action candidate is required")
+    if count and len(records) < sample_width:
         raise SystemExit("not enough records for requested sample-width")
 
     builder = Phase2LabelledRequestBuilder(
@@ -194,12 +213,20 @@ def build_phase2_labelled_requests(
         if row is not None:
             accepted_rows.append(row.to_dict())
 
+    for _ in range(no_action_count):
+        row, candidate = builder.build_no_action(draft_text=no_action_text.strip())
+        _merge_counters(counters, candidate)
+        if candidate.vendor_source_corpus:
+            source_labels.update(candidate.vendor_source_corpus.split(","))
+        if row is not None:
+            accepted_rows.append(row.to_dict())
+
     counters.vendor_source_corpus = ",".join(sorted(source_labels))
     summary = counters.summary()
     summary.update({
         "dataset": spec.dataset_name,
         "records_in": len(records),
-        "requested_candidates": count,
+        "requested_candidates": count + no_action_count,
         "accepted_rows": len(accepted_rows),
         "thresholds_pass": phase2_acceptance_thresholds_pass(spec, summary),
     })
@@ -253,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         draft_provider=draft_provider,
         judge_provider=judge_provider,
+        no_action_text=args.no_action_text,
+        no_action_count=args.no_action_count,
     )
     rows_written = write_jsonl(Path(args.output_jsonl), rows)
     write_metrics(Path(args.metrics_out), metrics)
