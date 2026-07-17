@@ -465,12 +465,12 @@ def parse_pro_judge_result(raw: str) -> ProJudgeResult:
             invalid_json=True,
             reason="accepted or accept is required",
         )
-    accepted = _optional_bool(parsed, accepted_key)
-    if accepted is None:
+    accepted = parsed[accepted_key]
+    if not isinstance(accepted, bool):
         return ProJudgeResult(
             accepted=False,
             invalid_json=True,
-            reason=f"{accepted_key} must be a boolean when present",
+            reason=f"{accepted_key} must be a boolean",
         )
     nonsense = _optional_bool(parsed, "nonsense")
     if nonsense is None:
@@ -787,11 +787,17 @@ def _validate_prompt_template(
 ) -> None:
     """Validate configured prompt placeholders before a build starts."""
     try:
-        parsed_fields = {
-            field_name
-            for _, field_name, _, _ in Formatter().parse(template)
-            if field_name
-        }
+        parsed_fields: set[str] = set()
+        for _, field_name, _, _ in Formatter().parse(template):
+            if field_name is None:
+                continue
+            if not field_name:
+                raise Phase2LabelledRequestsSpecError(
+                    f"{label} has unnamed format fields",
+                )
+            parsed_fields.add(field_name)
+    except Phase2LabelledRequestsSpecError:
+        raise
     except ValueError as exc:
         raise Phase2LabelledRequestsSpecError(f"{label} has malformed format fields") from exc
 

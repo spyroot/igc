@@ -378,6 +378,18 @@ def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     with pytest.raises(Phase2LabelledRequestsSpecError, match="malformed format fields"):
         load_phase2_labelled_requests_spec(malformed_model_prompt_field)
 
+    unnamed_model_prompt_field = _write_spec(tmp_path / "unnamed-model-prompt-field.yaml")
+    unnamed_model_prompt_field.write_text(
+        unnamed_model_prompt_field.read_text(encoding="utf-8").replace(
+            "      {records_json}",
+            "      {records_json}\n      {}",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="unnamed format fields"):
+        load_phase2_labelled_requests_spec(unnamed_model_prompt_field)
+
     malformed_generation = _write_spec(tmp_path / "malformed-generation.yaml")
     malformed_generation.write_text(
         malformed_generation.read_text(encoding="utf-8").replace(
@@ -584,6 +596,31 @@ def test_pro_judge_result_parsing_requires_nonsense_boolean() -> None:
     assert missing.accepted is False
     assert missing.invalid_json is True
     assert "nonsense" in missing.reason
+
+
+def test_pro_judge_result_parsing_requires_accepted_boolean() -> None:
+    """Judge output must carry an explicit accepted verdict."""
+    missing = parse_pro_judge_result(
+        json.dumps({
+            "rest_api_list": ["/redfish/v1/Systems/1"],
+            "nonsense": False,
+        }),
+    )
+    assert missing.accepted is False
+    assert missing.invalid_json is True
+    assert "accepted or accept" in missing.reason
+
+    malformed = parse_pro_judge_result(
+        json.dumps({
+            "accepted": "yes",
+            "rest_api_list": ["/redfish/v1/Systems/1"],
+            "nonsense": False,
+        }),
+    )
+    assert malformed.accepted is False
+    assert malformed.invalid_json is True
+    assert "accepted" in malformed.reason
+    assert "boolean" in malformed.reason
 
 
 def test_pro_judge_result_parsing_rejects_unknown_order_evidence() -> None:
