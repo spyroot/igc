@@ -340,6 +340,30 @@ def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     with pytest.raises(Phase2LabelledRequestsSpecError, match="model_x_draft"):
         load_phase2_labelled_requests_spec(missing_prompt_section)
 
+    missing_model_prompt_field = _write_spec(tmp_path / "missing-model-prompt-field.yaml")
+    missing_model_prompt_field.write_text(
+        missing_model_prompt_field.read_text(encoding="utf-8").replace(
+            "      {records_json}",
+            "      no record placeholder",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="records_json"):
+        load_phase2_labelled_requests_spec(missing_model_prompt_field)
+
+    unknown_judge_prompt_field = _write_spec(tmp_path / "unknown-judge-prompt-field.yaml")
+    unknown_judge_prompt_field.write_text(
+        unknown_judge_prompt_field.read_text(encoding="utf-8").replace(
+            "      {draft_text}",
+            "      {draft_text}\n      {unknown_field}",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="unknown_field"):
+        load_phase2_labelled_requests_spec(unknown_judge_prompt_field)
+
     malformed_generation = _write_spec(tmp_path / "malformed-generation.yaml")
     malformed_generation.write_text(
         malformed_generation.read_text(encoding="utf-8").replace(
