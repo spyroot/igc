@@ -125,7 +125,8 @@ EOF
 
     [ "$status" -ne 0 ]
     [[ "$output" != *"not matched by a committed LFS filter"* ]]
-    [ -z "$(git -C "${tmp}" status --porcelain -- raw.bin | grep '^A')" ]
+    staged="$(git -C "${tmp}" status --porcelain -- raw.bin)"
+    [[ "${staged}" != A* ]]
 }
 
 @test "model adapter safetensors files are tracked by Git LFS" {
