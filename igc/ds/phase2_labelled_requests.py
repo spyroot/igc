@@ -401,10 +401,13 @@ def sample_phase2_contexts(
     *,
     k: int,
     rng: random.Random,
+    sample_widths: Sequence[int],
 ) -> tuple[RestApiRecord, ...]:
-    """Sample one, two, or three REST API records without replacement."""
-    if k not in (1, 2, 3):
-        raise ValueError("sample width must be one of 1, 2, or 3")
+    """Sample one configured REST API record width without replacement."""
+    allowed_widths = tuple(sample_widths)
+    if k not in allowed_widths:
+        joined = ", ".join(str(width) for width in allowed_widths)
+        raise ValueError(f"sample width must be one of {joined}")
     if len(records) < k:
         raise ValueError("not enough records for requested sample width")
     return tuple(rng.sample(list(records), k))
@@ -622,11 +625,16 @@ class Phase2LabelledRequestBuilder:
         """Build and judge one accepted row candidate.
 
         :param records: candidate REST API records.
-        :param k: sample width, one through three.
+        :param k: configured sample width.
         :param rng: deterministic RNG supplied by the caller.
         :return: accepted row plus counters, or ``None`` plus rejection counters.
         """
-        sampled = sample_phase2_contexts(records, k=k, rng=rng)
+        sampled = sample_phase2_contexts(
+            records,
+            k=k,
+            rng=rng,
+            sample_widths=self._spec.sample_widths,
+        )
         expected_rest_api_list = tuple(record.rest_api for record in sampled)
         counters = Phase2LabelledRequestCounters(
             sample_width_k=k,

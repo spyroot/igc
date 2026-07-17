@@ -4,10 +4,10 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 target="${1:-phase2_labelled_requests}"
 
-if [[ -z "${GITLAB_CI:-}" && -z "${KUBERNETES_SERVICE_HOST:-}" ]]; then
+if [[ -z "${KUBERNETES_SERVICE_HOST:-}" ]]; then
     cat >&2 <<'EOF'
 BLOCKER: scripts/check.sh refuses local IGC gate execution.
-Observation: this shell is not a GitLab CI job or Kubernetes pod.
+Observation: this shell is not running inside a Kubernetes pod.
 Safe next step: run the homelab-k8s GitLab job or an approved in-cluster job.
 EOF
     exit 2

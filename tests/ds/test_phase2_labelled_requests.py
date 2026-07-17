@@ -540,24 +540,55 @@ def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Pat
 def test_sampling_accepts_only_k_1_2_3_and_preserves_record_payloads() -> None:
     """The builder samples one, two, or three REST records with deterministic RNG."""
     records = tuple(_record(index) for index in range(5))
+    sample_widths = (1, 2, 3)
 
     for width in (1, 2, 3):
-        sampled = sample_phase2_contexts(records, k=width, rng=random.Random(7))
+        sampled = sample_phase2_contexts(
+            records,
+            k=width,
+            rng=random.Random(7),
+            sample_widths=sample_widths,
+        )
         assert len(sampled) == width
         assert all(record.rest_api.startswith("/redfish/v1/Systems/") for record in sampled)
         assert all(record.allowed_methods == ("GET", "HEAD") for record in sampled)
         assert all(record.json_body["@odata.id"] == record.rest_api for record in sampled)
 
-    first = sample_phase2_contexts(records, k=3, rng=random.Random(13))
-    second = sample_phase2_contexts(records, k=3, rng=random.Random(13))
+    first = sample_phase2_contexts(
+        records,
+        k=3,
+        rng=random.Random(13),
+        sample_widths=sample_widths,
+    )
+    second = sample_phase2_contexts(
+        records,
+        k=3,
+        rng=random.Random(13),
+        sample_widths=sample_widths,
+    )
     assert [record.rest_api for record in first] == [record.rest_api for record in second]
 
     with pytest.raises(ValueError, match="sample width"):
-        sample_phase2_contexts(records, k=0, rng=random.Random(1))
+        sample_phase2_contexts(
+            records,
+            k=0,
+            rng=random.Random(1),
+            sample_widths=sample_widths,
+        )
     with pytest.raises(ValueError, match="sample width"):
-        sample_phase2_contexts(records, k=4, rng=random.Random(1))
+        sample_phase2_contexts(
+            records,
+            k=4,
+            rng=random.Random(1),
+            sample_widths=sample_widths,
+        )
     with pytest.raises(ValueError, match="not enough records"):
-        sample_phase2_contexts(records[:1], k=2, rng=random.Random(1))
+        sample_phase2_contexts(
+            records[:1],
+            k=2,
+            rng=random.Random(1),
+            sample_widths=sample_widths,
+        )
 
 
 def test_unordered_set_comparison_and_empty_set_equality() -> None:

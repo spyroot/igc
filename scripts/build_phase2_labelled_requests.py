@@ -69,7 +69,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--sample-width",
         type=int,
         required=True,
-        help="Number of REST API records sampled per candidate; must be 1, 2, or 3.",
+        help="Number of REST API records sampled per candidate; must be allowed by YAML.",
     )
     parser.add_argument(
         "--count",
@@ -128,7 +128,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--live-provider-gate-passed",
         action="store_true",
-        help="Allow live provider runs above the YAML safety.live_without_gate_max_candidates cap.",
+        help=(
+            "Allow explicitly gated live provider runs; required for any "
+            "openai-compatible provider use."
+        ),
     )
     parser.add_argument(
         "--allow-threshold-failure",
@@ -347,15 +350,16 @@ def _enforce_live_provider_gate(
     draft_adapter: str,
     judge_adapter: str,
 ) -> None:
-    """Block dataset-scale live provider runs until an explicit gate flag is passed."""
+    """Block live provider runs until an explicit gate flag is passed."""
     uses_live_adapter = "openai-compatible" in {draft_adapter, judge_adapter}
-    if not uses_live_adapter or args.live_provider_gate_passed:
+    if not uses_live_adapter:
         return
     candidate_count = args.count + args.no_action_count
-    if candidate_count > spec.live_without_gate_max_candidates:
+    if not args.live_provider_gate_passed:
         raise SystemExit(
-            "live provider runs above safety.live_without_gate_max_candidates "
-            "require --live-provider-gate-passed",
+            "live provider runs require --live-provider-gate-passed "
+            f"(requested_candidates={candidate_count}, "
+            f"ungated_cap={spec.live_without_gate_max_candidates})",
         )
 
 

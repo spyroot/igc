@@ -377,6 +377,7 @@ def test_cli_openai_compatible_provider_uses_fake_http_and_env_config(
         + [
             "--provider-mode",
             "openai-compatible",
+            "--live-provider-gate-passed",
         ],
     )
 
@@ -453,13 +454,13 @@ def test_cli_live_provider_gate_flag_allows_larger_fake_http_run(
     assert metrics[_metric("accepted_total")] == 4
 
 
-def test_cli_live_provider_blocks_dataset_scale_without_gate(tmp_path: Path) -> None:
-    """Live provider mode refuses larger runs until the explicit gate flag is passed."""
+def test_cli_live_provider_blocks_without_gate(tmp_path: Path) -> None:
+    """Live provider mode refuses even tiny runs until the explicit gate passes."""
     script = _load_script()
 
     with pytest.raises(SystemExit, match="live provider runs"):
         script.main(
-            _base_args(tmp_path, sample_width=1, count=4)
+            _base_args(tmp_path, sample_width=1, count=1)
             + [
                 "--provider-mode",
                 "openai-compatible",
@@ -537,6 +538,7 @@ def test_cli_live_override_requires_live_provider_config(tmp_path: Path) -> None
                 str(spec_path),
                 "--provider-mode",
                 "openai-compatible",
+                "--live-provider-gate-passed",
             ],
         )
 
