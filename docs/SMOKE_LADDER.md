@@ -4,9 +4,10 @@ Each rung is a gate: a run may not move up until the rung below passes. The ladd
 because the expensive failures (broken resume, corrupt sharded checkpoints, a mis-matched
 tokenizer) are cheap to catch low and ruinous to discover hours into a cluster job.
 
-Conventions: the offline gate is plain `pytest -q` from the repo root (configured by
+Conventions: the offline gate runs `make gate` from the repo root (configured by
 `pytest.ini`, which registers and excludes the `gpu`/`slow`/`download`/`dataset`/`live`
-markers). Cluster steps read the fleet dashboard address from `NV72_FLEET_DASHBOARD_URL`
+markers and sets the macOS OpenMP guard used by Torch tests). Cluster steps read the
+fleet dashboard address from `NV72_FLEET_DASHBOARD_URL`
 (an internal URL kept out of this repo; see the team's ops notes) and are gated by
 `scripts/preflight_nv72.sh`, which pipes `/api/v1/state` through the offline-tested
 checker in `igc/shared/nv72_preflight.py`.
@@ -14,7 +15,7 @@ checker in `igc/shared/nv72_preflight.py`.
 ## R0 — offline gate (every change)
 
 ```bash
-pytest -q          # must be green; ruff check on touched files
+make gate PYTHON=python
 ```
 
 ## R1 — CPU mini-train (before any GPU time)
