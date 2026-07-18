@@ -1,0 +1,84 @@
+# Internal GitLab CI for the mirrored igc repo.
+#
+# Surfaces (enforced by scripts/gates/ci_surface_guard.py + configs/ci/pass_matrix.yaml):
+#   cpu — every job below; runs on the in-cluster `homelab-k8s` runner. The
+#         home-lab cluster has NO GPU and cpu jobs must never request one.
+#   gpu — NOTHING here executes on GPUs. GPU passes run on approved GB300 slot
+#         containers outside CI; this pipeline only VALIDATES their recorded
+#         evidence manifests (reports/gpu-evidence/*.json). The `gb300` tag has
+#         no registered runner in home-lab, so a mis-tagged job cannot schedule.
+#
+# This file carries no internal hostnames: the mirror pulls from GitHub, and
+# runners are addressed by tag only.
+
+stages:
+  - cpu-gate
+  - gpu-evidence
+
+default:
+  image: python:3.12-slim
+
+.cpu-base: &cpu-base
+  tags: [homelab-k8s]
+  variables:
+    IGC_SURFACE: cpu
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+lint:
+  <<: *cpu-base
+  stage: cpu-gate
+  script:
+    - pip install --quiet ruff
+    - ruff check igc tests
+
+offline-gate:
+  <<: *cpu-base
+  stage: cpu-gate
+  variables:
+    IGC_SURFACE: cpu
+    KMP_DUPLICATE_LIB_OK: "TRUE"
+    OMP_NUM_THREADS: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    HF_DATASETS_OFFLINE: "1"
+    PIP_CACHE_DIR: .pip-cache
+  cache:
+    key: pip-$CI_COMMIT_REF_SLUG
+    paths: [.pip-cache]
+  script:
+    - pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+    - pip install --quiet -r docker/requirements-test.txt
+    - python -m pytest -q
+
+surface-guard:
+  <<: *cpu-base
+  stage: cpu-gate
+  script:
+    - pip install --quiet pyyaml
+    - python scripts/gates/ci_surface_guard.py
+
+# Validates committed GPU evidence manifests (schema in the pass matrix). This
+# is a CPU job: it reads JSON, it does not touch a GPU. Malformed evidence
+# fails; absent evidence passes (requiredness is enforced at phase acceptance).
+gpu-evidence-validate:
+  <<: *cpu-base
+  stage: gpu-evidence
+  script:
+    - pip install --quiet pyyaml
+    - python scripts/gates/ci_surface_guard.py
+
+# Placeholder marking the GPU execution surface. Never runs in home-lab (the
+# gb300 tag has no runner there) and never in an MR pipeline; if a GB300 runner
+# is ever registered, this stays manual-only per validate->plan->apply->verify.
+gb300-surface:
+  stage: gpu-evidence
+  tags: [gb300]
+  variables:
+    IGC_SURFACE: gpu
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+  script:
+    - echo "GPU passes run on approved GB300 slot containers; see configs/ci/pass_matrix.yaml"
