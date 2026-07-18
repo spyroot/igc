@@ -1,19 +1,20 @@
 # Environments: where igc runs
 
 Three surfaces matter for `igc`: local CPU development, the reproducible Docker test image, and the
-GB300 NVL72 training cluster.
+GB300 NVL72 training cluster. This doc covers environment setup only; the training runbook (data,
+launch, W&B, checkpoints) is [TRAINING.md](TRAINING.md).
 
 | Surface | Purpose | How |
 | --- | --- | --- |
-| Local CPU (mac/linux) | development and offline smoke tests | conda env `igc-dev`, created by `environment-dev.yaml` |
+| Local CPU (mac/linux) | development and offline smoke tests | conda env `igc-dev`, created by `environment-dev.yaml` (repo root) |
 | Docker test image | reproducible CPU checks for mac/linux/CI | `docker/Dockerfile.test` |
 | GB300 NVL72 cluster | GPU training and fine-tuning | NGC `pytorch:26.03-py3` container plus `docker/requirements-train.txt` via Slurm/pyxis |
 
 ## 1. Local CPU dev/test env
 
-The repo's `conda-recipe.yaml` is the CUDA/GPU recipe. It is not the local macOS happy path. For local
-Phase 0 work, use `environment-dev.yaml`, which creates `igc-dev` with CPU PyTorch, pytest, ruff, and
-mock-REST dependencies.
+The repo's `conda-recipe.yaml` is the CUDA/GPU recipe. It is not the local macOS happy path. For
+local CPU work, use `environment-dev.yaml`, which creates `igc-dev` with CPU PyTorch, pytest, ruff,
+and mock-REST dependencies:
 
 ```bash
 conda env create -f environment-dev.yaml
@@ -34,7 +35,7 @@ export TRANSFORMERS_OFFLINE=1
 export HF_DATASETS_OFFLINE=1
 ```
 
-Current Phase 0 smoke checks are explicit while the full offline harness is still being stabilized:
+The explicit smoke checks:
 
 ```bash
 python -m pytest -q tests/core
@@ -44,10 +45,10 @@ ruff check igc/core tests/core
 A green local run currently ends with `29 passed` for `tests/core` and `All checks passed!` from
 `ruff`.
 
-The intended integration gate is `pytest -q` plus `ruff check <changed files>` after GPU/download/live
-tests are marked and the shared fixtures are in place. Until then, new tests should name their safe
-node ids or files directly and must not require a GPU, network, HuggingFace download, live Redfish
-host, or real `redfish_ctl` crawl.
+The integration gate is `pytest -q` plus `ruff check <changed files>` once GPU/download/live tests
+are marked and the shared fixtures are in place. Until then, new tests should name their safe node
+ids or files directly and must not require a GPU, network, HuggingFace download, live Redfish host,
+or real `redfish_ctl` crawl.
 
 ## 2. Reproducible test image
 
@@ -60,8 +61,8 @@ docker run --rm igc-test:cpu python -m pytest -q tests/core
 docker run --rm igc-test:cpu ruff check igc/core tests/core
 ```
 
-The Docker build context is trimmed by `.dockerignore`, which excludes datasets, tarballs, `.npy`
-files, checkpoints, and local-only coordination files.
+The Docker build context is trimmed by `.dockerignore` (repo root), which excludes datasets,
+tarballs, `.npy` files, checkpoints, and local-only coordination files.
 
 ## 3. Training on the GB300 NVL72
 
@@ -83,9 +84,9 @@ NCCL_NVLS_ENABLE=0 accelerate launch --num_processes 1 igc_main.py --train ...
 ```
 
 Start with one GPU. Always exclude slots 2, 15, and 16, set `NCCL_NVLS_ENABLE=0`, and stage large
-artifacts on the shared BeeGFS filesystem mounted at `/models` on every node. Use node-local NVMe only
-for short-lived scratch data. Do not report a training run as successful without the exact command,
-logged metric, and artifact location.
+artifacts on the shared BeeGFS filesystem mounted at `/models` on every node. Use node-local NVMe
+only for short-lived scratch data. Do not report a training run as successful without the exact
+command, logged metric, and artifact location.
 
 ## Verification split
 

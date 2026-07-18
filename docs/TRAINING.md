@@ -118,6 +118,41 @@ phase3_argument_extraction/eval/no_argument_accuracy_rate
 phase3_argument_extraction/eval/unsafe_argument_rejection_rate
 ```
 
+The primary Phase 2 metric is unordered REST-API **set match** over `rest_api_list`
+(`list[str]`; a single-API goal is still a list of length one), supported by
+precision/recall/F1, invalid-REST rate, and hard-negative behavior. The primary Phase 3
+metrics are **method accuracy and argument accuracy plus argument JSON validity** over
+`calls` (`list[Call]`, each call carrying an explicit `http_method`, an `operation_name`
+that names the action/function when one exists and is null otherwise, and an `arguments`
+object, `{}` for reads). Call ordering is not a Phase 2/3 language-model target: it is
+separate RL-oracle evidence recorded as `expert_call_order` and consumed by the downstream
+RL policy stage, which learns ordering, prerequisites, retries, waiting, and recovery. The
+machine-readable schema under `configs/contracts/` (the authoritative Phase 2/3 goal
+contract) defines these shapes; the generic examples below are **illustrative only**
+(Redfish-shaped paths appear elsewhere only as the current test environment):
+
+```text
+# ILLUSTRATIVE ONLY — configs/contracts/ is authoritative.
+k=1  "set x to 1"
+  Phase 2: rest_api_list: ["/v1/x"]
+  Phase 3: calls: [{rest_api: "/v1/x", http_method: "PATCH", operation_name: null,
+                    arguments: {"x": 1}}]
+k=2  "set x to 1 and read z"
+  Phase 2: rest_api_list: ["/v1/x", "/v1/z"]
+  Phase 3: calls: [{rest_api: "/v1/x", http_method: "PATCH", operation_name: null,
+                    arguments: {"x": 1}},
+                   {rest_api: "/v1/z", http_method: "GET", operation_name: null,
+                    arguments: {}}]
+k=3  "set x to 1, set y to 2, and read z"
+  Phase 2: rest_api_list: ["/v1/x", "/v1/y", "/v1/z"]
+  Phase 3: calls: [{rest_api: "/v1/x", http_method: "PATCH", operation_name: null,
+                    arguments: {"x": 1}},
+                   {rest_api: "/v1/y", http_method: "PATCH", operation_name: null,
+                    arguments: {"y": 2}},
+                   {rest_api: "/v1/z", http_method: "GET", operation_name: null,
+                    arguments: {}}]
+```
+
 To use TensorBoard instead, choose the variable for the launcher you are using:
 `IGC_METRIC_REPORT=tensorboard bash scripts/run_profile.sh` for the profile wrapper, or
 `IGC_REPORT=tensorboard sbatch scripts/train_phase1_smoke.sbatch` for the sbatch smoke path.
@@ -240,9 +275,12 @@ the bottleneck.
 
 ### Multi-stage launcher
 
-[scripts/train_igc.sbatch](../scripts/train_igc.sbatch) is the staged curriculum launcher; it writes
-stage outputs under `experiments/${IGC_RUN}`. Keep the same `IGC_RUN` for every stage so later stages
-can find earlier checkpoints; see the script header for stage names and epoch knobs.
+[scripts/train_igc.sbatch](../scripts/train_igc.sbatch) runs several training stages back to back
+and writes stage outputs under `experiments/${IGC_RUN}`. Keep the same `IGC_RUN` for every stage so
+later stages can find earlier checkpoints; see the script header for stage names and epoch knobs.
+Stage sequencing here is only launcher-level checkpoint hand-off — there is no planner, scheduler,
+or curriculum inside Phase 2/3; ordering, prerequisites, retries, waiting, and recovery belong to
+the separate RL policy stage.
 
 ## 5. Checkpoints & weight sharing
 

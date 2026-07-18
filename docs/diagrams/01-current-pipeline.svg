@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" role="img"
+     aria-label="IGC current pipeline: D0 corpus to Phase 1 fine-tune to model_x to D1 rows, then human command to Phase 2 resource grounding to Phase 3 method/argument binding to separate z_rest and z_method encoders to a separate RL policy interacting with a JSON simulator, whose state feeds an external z_state interface.">
+  <!-- Solid background rect so the diagram is readable on both light and dark pages -->
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4b5563"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="520" rx="8" fill="#f2f4f7" stroke="#c6ccd4" stroke-width="1"/>
+
+  <text x="600" y="27" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16.5" font-weight="bold" fill="#1f2430">IGC current pipeline — Redfish is the first proof environment, not a permanent ontology</text>
+
+  <!-- ===================== TOP ROW: D0 -> Phase 1 -> model_x -> D1 ===================== -->
+
+  <!-- D0 corpus -->
+  <rect x="15" y="50" width="230" height="85" rx="6" fill="#dbe4ee" stroke="#5b7a9d" stroke-width="1.5"/>
+  <text x="130" y="67" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#1f2430">D0: captured Redfish REST records</text>
+  <text x="130" y="82" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">rest_api_map.npy = url_file_mapping</text>
+  <text x="130" y="94" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">+ allowed_methods_mapping</text>
+  <text x="130" y="106" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">(binding legal-action contract)</text>
+  <text x="130" y="118" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">per-URL JSON + allowed methods</text>
+
+  <line x1="245" y1="92" x2="303" y2="92" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Phase 1 -->
+  <rect x="305" y="50" width="130" height="85" rx="6" fill="#e3dcef" stroke="#7a68a6" stroke-width="1.5"/>
+  <text x="370" y="72" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#1f2430">Phase 1 fine-tune</text>
+  <text x="370" y="90" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.8" fill="#3b4252">causal-LM JSON</text>
+  <text x="370" y="101" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.8" fill="#3b4252">reconstruction, labels</text>
+  <text x="370" y="112" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.8" fill="#3b4252">masked to y_true JSON</text>
+
+  <line x1="435" y1="92" x2="488" y2="92" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="462" y="84" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.5" fill="#4b5563">produces</text>
+
+  <!-- model_x -->
+  <rect x="490" y="50" width="170" height="85" rx="6" fill="#e3dcef" stroke="#7a68a6" stroke-width="1.5"/>
+  <text x="575" y="82" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#1f2430">model_x</text>
+  <text x="575" y="99" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">Redfish-aware backbone</text>
+  <text x="575" y="111" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">checkpoint</text>
+
+  <line x1="660" y1="92" x2="718" y2="92" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="689" y="84" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.5" fill="#4b5563">generates</text>
+
+  <!-- D1 accepted rows -->
+  <rect x="720" y="50" width="465" height="85" rx="6" fill="#dbe4ee" stroke="#5b7a9d" stroke-width="1.5"/>
+  <text x="952" y="68" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#1f2430">D1: accepted rows — human command + realistic interface context</text>
+  <text x="952" y="85" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">pick a KNOWN UNORDERED API combination from D0 → model_x drafts a natural human command</text>
+  <text x="952" y="98" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">→ independent judge verifies it covers ALL and ONLY the selected APIs → deterministic accept</text>
+  <text x="952" y="115" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" font-style="italic" fill="#3b4252">realistic distractors, NO label leakage</text>
+
+  <!-- Elbow: D1 feeds the main row (human command) -->
+  <path d="M 790 135 L 790 182 L 90 182 L 90 226" fill="none" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="440" y="176" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#4b5563">accepted D1 text + interface context feed Phase 2</text>
+
+  <!-- ===================== MAIN ROW: command -> Phase 2 -> Phase 3 -> latents -> RL -> simulator ===================== -->
+
+  <!-- Human command -->
+  <rect x="15" y="230" width="150" height="95" rx="6" fill="#dbe4ee" stroke="#5b7a9d" stroke-width="1.5"/>
+  <text x="90" y="252" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#1f2430">Human command</text>
+  <text x="90" y="266" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#1f2430">+ interface context</text>
+  <text x="90" y="288" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">realistic distractors,</text>
+  <text x="90" y="300" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">no label leakage</text>
+
+  <line x1="165" y1="277" x2="193" y2="277" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Phase 2 -->
+  <rect x="195" y="230" width="200" height="95" rx="6" fill="#d8e8dc" stroke="#5e8f6a" stroke-width="1.5"/>
+  <text x="295" y="250" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#1f2430">Phase 2: resource grounding</text>
+  <text x="295" y="268" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9.5" fill="#1f2430">→ rest_api_list : list[str]</text>
+  <text x="295" y="283" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">UNORDERED unique set</text>
+  <text x="295" y="295" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">single item is still a length-1 list</text>
+  <text x="295" y="307" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.6" fill="#3b4252">no selected-marker / no target-only catalog</text>
+
+  <line x1="395" y1="277" x2="423" y2="277" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Phase 3 -->
+  <rect x="425" y="230" width="210" height="95" rx="6" fill="#d8e8dc" stroke="#5e8f6a" stroke-width="1.5"/>
+  <text x="530" y="248" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="bold" fill="#1f2430">Phase 3: method/argument binding</text>
+  <text x="530" y="264" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9.5" fill="#1f2430">k = 1/2/3 → calls : list[Call], UNORDERED</text>
+  <text x="530" y="280" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">Call = { rest_api, explicit http_method,</text>
+  <text x="530" y="292" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">arguments{} } — read-only → arguments {}</text>
+  <text x="530" y="308" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">exact argument VALUES stay raw</text>
+
+  <line x1="635" y1="262" x2="658" y2="253" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="635" y1="292" x2="658" y2="302" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- z_rest / z_method: two SEPARATE latent encoders -->
+  <rect x="660" y="230" width="155" height="42" rx="6" fill="#fdeacc" stroke="#b0813c" stroke-width="1.5"/>
+  <text x="737" y="247" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="bold" fill="#1f2430">z_rest encoder</text>
+  <text x="737" y="261" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.8" fill="#3b4252">REST-api selection</text>
+
+  <rect x="660" y="283" width="155" height="42" rx="6" fill="#fdeacc" stroke="#b0813c" stroke-width="1.5"/>
+  <text x="737" y="300" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="bold" fill="#1f2430">z_method encoder</text>
+  <text x="737" y="314" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.8" fill="#3b4252">method/argument structure</text>
+
+  <text x="737" y="342" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" font-style="italic" fill="#3b4252">SEPARATE latents in v1 — no shared/unified encoder,</text>
+  <text x="737" y="354" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" font-style="italic" fill="#3b4252">no shared latent space; raw argument VALUES stay OUTSIDE both</text>
+
+  <line x1="815" y1="251" x2="838" y2="262" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="815" y1="304" x2="838" y2="293" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- RL policy -->
+  <rect x="840" y="230" width="150" height="95" rx="6" fill="#f3d9d3" stroke="#a8604f" stroke-width="1.5"/>
+  <text x="915" y="248" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#1f2430">SEPARATE RL policy</text>
+  <text x="915" y="264" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.8" fill="#3b4252">learns order / retry / wait /</text>
+  <text x="915" y="276" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.8" fill="#3b4252">recovery / hidden state</text>
+  <text x="915" y="292" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.8" fill="#3b4252">order = separate RL-oracle</text>
+  <text x="915" y="304" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.8" fill="#3b4252">evidence expert_call_order, NOT</text>
+  <text x="915" y="316" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.8" fill="#3b4252">the Phase 2/3 language contract</text>
+
+  <!-- RL policy <-> simulator (execute / observation) -->
+  <line x1="992" y1="277" x2="1033" y2="277" stroke="#4b5563" stroke-width="1.5" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="1012" y="262" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.2" fill="#4b5563">execute</text>
+  <text x="1012" y="292" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.2" fill="#4b5563">observe</text>
+
+  <!-- JSON simulator -->
+  <rect x="1035" y="230" width="150" height="95" rx="6" fill="#dbe4ee" stroke="#5b7a9d" stroke-width="1.5"/>
+  <text x="1110" y="266" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#1f2430">JSON simulator</text>
+  <text x="1110" y="284" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">replays captured</text>
+  <text x="1110" y="296" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9" fill="#3b4252">Redfish JSON state</text>
+
+  <!-- simulator -> external z_state interface -->
+  <line x1="1100" y1="325" x2="1100" y2="373" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="1112" y="352" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-size="8.5" fill="#4b5563">state</text>
+
+  <rect x="1000" y="375" width="185" height="72" rx="6" fill="#e9ebee" stroke="#8a919c" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="1092" y="394" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="bold" fill="#3b4252">external z_state interface</text>
+  <text x="1092" y="410" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.8" fill="#4b5563">EXTERNAL observation encoder —</text>
+  <text x="1092" y="422" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.8" fill="#4b5563">interface only; internals are</text>
+  <text x="1092" y="434" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="8.8" fill="#4b5563">NOT designed here</text>
+
+  <!-- ===================== FOOTER CONTRACT BANNERS ===================== -->
+  <line x1="15" y1="460" x2="975" y2="460" stroke="#c6ccd4" stroke-width="1"/>
+  <text x="15" y="480" font-family="Helvetica, Arial, sans-serif" font-size="9.5" fill="#3b4252">• Phase 2 and Phase 3 outputs are UNORDERED.&#160;&#160;&#160;&#160;• Order is separate RL-oracle evidence (expert_call_order), never a Phase 2/3 label.</text>
+  <text x="15" y="500" font-family="Helvetica, Arial, sans-serif" font-size="9.5" fill="#3b4252">• Scalar shapes {"rest_api": …} / {"call": …} are FORBIDDEN — a single item is a length-1 list.&#160;&#160;&#160;&#160;• v1: z_rest and z_method are SEPARATE — no shared latent, no unified encoder, no proven zero-shot universal REST.</text>
+</svg>

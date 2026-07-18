@@ -2,14 +2,17 @@
 
 This is the single most important page in the set. If IGC were something a good prompt could do, it
 would not be worth building. It is worth building because the thing operators actually need —
-**reach a goal on real hardware, provably, in the fewest safe steps, and get better at it** — is
-exactly the thing a language model, used as a language model, cannot give you.
+**reach a goal on real hardware, provably, safely, and get better at it** — is exactly the thing a
+language model, used as a language model, cannot give you.
 
-To be clear up front: **IGC contains an LLM.** The backbone that encodes Redfish responses and helps
-plan is a language model, and that is on purpose — nothing understands a messy JSON API body like a
-model trained on language and code. The argument here is not "LLMs are bad." It is: **an LLM is the
-right *prior* and the wrong *decision-maker*.** IGC uses the model for understanding and constrains
-every *decision* to a reinforcement-learning agent operating in a real environment.
+To be clear up front: **IGC contains an LLM.** Phase 1 fine-tunes a backbone on captured Redfish
+JSON to produce `model_x` (the Phase 1 checkpoint defined in
+[`../ARCHITECTURE.md`](../ARCHITECTURE.md)), and Phases 2/3 are language tasks — nothing understands
+a messy JSON API body like a model trained on language and code. The argument here is not "LLMs are
+bad." It is: **an LLM is the right *prior* and the wrong *decision-maker*.** IGC uses the model for
+understanding — which APIs a request touches, which method and arguments each needs — and constrains
+every *consequential decision* (ordering, retries, waiting, recovery) to a **separate
+reinforcement-learning policy** operating in a real environment.
 
 ## The concrete failure: prompt a chatbot to run Redfish
 
@@ -43,14 +46,13 @@ offline.
 
 ## The three ways to solve it, compared
 
-| Property | Prompt an LLM | Hand-written script / runbook | **IGC (RL agent)** |
+| Property | Prompt an LLM | Hand-written script / runbook | **IGC (pipeline + RL policy)** |
 | --- | --- | --- | --- |
-| Knows *this* host's real resource tree | No — reasons from a generic prior | Only what the author hard-coded | **Yes** — the observation *is* the live `GET` |
-| Can invent a non-existent endpoint/method | **Yes, routinely** | No (but brittle if the API differs) | **No** — chooses only from the legal action catalog |
-| Handles a new vendor / unseen machine | Guesses, often wrong | Breaks until someone rewrites it | **Yes** — endpoints scored by structure, not memorized ids |
-| Finds the *shortest / safest* path | No notion of cost | The author's fixed path, optimal or not | **Yes** — learned value over whole trajectories |
-| Knows whether it *succeeded* | Self-reports, unverifiable | Only what the author asserted | **Yes** — an evaluator checks the goal `spec` against the new state |
-| Recovers from a failed step | No memory across attempts | Only pre-written error branches | **Yes** — learns ret/recovery from experience (HER) |
+| Knows *this* host's real interface | No — reasons from a generic prior | Only what the author hard-coded | **Yes** — trained on the captured interface (D0); observations are real reads |
+| Can invent a non-existent endpoint/method | **Yes, routinely** | No (but brittle if the API differs) | **No** — legal methods per URL come from the `allowed_methods_mapping` contract in `rest_api_map.npy` |
+| Handles order, prerequisites, waiting | Guesses a plausible order | The author's fixed path | **Yes** — the separate RL policy learns order/retry/wait/recovery from consequences |
+| Knows whether it *succeeded* | Self-reports, unverifiable | Only what the author asserted | **Yes** — an evaluator re-reads the resource and checks the target state |
+| Recovers from a failed step | No memory across attempts | Only pre-written error branches | **Yes** — recovery is learned from experience (HER) |
 | Gets better over time | No | No | **Yes** — every episode is training signal |
 | Safe to point at real hardware | No | Depends entirely on the author | **By design** — `dry-run → approval → execute` guardrail |
 
@@ -58,71 +60,67 @@ A hand-written script is honest but frozen: it encodes one operator's path for o
 rots the moment the API, the firmware, or the vendor changes. An LLM is flexible but ungrounded. IGC
 is built to be **both grounded and adaptive** — which is the combination the job actually requires.
 
-## The five properties IGC guarantees (and why each kills a failure mode)
+## The division of labor (the current pipeline, precisely)
 
-### 1. A grounded action space — it cannot hallucinate a call
-At every state the environment exposes a **dynamic catalog of legal actions**: an endpoint drawn from
-the *walked* Redfish resource tree, paired with an HTTP method from *that endpoint's* advertised
-`allowed_methods`, plus optional typed argument slots. The policy scores and picks **only from this
-set** — it has no way to emit a URL or method that the API did not offer. This is a deliberate design
-decision (see [`../DECISIONS.md`](../DECISIONS.md), D-001): the alternative of "let the LLM generate
-the action" was considered and **rejected**, both because it re-introduces hallucination and because
-it breaks the offline TD/HER learning the agent depends on. Hallucinated endpoints are not filtered
-out after the fact — they are **impossible to express**.
+1. **Phase 2 — which APIs.** From the operator's text, extract `rest_api_list: list[str]` — an
+   **unordered unique set** of REST APIs drawn from the captured interface. `[A, B] == [B, A]`; a
+   request that maps to nothing yields `[]`; a single API is still a length-1 list. No ordering, no
+   plan, no schedule lives here.
+2. **Phase 3 — how to call each one.** For each selected API, bind an explicit `http_method` and an
+   `arguments` object (`{}` for read-only calls), emitting `calls: list[Call]` — still
+   **unordered**. Exact argument *values* stay raw.
+3. **Two separate encoders.** `z_rest` encodes the resolved API selection; `z_method` encodes
+   method/argument structure. They are **separate latents in v1** — no shared space, no unified
+   encoder — and argument values stay outside both.
+4. **The separate RL policy decides.** Ordering, retries, waiting for long-running tasks,
+   prerequisite reads, and recovery are learned by the RL policy against the JSON simulator
+   (replaying captured Redfish state). Known-good order is supplied as **separate RL-oracle
+   evidence (`expert_call_order`)**, never smuggled into the Phase 2/3 contract.
+
+Take any stage away and you are back to a confident guess. Keep all of them and you have an agent an
+operator can actually audit.
+
+## The properties that kill the failure modes
+
+### 1. A grounded action surface — it cannot hallucinate a call
+The APIs the pipeline can name come from the walked, captured interface (D0), and the methods legal
+on each URL come from `allowed_methods_mapping` in `rest_api_map.npy` — the binding legal-action
+contract produced by `redfish_ctl` discovery. A URL or verb the interface never advertised is not
+filtered out after the fact; it is outside the trained selection space and rejected by the contract
+gate.
 
 ### 2. Verified success — the reward is measured, not self-reported
-A goal carries a machine-checkable `spec` (`igc/core/types.py`). After each action, an **evaluator**
-compares the new observation to that spec and returns success/reward. "Did the power state become
-`On`?" is answered by *reading the resource*, not by asking the model how it thinks it did. This is
-the anti-hallucination property that matters most operationally: **IGC's notion of "done" is a fact
-about the hardware, not an opinion about the transcript.**
+"Did the power state become `On`?" is answered by *re-reading the resource*, not by asking the model
+how it thinks it did. A `2xx` on a write means *accepted*, never *achieved*. **IGC's notion of
+"done" is a fact about the (simulated or real) hardware, not an opinion about the transcript.**
 
-### 3. An optimal strategy — learned value over trajectories, not a greedy guess
-Reaching a goal is usually multi-step (discover the system, check the current boot config, stage the
-change, trigger the reset, confirm). IGC learns a **value function over whole trajectories** (DQN-style
-targets), so it prefers the sequence that reaches the goal in the fewest, least-risky steps — and it
-can tell that a locally-tempting action leads to a dead end. A prompt has no cost model; a script has
-the author's fixed path whether or not it is optimal.
+### 3. Order, retries, and recovery are learned, not asserted
+Reaching a goal is usually multi-step, with hidden prerequisites (stage a pending setting before the
+reset; wait for a task to reach a terminal state). The Phase 2/3 language contract deliberately says
+nothing about order — the RL policy learns it from reward and from `expert_call_order` oracle
+evidence, and may legally insert reads, waits, retries, and recovery calls the target set never
+mentioned.
 
 ### 4. It learns *in the environment*, including from failure
-Most attempts on real systems don't go perfectly the first time. **Hindsight Experience Replay**
-turns a trajectory that missed its intended goal into training signal for the goal it actually
-reached — so failed or partial episodes still make the agent better. This is learning *from the
-consequences of real actions*, which is precisely what a stateless prompt cannot do.
+Most attempts do not go perfectly. **Hindsight Experience Replay** relabels a trajectory that missed
+its intended goal with the goal it actually reached, so failed or partial episodes still make the
+policy better. This runs offline over captured JSON in the simulator — learning from consequences
+without touching hardware.
 
-### 5. It transfers — one policy, many vendors and machines
-Because candidates are encoded by their **structure** (path tokens, HTTP method, resource type,
-how the endpoint is reached, whether it carries an action target — see D-002) rather than by a
-memorized id, a Supermicro or HPE URL the agent has never seen lands near the Dell URLs it has. IGC's
-own go/no-go experiment is *zero-shot on a held-out vendor* over the repo's multi-vendor fixture
-corpora. Generalization is the target being measured, not a hope. (That same experiment is honest
-about the bar: representation similarity alone is not enough — the *learned* scoring is load-bearing,
-which is exactly why this is trained RL and not a clever embedding lookup. See D-002's recorded
-result.)
-
-## Where the LLM still earns its place
-
-The model is doing real work — just not the deciding:
-
-- **Understanding** the observation: turning a nested, vendor-specific JSON body into a state the
-  policy can use is a language/code problem the backbone is good at.
-- **Goal extraction**: mapping a high-level `instruction` into atomic `GoalRef` targets and explicit
-  dependency hints is where the model's world knowledge helps; the RL policy still learns execution
-  order from reward.
-- **Argument values**: choosing enum values for an action's typed slots draws on the model's grasp of
-  what the fields mean.
-
-The division of labor is the whole design: **LLM for language, RL for consequential decisions,
-the real API for ground truth, an evaluator for the verdict.** Take any one of those away and you are
-back to a confident guess. Keep all four and you have an agent an operator can actually turn loose on
-hardware.
+### 5. Transfer is measured, never assumed
+The multi-vendor fixture corpora in the repo (Dell iDRAC, Supermicro, HPE iLO, generic DMTF) exist
+to *measure* generalization. The honest record so far: a frozen-encoder zero-shot ranking experiment
+came in **under the acceptance bar** on a large held-out corpus (numbers in
+[`uc-06-fleet-remediation-multivendor.md`](uc-06-fleet-remediation-multivendor.md)) — which is
+exactly why v1 claims **no** zero-shot universal-REST capability and no shared cross-task latent.
+Redfish is the first proof environment; anything beyond it is future evidence, not a present claim.
 
 ## The one-sentence takeaway
 
-A prompted LLM answers *"what call would plausibly do this?"*; IGC answers *"what is the shortest,
-verifiable, allowed sequence that provably reaches this goal on the machine in front of me — and how
-do I do it better next time?"* Those are different questions, and only the second one is safe to
-automate.
+A prompted LLM answers *"what call would plausibly do this?"*; IGC answers *"which calls does this
+request actually name on this interface, with which methods and arguments — and, separately, in what
+learned order do I execute, verify, and recover?"* Those are different questions, and only the
+second one is safe to automate.
 
 Author:
 Mus mbayramo@stanford.edu
