@@ -746,6 +746,30 @@ def test_pro_judge_acceptance_formula_requires_exact_structured_verdict() -> Non
     assert not unsupported.acceptance_for(selected)
 
 
+@pytest.mark.parametrize(
+    "judge_kwargs",
+    (
+        {"accepted": False},
+        {"natural": False},
+        {"nonsense": True},
+        {"ambiguous": True},
+        {"duplicate_intent": True},
+        {"method_semantics_valid": False},
+    ),
+)
+def test_pro_judge_acceptance_formula_rejects_each_boolean_blocker(
+    judge_kwargs: dict[str, bool],
+) -> None:
+    """Every structured judge boolean can independently block D1 acceptance."""
+    selected = ["/redfish/v1/A", "/redfish/v1/B"]
+    result = parse_pro_judge_result(
+        _judge_json(rest_api_list=selected, **judge_kwargs),
+    )
+
+    assert result.invalid_json is False
+    assert not result.acceptance_for(selected)
+
+
 def test_pro_judge_result_parsing_accepts_fenced_or_explained_json() -> None:
     """Common model wrappers are stripped before judge JSON validation."""
     fenced = parse_pro_judge_result(f"```json\n{_judge_json()}\n```")
