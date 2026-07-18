@@ -52,10 +52,11 @@ def _is_scalar(value: Any) -> bool:
 def classify_row(calls: list[Mapping[str, Any]]) -> set[str]:
     """Classify one row's call set into curriculum categories.
 
-    :param calls: the row's ``y_true.calls`` (each ``{rest_api, method, arguments}``).
+    :param calls: the row's ``y_true.calls`` (each
+        ``{rest_api, http_method, operation_name, arguments}``).
     :return: the set of category names this row satisfies (possibly several).
     """
-    methods = {str(call.get("method", "")).upper() for call in calls}
+    methods = {str(call.get("http_method", "")).upper() for call in calls}
     categories: set[str] = set()
 
     if calls and methods <= _READ:
@@ -70,7 +71,7 @@ def classify_row(calls: list[Mapping[str, Any]]) -> set[str]:
         categories.add("delete_observe")
 
     for call in calls:
-        method = str(call.get("method", "")).upper()
+        method = str(call.get("http_method", "")).upper()
         arguments = dict(call.get("arguments") or {})
         if method not in _READ and not arguments:
             categories.add("zero_argument_function")
@@ -96,7 +97,7 @@ def classify_row(calls: list[Mapping[str, Any]]) -> set[str]:
 def _combination_key(calls: list[Mapping[str, Any]]) -> str:
     """Canonical unordered identity of a call combination (order-independent)."""
     parts = sorted(
-        (str(call.get("rest_api", "")), str(call.get("method", "")).upper())
+        (str(call.get("rest_api", "")), str(call.get("http_method", "")).upper())
         for call in calls
     )
     return json.dumps(parts)

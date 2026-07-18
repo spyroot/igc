@@ -36,7 +36,7 @@ def _row(text: str, calls: list[dict]) -> dict:
 
 def _call(rest_api: str, method: str, arguments: dict | None = None) -> dict:
     """One bound call."""
-    return {"rest_api": rest_api, "method": method, "arguments": dict(arguments or {})}
+    return {"rest_api": rest_api, "http_method": method, "arguments": dict(arguments or {})}
 
 
 def _curriculum_rows() -> list[dict]:

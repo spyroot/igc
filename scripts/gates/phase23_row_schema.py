@@ -52,7 +52,18 @@ _TYPES: dict[str, tuple[type, ...]] = {
     "string": (str,),
     "integer": (int,),
     "boolean": (bool,),
+    "null": (type(None),),
 }
+
+
+def _type_ok(value: Any, type_names: list[str]) -> bool:
+    """True when the value satisfies any of the JSON type names (union support)."""
+    for name in type_names:
+        if name == "integer" and isinstance(value, bool):
+            continue  # bool never satisfies integer
+        if isinstance(value, _TYPES[name]):
+            return True
+    return False
 
 
 def validate_schema(value: Any, schema: Mapping[str, Any], path: str = "$") -> list[str]:
@@ -73,15 +84,15 @@ def validate_schema(value: Any, schema: Mapping[str, Any], path: str = "$") -> l
 
     expected_type = schema.get("type")
     if expected_type is not None:
-        allowed = _TYPES[expected_type]
-        if expected_type == "integer" and isinstance(value, bool):
-            violations.append(f"{path}: expected integer, got bool")
-            return violations
-        if not isinstance(value, allowed):
+        # "type" may be one name or a union list (e.g. ["string", "null"]).
+        type_names = expected_type if isinstance(expected_type, list) else [expected_type]
+        if not _type_ok(value, type_names):
             violations.append(
-                f"{path}: expected {expected_type}, got {type(value).__name__}"
+                f"{path}: expected {'|'.join(type_names)}, got {type(value).__name__}"
             )
             return violations
+        # Object/array traversal below applies only to the single-name forms.
+        expected_type = type_names[0] if len(type_names) == 1 else None
 
     if expected_type == "object":
         for key in schema.get("required", []):
@@ -141,6 +152,7 @@ def canonical_rows() -> dict[str, dict[str, Any]]:
         arguments_by_api={
             "/redfish/v1/Systems/1/Bios/Settings": {"Attributes": {"BootMode": "Uefi"}},
         },
+        # No operation name here: plain REST verbs carry operation_name: null.
     )
     return {"phase2": phase2, "phase3": phase3}
 

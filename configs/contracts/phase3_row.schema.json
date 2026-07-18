@@ -1,5 +1,5 @@
 {
-  "$comment": "Machine-readable Phase 3 training-row schema. AUTHORITATIVE over every doc/docstring example. Produced by igc/ds/rest_goal_contract.py:build_call_row; enforced by scripts/gates/phase23_row_schema.py. y_true.calls is an UNORDERED UNIQUE call set (one call is still a list of length one); a Call is exactly {rest_api, method, arguments} — allowed_methods is x context evidence, never part of a Call; execution order is never part of this row.",
+  "$comment": "Machine-readable Phase 3 training-row schema. AUTHORITATIVE over every doc/docstring example. Produced by igc/ds/rest_goal_contract.py:build_call_row; enforced by scripts/gates/phase23_row_schema.py. y_true.calls is an UNORDERED UNIQUE call set (one call is still a list of length one); a Call is exactly {rest_api, http_method, operation_name, arguments} — operation_name is the action/function name when available and null for plain REST verbs; allowed_methods is x context evidence, never part of a Call; execution order is never part of this row.",
   "type": "object",
   "required": [
     "phase",
@@ -49,11 +49,12 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["rest_api", "method", "arguments"],
+            "required": ["rest_api", "http_method", "operation_name", "arguments"],
             "additionalProperties": false,
             "properties": {
               "rest_api": { "type": "string" },
-              "method": { "type": "string" },
+              "http_method": { "type": "string" },
+              "operation_name": { "type": ["string", "null"] },
               "arguments": { "type": "object" }
             }
           }
