@@ -12,6 +12,27 @@
 version: 1
 name: rest_goal_contract
 
+# ---------------------------------------------------------------------------
+# SINGLE AUTHORITY. Prose/examples anywhere else in the repo (docs, docstrings,
+# smoke fixtures) are illustrative; THIS machine-readable schema is what wins.
+# Phase 2/3 are UNORDERED — execution order is NOT part of these contracts; it
+# is separate RL-oracle training evidence (see configs/contracts/goal_latent.yaml
+# order_evidence_shape). Any producer that emits an ordered handoff (ordered_goals)
+# or copies rest_api_list straight into both input and target is NON-COMPLIANT.
+authority:
+  - "Phase 2 always emits rest_api_list: list[str]."
+  - "Phase 3 always emits calls: list[Call]."
+  - "One item is still a list of length one."
+  - "Phase 2 and Phase 3 are unordered."
+  - "Execution order belongs only to the RL training oracle."
+  - "Arguments are always an object."
+  - "Methods and mutation arguments are explicit; no defaults."
+  - "z_rest and z_method are separate encoder outputs."
+  - "Literal argument values are retained outside both latents."
+  - "No planner, DMTF ontology, or unified latent is in v1."
+  - "Examples are illustrative; the machine-readable schema is authoritative."
+# ---------------------------------------------------------------------------
+
 # THE one module that owns the Phase 2/3 REST-goal contract. Any canonical
 # symbol (below) defined in a different module is a parallel island -> fail.
 canonical_module: igc/ds/rest_goal_contract.py
