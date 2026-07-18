@@ -145,9 +145,32 @@ def main(argv: list[str] | None = None) -> int:
     problems = []
     if not isinstance(contract, dict) or contract.get("max_operations") != MAX_OPERATIONS:
         problems.append("contract max_operations must be 3")
-    for key in ("tensor_shapes", "merge_blocking_checks", "retained_raw"):
+    for key in (
+        "tensor_shapes",
+        "merge_blocking_checks",
+        "retained_raw",
+        "encoder_sources",
+        "rl_training_freeze",
+    ):
         if key not in (contract or {}):
             problems.append(f"contract missing {key}")
+    # Locked encoder sources: each encoder comes from the phase that learned it.
+    sources = (contract or {}).get("encoder_sources") or {}
+    expected_sources = {
+        "state_encoder_backbone": "model_x",
+        "z_rest_encoder": "goal_extractor",
+        "z_method_encoder": "argument_extractor",
+    }
+    for component, source in expected_sources.items():
+        if sources.get(component) != source:
+            problems.append(f"encoder_sources.{component} must be {source!r}")
+    # Locked RL freeze: encoders frozen, only the policy learns.
+    freeze = (contract or {}).get("rl_training_freeze") or {}
+    for component in ("state_encoder", "z_rest_encoder", "z_method_encoder"):
+        if freeze.get(component) != "frozen":
+            problems.append(f"rl_training_freeze.{component} must be 'frozen'")
+    if freeze.get("rl_policy") != "trainable":
+        problems.append("rl_training_freeze.rl_policy must be 'trainable'")
     if problems:
         for p in problems:
             print(f"BLOCKER: {p}", file=sys.stderr)
