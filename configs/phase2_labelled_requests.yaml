@@ -1,5 +1,5 @@
 dataset:
-  name: phase2_labelled_requests
+  name: D1
   prompt_spec_version: phase2-labelled-requests-v1
 
 sampling:
@@ -65,7 +65,8 @@ prompts:
       Draft operator request:
       {draft_text}
 
-      Return JSON with accepted, rest_api_list, nonsense, reason, and order_evidence.
+      Return JSON with accepted, natural, nonsense, ambiguous, duplicate_intent,
+      method_semantics_valid, coverage, extra_intents, and reason.
 
 wandb:
   namespace: phase2_labelled_requests

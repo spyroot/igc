@@ -16,15 +16,12 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-from igc.modules.base.metric_keys import (
-    PHASE2_LABELLED_REQUESTS,
-    PHASE2_WANDB_METRIC_KEYS,
-    PHASE3_WANDB_METRIC_KEYS,
-)
+from igc.modules.base.metric_keys import PHASE2_WANDB_METRIC_KEYS, PHASE3_WANDB_METRIC_KEYS
 
 
 MODEL_X = "model_x"
 D0 = "D0"
+D1 = "D1"
 
 PHASE2_GOAL_EXTRACT_METRIC_KEYS = PHASE2_WANDB_METRIC_KEYS
 PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS = PHASE3_WANDB_METRIC_KEYS
@@ -101,46 +98,107 @@ def _allowed_methods_map(contexts: Sequence[RedfishContext]) -> dict[str, list[s
     }
 
 
+def _unique_rest_api_list(rest_api_list: Sequence[str]) -> list[str]:
+    """Return a duplicate-free REST API list preserving first occurrence."""
+    result: list[str] = []
+    seen: set[str] = set()
+    for rest_api in rest_api_list:
+        rest_api = str(rest_api)
+        if rest_api in seen:
+            raise ValueError("D1 y_true.rest_api_list must be an unordered unique set")
+        seen.add(rest_api)
+        result.append(rest_api)
+    return result
+
+
+def _locked_d1_validation(validation: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Return the exact one-string/eight-bool D1 validation block."""
+    result: dict[str, Any] = {
+        "text_source": "mock_fixture",
+        "review_judged": False,
+        "natural": True,
+        "exact_api_coverage": True,
+        "extra_intent": False,
+        "duplicate_intent": False,
+        "ambiguous": False,
+        "nonsense": False,
+        "method_semantics_valid": True,
+    }
+    if validation:
+        result.update(dict(validation))
+    required_keys = {
+        "text_source",
+        "review_judged",
+        "natural",
+        "exact_api_coverage",
+        "extra_intent",
+        "duplicate_intent",
+        "ambiguous",
+        "nonsense",
+        "method_semantics_valid",
+    }
+    keys = set(result)
+    if keys != required_keys:
+        missing = sorted(required_keys - keys)
+        extra = sorted(keys - required_keys)
+        raise ValueError(f"D1 validation keys mismatch missing={missing} extra={extra}")
+    if not isinstance(result["text_source"], str):
+        raise ValueError("D1 validation.text_source must be a string")
+    for key in sorted(required_keys - {"text_source"}):
+        if not isinstance(result[key], bool):
+            raise ValueError(f"D1 validation.{key} must be a bool")
+    return result
+
+
+def build_d1_rest_api_list_row(
+    *,
+    text: str,
+    contexts: Sequence[RedfishContext],
+    rest_api_list: Sequence[str],
+    validation: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build one locked ``D1`` row for text-to-REST-API training.
+
+    :param text: operator sentence.
+    :param contexts: current Redfish JSON/method context.
+    :param rest_api_list: target REST APIs, stored as an unordered unique set.
+    :param validation: optional judge/provenance flags for accepted rows.
+    :return: JSON-compatible Phase 2 row with locked field names.
+    """
+    by_api = _contexts_by_api(contexts)
+    _require_context(rest_api_list, by_api)
+    api_set = _unique_rest_api_list(rest_api_list)
+    return {
+        "phase": 2,                       # Phase 2: text -> REST API set.
+        "dataset": D1,                    # D1 is the accepted Phase 2 dataset.
+        "source_dataset": D0,             # D1 is drafted from D0 context.
+        "model_x": MODEL_X,               # model_x creates draft text before judging.
+        "task": "text_to_rest_api_list",  # Contract name from the phase workflow.
+        "target_semantics": "unordered_unique_set",
+        "x": {"text": text},              # Phase 2 training input is text-only.
+        "y_true": {"rest_api_list": api_set},
+        "validation": _locked_d1_validation(validation),
+    }
+
+
 def build_phase2_labelled_request_row(
     *,
     text: str,
     contexts: Sequence[RedfishContext],
     rest_api_list: Sequence[str],
-    order_evidence: str = "explicit_then",
+    validation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build one mock ``phase2_labelled_requests`` schema row.
+    """Compatibility wrapper for the canonical D1 row builder.
 
-    :param text: operator sentence.
-    :param contexts: current Redfish JSON/method context.
-    :param rest_api_list: target REST APIs, ordered only for explicit-order fixtures.
-    :param order_evidence: label describing why order should be evaluated strictly.
-    :return: JSON-compatible Phase 2 row with locked field names.
+    New code should call :func:`build_d1_rest_api_list_row`. This wrapper keeps
+    older imports from creating a second D1 shape while callers migrate.
     """
-    by_api = _contexts_by_api(contexts)
-    _require_context(rest_api_list, by_api)
-    return {
-        "phase": 2,                         # Phase 2: text -> rest_api_list.
-        "dataset": PHASE2_LABELLED_REQUESTS,  # Canonical Phase 2 dataset name.
-        "source_dataset": D0,               # D0 is the Phase 1 JSON reconstruction source.
-        "model_x": MODEL_X,                 # model_x creates/reviews labels after Phase 1.
-        "task": "text_to_rest_api_list",    # Contract name from the phase workflow.
-        "x": {
-            "text": text,                   # Operator sentence shown to the model.
-            "json": [dict(context.json) for context in contexts],  # Current resource bodies.
-            "allowed_methods": _allowed_methods_map(contexts),  # Method legality context.
-        },
-        "y_true": {
-            "rest_api_list": list(rest_api_list),  # Ordered API label, never sorted.
-            "order_evidence": order_evidence,     # Whether strict order evidence is explicit.
-        },
-        "validation": {
-            "text_source": "mock_fixture",         # Tiny offline fixture, not real generation.
-            "review_judged": False,                # Real review waits for model_x checkpoint.
-            "all_rest_api_present": True,          # All labels are present in current context.
-            "extra_rest_api_present": False,       # The mock row carries only requested APIs.
-            "order_preserved": True,               # The label keeps the caller-provided order.
-        },
-    }
+    return build_d1_rest_api_list_row(
+        text=text,
+        contexts=contexts,
+        rest_api_list=rest_api_list,
+        validation=validation,
+    )
 
 
 def _default_method(allowed_methods: Sequence[str]) -> str:
@@ -193,7 +251,7 @@ def build_ordered_call_row(
 
     return {
         "phase": 3,                           # Phase 3: ordered APIs -> ordered calls.
-        "source_dataset": PHASE2_LABELLED_REQUESTS,  # Phase 3 starts from accepted labels.
+        "source_dataset": D1,                 # Phase 3 starts from accepted D1 labels.
         "model_x": MODEL_X,                   # model_x is the Phase 1 checkpoint lineage.
         "task": "text_and_rest_api_list_to_calls",  # Contract name from the workflow.
         "x": {
@@ -211,7 +269,7 @@ def build_ordered_call_row(
 def render_rest_api_list_example(row: Mapping[str, Any]) -> RenderedContractExample:
     """Render a Phase 2 row into prompt and target JSON text.
 
-    :param row: row from :func:`build_phase2_labelled_request_row`.
+    :param row: row from :func:`build_d1_rest_api_list_row`.
     :return: rendered prompt/target split.
     """
     x = row["x"]
@@ -219,11 +277,7 @@ def render_rest_api_list_example(row: Mapping[str, Any]) -> RenderedContractExam
     prompt = (
         "### Operator Text\n"
         f"{x['text']}\n\n"
-        "### Current Redfish JSON\n"
-        f"{_canonical_json(x['json'])}\n\n"
-        "### Allowed Methods\n"
-        f"{_canonical_json(x['allowed_methods'])}\n\n"
-        "### Ordered REST API List\n"
+        "### REST API Set\n"
     )
     return RenderedContractExample(
         prompt=prompt,
@@ -277,6 +331,40 @@ def parse_rest_api_list_y_pred(y_pred: Mapping[str, Any] | str) -> list[str]:
     if not all(isinstance(rest_api, str) for rest_api in rest_api_list):
         raise ValueError("each y_pred.rest_api_list item must be a string")
     return list(rest_api_list)
+
+
+def evaluate_rest_api_list_y_pred(
+    row: Mapping[str, Any],
+    y_pred: Mapping[str, Any] | str,
+) -> dict[str, Any]:
+    """Evaluate a Phase 2 prediction as an unordered unique REST API set.
+
+    :param row: row from :func:`build_d1_rest_api_list_row`.
+    :param y_pred: model output as a mapping or JSON string.
+    :return: parse status plus duplicate-aware unordered-set metrics.
+    """
+    expected = list(row["y_true"]["rest_api_list"])
+    try:
+        predicted = parse_rest_api_list_y_pred(y_pred)
+    except json.JSONDecodeError as exc:
+        return _failed_rest_api_list_evaluation(expected, f"invalid_json: {exc.msg}")
+    except ValueError as exc:
+        return _failed_rest_api_list_evaluation(expected, str(exc))
+
+    expected_set = set(expected)
+    predicted_set = set(predicted)
+    duplicate_prediction = len(predicted) != len(predicted_set)
+    set_match = not duplicate_prediction and predicted_set == expected_set
+    return {
+        "parse_ok": True,
+        "error": "",
+        "set_match": set_match,
+        "duplicate_prediction": duplicate_prediction,
+        "missing_rest_api": sorted(expected_set - predicted_set),
+        "extra_rest_api": sorted(predicted_set - expected_set),
+        "expected_count": len(expected),
+        "predicted_count": len(predicted),
+    }
 
 
 def parse_ordered_calls_y_pred(y_pred: Mapping[str, Any] | str) -> list[dict[str, Any]]:
@@ -451,6 +539,20 @@ def _failed_ordered_call_evaluation(
         "arguments_json_parse_rate": 0.0,
         "invalid_method_rate": 1.0 if invalid_method else 0.0,
         "readonly_empty_arguments_rate": 0.0,
+    }
+
+
+def _failed_rest_api_list_evaluation(expected: Sequence[str], error: str) -> dict[str, Any]:
+    """Return a stable Phase 2 evaluation result for parse failures."""
+    return {
+        "parse_ok": False,
+        "error": error,
+        "set_match": False,
+        "duplicate_prediction": False,
+        "missing_rest_api": sorted(set(expected)),
+        "extra_rest_api": [],
+        "expected_count": len(expected),
+        "predicted_count": 0,
     }
 
 

@@ -418,10 +418,21 @@ def _mock_judge_provider(request: dict[str, Any]) -> str:
     """Return a deterministic accepting judge response for offline smoke tests."""
     return json.dumps({
         "accepted": True,
-        "rest_api_list": request["expected_rest_api_list"],
+        "natural": True,
         "nonsense": False,
+        "ambiguous": False,
+        "duplicate_intent": False,
+        "method_semantics_valid": True,
+        "coverage": [
+            {
+                "rest_api": rest_api,
+                "text_span": "fixture",
+                "supported": True,
+            }
+            for rest_api in request["expected_rest_api_list"]
+        ],
+        "extra_intents": [],
         "reason": "fixture",
-        "order_evidence": "none",
     })
 
 

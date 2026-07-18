@@ -12,6 +12,7 @@ from types import ModuleType
 
 import pytest
 
+from igc.ds.rest_goal_contract import D1
 from igc.modules.base.metric_keys import (
     PHASE2_LABELLED_REQUESTS,
     PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS,
@@ -85,6 +86,29 @@ def _metric(group: str, name: str | None = None) -> str:
     return phase_metric(PHASE2_LABELLED_REQUESTS, group, name)
 
 
+def _judge_payload(
+    rest_api_list: list[str],
+    *,
+    accepted: bool = True,
+    nonsense: bool = False,
+) -> dict:
+    """Return a structured D1 judge fixture payload."""
+    return {
+        "accepted": accepted,
+        "natural": True,
+        "nonsense": nonsense,
+        "ambiguous": False,
+        "duplicate_intent": False,
+        "method_semantics_valid": True,
+        "coverage": [
+            {"rest_api": rest_api, "text_span": "fixture", "supported": True}
+            for rest_api in rest_api_list
+        ],
+        "extra_intents": [],
+        "reason": "fixture",
+    }
+
+
 def test_cli_mock_mode_writes_accepted_jsonl_and_metrics(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -98,27 +122,33 @@ def test_cli_mock_mode_writes_accepted_jsonl_and_metrics(
     stdout = capsys.readouterr().out
 
     assert code == 0
-    assert "dataset=phase2_labelled_requests" in stdout
+    assert "dataset=D1" in stdout
     assert "accepted=2" in stdout
     assert f"output_jsonl={output}" in stdout
     rows = _read_jsonl(output)
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert len(rows) == 2
     assert rows[0]["phase"] == 2
-    assert rows[0]["dataset"] == PHASE2_LABELLED_REQUESTS
+    assert rows[0]["dataset"] == D1
+    assert rows[0]["source_dataset"] == "D0"
+    assert rows[0]["target_semantics"] == "unordered_unique_set"
     assert rows[0]["task"] == "text_to_rest_api_list"
     assert rows[0]["x"]["text"].startswith("fixture request covering 3")
-    assert len(rows[0]["x"]["json"]) == 3
-    assert len(rows[0]["x"]["rest_api_list"]) == 3
-    assert rows[0]["x"]["allowed_methods"][rows[0]["x"]["rest_api_list"][0]][0] == "GET"
-    assert set(rows[0]["y_true"]["rest_api_list"]) == set(rows[0]["x"]["rest_api_list"])
-    assert rows[0]["validation"]["set_coverage_preserved"] is True
+    assert set(rows[0]["x"]) == {"text"}
+    assert len(rows[0]["y_true"]["rest_api_list"]) == 3
+    assert rows[0]["validation"]["exact_api_coverage"] is True
     assert rows[0]["validation"]["review_judged"] is True
+    assert rows[0]["validation"]["natural"] is True
+    assert rows[0]["validation"]["extra_intent"] is False
+    assert rows[0]["validation"]["duplicate_intent"] is False
+    assert rows[0]["validation"]["ambiguous"] is False
+    assert rows[0]["validation"]["nonsense"] is False
+    assert rows[0]["validation"]["method_semantics_valid"] is True
     assert "calls" not in json.dumps(rows)
     assert '"method":' not in json.dumps(rows)
     assert '"arguments":' not in json.dumps(rows)
     assert set(PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS) <= set(metrics)
-    assert metrics["dataset"] == PHASE2_LABELLED_REQUESTS
+    assert metrics["dataset"] == D1
     assert metrics[_metric("draft_total")] == 2
     assert metrics[_metric("accepted_total")] == 2
     assert metrics[_metric("rejected_total")] == 0
@@ -145,8 +175,8 @@ def test_cli_mock_mode_accepts_all_configured_sample_widths(
     rows = _read_jsonl(output)
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert len(rows) == 1
-    assert len(rows[0]["x"]["json"]) == sample_width
-    assert len(rows[0]["x"]["rest_api_list"]) == sample_width
+    assert set(rows[0]["x"]) == {"text"}
+    assert len(rows[0]["y_true"]["rest_api_list"]) == sample_width
     assert metrics[_metric("sample_width", "k")] == sample_width
 
 
@@ -171,12 +201,10 @@ def test_cli_mock_mode_writes_no_action_empty_set_rows(tmp_path: Path) -> None:
     no_action = rows[-1]
     assert code == 0
     assert len(rows) == 2
-    assert no_action["dataset"] == PHASE2_LABELLED_REQUESTS
+    assert no_action["dataset"] == D1
     assert no_action["task"] == "text_to_rest_api_list"
     assert no_action["x"]["text"] == "do not change anything on this server"
-    assert no_action["x"]["json"] == []
-    assert no_action["x"]["allowed_methods"] == {}
-    assert no_action["x"]["rest_api_list"] == []
+    assert set(no_action["x"]) == {"text"}
     assert no_action["y_true"]["rest_api_list"] == []
     assert no_action["validation"]["text_source"] == "hard_negative_no_action"
     assert metrics["requested_candidates"] == 2
@@ -207,7 +235,7 @@ def test_cli_mock_mode_writes_no_action_only_rows(tmp_path: Path) -> None:
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert code == 0
     assert len(rows) == 2
-    assert all(row["x"]["rest_api_list"] == [] for row in rows)
+    assert all(set(row["x"]) == {"text"} for row in rows)
     assert all(row["y_true"]["rest_api_list"] == [] for row in rows)
     assert metrics["requested_candidates"] == 2
     assert metrics["accepted_rows"] == 2
@@ -240,13 +268,7 @@ def test_cli_file_providers_are_used_without_network(tmp_path: Path) -> None:
     metrics_path = tmp_path / "out" / "metrics.json"
     drafts.write_text("show the sampled fixture systems\n", encoding="utf-8")
     judges.write_text(
-        json.dumps({
-            "accepted": True,
-            "rest_api_list": ["/redfish/v1/Systems/3", "/redfish/v1/Systems/2"],
-            "nonsense": False,
-            "reason": "fixture",
-            "order_evidence": "none",
-        })
+        json.dumps(_judge_payload(["/redfish/v1/Systems/3", "/redfish/v1/Systems/2"]))
         + "\n",
         encoding="utf-8",
     )
@@ -356,13 +378,7 @@ def test_cli_openai_compatible_provider_uses_fake_http_and_env_config(
             "choices": [
                 {
                     "message": {
-                        "content": json.dumps({
-                            "accepted": True,
-                            "rest_api_list": sampled,
-                            "nonsense": False,
-                            "reason": "fixture",
-                            "order_evidence": "none",
-                        }),
+                        "content": json.dumps(_judge_payload(sampled)),
                     },
                 },
             ],
@@ -392,7 +408,8 @@ def test_cli_openai_compatible_provider_uses_fake_http_and_env_config(
     assert calls[1]["url"] == "http://judge.invalid/v1/chat/completions"
     assert calls[1]["headers"]["Authorization"] == "Bearer judge-token"
     assert rows[0]["x"]["text"] == "show the sampled fixture system"
-    assert rows[0]["y_true"]["rest_api_list"] == rows[0]["x"]["rest_api_list"]
+    assert set(rows[0]["x"]) == {"text"}
+    assert rows[0]["y_true"]["rest_api_list"]
     assert metrics[_metric("accepted_total")] == 1
 
 
@@ -424,11 +441,7 @@ def test_cli_live_provider_gate_flag_allows_larger_fake_http_run(
             "choices": [
                 {
                     "message": {
-                        "content": json.dumps({
-                            "accepted": True,
-                            "rest_api_list": sampled,
-                            "nonsense": False,
-                        }),
+                        "content": json.dumps(_judge_payload(sampled)),
                     },
                 },
             ],
@@ -587,19 +600,18 @@ def test_cli_rejects_mismatch_nonsense_and_invalid_judge_json(tmp_path: Path) ->
     judges = tmp_path / "judges.jsonl"
     output = tmp_path / "out" / "phase2_labelled_requests.jsonl"
     metrics_path = tmp_path / "out" / "metrics.json"
+    records = _write_records(tmp_path / "records.jsonl", count=1)
     drafts.write_text("mismatch\nnonsense\ninvalid\n", encoding="utf-8")
     judges.write_text(
         "\n".join([
-            json.dumps({
-                "accepted": True,
-                "rest_api_list": ["/redfish/v1/not-sampled"],
-                "nonsense": False,
-            }),
-            json.dumps({
-                "accepted": False,
-                "rest_api_list": ["/redfish/v1/Systems/3"],
-                "nonsense": True,
-            }),
+            json.dumps(_judge_payload(["/redfish/v1/not-sampled"])),
+            json.dumps(
+                _judge_payload(
+                    ["/redfish/v1/Systems/0"],
+                    accepted=False,
+                    nonsense=True,
+                ),
+            ),
             "not-json",
         ])
         + "\n",
@@ -607,7 +619,20 @@ def test_cli_rejects_mismatch_nonsense_and_invalid_judge_json(tmp_path: Path) ->
     )
 
     code = script.main(
-        _base_args(tmp_path, sample_width=1, count=3)
+        [
+            "--records-jsonl",
+            str(records),
+            "--output-jsonl",
+            str(output),
+            "--metrics-out",
+            str(metrics_path),
+            "--sample-width",
+            "1",
+            "--count",
+            "3",
+            "--seed",
+            "11",
+        ]
         + [
             "--provider-mode",
             "file",
@@ -708,11 +733,7 @@ def test_cli_threshold_failure_returns_nonzero_after_writing_metrics(tmp_path: P
     metrics_path = tmp_path / "out" / "metrics.json"
     drafts.write_text("mismatch\n", encoding="utf-8")
     judges.write_text(
-        json.dumps({
-            "accepted": True,
-            "rest_api_list": ["/redfish/v1/not-sampled"],
-            "nonsense": False,
-        })
+        json.dumps(_judge_payload(["/redfish/v1/not-sampled"]))
         + "\n",
         encoding="utf-8",
     )
