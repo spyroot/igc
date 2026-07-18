@@ -26,6 +26,23 @@ retained_raw:
   - raw_calls        # compiled calls retained for the executor/verifier
   - raw_arguments    # exact argument bindings retained (e.g. {"x": 1})
 
+# Where each encoder's weights COME FROM (locked 2026-07-18). Each encoder
+# initializes from the phase that learned its representation; initializing
+# from any other source is non-compliant.
+encoder_sources:
+  state_encoder_backbone: model_x         # Phase 1: stable JSON-aware env-state representation
+  z_rest_encoder: goal_extractor          # Phase 2 checkpoint: resources selected from human language
+  z_method_encoder: argument_extractor    # Phase 3 checkpoint: methods/functions + argument structure
+
+# RL-training freeze rule (locked 2026-07-18): during RL training the encoders
+# do not move — only the policy learns. Fine-tuning any frozen component during
+# RL is non-compliant.
+rl_training_freeze:
+  state_encoder: frozen     # StateEncoder parameters are frozen
+  z_rest_encoder: frozen    # Phase 2 parameters are frozen
+  z_method_encoder: frozen  # Phase 3 parameters are frozen
+  rl_policy: trainable      # only the RL policy learns
+
 # MERGE-BLOCKING contract checks (latent.contract; structural, offline-testable):
 merge_blocking_checks:
   - correct tensor rank, dimensions and dtype

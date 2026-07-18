@@ -9,9 +9,13 @@ Mus mbayramo@stanford.edu
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
+import yaml
 
+from scripts.gates.latent_contract import main as latent_contract_main
 from scripts.gates.latent_contract import validate_goal_latent
 
 
@@ -106,6 +110,32 @@ def test_batch_dim_must_agree() -> None:
     rec = _valid_record(batch=2)
     rec["z_method"] = np.zeros((3, 3, 6), dtype=np.float32)
     assert any("batch dim mismatch" in v for v in validate_goal_latent(rec))
+
+
+_CONTRACT_PATH = Path(__file__).resolve().parents[2] / "configs" / "contracts" / "goal_latent.yaml"
+
+
+def test_contract_config_locks_encoder_sources_and_rl_freeze() -> None:
+    """The committed contract carries the locked encoder sources + RL freeze rule."""
+    assert latent_contract_main(["--contract", str(_CONTRACT_PATH)]) == 0
+
+
+def test_contract_config_rejects_unfrozen_encoder(tmp_path: Path) -> None:
+    """A contract that lets an encoder train during RL fails the gate."""
+    contract = yaml.safe_load(_CONTRACT_PATH.read_text(encoding="utf-8"))
+    contract["rl_training_freeze"]["z_rest_encoder"] = "trainable"
+    tampered = tmp_path / "goal_latent.yaml"
+    tampered.write_text(yaml.safe_dump(contract), encoding="utf-8")
+    assert latent_contract_main(["--contract", str(tampered)]) == 1
+
+
+def test_contract_config_rejects_wrong_encoder_source(tmp_path: Path) -> None:
+    """A contract that sources z_method from anything but the Phase 3 checkpoint fails."""
+    contract = yaml.safe_load(_CONTRACT_PATH.read_text(encoding="utf-8"))
+    contract["encoder_sources"]["z_method_encoder"] = "model_x"
+    tampered = tmp_path / "goal_latent.yaml"
+    tampered.write_text(yaml.safe_dump(contract), encoding="utf-8")
+    assert latent_contract_main(["--contract", str(tampered)]) == 1
 
 
 @pytest.mark.gpu
