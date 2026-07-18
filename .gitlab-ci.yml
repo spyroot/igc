@@ -58,6 +58,23 @@ surface-guard:
     - pip install --quiet pyyaml
     - python scripts/gates/ci_surface_guard.py
 
+# Outbound fence: no agent artifacts tracked, no agent attribution or
+# agent-file chatter in commit/MR messages, no internal endpoint literals.
+agent-leak-guard:
+  <<: *cpu-base
+  stage: cpu-gate
+  variables:
+    IGC_SURFACE: cpu
+    GIT_DEPTH: "0"
+  script:
+    - |
+      RANGE=""
+      if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+        RANGE="${CI_MERGE_REQUEST_DIFF_BASE_SHA}..HEAD"
+      fi
+      printf '%s\n\n%s\n' "${CI_MERGE_REQUEST_TITLE:-}" "${CI_MERGE_REQUEST_DESCRIPTION:-}" > /tmp/mr_message.txt
+      python scripts/gates/agent_leak_guard.py ${RANGE:+--commit-range "$RANGE"} --message-file /tmp/mr_message.txt
+
 # Validates committed GPU evidence manifests (schema in the pass matrix). This
 # is a CPU job: it reads JSON, it does not touch a GPU. Malformed evidence
 # fails; absent evidence passes (requiredness is enforced at phase acceptance).

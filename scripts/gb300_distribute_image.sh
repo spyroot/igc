@@ -6,7 +6,7 @@
 #
 # Runs on one node (needs docker + zstd + /models mounted; reaches the others by ssh).
 #   scripts/gb300_distribute_image.sh
-#   DIST_NODES="172.25.230.42 172.25.230.49" scripts/gb300_distribute_image.sh   # subset
+#   DIST_NODES="<node-ip> <node-ip>" scripts/gb300_distribute_image.sh           # subset
 #   FORCE_SAVE=1 scripts/gb300_distribute_image.sh                               # re-save tarball
 #
 # Only the KEYLESS image is distributed here — never the .internal SSH-key image.
@@ -29,9 +29,12 @@ case "$COMPRESS" in
     *) echo "BLOCKER: COMPRESS must be zstd or gzip (got $COMPRESS)" >&2; exit 3 ;;
 esac
 TARBALL="${MODELS_IMAGES}/${IMAGE}-${TAG}.${EXT}"
-# All 18 GB300 nodes: 172.25.230.40 .. .57
+# Node list comes from the environment (or a gitignored nodes file) — the fleet
+# addressing is internal and never hardcoded in the public repo.
+NODES_FILE="${GB300_NODES_FILE:-.internal/gb300_nodes}"
 # shellcheck disable=SC2206  # word-split the space-separated override on purpose
-NODES=(${DIST_NODES:-$(seq -f "172.25.230.%g" 40 57)})
+NODES=(${DIST_NODES:-$(cat "$NODES_FILE" 2>/dev/null || true)})
+[ "${#NODES[@]}" -gt 0 ] || { echo "BLOCKER: set DIST_NODES=\"ip ip ...\" or provide $NODES_FILE (one line, space-separated node IPs)" >&2; exit 3; }
 SSH="ssh -o BatchMode=yes -o ConnectTimeout=8"
 
 log() { echo "=== [$(date -u '+%F %T')] $* ==="; }

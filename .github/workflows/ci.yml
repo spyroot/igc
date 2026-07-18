@@ -117,6 +117,8 @@ jobs:
         with:
           submodules: recursive
           lfs: true
+          # Full history so the agent-leak guard can scan the PR's commit range.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -126,6 +128,20 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r docker/requirements-test.txt
           pip install ruff
+      - name: Agent-leak guard
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          RANGE=""
+          if [ -n "$BASE_REF" ]; then
+            git fetch -q origin "$BASE_REF"
+            RANGE="origin/${BASE_REF}..HEAD"
+          fi
+          printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > /tmp/pr_message.txt
+          python scripts/gates/agent_leak_guard.py ${RANGE:+--commit-range "$RANGE"} --message-file /tmp/pr_message.txt
       - name: Run orchestration dry-runs
         shell: bash
         run: |
