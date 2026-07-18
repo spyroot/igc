@@ -1,0 +1,164 @@
+# Single source of truth for the Phase 2 D1 dataset contract.
+#
+# Used by:
+#   scripts/gates/d1_release_contract.py  (gate contract.d1-release)
+#   tests/gates/test_d1_release_contract.py
+#
+# What D1 is: Phase 2 (REST-goal extraction) learns text -> a SET of Redfish
+# REST APIs. The Redfish corpus has API paths, allowed methods, and JSON bodies
+# but NO human request text, so D1 is DRAFTED from D0: model_x writes the missing
+# operator `text` for a pre-selected API set, and a Pro judge decides whether the
+# draft maps back to EXACTLY that selected set before the row is accepted.
+#
+# Separation of view (binding): the generator and the judge may see APIs, JSON,
+# allowed methods, descriptions, and examples; the Phase 2 TRAINING model sees
+# ONLY `x.text`; the D1 label `y_true.rest_api_list` is the API set selected
+# BEFORE generation, never re-derived from the drafted text. Therefore `x` is
+# TEXT-ONLY -- any json / allowed_methods carried in `x` is Phase-2 input leakage.
+#
+# Target semantics: the label is an UNORDERED, UNIQUE SET. A prediction is correct
+# when set(pred) == set(expected) AND it has no duplicates. Order never matters
+# ([B, A] == [A, B]); a repeated API fails.
+version: 1
+name: d1_dataset_contract
+
+# ---------------------------------------------------------------------------
+# The exact stored D1 row shape (keys + types). A renamed/retyped/added/dropped
+# field desyncs the D1 builder from the Phase 2 trainer and poisons the dataset.
+# ---------------------------------------------------------------------------
+row_shape:
+  # Exact top-level key set -- no missing, no extra.
+  top_level_keys:
+    - phase             # int, always 2 (Phase 2)
+    - dataset           # str, always "D1"
+    - source_dataset    # str, always "D0" (D1 is drafted from D0)
+    - model_x           # str, the drafting model tag ("model_x")
+    - task              # str, always "text_to_rest_api_list"
+    - target_semantics  # str, always "unordered_unique_set"
+    - x                 # dict, the Phase 2 TRAINING input (text only)
+    - y_true            # dict, the label (the selected REST API set)
+    - validation        # dict, the judge/review provenance flags
+  # Required literal values for the tag fields.
+  literals:
+    phase: 2
+    dataset: "D1"
+    source_dataset: "D0"
+    task: "text_to_rest_api_list"
+    target_semantics: "unordered_unique_set"
+  # x is TEXT-ONLY. Exactly one key. json/allowed_methods here = input leakage.
+  x_keys:
+    - text              # str, the human operator request; the ONLY Phase 2 input
+  x_forbidden_keys:     # if present in x -> Phase-2 input leakage, hard fail
+    - json              # the D0 response body must not leak into Phase 2 input
+    - allowed_methods   # the HTTP method set must not leak into Phase 2 input
+    - rest_api          # the raw API path must not leak into Phase 2 input
+  # y_true is the label: an unordered unique set of REST API path strings.
+  y_true_keys:
+    - rest_api_list     # list[str], deduplicated; evaluated as a SET
+  # validation carries the drafting/judging provenance. 1 str + 8 bool fields.
+  validation_keys:
+    text_source: "str"            # how the text was produced, e.g. "model_x_then_pro_judge"
+    review_judged: "bool"         # a Pro judge reviewed this row
+    natural: "bool"               # the text reads as a natural operator request
+    exact_api_coverage: "bool"    # text covers exactly the selected API set
+    extra_intent: "bool"          # text asks for an API outside the selected set
+    duplicate_intent: "bool"      # text repeats the same API intent
+    ambiguous: "bool"             # text too vague to map to a concrete API
+    nonsense: "bool"              # text is junk / not a real request
+    method_semantics_valid: "bool"  # requested action matches an allowed HTTP method
+
+# ---------------------------------------------------------------------------
+# The structured judge-result shape (what the Pro judge emits per draft). The
+# generator/judge see the APIs; the judge decides acceptance from this result.
+# ---------------------------------------------------------------------------
+judge_result_shape:
+  keys:
+    accepted: "bool"              # judge's top-level accept flag
+    natural: "bool"               # text reads naturally
+    nonsense: "bool"              # text is junk
+    ambiguous: "bool"             # text too vague
+    duplicate_intent: "bool"      # text repeats an API intent
+    coverage: "list"             # list of per-API coverage entries (below)
+    extra_intents: "list"        # APIs the text asks for beyond the selected set
+    method_semantics_valid: "bool"  # requested action matches an allowed method
+    reason: "str"                 # human-readable justification
+  # Each coverage entry maps one selected API to its support in the text.
+  coverage_entry_keys:
+    rest_api: "str"               # the selected API path
+    text_span: "str"             # the text fragment that supports it
+    supported: "bool"             # whether the text actually supports this API
+
+# ---------------------------------------------------------------------------
+# The EXACT acceptance logic (contract.d1-release compute_acceptance mirrors this).
+# covered = {c.rest_api for c in coverage if c.supported}
+# accepted = verdict.accepted and verdict.natural and not verdict.nonsense
+#            and not verdict.ambiguous and not verdict.duplicate_intent
+#            and verdict.method_semantics_valid and not verdict.extra_intents
+#            and covered == set(selected_rest_api_list)
+# ---------------------------------------------------------------------------
+acceptance_logic:
+  require_true:            # these judge fields MUST be true to accept
+    - accepted
+    - natural
+    - method_semantics_valid
+  require_false:           # these judge fields MUST be false to accept
+    - nonsense
+    - ambiguous
+    - duplicate_intent
+  require_empty:           # this judge list MUST be empty to accept
+    - extra_intents
+  require_exact_coverage: true   # supported coverage set == selected API set
+
+# ---------------------------------------------------------------------------
+# Target evaluation: set match AND no duplicates in the prediction.
+# ---------------------------------------------------------------------------
+target_eval:
+  ignore_order: true       # [B, A] matches canonical [A, B]
+  reject_duplicates: true  # a repeated API in the prediction fails
+  empty_matches_empty: true  # [] == [] for hard-negative / no-action rows
+
+# ---------------------------------------------------------------------------
+# ILLUSTRATIVE reference only -- ONE example of a valid row + a matching judge
+# result. The gate and tests must generalize the contract, NOT depend on this
+# single example. Do not hardcode these specific APIs anywhere in the logic.
+# ---------------------------------------------------------------------------
+reference_row:  # ILLUSTRATIVE
+  phase: 2
+  dataset: "D1"
+  source_dataset: "D0"
+  model_x: "model_x"
+  task: "text_to_rest_api_list"
+  target_semantics: "unordered_unique_set"
+  x:
+    text: "check the boot configuration and certificate expiration"
+  y_true:
+    rest_api_list:
+      - "/redfish/v1/Systems/1/Bios"
+      - "/redfish/v1/Managers/1/SecurityService/Certificates"
+  validation:
+    text_source: "model_x_then_pro_judge"
+    review_judged: true
+    natural: true
+    exact_api_coverage: true
+    extra_intent: false
+    duplicate_intent: false
+    ambiguous: false
+    nonsense: false
+    method_semantics_valid: true
+
+reference_judge_result:  # ILLUSTRATIVE, matches reference_row above
+  accepted: true
+  natural: true
+  nonsense: false
+  ambiguous: false
+  duplicate_intent: false
+  method_semantics_valid: true
+  coverage:
+    - rest_api: "/redfish/v1/Systems/1/Bios"
+      text_span: "check the boot configuration"
+      supported: true
+    - rest_api: "/redfish/v1/Managers/1/SecurityService/Certificates"
+      text_span: "certificate expiration"
+      supported: true
+  extra_intents: []
+  reason: "text maps to exactly the two selected APIs"
