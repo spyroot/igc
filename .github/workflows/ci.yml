@@ -134,6 +134,7 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE_REF: ${{ github.base_ref }}
+          SRC_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           RANGE=""
           if [ -n "$BASE_REF" ]; then
@@ -141,7 +142,8 @@ jobs:
             RANGE="origin/${BASE_REF}..HEAD"
           fi
           printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > /tmp/pr_message.txt
-          python scripts/gates/agent_leak_guard.py ${RANGE:+--commit-range "$RANGE"} --message-file /tmp/pr_message.txt
+          python scripts/gates/agent_leak_guard.py ${RANGE:+--commit-range "$RANGE"} \
+            --message-file /tmp/pr_message.txt --branch "$SRC_BRANCH"
       - name: Run orchestration dry-runs
         shell: bash
         run: |

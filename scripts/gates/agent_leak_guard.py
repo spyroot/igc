@@ -8,15 +8,18 @@ carry no agent attribution or agent-file chatter, and internal endpoints
 context repo on the internal GitLab is where agent files live — this gate is
 the outbound fence.
 
-Three checks:
+Five checks (binding: agent tokens appear NOWHERE outward — not in branches,
+not in PR/MR titles or bodies, not in commit messages, not in tracked prose):
 
 1. tracked files — no agent artifact is committed (the binding artifact list);
-2. commit messages (a range) and an optional PR/MR body — no agent
-   attribution trailers, no "Generated with ..." footers, no agent-file
-   mentions, no session chatter. ``claude/*`` / ``codex/*`` BRANCH names are
-   the established public naming convention and are not leaks; patterns below
-   are anchored so branch refs in merge commits pass.
-3. tracked file contents — no internal endpoint literals (lab IP ranges,
+2. commit messages (a range) and an optional PR/MR body — no agent tokens at
+   all, no attribution trailers, no "Generated with ..." footers, no
+   agent-file mentions, no internal context paths;
+3. the branch name itself — no agent tokens (branches are public);
+4. tracked file contents — no agent tokens in prose. The ignore/config files
+   that EXCLUDE the agent artifacts (.gitignore, .dockerignore, pytest.ini)
+   are the fence itself and are exempt, as are this gate and its tests;
+5. tracked file contents — no internal endpoint literals (lab IP ranges,
    internal hostnames); env-var indirection is the allowed form.
 
 Used by:
@@ -59,18 +62,35 @@ FORBIDDEN_TRACKED = (
     ".agent-review/*",
 )
 
-# Message patterns that ARE leaks. Deliberately anchored/specific so the
-# established public branch naming (claude/<topic>, codex/<topic>) passes.
+# Message patterns that ARE leaks. The agent-token rule is absolute: the
+# tokens must not appear in messages, PR/MR text, or branch names in any form
+# (including branch refs inside merge-commit subjects).
+AGENT_TOKEN = re.compile(r"claude|codex|anthropic", re.I)
 MESSAGE_PATTERNS = (
-    (re.compile(r"co-authored-by:.*(claude|anthropic)", re.I), "agent attribution trailer"),
-    (re.compile(r"noreply@anthropic\.com", re.I), "agent attribution email"),
-    (re.compile(r"generated with.*claude", re.I), "agent generation footer"),
-    (re.compile(r"\bclaude code\b", re.I), "agent tool name"),
-    (re.compile(r"\b(claude|codex)\s+(session|worker|agent|pass)\b", re.I), "agent session chatter"),
+    (AGENT_TOKEN, "agent token"),
+    (re.compile(r"co-authored-by:", re.I), "attribution trailer"),
     (re.compile(r"\b(CLAUDE|AGENTS|TEAM_GUIDE|COORDINATION|AGENT_HANDOFF|CODEX_TASKS)\.md\b"), "agent file mention"),
     (re.compile(r"\.internal/"), "internal context path"),
-    (re.compile(r"\bagent handoff\b", re.I), "agent session chatter"),
+    (re.compile(r"\bagent (handoff|session|worker)\b", re.I), "agent session chatter"),
 )
+
+# Tracked-content prose must be token-free too. The exclusion configs that keep
+# the artifacts OUT are the fence itself and stay exempt.
+_TOKEN_SCAN_EXEMPT = {
+    ".gitignore",
+    ".dockerignore",
+    "pytest.ini",
+    "scripts/gates/agent_leak_guard.py",
+    "tests/gates/test_agent_leak_guard.py",
+}
+
+# The token scan targets PROSE AND CODE, not data assets (a tokenizer
+# vocabulary legitimately contains every common word). Endpoint literals are
+# scanned everywhere regardless.
+_TOKEN_SCAN_SUFFIXES = {
+    ".py", ".sh", ".bash", ".bats", ".md", ".rst", ".txt",
+    ".yaml", ".yml", ".toml", ".cfg", ".ini",
+}
 
 # Internal endpoint literals that must never appear in tracked content.
 ENDPOINT_PATTERNS = (
@@ -136,12 +156,17 @@ def check_commit_messages(commit_range: str, repo: Path = REPO_ROOT) -> list[str
     return violations
 
 
+def check_branch_name(branch: str) -> list[str]:
+    """The branch name itself is public and must carry no agent token."""
+    if branch and AGENT_TOKEN.search(branch):
+        return [f"branch name {branch!r}: agent token"]
+    return []
+
+
 def check_endpoint_literals(repo: Path = REPO_ROOT) -> list[str]:
-    """No internal endpoint literal in tracked file contents."""
+    """No internal endpoint literal (and no agent token) in tracked contents."""
     violations: list[str] = []
     for path in _git(["ls-files"], repo).splitlines():
-        if path in _ENDPOINT_SCAN_EXEMPT:
-            continue
         file_path = repo / path
         if file_path.suffix.lower() in _SKIP_SUFFIXES or not file_path.is_file():
             continue
@@ -149,10 +174,15 @@ def check_endpoint_literals(repo: Path = REPO_ROOT) -> list[str]:
             text = file_path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        for pattern, why in ENDPOINT_PATTERNS:
-            match = pattern.search(text)
+        if path not in _ENDPOINT_SCAN_EXEMPT:
+            for pattern, why in ENDPOINT_PATTERNS:
+                match = pattern.search(text)
+                if match:
+                    violations.append(f"{path}: {why} ({match.group(0)})")
+        if path not in _TOKEN_SCAN_EXEMPT and file_path.suffix.lower() in _TOKEN_SCAN_SUFFIXES:
+            match = AGENT_TOKEN.search(text)
             if match:
-                violations.append(f"{path}: {why} ({match.group(0)})")
+                violations.append(f"{path}: agent token in tracked content ({match.group(0)})")
     return violations
 
 
@@ -172,9 +202,15 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="Optional file carrying the PR/MR title+body to scan.",
     )
+    parser.add_argument(
+        "--branch",
+        default="",
+        help="Branch name under review (source branch of the PR/MR).",
+    )
     args = parser.parse_args(argv)
 
     violations = check_tracked_files() + check_endpoint_literals()
+    violations += check_branch_name(args.branch)
     if args.commit_range:
         # Skip gracefully when the range is unresolvable (shallow clone).
         if _git(["rev-list", "-n", "1", args.commit_range], REPO_ROOT):

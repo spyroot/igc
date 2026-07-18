@@ -85,31 +85,58 @@ def test_endpoint_literal_fails(tmp_path: Path) -> None:
     assert any("internal GitLab hostname" in v for v in violations)
 
 
-def test_attribution_and_agent_chatter_in_messages_fail(tmp_path: Path) -> None:
-    """Attribution trailers, generation footers, and agent-file mentions are leaks."""
+def test_agent_tokens_and_chatter_in_messages_fail(tmp_path: Path) -> None:
+    """Any agent token, attribution, or agent-file mention in a message is a leak."""
     gate = _load_gate()
 
     for message, expected in (
-        ("Fix bug\n\nCo-Authored-By: Claude <x@y>", "attribution trailer"),
-        ("Fix bug\n\nGenerated with Claude Code", "agent"),
+        ("Fix bug\n\nCo-Authored-By: A Tool <x@y>", "attribution trailer"),
+        ("Fix bug\n\nGenerated with Claude Code", "agent token"),
         ("Update per CLAUDE.md instructions", "agent file mention"),
         ("Sync notes to .internal/board", "internal context path"),
-        ("Handled by the codex worker overnight", "session chatter"),
+        ("Handled by the codex worker overnight", "agent token"),
+        # Branch refs inside merge subjects leak the token too — no whitelist.
+        ("Merge pull request #142 from spyroot/claude/phase23-semantics", "agent token"),
+        ("Merge branch 'codex/p0-fix' into main", "agent token"),
+        ("Reviewed by anthropic tooling", "agent token"),
     ):
         violations = gate.scan_message(message, "m")
         assert violations, message
         assert any(expected in v for v in violations), (message, violations)
 
 
-def test_branch_naming_convention_is_not_flagged() -> None:
-    """claude/<topic> and codex/<topic> branch refs in merge messages pass."""
+def test_clean_message_passes() -> None:
+    """Ordinary engineering messages carry no flags."""
     gate = _load_gate()
     for message in (
-        "Merge pull request #142 from spyroot/claude/phase23-semantics",
-        "Merge branch 'codex/p0-d1-contract-source-fix' into main",
-        "Reconcile codex/phase2-labelled-requests follow-up",
+        "Make Phase 3 an unordered bound-call set with explicit methods",
+        "Merge pull request #200 from spyroot/phase23-semantics",
+        "Fix sample-width reporting for no-action runs",
     ):
         assert gate.scan_message(message, "m") == [], message
+
+
+def test_agent_token_in_branch_name_fails() -> None:
+    """Branch names are public; agent tokens in them are leaks."""
+    gate = _load_gate()
+    assert gate.check_branch_name("claude/phase23-semantics")
+    assert gate.check_branch_name("codex/p0-fix")
+    assert gate.check_branch_name("phase23-semantics") == []
+    assert gate.check_branch_name("") == []
+
+
+def test_agent_token_in_tracked_content_fails(tmp_path: Path) -> None:
+    """Agent tokens in tracked prose are leaks; exclusion configs are exempt."""
+    gate = _load_gate()
+    repo = _fixture_repo(tmp_path)
+    (repo / "notes.py").write_text("# reviewed by the codex lane\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("CLAUDE.md\n.codex/\n", encoding="utf-8")
+    _git(repo, "add", "notes.py", ".gitignore")
+    _git(repo, "commit", "-q", "-m", "Add notes")
+
+    violations = gate.check_endpoint_literals(repo)
+    assert any("notes.py" in v and "agent token" in v for v in violations)
+    assert not any(".gitignore" in v for v in violations)
 
 
 def test_commit_range_scan_detects_leaky_commit(tmp_path: Path) -> None:

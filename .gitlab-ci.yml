@@ -73,7 +73,9 @@ agent-leak-guard:
         RANGE="${CI_MERGE_REQUEST_DIFF_BASE_SHA}..HEAD"
       fi
       printf '%s\n\n%s\n' "${CI_MERGE_REQUEST_TITLE:-}" "${CI_MERGE_REQUEST_DESCRIPTION:-}" > /tmp/mr_message.txt
-      python scripts/gates/agent_leak_guard.py ${RANGE:+--commit-range "$RANGE"} --message-file /tmp/mr_message.txt
+      python scripts/gates/agent_leak_guard.py ${RANGE:+--commit-range "$RANGE"} \
+        --message-file /tmp/mr_message.txt \
+        --branch "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-$CI_COMMIT_REF_NAME}"
 
 # Validates committed GPU evidence manifests (schema in the pass matrix). This
 # is a CPU job: it reads JSON, it does not touch a GPU. Malformed evidence
