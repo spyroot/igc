@@ -1,0 +1,233 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{amsmath}  % \text, cases, aligned, gathered
+\usepackage{microtype} % character protrusion / font expansion for tighter lines
+
+\title{igc}
+\author{spyroot}
+\date{July 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+Let the real API environment have hidden state $S_t$. The agent observes the currently discovered JSON graph:
+
+$$
+O_t = H\left(S_t\right)
+$$
+
+The graph encoder produces:
+
+$$
+z_t = E_{\text{state}}\left(O_t\right)
+$$
+
+A concrete API action is:
+
+$$
+A_t = \left(r_t, m_t, b_t\right)
+$$
+
+where:
+
+\begin{itemize}
+  \item $r_t$: REST resource;
+  \item $m_t$: HTTP method or callable function;
+  \item $b_t$: exact argument bindings.
+\end{itemize}
+
+The environment then evolves according to one transition kernel:
+
+$$
+S_{t+1} \sim P\left(S_{t+1} \mid S_t, r_t, m_t, b_t\right)
+$$
+
+Everything above is derived from that one object; the same joint process can be viewed in several ways. The exploration policy induces a visitation distribution:
+
+$$
+d^\pi\left(S_t, A_t\right)
+$$
+
+The GNN sees the observation projection:
+
+$$
+P\left(O_{t+1} \mid O_t, A_t\right)
+$$
+
+The StateEncoder sees:
+
+$$
+P\left(z_{t+1} \mid z_t, A_t\right)
+$$
+
+The REST representation is related to which part of the state graph the action addresses:
+
+$$
+z_{\text{rest}} = E_{\text{rest}}\left(r_t, O_t\right)
+$$
+
+The method representation describes the transformation:
+
+$$
+z_{\text{method}} = E_{\text{method}}\left(m_t, \text{ function schema }\right)
+$$
+
+And the policy learns:
+
+$$
+Q\left(z_t, z_{\text{rest}}, z_{\text{method}}, a_t\right)
+$$
+
+These are not unrelated probability spaces. They are marginals, conditionals, or learned transformations of the same trajectories:
+
+$$
+\left(S_t, O_t, z_t, r_t, m_t, b_t, R_t, S_{t+1}\right)
+$$
+
+That is why the system is unusually traceable.
+
+\subsection*{What ``same entity'' should mean}
+
+Two vendor-specific resources or methods represent the same underlying entity when they are equivalent with respect to the behavior that matters.
+
+For two methods $m_A$ and $m_B$, under corresponding states:
+
+$$
+P\left(S' \mid S, r_A, m_A, b\right) \approx P\left(S' \mid S, r_B, m_B, b\right)
+$$
+
+and:
+
+$$
+R\left(S, r_A, m_A, b\right) \approx R\left(S, r_B, m_B, b\right)
+$$
+
+Then they should have nearby learned representations:
+
+$$
+z_{\text{method}}^A \approx z_{\text{method}}^B
+$$
+
+Likewise, if two REST resources occupy equivalent roles in their respective graphs:
+
+$$
+z_{\text{rest}}^A \approx z_{\text{rest}}^B
+$$
+
+A named equivalence such as \texttt{ComputerSystem.power\_on} need not be declared beforehand. It can be inferred from:
+
+\begin{itemize}
+  \item the same type of graph position;
+  \item the same legal operation pattern;
+  \item the same observable state transition;
+  \item the same reward condition.
+\end{itemize}
+
+\subsection*{Why the exploration phase is valuable}
+
+During graph exploration, every quantity is observable or computable: the known hidden simulator graph, the currently discovered graph, the selected GET target, whether it was already visited, the returned JSON, the newly exposed links, the next graph, the reward, and the maximum possible coverage reward.
+
+For a graph with $N$ reachable nodes, if the root starts visited:
+
+$$
+R_{\max} = N - 1
+$$
+
+At every step:
+
+$$
+r_t = \begin{cases}
+  1, & \text{first successful visit to a reachable node} \\
+  0, & \text{repeat visit} \\
+  -\lambda, & \text{invalid or failed request (optional)}
+\end{cases}
+$$
+
+So the exploration task has exact labels, exact transition traces, an exact terminal condition, an exact maximum return, and an exact expert solution.
+
+The GNN is trained on the same traces the policy uses. It is not learning an abstract representation disconnected from control.
+
+\subsection*{Phase 2/3 attaches human intent to the same process}
+
+Before Phase 2/3, the goal is to visit all reachable nodes. After Phase 2/3, the goal becomes a compiled operation:
+
+$$
+G = \left\{\left(r_i, m_i, b_i\right)\right\}_{i=1}^K
+$$
+
+But the environment dynamics do not change:
+
+$$
+P\left(S_{t+1} \mid S_t, r_i, m_i, b_i\right)
+$$
+
+The same GNN represents the state. The same policy operates over the graph. The only change is the goal conditioning.
+
+Bootstrap:
+
+$$
+\pi\left(a \mid z_t, z_{\text{explore}}\right)
+$$
+
+Post Phase 2/3:
+
+$$
+\pi\left(a \mid z_t, z_{\text{rest}}, z_{\text{method}}\right)
+$$
+
+So these are not unrelated models stitched together. The same controlled stochastic process is progressively given more information.
+
+\subsection*{The exact-value distinction also fits}
+
+For:
+
+$$
+\begin{aligned}
+  & \text{set } x = 1 \\
+  & \text{set } x = 2
+\end{aligned}
+$$
+
+the resource and method are the same:
+
+$$
+\begin{gathered}
+  z_{\text{rest}}^{x=1} \approx z_{\text{rest}}^{x=2} \\
+  z_{\text{method}}^{x=1} \approx z_{\text{method}}^{x=2}
+\end{gathered}
+$$
+
+But the binding changes:
+
+$$
+b_1 = \{x: 1\}, \quad b_2 = \{x: 2\}
+$$
+
+Therefore the transition distributions differ through the binding:
+
+$$
+P\left(S' \mid S, z_{\text{rest}}, z_{\text{method}}, b_1\right) \neq P\left(S' \mid S, z_{\text{rest}}, z_{\text{method}}, b_2\right)
+$$
+
+This is why exact values stay outside $z_{\text{rest}}$ and $z_{\text{method}}$, while still participating in execution and transition prediction.
+
+\subsection*{The precise wording to lock}
+
+This belongs in the architecture contract.
+
+All learned representations in IGC are views of one underlying environment interaction process. $z_{\text{state}}$ represents the currently observable JSON graph; $z_{\text{rest}}$ represents the selected resource within that graph; $z_{\text{method}}$ represents the operation applied to that resource; exact argument bindings parameterize the operation. Exploration, supervised trajectories, HER, and task-conditioned RL all produce or consume traces from the same transition kernel. Cross-vendor equivalence is defined behaviorally by comparable reward and next-state distributions, not by URI spelling or a handcrafted domain ontology.
+
+The v1 StateEncoder that realizes $z_{\text{state}}$ is version-pinned. It is built on the immutable Phase~1 \texttt{model\_x} backbone and emits a fixed-width $z_{\text{state}}$. Its internal pooler (Conv1D/MLP, resource-set pooling, or graph pooling) and any JSON graph structure it uses are implementation experiments, not part of this contract: $z_{\text{state}}$ must represent the observable JSON graph, but no consumer may depend on how that graph is encoded. Because $z_{\text{state}}$ is the observation representation, exact observed state values and API errors must influence it and are not discarded---in contrast to the exact argument bindings, which stay outside $z_{\text{rest}}$ and $z_{\text{method}}$. The encoder is frozen and version-pinned for the duration of each RL experiment so that $z_{\text{state}}$ is reproducible, and its compactness is accepted by state-sufficiency and RL-performance gates rather than reconstruction loss alone.
+
+One small mathematical qualification: these are not literally all the same distribution. They are different distributions derived from the same joint process. That is even stronger architecturally, because every representation and metric can be traced back to:
+
+$$
+P\left(S_{t+1}, R_t \mid S_t, A_t\right)
+$$
+
+That is the single underlying entity the entire system is trying to model and control.
+
+\end{document}
