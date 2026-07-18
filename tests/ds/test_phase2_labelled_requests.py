@@ -39,8 +39,8 @@ from igc.ds.phase2_labelled_requests import (
 from igc.ds.rest_goal_contract import (
     D1,
     RedfishContext,
-    build_ordered_call_row,
-    parse_ordered_calls_y_pred,
+    build_call_row,
+    parse_calls_y_pred,
 )
 from igc.modules.base.metric_keys import (
     PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS,
@@ -1245,15 +1245,23 @@ def test_minimal_phase3_fixture_feeds_phase3_schema_helper(tmp_path: Path) -> No
         for index, rest_api in enumerate(phase3_input["rest_api_list"])
     )
 
-    phase3_row = build_ordered_call_row(
+    phase3_row = build_call_row(
         text=phase3_input["text"],
         contexts=phase3_contexts,
         rest_api_list=phase3_input["rest_api_list"],
+        # Methods are always explicit in Phase 3 — never inferred from context.
+        method_by_api={
+            rest_api: "GET" for rest_api in phase3_input["rest_api_list"]
+        },
     )
 
     assert phase3_row["source_dataset"] == D1
-    assert phase3_row["x"] == phase3_input
-    assert phase3_row["y_true"]["calls"] == parse_ordered_calls_y_pred({
+    assert phase3_row["x"]["text"] == phase3_input["text"]
+    # Phase 3 canonicalizes the API list to the sorted unique set.
+    assert phase3_row["x"]["rest_api_list"] == sorted(phase3_input["rest_api_list"])
+    assert phase3_row["x"]["allowed_methods"] == phase3_input["allowed_methods"]
+    assert phase3_row["x"]["json"] == phase3_input["json"]
+    assert phase3_row["y_true"]["calls"] == parse_calls_y_pred({
         "calls": phase3_row["y_true"]["calls"],
     })
 
@@ -1280,8 +1288,8 @@ def test_phase2_module_does_not_import_phase3_argument_runtime() -> None:
 
     assert "igc.ds.rest_goal_contract" in imported_modules
     assert "build_d1_rest_api_list_row" in imported_names
-    assert "build_ordered_call_row" not in imported_names
-    assert "parse_ordered_calls_y_pred" not in imported_names
+    assert "build_call_row" not in imported_names
+    assert "parse_calls_y_pred" not in imported_names
 
 
 # Author: Mus mbayramo@stanford.edu
