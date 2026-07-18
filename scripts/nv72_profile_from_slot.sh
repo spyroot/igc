@@ -132,12 +132,102 @@ remote_prefix="${remote_env[*]}"
 set -euo pipefail
 
 die() {
+    SUMMARY_STATUS="failed"
+    SUMMARY_MESSAGE="$*"
     printf 'ERROR: %s\n' "$*" >&2
     exit 2
 }
 
 q() {
     printf '%q' "$1"
+}
+
+json_string() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//$'\n'/\\n}"
+    value="${value//$'\r'/\\r}"
+    value="${value//$'\t'/\\t}"
+    printf '"%s"' "${value}"
+}
+
+json_bool_for_file() {
+    local path="$1"
+    if [[ -s "${path}" ]]; then
+        printf 'true'
+    else
+        printf 'false'
+    fi
+}
+
+write_run_env() {
+    {
+        printf 'RUN_ID=%q\n' "${RUN_ID}"
+        printf 'PROFILE_MODE=%q\n' "${PROFILE_MODE}"
+        printf 'BUNDLE=%q\n' "${BUNDLE}"
+        printf 'HOST=%q\n' "${REMOTE_HOST}"
+        printf 'CONTAINER=%q\n' "${CONTAINER}"
+        printf 'IGC_CODE_DIR=%q\n' "${IGC_CODE_DIR}"
+        printf 'GPU_COUNT=%q\n' "${GPU_COUNT}"
+        printf 'GPU_IDS=%q\n' "${GPU_IDS}"
+        printf 'GPU_MAX_MEM_MB=%q\n' "${GPU_MAX_MEM_MB}"
+        printf 'GPU_MAX_UTIL=%q\n' "${GPU_MAX_UTIL}"
+        printf 'GPU_IDLE_SAMPLES=%q\n' "${GPU_IDLE_SAMPLES}"
+        printf 'GPU_IDLE_INTERVAL=%q\n' "${GPU_IDLE_INTERVAL}"
+        printf 'MIN_MODELS_FREE_GB=%q\n' "${MIN_MODELS_FREE_GB}"
+        printf 'STARTED_AT=%q\n' "${STARTED_AT}"
+        printf 'PROFILE_DATASET_ARGS=%q\n' "${PROFILE_DATASET_ARGS}"
+    } > "${BUNDLE}/run.env"
+}
+
+write_summary() {
+    local status="$1"
+    local exit_code="$2"
+    local finished_at
+    finished_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    {
+        printf '{\n'
+        printf '  "status": %s,\n' "$(json_string "${status}")"
+        printf '  "exit_code": %s,\n' "${exit_code}"
+        printf '  "run_id": %s,\n' "$(json_string "${RUN_ID}")"
+        printf '  "profile_mode": %s,\n' "$(json_string "${PROFILE_MODE}")"
+        printf '  "bundle": %s,\n' "$(json_string "${BUNDLE}")"
+        printf '  "host": %s,\n' "$(json_string "${REMOTE_HOST}")"
+        printf '  "container": %s,\n' "$(json_string "${CONTAINER}")"
+        printf '  "igc_code_dir": %s,\n' "$(json_string "${IGC_CODE_DIR}")"
+        printf '  "gpu_count": %s,\n' "${GPU_COUNT}"
+        printf '  "gpu_ids": %s,\n' "$(json_string "${GPU_IDS}")"
+        printf '  "started_at": %s,\n' "$(json_string "${STARTED_AT}")"
+        printf '  "finished_at": %s,\n' "$(json_string "${finished_at}")"
+        printf '  "message": %s,\n' "$(json_string "${SUMMARY_MESSAGE:-}")"
+        printf '  "artifacts": {\n'
+        printf '    "run_env": %s,\n' "$(json_bool_for_file "${BUNDLE}/run.env")"
+        printf '    "wrapper_log": %s,\n' "$(json_bool_for_file "${BUNDLE}/wrapper.log")"
+        printf '    "docker_ps": %s,\n' "$(json_bool_for_file "${BUNDLE}/docker_ps.txt")"
+        printf '    "docker_metadata": %s,\n' "$(json_bool_for_file "${BUNDLE}/docker_metadata.txt")"
+        printf '    "container_git_state": %s,\n' "$(json_bool_for_file "${BUNDLE}/container_git_state.txt")"
+        printf '    "nvidia_smi_before": %s,\n' "$(json_bool_for_file "${BUNDLE}/nvidia_smi_before.csv")"
+        printf '    "nvidia_smi_after": %s,\n' "$(json_bool_for_file "${BUNDLE}/nvidia_smi_after.csv")"
+        printf '    "gpu_selection": %s,\n' "$(json_bool_for_file "${BUNDLE}/gpu_selection.txt")"
+        printf '    "profile_cpu_log": %s,\n' "$(json_bool_for_file "${BUNDLE}/profile_cpu.log")"
+        printf '    "profile_dataset_cuda_log": %s,\n' "$(json_bool_for_file "${BUNDLE}/profile_dataset_cuda.log")"
+        printf '    "profile_summary": %s\n' "$(json_bool_for_file "${BUNDLE}/profile_summary.json")"
+        printf '  }\n'
+        printf '}\n'
+    } > "${BUNDLE}/summary.json"
+}
+
+finish_summary() {
+    local exit_code="$?"
+    if [[ -n "${BUNDLE:-}" && -d "${BUNDLE}" ]]; then
+        if ((exit_code == 0)); then
+            write_summary "ok" "${exit_code}"
+        else
+            write_summary "${SUMMARY_STATUS:-failed}" "${exit_code}"
+        fi
+    fi
+    return "${exit_code}"
 }
 
 require_models_space() {
@@ -218,6 +308,12 @@ LOCK="/models/igc/profile_runs/.${PROFILE_MODE}-${HOSTNAME:-slot}.lock"
 mkdir -p /models/igc/profile_runs
 [[ ! -e "${BUNDLE}" ]] || die "profile bundle already exists: ${BUNDLE}"
 mkdir -p "${BUNDLE}"
+STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+REMOTE_HOST="$(hostname)"
+SUMMARY_STATUS="running"
+SUMMARY_MESSAGE=""
+trap finish_summary EXIT
+write_run_env
 
 exec > >(tee -a "${BUNDLE}/wrapper.log") 2>&1
 
@@ -228,8 +324,8 @@ fi
 
 printf 'run_id=%s\n' "${RUN_ID}"
 printf 'profile_mode=%s\n' "${PROFILE_MODE}"
-printf 'host=%s\n' "$(hostname)"
-date -u '+started_at=%Y-%m-%dT%H:%M:%SZ'
+printf 'host=%s\n' "${REMOTE_HOST}"
+printf 'started_at=%s\n' "${STARTED_AT}"
 df -h /models | tee "${BUNDLE}/models_df.txt"
 
 if [[ "${PROFILE_MODE}" == "cuda" || "${PROFILE_MODE}" == "all" ]]; then
