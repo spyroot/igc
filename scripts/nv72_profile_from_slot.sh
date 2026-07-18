@@ -80,7 +80,7 @@ if [[ "${PROFILE_MODE}" == "cuda" || "${PROFILE_MODE}" == "all" ]]; then
 fi
 
 SSH_BIN="${SSH_BIN:-ssh}"
-CONTAINER="${CONTAINER:-igc}"
+CONTAINER="${CONTAINER:-igc-phase1-pretrain}"
 IGC_CODE_DIR="${IGC_CODE_DIR:-/workspace/igc}"
 GPU_COUNT="${GPU_COUNT:-1}"
 GPU_IDS="${GPU_IDS:-}"
