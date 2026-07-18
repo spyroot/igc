@@ -18,6 +18,7 @@ import pytest
 import torch
 
 from igc.ds.corpus_dataset import CorpusJSONLDataset
+from igc.ds.phase1_render import render_phase1_completion, render_phase1_prompt
 from igc.ds.sources.base import SourceRecord, TrustLevel
 from igc.ds.sources.corpus_io import write_corpus
 from igc.ds.sources.mixer import SourceMix
@@ -126,6 +127,13 @@ def _explicit_phase1_corpus_dir(tmp_path: Path, body: dict, target: dict | None 
     return str(out)
 
 
+def _first_example(corpus_dir: str) -> dict:
+    """Return the first JSONL row from a tiny test corpus."""
+
+    examples = Path(corpus_dir) / "examples.jsonl"
+    return json.loads(examples.read_text(encoding="utf-8").splitlines()[0])
+
+
 def test_items_are_fixed_length_tensor_dicts(tmp_path: Path):
     """Every item is a {input_ids, attention_mask} pair of length max_len."""
     ds = CorpusJSONLDataset(_corpus_dir(tmp_path), max_len=64, tokenizer=_FakeTokenizer())
@@ -223,6 +231,69 @@ def test_phase1_long_prompt_keeps_completion_marker(tmp_path: Path):
                      add_special_tokens=False)["input_ids"].squeeze(0).tolist()
 
     assert _contains_subsequence(prompt_ids, marker_ids)
+
+
+def test_phase1_renderer_matches_existing_token_stream(tmp_path: Path):
+    """The shared renderer preserves the original prompt/completion tokens."""
+
+    body = {"@odata.id": "/redfish/v1/Systems/1", "PowerState": "On"}
+    target = {"@odata.id": "/redfish/v1/Systems/1", "Id": "1", "PowerState": "On"}
+    corpus_dir = _explicit_phase1_corpus_dir(tmp_path, body, target=target)
+    tok = _FakeTokenizer()
+    ds = CorpusJSONLDataset(
+        corpus_dir,
+        max_len=256,
+        tokenizer=tok,
+        objective="phase1_pretrain",
+    )
+    example = _first_example(corpus_dir)
+
+    prompt, target_json = render_phase1_prompt(example)
+    completion = render_phase1_completion(target_json)
+    expected_prompt = (
+        "### REST API\n"
+        "/redfish/v1/Systems/1\n\n"
+        "### Allowed Methods\n"
+        "GET, PATCH\n\n"
+        "### Redfish JSON Input\n"
+        "{\n"
+        "  \"@odata.id\": \"/redfish/v1/Systems/1\",\n"
+        "  \"PowerState\": \"On\"\n"
+        "}\n\n"
+        "### Complete Redfish JSON\n"
+    )
+    expected_completion = (
+        "{\n"
+        "  \"@odata.id\": \"/redfish/v1/Systems/1\",\n"
+        "  \"Id\": \"1\",\n"
+        "  \"PowerState\": \"On\"\n"
+        "}\n"
+    )
+
+    assert prompt == expected_prompt
+    assert target_json == target
+    assert completion == expected_completion
+
+    item = ds[0]
+    expected = ds._tokenize_prompt_completion(tok, expected_prompt, expected_completion)
+    for key in ("input_ids", "attention_mask", "labels"):
+        assert torch.equal(item[key], expected[key])
+
+
+def test_phase1_renderer_supports_normalized_legacy_rows(tmp_path: Path):
+    """Normalized corpus rows still render with URL, methods, and response target."""
+
+    corpus_dir = _corpus_dir(tmp_path, n=4)
+    example = _first_example(corpus_dir)
+
+    prompt, target_json = render_phase1_prompt(example)
+    completion = render_phase1_completion(target_json)
+
+    assert prompt.startswith("### REST API\n/redfish/v1/S/")
+    assert "\n### Allowed Methods\nGET\n\n" in prompt
+    assert prompt.endswith("### Complete Redfish JSON\n")
+    assert target_json == example["response"]
+    assert completion.endswith("}\n")
 
 
 def test_items_stack_like_the_trainer_collate(tmp_path: Path):

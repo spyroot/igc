@@ -1,15 +1,15 @@
 """Named Phase 1 Redfish JSON pretraining profiles + adapter specs.
 
-``docs/P0_PHASE_WORKFLOW.md`` and ``docs/TRAINING_OPTIMIZATION_PLAN.md`` are the source of
-truth; this module makes the Phase 1 profile/adapter matrix executable so every run resolves
-to an explicit, logged config instead of carrying over GPT-2 / small-GPU defaults. A
+``configs/training/profiles.yaml`` is the executable source of truth; this module loads the
+Phase 1 profile/adapter matrix so every run resolves to an explicit, logged config instead
+of carrying over GPT-2 / small-GPU defaults. A
 :class:`TrainingProfile` fully determines a run (phase, objective, model, precision, batch,
 weight role, accumulation, lr, scheduler, warmup, sharding, sequence length, and the
 :class:`AdapterSpec`); :func:`resolve_profile` applies overrides and :func:`describe` yields
 the flat dict a launcher prints and logs to W&B config.
 
-Pure standard library on purpose (no torch/peft): imported by the launcher and tests,
-and must stay cheap/offline. :func:`apply_lora_kwargs` produces the exact kwargs for
+No torch/peft imports on purpose: imported by the launcher and tests, and must stay
+cheap/offline. :func:`apply_lora_kwargs` produces the exact kwargs for
 :func:`igc.modules.llm.peft_lora.apply_lora` (which owns the actual PEFT construction).
 
 Author:
@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Dict, List, Optional
+
+import yaml
 
 # Qwen/Llama-family decoder linear projections — the plan's target-module list; also the
 # default in igc.modules.llm.peft_lora.default_target_modules (kept in sync here).
@@ -27,6 +30,7 @@ DECODER_TARGETS = ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj
 
 # Adapter-init name -> PEFT ``init_lora_weights`` value.
 _INIT_MAP = {"default": True, "pissa": "pissa", "eva": "eva", "loftq": "loftq"}
+PROFILE_SPEC_PATH = Path(__file__).resolve().parents[3] / "configs" / "training" / "profiles.yaml"
 
 
 @dataclass(frozen=True)
@@ -117,45 +121,108 @@ class TrainingProfile:
         return d
 
 
-# The named profiles of docs/P0_PHASE_WORKFLOW.md §Phase 1 and
-# docs/TRAINING_OPTIMIZATION_PLAN.md §Target Training Profiles.
-PROFILES: Dict[str, TrainingProfile] = {
-    "phase1_gpt2_smoke": TrainingProfile(
-        name="phase1_gpt2_smoke", model="gpt2", use_peft=False, adapter=None,
-        precision="no", torch_dtype="float32", batch_size=8, lr=5e-5,
-        max_steps=50, seq_len=256, sharding="none",
-    ),
-    "phase1_3b_lora": TrainingProfile(
-        name="phase1_3b_lora", model="Qwen/Qwen2.5-3B-Instruct",
-        adapter=AdapterSpec(method="lora", r=16, alpha=32),
-        batch_size=8, grad_accum=2, lr=1e-4, warmup_ratio=0.03,
-    ),
-    "phase1_7b_lora": TrainingProfile(
-        name="phase1_7b_lora", model="Qwen/Qwen2.5-7B-Instruct",
-        adapter=AdapterSpec(method="lora", r=16, alpha=32),
-        batch_size=8, grad_accum=4, lr=1e-4, warmup_ratio=0.03,
-    ),
-    "phase1_7b_rslora_r32": TrainingProfile(
-        name="phase1_7b_rslora_r32", model="Qwen/Qwen2.5-7B-Instruct",
-        adapter=AdapterSpec(method="rslora", r=32, alpha=64, init="default"),
-        batch_size=8, grad_accum=4, lr=1e-4, warmup_ratio=0.03,
-    ),
-    "phase1_local": TrainingProfile(
-        # local weights dir from the environment (e.g. the staged DeepSeek-V4-Flash or
-        # any node-local backbone) -- no path is baked into committed code.
-        name="phase1_local", model="$IGC_MODEL_DIR",
-        adapter=AdapterSpec(method="lora", r=16, alpha=32),
-        batch_size=8, grad_accum=4, lr=1e-4, warmup_ratio=0.03,
-    ),
-    "phase1_3b_full": TrainingProfile(
-        name="phase1_3b_full", model="Qwen/Qwen2.5-3B-Instruct", use_peft=False, adapter=None,
-        batch_size=4, grad_accum=8, lr=2e-5, sharding="zero3", warmup_ratio=0.03,
-    ),
-    "phase1_7b_full_zero3": TrainingProfile(
-        name="phase1_7b_full_zero3", model="Qwen/Qwen2.5-7B-Instruct", use_peft=False, adapter=None,
-        batch_size=2, grad_accum=16, lr=1e-5, sharding="zero3", warmup_ratio=0.03,
-    ),
-}
+_PROFILE_FIELDS = set(TrainingProfile.__dataclass_fields__) - {"name", "adapter"}
+_ADAPTER_FIELDS = set(AdapterSpec.__dataclass_fields__)
+
+
+def _load_yaml(path: Path) -> dict:
+    """Load the training profile YAML spec."""
+
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValueError(f"cannot read training profile spec {path}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise ValueError(f"cannot parse training profile spec {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("training profile spec must be a YAML mapping")
+    return payload
+
+
+def _adapter_from_raw(profile_name: str, raw: Optional[dict]) -> Optional[AdapterSpec]:
+    """Build an adapter spec from YAML."""
+
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError(f"profile {profile_name!r} adapter must be a mapping or null")
+    missing = sorted(_ADAPTER_FIELDS - set(raw))
+    unknown = sorted(set(raw) - _ADAPTER_FIELDS)
+    if missing:
+        raise ValueError(f"profile {profile_name!r} adapter missing keys: {missing}")
+    if unknown:
+        raise ValueError(f"profile {profile_name!r} adapter has unknown keys: {unknown}")
+    target_modules = raw["target_modules"]
+    if not isinstance(target_modules, list) or not all(isinstance(v, str) for v in target_modules):
+        raise ValueError(f"profile {profile_name!r} adapter.target_modules must be list[str]")
+    return AdapterSpec(
+        method=str(raw["method"]),
+        r=int(raw["r"]),
+        alpha=int(raw["alpha"]),
+        dropout=float(raw["dropout"]),
+        init=str(raw["init"]),
+        target_modules=tuple(target_modules),
+    )
+
+
+def _profile_from_raw(name: str, raw: dict) -> TrainingProfile:
+    """Build a training profile from one YAML entry."""
+
+    if not isinstance(raw, dict):
+        raise ValueError(f"profile {name!r} must be a mapping")
+    missing = sorted(_PROFILE_FIELDS - set(raw))
+    unknown = sorted(set(raw) - (_PROFILE_FIELDS | {"adapter"}))
+    if missing:
+        raise ValueError(f"profile {name!r} missing keys: {missing}")
+    if unknown:
+        raise ValueError(f"profile {name!r} has unknown keys: {unknown}")
+
+    use_peft = bool(raw["use_peft"])
+    adapter = _adapter_from_raw(name, raw.get("adapter"))
+    if use_peft and adapter is None:
+        raise ValueError(f"profile {name!r} has use_peft=true but adapter=null")
+    if not use_peft and adapter is not None:
+        raise ValueError(f"profile {name!r} has use_peft=false but adapter is set")
+
+    return TrainingProfile(
+        name=name,
+        model=str(raw["model"]),
+        phase=str(raw["phase"]),
+        weights_role=str(raw["weights_role"]),
+        llm_stage=str(raw["llm_stage"]),
+        corpus_objective=str(raw["corpus_objective"]),
+        use_peft=use_peft,
+        adapter=adapter,
+        precision=str(raw["precision"]),
+        torch_dtype=str(raw["torch_dtype"]),
+        batch_size=int(raw["batch_size"]),
+        grad_accum=int(raw["grad_accum"]),
+        lr=float(raw["lr"]),
+        scheduler=str(raw["scheduler"]),
+        warmup_ratio=float(raw["warmup_ratio"]),
+        epochs=int(raw["epochs"]),
+        max_steps=None if raw["max_steps"] is None else int(raw["max_steps"]),
+        early_stopping_patience=int(raw["early_stopping_patience"]),
+        early_stopping_min_delta=float(raw["early_stopping_min_delta"]),
+        sharding=str(raw["sharding"]),
+        seq_len=int(raw["seq_len"]),
+        num_workers=int(raw["num_workers"]),
+    )
+
+
+def load_profiles(path: Path = PROFILE_SPEC_PATH) -> Dict[str, TrainingProfile]:
+    """Load named training profiles from the YAML spec."""
+
+    payload = _load_yaml(path)
+    if payload.get("version") != 1:
+        raise ValueError("training profile spec version must be 1")
+    raw_profiles = payload.get("profiles")
+    if not isinstance(raw_profiles, dict) or not raw_profiles:
+        raise ValueError("training profile spec must contain non-empty profiles mapping")
+    return {name: _profile_from_raw(name, raw) for name, raw in raw_profiles.items()}
+
+
+PROFILES: Dict[str, TrainingProfile] = load_profiles()
 
 
 def profile_names() -> List[str]:

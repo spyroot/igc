@@ -39,5 +39,19 @@ def test_phase1_all_metric_keys_combines_live_and_acceptance_families() -> None:
     assert set(PHASE1_WANDB_METRIC_KEYS) < all_keys
     assert set(PHASE1_ACCEPTANCE_METRIC_KEYS) < all_keys
 
+def test_phase1_metric_registry_includes_structural_package_keys() -> None:
+    """The offline acceptance producer emits the structural/calibration keys."""
+    keys = set(PHASE1_WANDB_METRIC_KEYS)
+    assert phase_metric(PHASE1_FINETUNE, "eval", "key_presence_rate") in keys
+    assert phase_metric(PHASE1_FINETUNE, "eval", "value_exact_match_rate") in keys
+    assert phase_metric(PHASE1_FINETUNE, "calibration", "nll") in keys
+    assert phase_metric(PHASE1_FINETUNE, "calibration", "brier_score") in keys
+    # Shared JSON/calibration keys live once, in the acceptance family.
+    combined = set(PHASE1_ALL_METRIC_KEYS)
+    assert phase_metric(PHASE1_FINETUNE, "eval", "json_parse_rate") in combined
+    assert phase_metric(PHASE1_FINETUNE, "calibration", "ece") in combined
+    assert len(PHASE1_ALL_METRIC_KEYS) == len(set(PHASE1_ALL_METRIC_KEYS))
+
+
 
 # Author: Mus mbayramo@stanford.edu
