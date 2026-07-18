@@ -1,0 +1,69 @@
+{
+  "$comment": "Machine-readable Phase 2 (D1) training-row schema. AUTHORITATIVE over every doc/docstring example. Produced by igc/ds/rest_goal_contract.py:build_d1_rest_api_list_row; enforced by scripts/gates/phase23_row_schema.py. x is TEXT-ONLY; y_true.rest_api_list is an UNORDERED UNIQUE set (one item is still a list of length one); execution order is never part of this row.",
+  "type": "object",
+  "required": [
+    "phase",
+    "dataset",
+    "source_dataset",
+    "model_x",
+    "task",
+    "target_semantics",
+    "x",
+    "y_true",
+    "validation"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "phase": { "const": 2 },
+    "dataset": { "const": "D1" },
+    "source_dataset": { "const": "D0" },
+    "model_x": { "type": "string" },
+    "task": { "const": "text_to_rest_api_list" },
+    "target_semantics": { "const": "unordered_unique_set" },
+    "x": {
+      "type": "object",
+      "required": ["text"],
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string" }
+      }
+    },
+    "y_true": {
+      "type": "object",
+      "required": ["rest_api_list"],
+      "additionalProperties": false,
+      "properties": {
+        "rest_api_list": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": [
+        "text_source",
+        "review_judged",
+        "natural",
+        "exact_api_coverage",
+        "extra_intent",
+        "duplicate_intent",
+        "ambiguous",
+        "nonsense",
+        "method_semantics_valid"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text_source": { "type": "string" },
+        "review_judged": { "type": "boolean" },
+        "natural": { "type": "boolean" },
+        "exact_api_coverage": { "type": "boolean" },
+        "extra_intent": { "type": "boolean" },
+        "duplicate_intent": { "type": "boolean" },
+        "ambiguous": { "type": "boolean" },
+        "nonsense": { "type": "boolean" },
+        "method_semantics_valid": { "type": "boolean" }
+      }
+    }
+  }
+}
