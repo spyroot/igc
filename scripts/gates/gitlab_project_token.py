@@ -172,12 +172,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--env-file",
-        required=True,
+        default=".internal/gitlab-igc-api-key.env",
         help="Gitignored env file with GITLAB_URL/PROJECT_PATH/PROJECT_ID/PROJECT_TOKEN"
-        " (+ optional GITLAB_CANARY_PROJECTS).",
+        " (+ GITLAB_CANARY_PROJECTS). Defaults to this project's token file;"
+        " other projects pass their own.",
     )
     args = parser.parse_args(argv)
 
+    if not Path(args.env_file).exists():
+        print(f"BLOCKER: gitlab.project-token.exists: env file not found: {args.env_file}", file=sys.stderr)
+        return 1
     results = run_all(load_env_file(args.env_file))
     failed = 0
     for gate_id, violations in results.items():
