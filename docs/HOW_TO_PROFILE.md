@@ -153,8 +153,9 @@ dashboard is reachable, `nvidia_smi_query.log`, `nvidia_smi_pmon.log`,
 `docker_ps.log`, `docker_inspect.json`, `container_preflight.log`, and, by mode,
 `cpu_hot_paths.log` and/or `cuda_train_profile.log` plus
 `cuda_train_profile/profile_summary.json`. If a slow path is identified, push a
-small branch from the remote Docker checkout and mark it READY-FOR-PR in
-`COORDINATION.md`; Claude opens/merges the PR.
+small neutral-named branch from the remote Docker checkout and mark it
+READY-FOR-PR on the private work board; the integration pass opens and merges
+the PR.
 
 ## In CI
 
