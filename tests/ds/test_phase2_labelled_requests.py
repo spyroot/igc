@@ -999,6 +999,32 @@ def test_builder_accepts_no_action_empty_set_rows(tmp_path: Path) -> None:
     assert summary[_phase2_metric("sample_width", "k")] == 0
 
 
+def test_builder_rejects_no_action_when_judge_returns_api(tmp_path: Path) -> None:
+    """No-action rows reject any judge result that maps text to an API."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    builder = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=lambda request: "unused",
+        judge_provider=lambda request: _judge_json(
+            accepted=True,
+            rest_api_list=["/redfish/v1/Systems/99"],
+        ),
+    )
+
+    row, counters = builder.build_no_action(draft_text="do nothing to this server")
+    summary = counters.summary()
+
+    assert row is None
+    assert summary[_phase2_metric("draft_total")] == 1
+    assert summary[_phase2_metric("accepted_total")] == 0
+    assert summary[_phase2_metric("rejected_total")] == 1
+    assert summary[_phase2_metric("pro_accept_rate")] == 1.0
+    assert summary[_phase2_metric("rest_api_set_match_rate")] == 0.0
+    assert summary[_phase2_metric("empty_set_match_rate")] == 0.0
+    assert summary[_phase2_metric("empty_set_expected_total")] == 1
+    assert summary[_phase2_metric("sample_width", "k")] == 0
+
+
 def test_builder_returns_none_and_counts_rejection_on_set_mismatch(tmp_path: Path) -> None:
     """Rejected rows still produce namespaced counters for offline accounting."""
     spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
