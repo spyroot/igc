@@ -1,0 +1,43 @@
+# Gate config: dataset.phase3-combination-coverage.
+#
+# Used by:
+#   scripts/gates/phase3_combination_coverage.py  (gate; classifies rows + checks coverage)
+#   tests/gates/test_phase3_combination_coverage.py
+#
+# Phase 3 must train on one-, two-, and three-API combinations — it cannot be
+# mostly singleton examples — and the first curriculum must cover the operation,
+# argument, and vendor categories below. Categories are detected from each row's
+# y_true.calls (method mix, argument structure, /Oem/ path segments); a row may
+# satisfy several categories at once.
+version: 1
+name: phase3_combination_coverage
+
+# Every build must contain rows at each of these sample widths (|calls| per row;
+# 0-width hard negatives are counted separately and never satisfy a width).
+required_sample_widths: [1, 2, 3]
+min_rows_per_width: 1
+
+# "Cannot be mostly singleton examples": fraction of non-empty rows with
+# exactly one call must not exceed this cap.
+max_singleton_fraction: 0.5
+
+# Mention-order variants: different operator texts mapping to the SAME unordered
+# call combination. Reported always; enforced when min_text_variants_per_combination > 1.
+min_text_variants_per_combination: 1
+
+# First-curriculum categories. required: true categories must each reach
+# min_rows; "where available" vendor categories default to required: false but
+# are still counted and reported.
+categories:
+  all_get_observe:        { required: true,  min_rows: 1 }  # every call is GET/HEAD
+  observe_mutate:         { required: true,  min_rows: 1 }  # GET/HEAD + PATCH/PUT in one row
+  observe_invoke:         { required: true,  min_rows: 1 }  # GET/HEAD + POST in one row
+  mutate_invoke:          { required: true,  min_rows: 1 }  # PATCH/PUT + POST in one row
+  delete_observe:         { required: true,  min_rows: 1 }  # DELETE + GET/HEAD in one row
+  zero_argument_function: { required: true,  min_rows: 1 }  # a non-read call binding {} explicitly
+  one_scalar_argument:    { required: true,  min_rows: 1 }  # a call with exactly one scalar argument
+  nested_object_argument: { required: true,  min_rows: 1 }  # a call with an object-valued argument
+  multiple_arguments:     { required: true,  min_rows: 1 }  # a call with two or more argument keys
+  standard_standard:      { required: true,  min_rows: 1 }  # >=2 calls, all standard (no /Oem/)
+  standard_oem:           { required: false, min_rows: 1 }  # standard + OEM mixed (where available)
+  oem_oem:                { required: false, min_rows: 1 }  # >=2 OEM calls (where available)
