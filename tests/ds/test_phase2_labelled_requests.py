@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from igc.ds.phase2_labelled_requests import (
     PHASE2_LABELLED_REQUESTS,
@@ -34,6 +35,11 @@ from igc.ds.phase2_labelled_requests import (
     render_pro_judge_prompt,
     sample_phase2_contexts,
     to_minimal_phase3_input,
+)
+from igc.ds.rest_goal_contract import (
+    RedfishContext,
+    build_ordered_call_row,
+    parse_ordered_calls_y_pred,
 )
 from igc.modules.base.metric_keys import (
     PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS,
@@ -161,6 +167,50 @@ def _judge_json(
 def _phase2_metric(group: str, name: str | None = None) -> str:
     """Return a required Phase 2 labelled-request metric key."""
     return phase_metric(PHASE2_LABELLED_REQUESTS, group, name)
+
+
+def _phase2_runtime_source() -> str:
+    """Return runtime source text checked for hardcoded config literals."""
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            Path("igc/ds/phase2_labelled_requests.py"),
+            Path("scripts/build_phase2_labelled_requests.py"),
+        )
+    )
+
+
+def _prompt_leaf_literals(raw_spec: dict[str, Any]) -> tuple[str, ...]:
+    """Return non-placeholder prompt lines that must stay out of runtime code."""
+    prompts = raw_spec["prompts"]
+    literals: list[str] = []
+    for prompt in prompts.values():
+        for key in ("system", "template"):
+            for line in str(prompt[key]).splitlines():
+                literal = line.strip()
+                if literal and "{" not in literal and "}" not in literal:
+                    literals.append(literal)
+    return tuple(literals)
+
+
+def _committed_config_literals() -> tuple[str, ...]:
+    """Return model, judge, prompt, and generation literals owned by YAML."""
+    raw = yaml.safe_load(
+        Path("configs/phase2_labelled_requests.yaml").read_text(encoding="utf-8"),
+    )
+    assert isinstance(raw, dict)
+    literals = [
+        str(raw["model_x"]["model_id"]),
+        str(raw["model_x"]["artifact_sha"]),
+        str(raw["judge"]["route"]),
+        str(raw["judge"]["model_id"]),
+        str(raw["judge"]["profile"]),
+    ]
+    for key, value in raw["generation"].items():
+        literals.append(str(key))
+        literals.append(str(value))
+    literals.extend(_prompt_leaf_literals(raw))
+    return tuple(dict.fromkeys(literal for literal in literals if literal))
 
 
 def test_loads_prompt_model_judge_generation_and_thresholds_from_yaml(tmp_path: Path) -> None:
@@ -507,13 +557,7 @@ def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Pat
     assert "/redfish/v1/Systems/1" in model_prompt
     assert "show both systems" in judge_prompt
 
-    runtime_sources = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in (
-            Path("igc/ds/phase2_labelled_requests.py"),
-            Path("scripts/build_phase2_labelled_requests.py"),
-        )
-    )
+    runtime_sources = _phase2_runtime_source()
     forbidden_literals = (
         "phase2 test model-x system prompt from YAML",
         "${PHASE1_MODEL_X_MODEL_ID}",
@@ -541,6 +585,14 @@ def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Pat
     )
     for literal in forbidden_lowercase_literals:
         assert literal not in lowercase_runtime_sources
+
+
+def test_committed_yaml_literals_do_not_leak_into_runtime_code() -> None:
+    """Prompt, model, judge, and generation literals stay in the YAML spec."""
+    runtime_sources = _phase2_runtime_source()
+
+    for literal in _committed_config_literals():
+        assert literal not in runtime_sources
 
 
 def test_sampling_accepts_only_k_1_2_3_and_preserves_record_payloads() -> None:
@@ -1155,6 +1207,39 @@ def test_minimal_phase3_fixture_keeps_phase3_arguments_separate(tmp_path: Path) 
     encoded = json.dumps(phase3_input)
     assert '"method":' not in encoded
     assert '"arguments":' not in encoded
+
+
+def test_minimal_phase3_fixture_feeds_phase3_schema_helper(tmp_path: Path) -> None:
+    """Production Phase 2 output can seed Phase 3 without changing contracts."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    records = (_record(1), _record(2))
+    builder = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=lambda request: "show both systems",
+        judge_provider=lambda request: _judge_json(rest_api_list=request["expected_rest_api_list"]),
+    )
+    row, _ = builder.build_one(records, k=2, rng=random.Random(4))
+    phase3_input = to_minimal_phase3_input(row)
+    phase3_contexts = tuple(
+        RedfishContext(
+            rest_api=rest_api,
+            allowed_methods=phase3_input["allowed_methods"][rest_api],
+            json=phase3_input["json"][index],
+        )
+        for index, rest_api in enumerate(phase3_input["rest_api_list"])
+    )
+
+    phase3_row = build_ordered_call_row(
+        text=phase3_input["text"],
+        contexts=phase3_contexts,
+        rest_api_list=phase3_input["rest_api_list"],
+    )
+
+    assert phase3_row["source_dataset"] == PHASE2_LABELLED_REQUESTS
+    assert phase3_row["x"] == phase3_input
+    assert phase3_row["y_true"]["calls"] == parse_ordered_calls_y_pred({
+        "calls": phase3_row["y_true"]["calls"],
+    })
 
 
 def test_minimal_phase3_fixture_rejects_missing_phase2_row() -> None:
