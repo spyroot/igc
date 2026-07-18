@@ -80,19 +80,30 @@ if [[ "${PROFILE_MODE}" == "cuda" || "${PROFILE_MODE}" == "all" ]]; then
 fi
 
 SSH_BIN="${SSH_BIN:-ssh}"
-CONTAINER="${CONTAINER:-igc}"
+CONTAINER="${CONTAINER:-igc-phase1-pretrain}"
 IGC_CODE_DIR="${IGC_CODE_DIR:-/workspace/igc}"
 GPU_COUNT="${GPU_COUNT:-1}"
 GPU_IDS="${GPU_IDS:-}"
 GPU_MAX_MEM_MB="${GPU_MAX_MEM_MB:-256}"
 GPU_MAX_UTIL="${GPU_MAX_UTIL:-5}"
+GPU_IDLE_SAMPLES="${GPU_IDLE_SAMPLES:-3}"
+GPU_IDLE_INTERVAL="${GPU_IDLE_INTERVAL:-5}"
+MIN_MODELS_FREE_GB="${MIN_MODELS_FREE_GB:-20}"
 RUN_ID="${RUN_ID:-igc-${PROFILE_MODE}-$(date -u +%Y%m%dT%H%M%SZ)}"
 REMOTE_TIMEOUT="${REMOTE_TIMEOUT:-10}"
+BRAIN_READY_URL="${BRAIN_READY_URL:-}"
+FLEET_STATE_URL="${FLEET_STATE_URL:-}"
 
 [[ "${RUN_ID}" =~ ^[A-Za-z0-9._+-]+$ ]] ||
     die "RUN_ID may contain only letters, digits, dot, underscore, plus, and dash"
 [[ "${GPU_COUNT}" =~ ^[0-9]+$ ]] && [[ "${GPU_COUNT}" -ge 1 ]] ||
     die "GPU_COUNT must be a positive integer"
+[[ "${GPU_IDLE_SAMPLES}" =~ ^[0-9]+$ ]] && [[ "${GPU_IDLE_SAMPLES}" -ge 1 ]] ||
+    die "GPU_IDLE_SAMPLES must be a positive integer"
+[[ "${GPU_IDLE_INTERVAL}" =~ ^[0-9]+$ ]] ||
+    die "GPU_IDLE_INTERVAL must be a non-negative integer"
+[[ "${MIN_MODELS_FREE_GB}" =~ ^[0-9]+$ ]] ||
+    die "MIN_MODELS_FREE_GB must be a non-negative integer"
 
 remote_env=(
     "PROFILE_MODE=$(quote "${PROFILE_MODE}")"
@@ -102,8 +113,13 @@ remote_env=(
     "GPU_IDS=$(quote "${GPU_IDS}")"
     "GPU_MAX_MEM_MB=$(quote "${GPU_MAX_MEM_MB}")"
     "GPU_MAX_UTIL=$(quote "${GPU_MAX_UTIL}")"
+    "GPU_IDLE_SAMPLES=$(quote "${GPU_IDLE_SAMPLES}")"
+    "GPU_IDLE_INTERVAL=$(quote "${GPU_IDLE_INTERVAL}")"
+    "MIN_MODELS_FREE_GB=$(quote "${MIN_MODELS_FREE_GB}")"
     "RUN_ID=$(quote "${RUN_ID}")"
     "PROFILE_DATASET_ARGS=$(quote "${PROFILE_DATASET_ARGS:-}")"
+    "BRAIN_READY_URL=$(quote "${BRAIN_READY_URL}")"
+    "FLEET_STATE_URL=$(quote "${FLEET_STATE_URL}")"
 )
 
 remote_prefix="${remote_env[*]}"
@@ -122,6 +138,76 @@ die() {
 
 q() {
     printf '%q' "$1"
+}
+
+require_models_space() {
+    local available_kb required_kb
+    available_kb="$(
+        df -Pk /models |
+            awk 'NR == 2 {print $4}'
+    )"
+    [[ "${available_kb}" =~ ^[0-9]+$ ]] ||
+        die "could not determine free space under /models"
+    required_kb=$((MIN_MODELS_FREE_GB * 1024 * 1024))
+    if ((available_kb < required_kb)); then
+        die "/models free space below MIN_MODELS_FREE_GB=${MIN_MODELS_FREE_GB}"
+    fi
+}
+
+trim_spaces() {
+    local value="$1"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "${value}"
+}
+
+gpu_requested() {
+    local idx="$1"
+    [[ -z "${GPU_IDS}" || ",${GPU_IDS}," == *",${idx},"* ]]
+}
+
+select_idle_gpus() {
+    command -v nvidia-smi >/dev/null 2>&1 ||
+        die "nvidia-smi required to select GPUs"
+
+    local -A idle_counts=()
+    local sample idx mem util snapshot
+    for sample in $(seq 1 "${GPU_IDLE_SAMPLES}"); do
+        snapshot="$(
+            nvidia-smi \
+                --query-gpu=index,memory.used,utilization.gpu \
+                --format=csv,noheader,nounits
+        )"
+        printf '%s\n' "${snapshot}" |
+            tee "${BUNDLE}/nvidia_smi_idle_sample_${sample}.csv"
+        while IFS=, read -r idx mem util; do
+            idx="$(trim_spaces "${idx}")"
+            mem="$(trim_spaces "${mem}")"
+            util="$(trim_spaces "${util}")"
+            [[ "${idx}" =~ ^[0-9]+$ ]] || continue
+            [[ "${mem}" =~ ^[0-9]+$ ]] || continue
+            [[ "${util}" =~ ^[0-9]+$ ]] || continue
+            gpu_requested "${idx}" || continue
+            if ((mem <= GPU_MAX_MEM_MB && util <= GPU_MAX_UTIL)); then
+                idle_counts["${idx}"]=$(( ${idle_counts["${idx}"]:-0} + 1 ))
+            fi
+        done <<< "${snapshot}"
+        if ((sample < GPU_IDLE_SAMPLES && GPU_IDLE_INTERVAL > 0)); then
+            sleep "${GPU_IDLE_INTERVAL}"
+        fi
+    done
+
+    local selected=()
+    for idx in "${!idle_counts[@]}"; do
+        if ((idle_counts["${idx}"] == GPU_IDLE_SAMPLES)); then
+            selected+=("${idx}")
+        fi
+    done
+    mapfile -t selected < <(printf '%s\n' "${selected[@]}" | sort -n)
+    if ((${#selected[@]} < GPU_COUNT)); then
+        die "not enough GPUs stayed idle for ${GPU_IDLE_SAMPLES} samples"
+    fi
+    (IFS=,; printf '%s' "${selected[*]:0:GPU_COUNT}")
 }
 
 BUNDLE="/models/igc/profile_runs/${RUN_ID}"
@@ -146,6 +232,23 @@ printf 'host=%s\n' "$(hostname)"
 date -u '+started_at=%Y-%m-%dT%H:%M:%SZ'
 df -h /models | tee "${BUNDLE}/models_df.txt"
 
+if [[ "${PROFILE_MODE}" == "cuda" || "${PROFILE_MODE}" == "all" ]]; then
+    require_models_space
+fi
+
+if [[ -n "${BRAIN_READY_URL}" ]] && command -v curl >/dev/null 2>&1; then
+    curl --noproxy '*' -fsS --connect-timeout 3 --max-time 5 \
+        "${BRAIN_READY_URL}" > "${BUNDLE}/brain_ready.json" ||
+        printf 'Brain readiness snapshot unavailable\n' \
+            > "${BUNDLE}/brain_ready.unavailable.txt"
+fi
+if [[ -n "${FLEET_STATE_URL}" ]] && command -v curl >/dev/null 2>&1; then
+    curl --noproxy '*' -fsS --connect-timeout 3 --max-time 5 \
+        "${FLEET_STATE_URL}" > "${BUNDLE}/fleet_state.json" ||
+        printf 'Fleet state snapshot unavailable\n' \
+            > "${BUNDLE}/fleet_state.unavailable.txt"
+fi
+
 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}' |
     tee "${BUNDLE}/docker_ps.txt"
 
@@ -164,6 +267,7 @@ if command -v nvidia-smi >/dev/null 2>&1; then
         --query-gpu=index,memory.used,utilization.gpu \
         --format=csv,noheader,nounits |
         tee "${BUNDLE}/nvidia_smi_before.csv"
+    nvidia-smi pmon -c 1 > "${BUNDLE}/nvidia_smi_pmon_before.txt" 2>&1 || true
 else
     printf 'nvidia-smi unavailable on host\n' |
         tee "${BUNDLE}/nvidia_smi_before.csv"
@@ -181,39 +285,7 @@ if [[ "${PROFILE_MODE}" == "cpu" || "${PROFILE_MODE}" == "all" ]]; then
 fi
 
 if [[ "${PROFILE_MODE}" == "cuda" || "${PROFILE_MODE}" == "all" ]]; then
-    if [[ -z "${GPU_IDS}" ]]; then
-        command -v nvidia-smi >/dev/null 2>&1 ||
-            die "nvidia-smi required to select GPUs"
-        GPU_IDS="$(
-            nvidia-smi \
-                --query-gpu=index,memory.used,utilization.gpu \
-                --format=csv,noheader,nounits |
-            awk -F, \
-                -v count="${GPU_COUNT}" \
-                -v max_mem="${GPU_MAX_MEM_MB}" \
-                -v max_util="${GPU_MAX_UTIL}" '
-                    function trim(v) {
-                        gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
-                        return v
-                    }
-                    {
-                        idx = trim($1)
-                        mem = trim($2) + 0
-                        util = trim($3) + 0
-                        if (mem <= max_mem && util <= max_util) {
-                            selected[n++] = idx
-                        }
-                    }
-                    END {
-                        if (n < count) {
-                            exit 3
-                        }
-                        for (i = 0; i < count; i++) {
-                            printf "%s%s", (i ? "," : ""), selected[i]
-                        }
-                    }'
-        )" || die "not enough idle GPUs for GPU_COUNT=${GPU_COUNT}"
-    fi
+    GPU_IDS="$(select_idle_gpus)"
     printf 'cuda_visible_devices=%s\n' "${GPU_IDS}" |
         tee "${BUNDLE}/gpu_selection.txt"
     full_args="${PROFILE_DATASET_ARGS} --output-dir $(q "${BUNDLE}")"
@@ -231,6 +303,7 @@ if command -v nvidia-smi >/dev/null 2>&1; then
         --query-gpu=index,memory.used,utilization.gpu \
         --format=csv,noheader,nounits |
         tee "${BUNDLE}/nvidia_smi_after.csv"
+    nvidia-smi pmon -c 1 > "${BUNDLE}/nvidia_smi_pmon_after.txt" 2>&1 || true
 fi
 printf 'profile bundle: %s\n' "${BUNDLE}"
 REMOTE
