@@ -200,7 +200,9 @@ def build_phase2_labelled_requests(
     rng = random.Random(seed)
     accepted_rows: list[dict[str, Any]] = []
     counters = Phase2LabelledRequestCounters(
-        sample_width_k=sample_width,
+        # A no-action-only run (count=0) samples no API combination, so it
+        # reports k=0 rather than the unused requested width.
+        sample_width_k=sample_width if count else 0,
         prompt_spec_version=spec.prompt_spec_version,
         model_x_artifact_sha=spec.model_x.artifact_sha,
         judge_model=spec.judge.model_id,
