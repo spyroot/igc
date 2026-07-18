@@ -208,12 +208,15 @@ def test_phase23_rows_pin_locked_field_names() -> None:
     assert phase3["target_semantics"] == "unordered_call_set"
     assert set(phase3["x"]) == {"text", "rest_api_list", "json", "allowed_methods"}
     assert set(phase3["y_true"]) == {"calls"}
-    # A Call is exactly rest_api/method/arguments; allowed_methods stays in x.
+    # A Call is exactly rest_api/http_method/operation_name/arguments;
+    # allowed_methods stays in x as context evidence.
     assert set(phase3["y_true"]["calls"][0]) == {
         "rest_api",
-        "method",
+        "http_method",
+        "operation_name",
         "arguments",
     }
+    assert phase3["y_true"]["calls"][0]["operation_name"] is None
 
 
 def test_phase3_get_calls_form_canonical_set_and_keep_arguments_empty() -> None:
@@ -270,12 +273,14 @@ def test_phase3_get_calls_form_canonical_set_and_keep_arguments_empty() -> None:
     assert row["y_true"]["calls"] == [
         {
             "rest_api": "/redfish/v1/Systems/1",
-            "method": "GET",
+            "http_method": "GET",
+            "operation_name": None,
             "arguments": {},
         },
         {
             "rest_api": "/redfish/v1/TaskService/Tasks",
-            "method": "GET",
+            "http_method": "GET",
+            "operation_name": None,
             "arguments": {},
         },
     ]
@@ -363,11 +368,16 @@ def test_phase3_no_argument_action_binds_empty_object_explicitly() -> None:
             # builder does not scrape ResetType from the observed GET JSON.
             "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset": {},
         },
+        operation_name_by_api={
+            # The action name is available here, so the Call carries it.
+            "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset": "ComputerSystem.Reset",
+        },
     )
 
     assert row["y_true"]["calls"][0] == {
         "rest_api": "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
-        "method": "POST",
+        "http_method": "POST",
+        "operation_name": "ComputerSystem.Reset",
         "arguments": {},
     }
 
@@ -403,7 +413,8 @@ def test_phase3_ignores_unselected_method_and_argument_labels() -> None:
     assert row["x"]["rest_api_list"] == ["/redfish/v1/Systems/1"]
     assert row["y_true"]["calls"] == [{
         "rest_api": "/redfish/v1/Systems/1",
-        "method": "GET",
+        "http_method": "GET",
+        "operation_name": None,
         "arguments": {},
     }]
 
@@ -476,12 +487,14 @@ def test_phase3_mixed_calls_normalize_case_and_isolate_per_api_arguments() -> No
     assert row["y_true"]["calls"] == [
         {
             "rest_api": "/redfish/v1/Managers/1/VirtualMedia/CD",
-            "method": "GET",
+            "http_method": "GET",
+            "operation_name": None,
             "arguments": {},
         },
         {
             "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
-            "method": "PATCH",
+            "http_method": "PATCH",
+            "operation_name": None,
             "arguments": {"Attributes": {"BootMode": "Uefi"}},
         },
     ]
@@ -626,7 +639,8 @@ def test_rendered_examples_have_prompt_target_boundary_and_canonical_json() -> N
         '  "calls": [\n'
         "    {\n"
         '      "arguments": {},\n'
-        '      "method": "GET",\n'
+        '      "http_method": "GET",\n'
+        '      "operation_name": null,\n'
         '      "rest_api": "/redfish/v1/Systems"\n'
         "    }\n"
         "  ]\n"
@@ -667,7 +681,8 @@ def test_rendered_phase3_patch_example_keeps_explicit_arguments() -> None:
     assert json.loads(rendered.target_json) == {
         "calls": [{
             "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
-            "method": "PATCH",
+            "http_method": "PATCH",
+            "operation_name": None,
             "arguments": {"Attributes": {"BootMode": "Uefi"}},
         }],
     }
@@ -718,12 +733,14 @@ def test_rendered_phase3_targets_use_canonical_set_order() -> None:
         "calls": [
             {
                 "rest_api": "/redfish/v1/Systems",
-                "method": "GET",
+                "http_method": "GET",
+                "operation_name": None,
                 "arguments": {},
             },
             {
                 "rest_api": "/redfish/v1/TaskService/Tasks",
-                "method": "GET",
+                "http_method": "GET",
+                "operation_name": None,
                 "arguments": {},
             },
         ],
@@ -747,20 +764,23 @@ def test_y_pred_parsers_report_bad_contracts() -> None:
     }) == ["/redfish/v1/Systems", "/redfish/v1/Managers"]
     calls = [{
         "rest_api": "/redfish/v1/Systems",
-        "method": "get",
+        "http_method": "get",
+        "operation_name": None,
         "arguments": {},
     }]
 
     assert parse_calls_y_pred(json.dumps({"y_pred": {"calls": calls}})) == [{
         "rest_api": "/redfish/v1/Systems",
-        "method": "GET",
+        "http_method": "GET",
+        "operation_name": None,
         "arguments": {},
     }]
     with pytest.raises(ValueError, match="rest_api"):
         parse_calls_y_pred({
             "y_pred": {
                 "calls": [{
-                    "method": "GET",
+                    "http_method": "GET",
+                    "operation_name": None,
                     "arguments": {},
                 }],
             },
@@ -776,7 +796,8 @@ def test_y_pred_parsers_report_bad_contracts() -> None:
         parse_calls_y_pred({
             "calls": [{
                 "rest_api": "/redfish/v1/Systems",
-                "method": "GET",
+                "http_method": "GET",
+                "operation_name": None,
             }],
         })
 
@@ -819,13 +840,15 @@ def test_calls_parser_preserves_mutation_arguments_and_normalizes_method() -> No
     """Phase 3 y_pred parsing keeps PATCH arguments and normalizes method case."""
     calls = [{
         "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
-        "method": "patch",
+        "http_method": "patch",
+        "operation_name": None,
         "arguments": {"Attributes": {"BootMode": "Uefi"}},
     }]
 
     assert parse_calls_y_pred({"y_pred": {"calls": calls}}) == [{
         "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
-        "method": "PATCH",
+        "http_method": "PATCH",
+        "operation_name": None,
         "arguments": {"Attributes": {"BootMode": "Uefi"}},
     }]
 
@@ -835,13 +858,15 @@ def test_calls_parser_strips_context_fields_from_predicted_calls() -> None:
     calls = [{
         "rest_api": "/redfish/v1/Systems",
         "allowed_methods": ["GET", "HEAD"],
-        "method": "GET",
+        "http_method": "GET",
+        "operation_name": None,
         "arguments": {},
     }]
 
     assert parse_calls_y_pred({"calls": calls}) == [{
         "rest_api": "/redfish/v1/Systems",
-        "method": "GET",
+        "http_method": "GET",
+        "operation_name": None,
         "arguments": {},
     }]
 
@@ -881,12 +906,14 @@ def test_calls_parser_keeps_predicted_sequence_for_set_evaluation() -> None:
     calls = [
         {
             "rest_api": "/redfish/v1/TaskService/Tasks",
-            "method": "GET",
+            "http_method": "GET",
+            "operation_name": None,
             "arguments": {},
         },
         {
             "rest_api": "/redfish/v1/Systems",
-            "method": "GET",
+            "http_method": "GET",
+            "operation_name": None,
             "arguments": {},
         },
     ]
@@ -900,7 +927,8 @@ def test_calls_parser_rejects_non_string_contract_fields() -> None:
         parse_calls_y_pred({
             "calls": [{
                 "rest_api": 42,
-                "method": "GET",
+                "http_method": "GET",
+                "operation_name": None,
                 "arguments": {},
             }],
         })
@@ -908,7 +936,7 @@ def test_calls_parser_rejects_non_string_contract_fields() -> None:
         parse_calls_y_pred({
             "calls": [{
                 "rest_api": "/redfish/v1/Systems",
-                "method": 42,
+                "http_method": 42,
                 "arguments": {},
             }],
         })
@@ -942,7 +970,8 @@ def test_calls_parser_rejects_non_object_arguments() -> None:
         parse_calls_y_pred({
             "calls": [{
                 "rest_api": "/redfish/v1/Systems",
-                "method": "GET",
+                "http_method": "GET",
+                "operation_name": None,
                 "arguments": ["PowerState", "On"],
             }],
         })
@@ -955,7 +984,8 @@ def test_calls_parser_rejects_readonly_arguments() -> None:
             parse_calls_y_pred({
                 "calls": [{
                     "rest_api": "/redfish/v1/Systems",
-                    "method": method,
+                    "http_method": method,
+                    "operation_name": None,
                     "arguments": {"PowerState": "On"},
                 }],
             })
@@ -1022,7 +1052,8 @@ def test_call_evaluation_counts_distinct_extra_predictions_as_failures() -> None
     row = _two_call_row()
     predicted_calls = list(row["y_true"]["calls"]) + [{
         "rest_api": "/redfish/v1/Chassis",
-        "method": "GET",
+        "http_method": "GET",
+        "operation_name": None,
         "arguments": {},
     }]
 
@@ -1056,7 +1087,8 @@ def test_call_evaluation_reports_invalid_method_via_row_evidence() -> None:
         {
             "calls": [{
                 "rest_api": "/redfish/v1/Systems",
-                "method": "PATCH",
+                "http_method": "PATCH",
+                "operation_name": None,
                 "arguments": {"PowerState": "On"},
             }],
         },
@@ -1112,12 +1144,14 @@ def test_call_evaluation_scores_required_and_no_argument_calls() -> None:
     missing_required = evaluate_calls_y_pred(row, {"calls": [
         {
             "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
-            "method": "PATCH",
+            "http_method": "PATCH",
+            "operation_name": None,
             "arguments": {},
         },
         {
             "rest_api": "/redfish/v1/TaskService/Tasks",
-            "method": "GET",
+            "http_method": "GET",
+            "operation_name": None,
             "arguments": {},
         },
     ]})
@@ -1130,7 +1164,8 @@ def test_call_evaluation_scores_required_and_no_argument_calls() -> None:
     unsafe = evaluate_calls_y_pred(row, {"calls": [
         {
             "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
-            "method": "PATCH",
+            "http_method": "PATCH",
+            "operation_name": None,
             "arguments": {
                 "Attributes": {"BootMode": "Uefi"},
                 "UnsupportedKnob": True,
@@ -1138,7 +1173,8 @@ def test_call_evaluation_scores_required_and_no_argument_calls() -> None:
         },
         {
             "rest_api": "/redfish/v1/TaskService/Tasks",
-            "method": "GET",
+            "http_method": "GET",
+            "operation_name": None,
             "arguments": {},
         },
     ]})
@@ -1162,7 +1198,8 @@ def test_call_evaluation_empty_set_matches_empty_prediction() -> None:
 
     nonempty = evaluate_calls_y_pred(row, {"calls": [{
         "rest_api": "/redfish/v1/Systems",
-        "method": "GET",
+        "http_method": "GET",
+        "operation_name": None,
         "arguments": {},
     }]})
     assert nonempty["call_set_exact_match"] is False

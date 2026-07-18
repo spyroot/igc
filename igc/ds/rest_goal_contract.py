@@ -212,26 +212,33 @@ def build_call_row(
     rest_api_list: Sequence[str],
     method_by_api: Mapping[str, str],
     arguments_by_api: Mapping[str, Mapping[str, Any]] | None = None,
+    operation_name_by_api: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build one mock Phase 3 row: an UNORDERED set of bound calls.
 
-    Phase 3 binds each Phase 2 API to an explicit method and explicit arguments.
-    The emitted calls form an unordered unique set (canonical sort is dedup
-    identity only, never execution order — order belongs to the RL oracle).
-    Methods are explicit per API; there is no inferred default.
+    Phase 3 binds each Phase 2 API to an explicit HTTP method and explicit
+    arguments. The emitted calls form an unordered unique set (canonical sort is
+    dedup identity only, never execution order — order belongs to the RL oracle).
+    Methods are explicit per API; there is no inferred default. A Call is
+    exactly ``{rest_api, http_method, operation_name, arguments}`` —
+    ``operation_name`` names the action/function when one exists and is null
+    for plain REST verbs.
 
     :param text: operator sentence.
     :param contexts: current Redfish JSON/method context.
     :param rest_api_list: REST API set emitted by Phase 2 (unordered, unique).
-    :param method_by_api: explicit method label per API; every selected API
+    :param method_by_api: explicit HTTP method label per API; every selected API
         must have one — a missing method raises instead of defaulting.
     :param arguments_by_api: explicit argument bindings by API. Every mutation
         (non-GET/HEAD) call must have an explicit binding — a no-argument
         action binds ``{}`` explicitly; a missing binding raises instead of
         silently becoming ``{}``.
+    :param operation_name_by_api: optional action/function name per API
+        (e.g. a Redfish action name); absent APIs carry ``None``.
     :return: JSON-compatible Phase 3 row with the unordered call set.
     """
     arguments_by_api = arguments_by_api or {}
+    operation_name_by_api = operation_name_by_api or {}
     by_api = _contexts_by_api(contexts)
     _require_context(rest_api_list, by_api)
     api_set = sorted(_unique_rest_api_list(rest_api_list))
@@ -260,9 +267,11 @@ def build_call_row(
                     "a no-argument action binds {} explicitly"
                 )
             explicit_arguments = dict(arguments_by_api[rest_api])
+        operation_name = operation_name_by_api.get(rest_api)
         calls.append({
             "rest_api": rest_api,             # One selected REST API from the Phase 2 set.
-            "method": method,                 # Explicit method label; never inferred.
+            "http_method": method,            # Explicit HTTP method label; never inferred.
+            "operation_name": operation_name,  # Action/function name, or None for plain verbs.
             "arguments": explicit_arguments,  # Explicit body/action args; {} for reads.
         })
 
@@ -279,7 +288,7 @@ def build_call_row(
             "allowed_methods": _allowed_methods_map(contexts),  # Method legality evidence.
         },
         "y_true": {
-            "calls": calls,                   # Unordered bound calls: rest_api/method/arguments.
+            "calls": calls,                   # Unordered bound calls: rest_api/http_method/operation_name/arguments.
         },
     }
 
@@ -389,12 +398,15 @@ def evaluate_rest_api_list_y_pred(
 def parse_calls_y_pred(y_pred: Mapping[str, Any] | str) -> list[dict[str, Any]]:
     """Parse Phase 3 model output into bound-call dictionaries.
 
-    A Call is exactly ``{rest_api, method, arguments}`` — ``allowed_methods`` is
-    row context evidence, never part of the emitted call. Method legality against
-    that evidence is checked by :func:`evaluate_calls_y_pred`, which holds the row.
+    A Call is exactly ``{rest_api, http_method, operation_name, arguments}`` —
+    ``allowed_methods`` is row context evidence, never part of the emitted call.
+    ``operation_name`` is optional in the raw output ("when available") and is
+    normalized to ``None`` when absent. Method legality against the row evidence
+    is checked by :func:`evaluate_calls_y_pred`, which holds the row.
 
     :param y_pred: model output as a mapping or JSON string.
-    :return: calls with ``rest_api``, ``method``, and ``arguments``.
+    :return: calls with ``rest_api``, ``http_method``, ``operation_name``, and
+        ``arguments``.
     """
     if isinstance(y_pred, str):
         y_pred = json.loads(y_pred)
@@ -412,25 +424,29 @@ def parse_calls_y_pred(y_pred: Mapping[str, Any] | str) -> list[dict[str, Any]]:
             raise ValueError("each y_pred.calls item must be an object")
         missing = [
             field
-            for field in ("rest_api", "method", "arguments")
+            for field in ("rest_api", "http_method", "arguments")
             if field not in call
         ]
         if missing:
             raise ValueError(f"y_pred.calls item missing required field(s): {missing}")
         if not isinstance(call["rest_api"], str):
             raise ValueError("y_pred.calls.rest_api must be a string")
-        if not isinstance(call["method"], str):
-            raise ValueError("y_pred.calls.method must be a string")
-        method = call["method"].upper()
+        if not isinstance(call["http_method"], str):
+            raise ValueError("y_pred.calls.http_method must be a string")
+        method = call["http_method"].upper()
+        operation_name = call.get("operation_name")
+        if operation_name is not None and not isinstance(operation_name, str):
+            raise ValueError("y_pred.calls.operation_name must be a string or null")
         if not isinstance(call["arguments"], Mapping):
             raise ValueError("y_pred.calls.arguments must be an object")
         arguments = dict(call["arguments"])
         if method in ("GET", "HEAD") and arguments:
             raise ValueError("read-only y_pred.calls.arguments must be empty")
         parsed.append({
-            "rest_api": call["rest_api"],   # The API this call binds.
-            "method": method,               # Explicit method label.
-            "arguments": arguments,         # Explicit args; {} for reads.
+            "rest_api": call["rest_api"],     # The API this call binds.
+            "http_method": method,            # Explicit HTTP method label.
+            "operation_name": operation_name,  # Action/function name, or None.
+            "arguments": arguments,           # Explicit args; {} for reads.
         })
     return parsed
 
@@ -504,7 +520,7 @@ def evaluate_calls(
     for rest_api in shared_apis:
         expected_call = expected_by_api[rest_api]
         predicted_call = predicted_by_api[rest_api]
-        method_ok = predicted_call.get("method") == expected_call.get("method")
+        method_ok = predicted_call.get("http_method") == expected_call.get("http_method")
         arguments_ok = predicted_call.get("arguments") == expected_call.get("arguments")
         method_matches += 1 if method_ok else 0
         argument_matches += 1 if arguments_ok else 0
@@ -559,7 +575,7 @@ def evaluate_calls(
     invalid_methods = sum(
         1
         for call in legality_checked
-        if str(call.get("method", "")).upper()
+        if str(call.get("http_method", "")).upper()
         not in legality[str(call.get("rest_api", ""))]
     )
 

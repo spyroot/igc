@@ -88,7 +88,7 @@ def test_cli_mock_mode_writes_rendered_rows_and_metrics(
     assert "inference" not in rows[0]
     assert "inference" not in rows[1]
     patch_call = next(
-        call for call in rows[1]["y_true"]["calls"] if call["method"] == "PATCH"
+        call for call in rows[1]["y_true"]["calls"] if call["http_method"] == "PATCH"
     )
     assert patch_call["arguments"] == {"Attributes": {"BootMode": "Uefi"}}
     assert metrics["dataset"] == "phase3_argument_extractor_smoke"
@@ -141,7 +141,7 @@ def test_cli_extra_predicted_call_fails_set_match(tmp_path: Path) -> None:
     # a DISTINCT extra proves set-cardinality mismatch is what fails the row.
     extra_calls = list(rows[0]["y_true"]["calls"]) + [{
         "rest_api": "/redfish/v1/Chassis",
-        "method": "GET",
+        "http_method": "GET",
         "arguments": {},
     }]
     predictions = tmp_path / "predictions.jsonl"
@@ -180,7 +180,7 @@ def test_cli_invalid_method_returns_nonzero_after_writing_metrics(tmp_path: Path
     bad_calls = [dict(call) for call in rows[0]["y_true"]["calls"]]
     # PATCH is not legal for this read-only fixture API — the prediction still
     # PARSES (structure is valid); legality fails against the row's evidence.
-    bad_calls[0]["method"] = "PATCH"
+    bad_calls[0]["http_method"] = "PATCH"
     bad_calls[0]["arguments"] = {"Illegal": True}
     predictions = tmp_path / "predictions.jsonl"
     predictions.write_text(

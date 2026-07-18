@@ -1221,7 +1221,7 @@ def test_minimal_phase3_fixture_keeps_phase3_arguments_separate(tmp_path: Path) 
     assert phase3_input["allowed_methods"]["/redfish/v1/Systems/1"] == ["GET", "HEAD"]
     assert "calls" not in phase3_input
     encoded = json.dumps(phase3_input)
-    assert '"method":' not in encoded
+    assert '"http_method":' not in encoded
     assert '"arguments":' not in encoded
 
 
