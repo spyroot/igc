@@ -35,6 +35,11 @@ passes:
   no_gpu_homelab_policy:    { surface: cpu, tool: "policy scan: no GPU resource requests in home-lab CI/manifests" }
   gpu_evidence_validation:  { surface: cpu, tool: "validate committed GPU evidence manifests against the schema below" }
   agent_leak_guard:         { surface: cpu, tool: "scripts/gates/agent_leak_guard.py: no agent artifacts tracked, no agent attribution/chatter in commit+PR/MR messages, no internal endpoint literals" }
+  # SHARED gate class (same gate ships in every project): the per-project GitLab
+  # token exists, is bound to THIS project's bot, has API access, and is DENIED
+  # on canary projects. Live run needs the gitignored token env file + network;
+  # offline tests mock the fetcher.
+  gitlab_project_token:     { surface: cpu, tool: "scripts/gates/gitlab_project_token.py --env-file <gitignored token env>: gitlab.project-token.{exists,project-bound,api-access,no-cross-project-access}" }
 
   # ---- GPU passes: GB300 only; CI sees their EVIDENCE, never runs them. ----
   single_gpu_smoke:         { surface: gpu, evidence: required }
