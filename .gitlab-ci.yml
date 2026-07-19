@@ -1,0 +1,28 @@
+stages:
+  - phase2
+
+phase2_labelled_requests:
+  stage: phase2
+  tags:
+    - homelab-k8s
+  image: python:3.10-slim
+  variables:
+    HF_DATASETS_OFFLINE: "1"
+    KMP_DUPLICATE_LIB_OK: "TRUE"
+    OMP_NUM_THREADS: "1"
+    PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    PYTEST_ADDOPTS: "--junitxml=phase2_labelled_requests.junit.xml"
+    PYTHONDONTWRITEBYTECODE: "1"
+    PYTHONPATH: "$CI_PROJECT_DIR"
+    TRANSFORMERS_OFFLINE: "1"
+  before_script:
+    - python --version
+    - python -m pip install pytest pyyaml
+  script:
+    - scripts/check.sh phase2_labelled_requests
+  artifacts:
+    when: always
+    reports:
+      junit: phase2_labelled_requests.junit.xml
+    paths:
+      - phase2_labelled_requests.junit.xml

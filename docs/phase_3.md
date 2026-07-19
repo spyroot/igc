@@ -1,12 +1,14 @@
-# Phase 3: Ordered Method And Argument Extraction
+# Phase 3: Method And Argument Extraction
 
-Phase 3 fine-tunes argument extraction. It starts from accepted `D1` rows. Given operator text and
-the ordered `rest_api_list` from Phase 2, the model must produce the method and arguments for each
-`rest_api` in the same order.
+Phase 3 fine-tunes method and argument extraction. It starts from accepted
+`phase2_labelled_requests` rows. Legacy notes may call that Phase 2 artifact
+`D1`; new code and docs use the canonical name. Given operator text and the
+canonical `rest_api_list` from Phase 2, the model must produce the method and
+arguments for each `rest_api`.
 
 Names are fixed as follows:
 
-- `D1`: Phase 2 text-to-ordered-REST-goal data.
+- `phase2_labelled_requests`: Phase 2 text-to-REST-API-set data.
 - `model_x`: the Phase 1 Redfish-tuned LLM.
 - `goal_extractor`: the separate Phase 2 weight role, used upstream to produce `rest_api_list`.
 - `argument_extractor`: the separate Phase 3 fine-tuned weight role.
@@ -17,23 +19,24 @@ Names are fixed as follows:
 - `y_true`: the exact target label stored in the dataset.
 - `y_pred`: the model output during inference or evaluation.
 - `rest_api`: one concrete Redfish URI.
-- `rest_api_list`: ordered list of concrete Redfish URIs from `D1`.
+- `rest_api_list`: canonical list of concrete Redfish URIs from `phase2_labelled_requests`.
 - `method`: the selected HTTP method for a `rest_api`.
 - `allowed_methods`: methods from the same discovery run's `rest_api_map.npy`.
 - `arguments`: request body or action arguments; `{}` means no arguments.
 - `json`: full Redfish JSON resource body.
 
-Phase 3 does not choose new REST APIs. It fills `method` and `arguments` for the ordered
-`rest_api_list` already produced by Phase 2.
+Phase 3 does not choose new REST APIs and does not create new text. It fills
+`method` and `arguments` for the `rest_api_list` already produced by Phase 2.
 
 Checkpoint rule: Phase 3 writes only `argument_extractor` artifacts. A run config must record the
 input checkpoint path, the output path for `argument_extractor`, the `phase3_argument_extraction/*`
 W&B namespace, and the exact dataset manifest used for training.
 
-## Phase 3 Row From D1
+## Phase 3 Row From Phase 2
 
-This example continues the accepted `D1` row from Phase 2. Both resources are read-only checks with
-`GET` and `HEAD` allowed, so the correct method is `GET` and `arguments` is empty for each one.
+This example continues an accepted `phase2_labelled_requests` row from Phase 2.
+Both resources are read-only checks with `GET` and `HEAD` allowed, so the
+correct method is `GET` and `arguments` is empty for each one.
 
 ```json
 {
@@ -181,19 +184,19 @@ corpora, readable W&B plots, checkpoint/report storage, and reviewed Git LFS art
 
 At normal inference time the chain is:
 
-1. Phase 2 receives operator text plus current Redfish JSON/method context and emits an ordered
+1. Phase 2 receives operator text plus current Redfish JSON/method context and emits a canonical
    `rest_api_list`.
-2. Phase 3 receives the same text plus ordered `rest_api_list` and emits one ordered call per
+2. Phase 3 receives the same text plus canonical `rest_api_list` and emits one target call per
    `rest_api`.
-3. RL receives the ordered REST goals and can still learn environment strategy, retries, recovery,
-   and consequences from state transitions.
+3. RL receives the target calls as the visible goal specification and can still learn environment
+   strategy, retries, recovery, and consequences from state transitions.
 
 The combined inference JSON should be easy to test:
 
 ```json
 {
   "text": "check the task queue, then list the available computer systems",
-  "ordered_goals": [
+  "target_calls": [
     {
       "rest_api": "/redfish/v1/TaskService/Tasks",
       "allowed_methods": [

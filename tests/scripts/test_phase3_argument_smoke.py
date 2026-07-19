@@ -81,24 +81,29 @@ def test_cli_mock_mode_writes_rendered_rows_and_metrics(
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert len(rows) == 2
     assert rows[0]["task"] == "text_and_rest_api_list_to_calls"
-    assert rows[0]["rendered"]["renderer"] == "render_ordered_call_example"
+    assert rows[0]["rendered"]["renderer"] == "render_call_example"
     assert rows[0]["rendered"]["target_char_start"] == rows[0]["rendered"]["prompt_char_count"]
     assert json.loads(rows[0]["rendered"]["target_json"]) == rows[0]["y_true"]
-    assert "ordered_goals" in rows[0]["inference"]
-    assert "target_calls" not in rows[0]["inference"]
-    assert rows[0]["inference"]["ordered_goals"] == rows[0]["y_true"]["calls"]
-    patch_call = rows[1]["inference"]["ordered_goals"][0]
-    assert patch_call["method"] == "PATCH"
+    # No call handoff from a Phase 3 producer: order is RL-oracle evidence.
+    assert "inference" not in rows[0]
+    assert "inference" not in rows[1]
+    patch_call = next(
+        call for call in rows[1]["y_true"]["calls"] if call["http_method"] == "PATCH"
+    )
     assert patch_call["arguments"] == {"Attributes": {"BootMode": "Uefi"}}
     assert metrics["dataset"] == "phase3_argument_extractor_smoke"
     assert metrics[_metric("smoke", "rows_total")] == 2
     assert metrics[_metric("smoke", "parsed_total")] == 2
     assert metrics[_metric("smoke", "accepted_total")] == 2
     assert metrics[_metric("smoke", "weights_role")] == "argument_extractor"
-    assert metrics[_metric("eval", "call_ordered_exact_match_rate")] == 1.0
+    assert metrics[_metric("eval", "call_set_exact_match_rate")] == 1.0
     assert metrics[_metric("eval", "method_exact_match_rate")] == 1.0
     assert metrics[_metric("eval", "arguments_exact_match_rate")] == 1.0
-    assert metrics[_metric("eval", "readonly_empty_arguments_rate")] == 1.0
+    assert metrics[_metric("eval", "arguments_json_validity_rate")] == 1.0
+    assert metrics[_metric("eval", "required_argument_coverage_rate")] == 1.0
+    assert metrics[_metric("eval", "no_argument_accuracy_rate")] == 1.0
+    assert metrics[_metric("eval", "unsafe_argument_rejection_rate")] == 1.0
+    assert metrics[_metric("eval", "invalid_method_rate")] == 0.0
     assert metrics["thresholds_pass"] is True
 
 
@@ -124,15 +129,21 @@ def test_cli_file_provider_uses_local_fake_predictions(tmp_path: Path) -> None:
     rows = _read_jsonl(output)
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert rows[0]["evaluation"]["parsed"] is True
-    assert rows[1]["evaluation"]["call_ordered_exact_match"] is True
+    assert rows[1]["evaluation"]["call_set_exact_match"] is True
     assert metrics[_metric("smoke", "accepted_total")] == 2
 
 
-def test_cli_extra_predicted_call_fails_ordered_exact_match(tmp_path: Path) -> None:
-    """Extra predicted calls are counted as failures, not hidden by zipped compare."""
+def test_cli_extra_predicted_call_fails_set_match(tmp_path: Path) -> None:
+    """A distinct extra predicted call fails the set match — extras are never hidden."""
     script = _load_script()
     rows = script.default_phase3_smoke_rows()
-    extra_calls = list(rows[0]["y_true"]["calls"]) + [rows[0]["y_true"]["calls"][0]]
+    # Distinct extra call: a duplicate would already fail via duplicate detection;
+    # a DISTINCT extra proves set-cardinality mismatch is what fails the row.
+    extra_calls = list(rows[0]["y_true"]["calls"]) + [{
+        "rest_api": "/redfish/v1/Chassis",
+        "http_method": "GET",
+        "arguments": {},
+    }]
     predictions = tmp_path / "predictions.jsonl"
     predictions.write_text(
         json.dumps({"calls": extra_calls}, sort_keys=True)
@@ -156,17 +167,21 @@ def test_cli_extra_predicted_call_fails_ordered_exact_match(tmp_path: Path) -> N
 
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert code == 0
-    assert metrics[_metric("eval", "call_ordered_exact_match_rate")] == 0.5
+    assert metrics[_metric("eval", "call_set_exact_match_rate")] == 0.5
+    assert metrics[_metric("eval", "rest_api_set_match_rate")] == 0.5
     assert metrics[_metric("smoke", "accepted_total")] == 1
     assert metrics["thresholds_pass"] is False
 
 
 def test_cli_invalid_method_returns_nonzero_after_writing_metrics(tmp_path: Path) -> None:
-    """Invalid fake predictions fail thresholds while still writing inspectable artifacts."""
+    """A method illegal for the row's evidence fails thresholds with inspectable artifacts."""
     script = _load_script()
     rows = script.default_phase3_smoke_rows()
     bad_calls = [dict(call) for call in rows[0]["y_true"]["calls"]]
-    bad_calls[0]["method"] = "PATCH"
+    # PATCH is not legal for this read-only fixture API — the prediction still
+    # PARSES (structure is valid); legality fails against the row's evidence.
+    bad_calls[0]["http_method"] = "PATCH"
+    bad_calls[0]["arguments"] = {"Illegal": True}
     predictions = tmp_path / "predictions.jsonl"
     predictions.write_text(
         json.dumps({"calls": bad_calls}, sort_keys=True)
@@ -191,10 +206,12 @@ def test_cli_invalid_method_returns_nonzero_after_writing_metrics(tmp_path: Path
     rows_out = _read_jsonl(output)
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert code == 2
-    assert rows_out[0]["evaluation"]["parsed"] is False
-    assert "not in allowed_methods" in rows_out[0]["evaluation"]["parse_error"]
-    assert metrics[_metric("eval", "invalid_method_rate")] == 0.5
-    assert metrics[_metric("smoke", "parsed_total")] == 1
+    assert rows_out[0]["evaluation"]["parsed"] is True
+    assert rows_out[0]["evaluation"]["invalid_method_rate"] == 0.5
+    assert rows_out[0]["evaluation"]["call_set_exact_match"] is False
+    assert metrics[_metric("eval", "invalid_method_rate")] == 0.25
+    assert metrics[_metric("smoke", "parsed_total")] == 2
+    assert metrics[_metric("smoke", "accepted_total")] == 1
     assert metrics["thresholds_pass"] is False
 
 

@@ -1,0 +1,65 @@
+{
+  "$comment": "Machine-readable Phase 3 training-row schema. AUTHORITATIVE over every doc/docstring example. Produced by igc/ds/rest_goal_contract.py:build_call_row; enforced by scripts/gates/phase23_row_schema.py. y_true.calls is an UNORDERED UNIQUE call set (one call is still a list of length one); a Call is exactly {rest_api, http_method, operation_name, arguments} — operation_name is the action/function name when available and null for plain REST verbs; allowed_methods is x context evidence, never part of a Call; execution order is never part of this row.",
+  "type": "object",
+  "required": [
+    "phase",
+    "source_dataset",
+    "model_x",
+    "task",
+    "target_semantics",
+    "x",
+    "y_true"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "phase": { "const": 3 },
+    "source_dataset": { "const": "D1" },
+    "model_x": { "type": "string" },
+    "task": { "const": "text_and_rest_api_list_to_calls" },
+    "target_semantics": { "const": "unordered_call_set" },
+    "x": {
+      "type": "object",
+      "required": ["text", "rest_api_list", "json", "allowed_methods"],
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string" },
+        "rest_api_list": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "json": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "allowed_methods": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "y_true": {
+      "type": "object",
+      "required": ["calls"],
+      "additionalProperties": false,
+      "properties": {
+        "calls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["rest_api", "http_method", "operation_name", "arguments"],
+            "additionalProperties": false,
+            "properties": {
+              "rest_api": { "type": "string" },
+              "http_method": { "type": "string" },
+              "operation_name": { "type": ["string", "null"] },
+              "arguments": { "type": "object" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
