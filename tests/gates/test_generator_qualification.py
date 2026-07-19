@@ -42,7 +42,14 @@ def test_duplicate_heavy_generator_trips_threshold() -> None:
         {
             "text": "read system 1 twice",
             "allowed_methods": {"/redfish/v1/Systems/1": ["GET"]},
-            "judge_response": '{"accepted": false, "rest_api_list": ["/redfish/v1/Systems/1", "/redfish/v1/Systems/1"], "nonsense": false}',
+            "judge_response": (
+                '{"accepted": false, "natural": true, "nonsense": false, '
+                '"ambiguous": false, "duplicate_intent": true, '
+                '"method_semantics_valid": true, "coverage": '
+                '[{"rest_api": "/redfish/v1/Systems/1", "text_span": "read system 1", "supported": true}, '
+                '{"rest_api": "/redfish/v1/Systems/1", "text_span": "twice", "supported": true}], '
+                '"extra_intents": [], "reason": "duplicate"}'
+            ),
         }
         for _ in range(4)
     ]
@@ -56,7 +63,13 @@ def test_unsupported_intent_detected() -> None:
     rec = [{
         "text": "reset manager 1",
         "allowed_methods": {"/redfish/v1/Systems/1": ["GET"]},
-        "judge_response": '{"accepted": false, "rest_api_list": ["/redfish/v1/Managers/1"], "nonsense": false}',
+        "judge_response": (
+            '{"accepted": false, "natural": true, "nonsense": false, '
+            '"ambiguous": false, "duplicate_intent": false, '
+            '"method_semantics_valid": false, "coverage": '
+            '[{"rest_api": "/redfish/v1/Managers/1", "text_span": "reset manager 1", "supported": true}], '
+            '"extra_intents": [], "reason": "outside allowed context"}'
+        ),
     }]
     report = run(rec, load_config(CONFIG)["thresholds"])
     assert report["rates"]["unsupported_intent_rate"] == 1.0
