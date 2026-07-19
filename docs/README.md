@@ -1,52 +1,63 @@
-# igc docs
+# IGC docs
 
-Architecture, environment, and training-plan notes for `igc` (Infrastructure Goal-Condition
-Reinforce Learner).
+Start with the root [../README.md](../README.md) for setup and the offline CPU gate. This directory
+is the design + runtime authority. In the current design, **Phase 2 and Phase 3 outputs are
+unordered**, and **order is separate RL-oracle evidence (`expert_call_order`)**, not part of the
+language contract. Redfish is the first proof environment, not a permanent ontology.
 
-## Start here
+The machine-readable schema under `configs/contracts/*.yaml` is authoritative for the Phase 2/3
+output shapes; every example in these docs is illustrative only.
 
-- [ENVIRONMENT.md](ENVIRONMENT.md) — the local CPU setup, current offline smoke gate, Docker test
-  image, and GB300 NVL72 training surface.
-- [TRAINING.md](TRAINING.md) — the reproducible GPU training runbook: secret handling, data staging,
-  launch, experiment tracking, checkpoints, and reporting evidence.
-- [ARCHITECTURE.md](ARCHITECTURE.md) — the generic goal-conditioned tool-use framework design,
-  simulator plugin plan, hierarchical workload model, model curriculum, backbone modernization, and
-  Phase 0 stabilization notes.
-- [DECISIONS.md](DECISIONS.md) — the design-decision log: each entry records what was decided,
-  the alternatives weighed, binding implementation requirements, accepted risks, and the
-  experiment that validates it.
-- [MATH_CHECKS.md](MATH_CHECKS.md) — the math and optimization gate for Bellman targets, HER,
-  replay masks, tensor shapes, finite-gradient checks, and trustworthy training claims.
-- [CRITICAL_SECTIONS.md](CRITICAL_SECTIONS.md) — the performance map: every hot path, its cost,
-  what we optimized (with numbers), and the budget tripwire that guards it.
-- [HOW_TO_PROFILE.md](HOW_TO_PROFILE.md) — the one-command way to measure hot paths, find the
-  critical section, and prove a change is faster; how CI runs it.
-- [NODE_ARTIFACTS.md](NODE_ARTIFACTS.md) — pushing large LFS artifacts from a training node over
-  its own uplink (never the VPN), git-lfs without OS changes, and the Docker Hub image flow.
-- [RUN_ORCHESTRATION_PLAN.md](RUN_ORCHESTRATION_PLAN.md) — the spec-driven Docker and Slurm
-  launcher automation roadmap: image reuse, storage, checkpoints, dry-runs, sanity checks, and CI.
-- [RL_SCALING_PLAN.md](RL_SCALING_PLAN.md) — RL scaling plan: DQN/HER safety,
-  rollout/learner split, freshness, batching, parity, and profiling gates.
-- [GOAL_LATENT_DESIGN.md](GOAL_LATENT_DESIGN.md) — the GoalExtractor and GoalEncoder design:
-  atomic sub-goal extraction, latent `z_sub_goal` alignment, hidden verifier payloads, and HER
-  relabel boundaries.
-- [P0_PHASE_WORKFLOW.md](P0_PHASE_WORKFLOW.md) — the current Phase 1/2/3 split: Redfish JSON
-  pretraining first, mock-dataset plumbing for ordered REST goal extraction next, and method/argument
-  extraction after that.
-- [phase_1.md](phase_1.md), [phase_2.md](phase_2.md), [phase_3.md](phase_3.md) — concrete dataset
-  row shapes, rendering contracts, W&B metric namespaces, and inference JSON for each phase.
-- [TRAINING_OPTIMIZATION_PLAN.md](TRAINING_OPTIMIZATION_PLAN.md) — the large-model training,
-  optimization, and GPU-efficiency roadmap for 3B/7B state-encoder work.
+## Architecture & contract
 
-The repository [README](../README.md) stays short and tutorial-oriented. Put deeper design and runtime
-material in this directory so setup instructions and architecture details do not drift apart.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — the current pipeline: D0 -> Phase 1 -> `model_x` -> D1
+  (judge-verified inverse labels) -> Phase 2 `rest_api_list` (unordered unique set) -> Phase 3
+  `calls: list[Call]` (unordered, explicit `http_method` + `operation_name` + `arguments`) -> two SEPARATE encoders
+  `z_rest` + `z_method` -> a separate RL policy -> JSON simulator.
+- [GOAL_LATENT_DESIGN.md](GOAL_LATENT_DESIGN.md) — the `z_rest` / `z_method` separate-latent
+  design; exact argument VALUES stay raw/outside both latents.
+- [mdp_formulation.md](mdp_formulation.md) — SSP/MDP formulation and convergence proof underpinning
+  the separate RL recovery policy.
 
-## Diagrams
+## Phase runbooks
 
-Theme-aware standalone SVGs live under [`diagrams/`](diagrams/):
+- [phase_1.md](phase_1.md) — Phase 1 Redfish JSON-reconstruction pretraining for `model_x`.
+- [phase_2.md](phase_2.md) — Phase 2 `labelled_requests` builder (unordered `rest_api_list` set
+  extraction; order is separate RL-oracle evidence).
+- [phase_3.md](phase_3.md) — Phase 3 method/argument binding (unordered `calls: list[Call]`; order
+  is separate RL-oracle evidence).
 
-1. [Five-layer gap map](diagrams/01-five-layer-gap-map.svg) — target layers versus what exists today.
-2. [GitHub environment](diagrams/02-github-env.svg) — a non-Redfish `GoalEnvironment` adapter via record/replay.
-3. [SQL environment](diagrams/03-sql-env.svg) — a self-simulating environment with transactions as the dry-run guardrail.
-4. [Hierarchical workload plan](diagrams/04-hierarchical-workload-plan.svg) — "tune BIOS, boot Ubuntu" as ordered sub-goals plus discovery.
-5. [Training curriculum](diagrams/05-training-curriculum.svg) — the six models and their staged training path on the NVL72.
+## Training, environment, artifacts
+
+- [ENVIRONMENT.md](ENVIRONMENT.md) — local CPU dev/test, Docker CPU image, GB300 surface.
+- [TRAINING.md](TRAINING.md) — training runbook: secrets, corpus staging, launch, W&B, checkpoints.
+- [TRAINING_OPTIMIZATION_PLAN.md](TRAINING_OPTIMIZATION_PLAN.md) — Phase 1 profile/adapter/precision
+  plan.
+- [NODE_ARTIFACTS.md](NODE_ARTIFACTS.md) — node-uplink LFS artifact + Docker image handling.
+- [RUN_ORCHESTRATION_PLAN.md](RUN_ORCHESTRATION_PLAN.md) — spec-driven single launch contract.
+- [DISTRIBUTED_PLAN.md](DISTRIBUTED_PLAN.md) — DDP vs FSDP2 distributed-training plan.
+- [SMOKE_LADDER.md](SMOKE_LADDER.md) — R0..R5 gated promotion ladder.
+
+## Performance, decisions, math
+
+- [HOW_TO_PROFILE.md](HOW_TO_PROFILE.md) — profiling + CI budget one-command flow.
+- [CRITICAL_SECTIONS.md](CRITICAL_SECTIONS.md) — measured hot-path map + budgets.
+- [DECISIONS.md](DECISIONS.md) — accepted decision log.
+- [MATH_CHECKS.md](MATH_CHECKS.md) — numerical-checkout discipline for trainable
+  objectives/metrics.
+- [REDFISH_ENUM_SPACES.md](REDFISH_ENUM_SPACES.md) — offline argument value-space extraction
+  (values stay raw).
+- [RL_SCALING_PLAN.md](RL_SCALING_PLAN.md) — separate RL policy scaling + DQN/HER contracts.
+
+## Use cases
+
+- [use_cases/README.md](use_cases/README.md) — illustrative end-to-end Redfish episodes.
+
+## Diagram
+
+- [diagrams/01-current-pipeline.svg](diagrams/01-current-pipeline.svg) — the current-pipeline
+  architecture diagram (theme-aware).
+
+The repository [README](../README.md) stays short and tutorial-oriented; this directory is the
+entry point for deeper design and runtime material, so setup instructions and architecture details
+do not drift apart.

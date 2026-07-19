@@ -2,18 +2,49 @@
 
 Design note for `igc/ds/sources/redfish_enum_space.py`, the extraction layer that turns
 the richer resource types captured by `redfish_ctl` discovery (the data-collection tool
-that writes per-resource JSON under `~/.json_responses/<host>/`) into the per-slot
-argument value spaces consumed by the stage-2 argument decoder
-(`igc/modules/policy/argument_decoder.py`).
+that writes per-resource JSON under `~/.json_responses/<host>/`) into an offline catalog
+of raw argument **value spaces**. The machine-readable contract schemas under
+`configs/contracts/*.yaml` are authoritative for record shapes; every example in this
+document is illustrative only.
 
-## Motivation
+## Purpose — value spaces for Phase 3 argument binding
 
-Stage 1 of the policy (the pointer policy) selects a value-independent action template;
-stage 2 fills argument values. For a categorical argument, the decoder scores the slot's
-OWN allowable values, read from `ToolSpec.arg_schema[op][slot]["enum"]` — so the head
-width tracks one slot's choice count and never a global vocabulary. Until now those enum
-spaces existed only as hand-written schemas in tests. The captured corpora already
-contain the real value spaces; this layer extracts them offline.
+Phase 3 (ordered method/argument extraction, per the Phase 1/2/3 pipeline docs) emits
+`calls: list[Call]`, where each `Call` carries an explicit `http_method` and an explicit
+`arguments` object (`{}` for reads). One call is still a list of length one; the field is
+never a scalar. In the locked v1 architecture, exact argument **values** stay raw —
+outside both the `z_rest` encoder (REST-goal latent) and the separate `z_method` encoder
+(method latent); neither encoder embeds concrete values, and there is no shared or
+unified latent. A value-space catalog is therefore exactly the right offline artifact:
+it enumerates, per writable slot, which raw values a corpus actually allows, so Phase 3
+argument binding can fill `arguments` from real per-slot choice sets instead of
+hand-written schemas.
+
+Illustrative generic examples of the Phase 3 output this catalog supports
+(k = number of calls; the set is UNORDERED — execution order is separate RL-oracle
+evidence recorded as `expert_call_order`, not part of the Phase 3 target):
+
+```yaml
+# k=1 — "set x to 1"
+calls:
+  - {http_method: PATCH, arguments: {x: 1}}
+
+# k=2 — "set x to 1 and read z"
+calls:
+  - {http_method: PATCH, arguments: {x: 1}}
+  - {http_method: GET,   arguments: {}}
+
+# k=3 — "set x to 1, set y to 2, and read z"
+calls:
+  - {http_method: PATCH, arguments: {x: 1}}
+  - {http_method: PATCH, arguments: {y: 2}}
+  - {http_method: GET,   arguments: {}}
+```
+
+Redfish-shaped values (`ResetType`, `BootMode`, …) appear below only because Redfish is
+the current test environment. No planner, scheduler, or curriculum lives in this layer or
+in Phase 2/3; ordering, prerequisites, retries, waiting, and recovery belong to the
+separate RL policy stage.
 
 ## What discovery captures vs. what was ingested
 
@@ -37,10 +68,11 @@ extraction of the value spaces inside these resource types:
 
 ## Ingestion path (offline, fixture-driven)
 
-Reuse over duplication: the layer does **not** walk the filesystem. It consumes the
-existing `SourceRecord` stream, so the trust tagging, URL canonicalization
-(`@odata.id`-first), and skip accounting of `RedfishFixtureSource` apply unchanged, and
-any future adapter (DMTF mockup replay, emulator) feeds it for free.
+Reuse over duplication: the layer does **not** walk the filesystem and does **not**
+crawl. It consumes the existing `SourceRecord` stream, so the trust tagging, URL
+canonicalization (`@odata.id`-first), and skip accounting of `RedfishFixtureSource`
+apply unchanged, and any future adapter (DMTF mockup replay, emulator) feeds it for
+free.
 
 ```
 RedfishFixtureSource(capture dir)          # existing generic adapter
@@ -59,8 +91,8 @@ index.post_arg_schema()   →  {"POST":  {param: {"type", "enum", "required"}}}
 index.boot_reference_space()  →  ordered BootOptionReference ids
 ```
 
-The exported fragments are exactly what `arg_slots_for` in the argument decoder reads
-(pinned by a round-trip test through a real `ToolSpec`). For the dataset side,
+The exported fragments are per-slot raw value spaces keyed by HTTP method — the shape
+Phase 3 argument binding draws candidate values from. For the dataset side,
 `normalize_enriched()` wraps the existing `normalize_record()` (in
 `igc/ds/sources/training_object.py`) and stamps
 `expected_semantics["resource_kind"]`, so BIOS/boot/registry observations become

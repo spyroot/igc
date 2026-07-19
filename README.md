@@ -47,7 +47,7 @@ and verification guide.
 - `igc/modules/` contains model and training code for the language model, state encoder, value head,
   and RL agent.
 - `igc/shared/` contains shared argument parsing and utility code.
-- `igc/core/` contains typed contracts for the generic tool-use agent architecture.
+- `igc/core/` contains shared typed records used by the pipeline.
 - `tests/` contains pytest coverage. Default tests must stay offline: no GPU, network, HuggingFace
   download, live Redfish host, or real `redfish_ctl` crawl.
 - `docs/` contains the deeper design and environment material. Start with
@@ -88,15 +88,50 @@ local smoke gate and must not be logged or committed.
 
 ## How the agent learns
 
-The current Redfish-specific stack is being generalized into a pluggable goal-conditioned tool-use
-agent framework. The target architecture keeps Redfish as one environment adapter while adding typed
-`Goal`, `Observation`, `ToolAction`, and `Transition` contracts, environment registries, trajectory
-recording, evaluators, and runtime guardrails.
+The current pipeline is narrow and staged. Redfish is the first proof environment: the same stages
+are exercised today against captured Redfish data and the JSON simulator built from it.
 
-Training is intentionally staged. First the backbone language model learns Redfish JSON structure;
-then pooling/autoencoder, planner, reward, world-model, and RL policy pieces build on that
-representation. The full plan and model curriculum live in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+1. **D0 — REST-interface records.** The materialized `redfish_ctl` corpus (see Data flow above) is
+   rendered into D0, the per-endpoint interface records (URL, allowed methods, response JSON).
+2. **Phase 1 — fine-tune.** The backbone language model is fine-tuned on D0, producing `model_x`,
+   the Phase 1 checkpoint.
+3. **D1 — inverse-label generation.** `model_x` drafts the missing human request text for sampled
+   API sets; each draft is judge-verified so the text maps back to all and only the sampled APIs
+   before a row is accepted into D1.
+4. **Phase 2 — REST-goal extraction.** From accepted D1 text, the model predicts
+   `rest_api_list: list[str]`, an unordered set of unique API paths.
+5. **Phase 3 — call extraction.** From the same D1 row, the model predicts `calls: list[Call]`,
+   unordered, where every `Call` carries an explicit `http_method`, an `operation_name` (action/function name or `null`), and an `arguments` object
+   (`{}` for reads).
+6. **Encoders.** Two separate encoders embed the outputs: `z_rest` for the API-path set and
+   `z_method` for the method decision. Exact argument values stay raw, outside both encoders.
+7. **RL policy.** A separate RL policy — not Phase 2/3 — owns execution ordering, retries,
+   waiting, prerequisite and recovery calls, and error handling, trained against the JSON
+   simulator replaying captured responses.
+
+The machine-readable schema in `configs/contracts/*.yaml` is authoritative for all record shapes;
+the examples below are illustrative only.
+
+```text
+k=1  "set x to 1"
+  Phase 2: rest_api_list: ["/api/x"]
+  Phase 3: calls: [{rest_api: "/api/x", http_method: "PATCH", operation_name: null, arguments: {"x": 1}}]
+
+k=2  "set x to 1 and read z"
+  Phase 2: rest_api_list: ["/api/x", "/api/z"]
+  Phase 3: calls: [{rest_api: "/api/x", http_method: "PATCH", operation_name: null, arguments: {"x": 1}},
+                   {rest_api: "/api/z", http_method: "GET", operation_name: null, arguments: {}}]
+
+k=3  "set x to 1, set y to 2, and read z"
+  Phase 2: rest_api_list: ["/api/x", "/api/y", "/api/z"]
+  Phase 3: calls: [{rest_api: "/api/x", http_method: "PATCH", operation_name: null, arguments: {"x": 1}},
+                   {rest_api: "/api/y", http_method: "PATCH", operation_name: null, arguments: {"y": 2}},
+                   {rest_api: "/api/z", http_method: "GET", operation_name: null, arguments: {}}]
+```
+
+A single item is still a list of length one, never a scalar. Phase 2/3 targets are unordered;
+ordering is recorded separately as RL-oracle evidence (`expert_call_order`), not as a Phase 2/3
+label.
 
 ## Working rules
 
@@ -112,6 +147,6 @@ representation. The full plan and model curriculum live in
 
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — local CPU env, Docker test image, and GB300/NVL72
   training surfaces.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — target architecture, simulator plugin model,
-  training curriculum, and current implementation status.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the current pipeline in detail: D0/D1 datasets,
+  Phase 1/2/3 contracts, the two encoders, the RL policy stage, and the JSON simulator.
 - [docs/README.md](docs/README.md) — index for the docs directory and diagrams.

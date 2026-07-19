@@ -69,13 +69,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--sample-width",
         type=int,
         required=True,
-        help="Number of REST API records sampled per candidate; must be 1, 2, or 3.",
+        help="Number of REST API records sampled per candidate; must be allowed by YAML.",
     )
     parser.add_argument(
         "--count",
         type=int,
         default=1,
         help="Number of labelled-request candidates to attempt.",
+    )
+    parser.add_argument(
+        "--no-action-text",
+        default="",
+        help="Optional hard-negative request text that should map to an empty REST API set.",
+    )
+    parser.add_argument(
+        "--no-action-count",
+        type=int,
+        default=0,
+        help="Number of hard-negative/no-action rows to judge with --no-action-text.",
     )
     parser.add_argument(
         "--seed",
@@ -117,7 +128,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--live-provider-gate-passed",
         action="store_true",
-        help="Allow live provider runs above the YAML safety.live_without_gate_max_candidates cap.",
+        help=(
+            "Allow explicitly gated live provider runs; required for any "
+            "openai-compatible provider use."
+        ),
     )
     parser.add_argument(
         "--allow-threshold-failure",
@@ -161,13 +175,21 @@ def build_phase2_labelled_requests(
     seed: int,
     draft_provider: DraftProvider,
     judge_provider: JudgeProvider,
+    no_action_text: str = "",
+    no_action_count: int = 0,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build accepted rows plus aggregate metrics using injected providers."""
     if sample_width not in spec.sample_widths:
         raise SystemExit("sample-width must be present in the YAML sampling.sample_widths")
-    if count < 1:
-        raise SystemExit("count must be positive")
-    if len(records) < sample_width:
+    if count < 0:
+        raise SystemExit("count must be non-negative")
+    if no_action_count < 0:
+        raise SystemExit("no-action-count must be non-negative")
+    if no_action_count and not no_action_text.strip():
+        raise SystemExit("--no-action-text is required when --no-action-count is positive")
+    if count + no_action_count < 1:
+        raise SystemExit("at least one sampled or no-action candidate is required")
+    if count and len(records) < sample_width:
         raise SystemExit("not enough records for requested sample-width")
 
     builder = Phase2LabelledRequestBuilder(
@@ -178,7 +200,9 @@ def build_phase2_labelled_requests(
     rng = random.Random(seed)
     accepted_rows: list[dict[str, Any]] = []
     counters = Phase2LabelledRequestCounters(
-        sample_width_k=sample_width,
+        # A no-action-only run (count=0) samples no API combination, so it
+        # reports k=0 rather than the unused requested width.
+        sample_width_k=sample_width if count else 0,
         prompt_spec_version=spec.prompt_spec_version,
         model_x_artifact_sha=spec.model_x.artifact_sha,
         judge_model=spec.judge.model_id,
@@ -194,12 +218,20 @@ def build_phase2_labelled_requests(
         if row is not None:
             accepted_rows.append(row.to_dict())
 
+    for _ in range(no_action_count):
+        row, candidate = builder.build_no_action(draft_text=no_action_text.strip())
+        _merge_counters(counters, candidate)
+        if candidate.vendor_source_corpus:
+            source_labels.update(candidate.vendor_source_corpus.split(","))
+        if row is not None:
+            accepted_rows.append(row.to_dict())
+
     counters.vendor_source_corpus = ",".join(sorted(source_labels))
     summary = counters.summary()
     summary.update({
         "dataset": spec.dataset_name,
         "records_in": len(records),
-        "requested_candidates": count,
+        "requested_candidates": count + no_action_count,
         "accepted_rows": len(accepted_rows),
         "thresholds_pass": phase2_acceptance_thresholds_pass(spec, summary),
     })
@@ -253,6 +285,8 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         draft_provider=draft_provider,
         judge_provider=judge_provider,
+        no_action_text=args.no_action_text,
+        no_action_count=args.no_action_count,
     )
     rows_written = write_jsonl(Path(args.output_jsonl), rows)
     write_metrics(Path(args.metrics_out), metrics)
@@ -318,14 +352,16 @@ def _enforce_live_provider_gate(
     draft_adapter: str,
     judge_adapter: str,
 ) -> None:
-    """Block dataset-scale live provider runs until an explicit gate flag is passed."""
+    """Block live provider runs until an explicit gate flag is passed."""
     uses_live_adapter = "openai-compatible" in {draft_adapter, judge_adapter}
-    if not uses_live_adapter or args.live_provider_gate_passed:
+    if not uses_live_adapter:
         return
-    if args.count > spec.live_without_gate_max_candidates:
+    candidate_count = args.count + args.no_action_count
+    if not args.live_provider_gate_passed:
         raise SystemExit(
-            "live provider runs above safety.live_without_gate_max_candidates "
-            "require --live-provider-gate-passed",
+            "live provider runs require --live-provider-gate-passed "
+            f"(requested_candidates={candidate_count}, "
+            f"ungated_cap={spec.live_without_gate_max_candidates})",
         )
 
 
@@ -384,10 +420,21 @@ def _mock_judge_provider(request: dict[str, Any]) -> str:
     """Return a deterministic accepting judge response for offline smoke tests."""
     return json.dumps({
         "accepted": True,
-        "rest_api_list": request["expected_rest_api_list"],
+        "natural": True,
         "nonsense": False,
+        "ambiguous": False,
+        "duplicate_intent": False,
+        "method_semantics_valid": True,
+        "coverage": [
+            {
+                "rest_api": rest_api,
+                "text_span": "fixture",
+                "supported": True,
+            }
+            for rest_api in request["expected_rest_api_list"]
+        ],
+        "extra_intents": [],
         "reason": "fixture",
-        "order_evidence": "none",
     })
 
 

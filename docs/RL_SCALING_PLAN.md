@@ -9,20 +9,53 @@ The current code path is still value-based DQN/HER over the vectorized REST
 mock environment. Future LLM-rollout or policy-gradient modes are planned
 architecture, not implemented training evidence.
 
-## State And Goal Graph Anchor
+## RL Input Surface
 
-The compact state and goal graph plan already lives in
-[ARCHITECTURE.md](ARCHITECTURE.md). Its `RedfishStateV0` contract describes a
-structured state with resource identity, topology, health/control fields, legal
-actions, deferred state, observation metadata, and goal context.
+The RL policy is a **separate stage** downstream of Phase 2/3 extraction. Its
+input surface is the Phase 3 output contract — `calls: list[Call]`, defined by
+the machine-readable schema under `configs/contracts/*.yaml`, which is
+authoritative over any example in this document. Each `Call` carries an
+explicit `http_method` and an `arguments` object (`{}` for reads); one call is
+still a list of length one, never a scalar.
 
-The action-candidate graph feature decision lives in
-[DECISIONS.md](DECISIONS.md). The v1 scope uses text plus graph features for
-candidate actions; learned graph-neighborhood embeddings are deferred until the
-structured state and offline evaluation contracts are stable.
+Two **separate** encoders consume that surface:
 
-This RL scaling plan assumes those state and goal graph contracts are the input
-surface. It does not replace them.
+- `z_rest` encodes the REST target (the Phase 2 `rest_api_list` surface).
+- `z_method` encodes the HTTP method, operation/function name, and argument
+  key/type structure.
+
+Exact argument **values** stay raw, outside both encoders. There is no shared
+latent, unified encoder, or zero-shot-universal claim in v1.
+
+Encoder sources and the RL freeze (locked in `configs/contracts/goal_latent.yaml`):
+the StateEncoder backbone initializes from `model_x` (Phase 1), the `z_rest`
+encoder from the Phase 2 `goal_extractor` checkpoint, and the `z_method` encoder
+from the Phase 3 `argument_extractor` checkpoint. **During RL training the
+StateEncoder and the Phase 2/3 encoders are frozen — only the RL policy learns.**
+
+Phase 2/3 targets are **unordered** sets. Ordering is separate RL-oracle
+evidence (`expert_call_order`, produced by the RL data pipeline, not by
+Phase 2/3 training targets). The RL policy — not Phase 2/3, which contain no
+planner, scheduler, or curriculum — learns ordering, prerequisites, retries,
+waiting, recovery, hidden-state effects, and error handling, and may execute
+legal reads, waits, and recovery calls outside the target set.
+
+Illustrative examples only (the YAML schema is authoritative), shown generic;
+Redfish-shaped data appears only as the current test environment:
+
+```text
+k=1  "set x to 1"
+  calls: [ {rest_api: "/api/x", http_method: "PATCH", arguments: {"x": 1}} ]
+
+k=2  "set x to 1 and read z"
+  calls: [ {rest_api: "/api/x", http_method: "PATCH", arguments: {"x": 1}},
+           {rest_api: "/api/z", http_method: "GET",   arguments: {}} ]
+
+k=3  "set x to 1, set y to 2, and read z"
+  calls: [ {rest_api: "/api/x", http_method: "PATCH", arguments: {"x": 1}},
+           {rest_api: "/api/y", http_method: "PATCH", arguments: {"y": 2}},
+           {rest_api: "/api/z", http_method: "GET",   arguments: {}} ]
+```
 
 ## Current Safety Finding
 
@@ -69,7 +102,7 @@ Before scaling RL, the current value-learning path needs these contracts green:
   Time limits may bootstrap; true terminals may not.
   Current status: partially covered.
 - Zero legal actions are terminal dead ends.
-  Pointer/candidate mode can produce no legal candidates.
+  An environment state can offer no legal calls at all.
   Current status: strict xfail.
 - Non-finite Q-values fail fast.
   NaN/+inf should not be silently treated as a terminal.
@@ -89,8 +122,8 @@ are passing or explicitly waived in a design review.
 
 ## Scaling Principles
 
-The RL phase should scale by producing more useful trajectories, not by making
-one enormous policy replica.
+Planned, not implemented. The RL phase should scale by producing more useful
+trajectories, not by making one enormous policy replica.
 
 1. Use many rollout replicas with modest tensor parallelism, not one 72-GPU
    rollout engine.
@@ -112,7 +145,8 @@ one enormous policy replica.
 
 ## Target Architecture
 
-The future architecture has four independent loops with explicit contracts:
+Planned, not implemented. The future architecture has four independent loops
+with explicit contracts:
 
 - Rollout workers generate trajectories from the current policy against
   replayable simulators or approved gated environments.
@@ -186,7 +220,7 @@ The first implementation slice should stay local and deterministic.
 - Negative terminal replay mask:
   a reward `-0.5`, `terminated=True`, `truncated=False` record samples back as
   `done=1` and targets `reward`.
-- Zero-candidate target:
+- Zero-legal-action target:
   `next_q` with width zero returns `reward`, finite, with no bootstrap.
 - Non-finite target guard:
   NaN/+inf next-Q values raise a clear error; only all `-inf` masked rows become
@@ -251,8 +285,8 @@ then 8 GPUs, and then the full fleet.
 
 1. Pin current DQN/HER safety with strict-xfail offline tests.
 2. Fix the trainer/replay terminal-mask contract in the engine lane.
-3. Turn negative-terminal, zero-candidate, shape, non-finite, and partial-done
-   xfails into passing tests.
+3. Turn negative-terminal, zero-legal-action, shape, non-finite, and
+   partial-done xfails into passing tests.
 4. Add rollout profiler JSON summaries to the existing RL sanity/profiling
    scripts.
 5. Add replay freshness metadata and bounded-queue tests.
