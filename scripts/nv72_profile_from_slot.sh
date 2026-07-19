@@ -98,6 +98,12 @@ FLEET_STATE_URL="${FLEET_STATE_URL:-}"
     die "RUN_ID may contain only letters, digits, dot, underscore, plus, and dash"
 [[ "${GPU_COUNT}" =~ ^[0-9]+$ ]] && [[ "${GPU_COUNT}" -ge 1 ]] ||
     die "GPU_COUNT must be a positive integer"
+if [[ "${PROFILE_MODE}" == "cuda" || "${PROFILE_MODE}" == "all" ]]; then
+    [[ "${GPU_COUNT}" == "1" ]] ||
+        die "profile_dataset_to_cuda.py is single-process; set GPU_COUNT=1"
+    [[ "${GPU_IDS}" != *,* ]] ||
+        die "profile_dataset_to_cuda.py is single-process; set a single GPU_ID"
+fi
 [[ "${GPU_IDLE_SAMPLES}" =~ ^[0-9]+$ ]] && [[ "${GPU_IDLE_SAMPLES}" -ge 1 ]] ||
     die "GPU_IDLE_SAMPLES must be a positive integer"
 [[ "${GPU_IDLE_INTERVAL}" =~ ^[0-9]+$ ]] ||
