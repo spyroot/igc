@@ -1,0 +1,69 @@
+version: 1
+name: phase1-model-x-qwen2_5-7b-rslora-inference
+phase: phase1_inference
+
+base_model:
+  id: Qwen/Qwen2.5-7B-Instruct
+  cache_dir: /models/hf-cache/hub
+  tokenizer: Qwen/Qwen2.5-7B-Instruct
+
+adapter:
+  path: /models/igc/phase1_runs/phase1-finetune-qwen2_5-7b-rslora-slot2-689b4c7-20260715T083423Z/state_encoder/fine_tuned
+  sha256: 98243e5a7d5311bfac4856fa56684eea38327b5e3d4ab806d6b53f07a764d5e4
+  size_bytes: 323014168
+  method: rslora
+  rank: 32
+  alpha: 64
+
+runtime:
+  torch_dtype: bfloat16
+  device: cuda:0
+  device_map: auto
+  require_cuda: true
+  trust_remote_code: false
+
+generation:
+  seed: 0
+  # Phase 1 training labels are whole target Redfish JSON documents. Keep this
+  # default aligned with held-out target length p95+margin; fragment smoke prompts
+  # below carry their own smaller overrides.
+  max_new_tokens: 2048
+  prompts:
+    - id: redfish_system_fragment
+      prompt: |
+        Complete this Redfish JSON fragment with plausible fields only:
+        {"@odata.id":"/redfish/v1/Systems/1","@odata.type":"#ComputerSystem.v1_18_0.ComputerSystem","Id":"1","PowerState":"
+      max_new_tokens: 96
+      min_new_tokens: 8
+      forbidden: ["Traceback", "API key", "password"]
+      must_contain: ["/redfish/v1/Systems/1"]
+    - id: redfish_manager_fragment
+      prompt: |
+        Complete this Redfish Manager JSON fragment:
+        {"@odata.id":"/redfish/v1/Managers/1","Id":"1","ManagerType":"
+      max_new_tokens: 96
+      min_new_tokens: 8
+      forbidden: ["Traceback", "API key", "password"]
+      must_contain: ["/redfish/v1/Managers/1"]
+    - id: redfish_system_whole_document
+      prompt: |
+        ### REST API
+        /redfish/v1/Systems/1
+
+        ### Allowed Methods
+        GET, PATCH
+
+        ### Redfish JSON Input
+        {
+          "@odata.id": "/redfish/v1/Systems/1",
+          "Id": "1",
+          "PowerState": "On"
+        }
+
+        ### Complete Redfish JSON
+      min_new_tokens: 128
+      forbidden: ["Traceback", "API key", "password"]
+      must_contain: ["/redfish/v1/Systems/1"]
+
+output:
+  json: /models/igc/phase1_runs/phase1-finetune-qwen2_5-7b-rslora-slot2-689b4c7-20260715T083423Z/phase1_inference_gate.json

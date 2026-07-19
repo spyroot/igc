@@ -60,7 +60,7 @@ def _iter_files() -> List[Path]:
         if not p.is_file() or p.suffix not in _CODE_EXT + _DOC_EXT:
             continue
         rel = p.relative_to(_REPO).as_posix()
-        if rel.startswith((".git/", "idrac_ctl/", ".venv/", "build/")):
+        if rel.startswith((".git/", "redfish_ctl/", ".venv/", "build/")):
             continue
         out.append(p)
     return out

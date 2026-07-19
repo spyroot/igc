@@ -73,7 +73,7 @@ pulled on the nodes; igc's extra training dependencies live in `docker/requireme
 srun \
   --partition=debug \
   --gres=gpu:1 \
-  --exclude=gb300-poc1-slot2,gb300-poc1-slot15,gb300-poc1-slot16 \
+  --exclude=<reserved-node-list> \
   --container-image=nvcr.io/nvidia/pytorch:26.03-py3 \
   --container-mounts=$HOME/igc:/workspace/igc,$HOME/data:/data \
   --time=02:00:00 \

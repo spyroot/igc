@@ -24,11 +24,12 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional
 
 import torch
 from torch.utils.data import Dataset
 
+from igc.ds.phase1_render import render_phase1_completion, render_phase1_prompt
 from igc.ds.sources.corpus_io import iter_examples, read_manifest
 from igc.ds.sources.mixer import DataManifest
 from igc.modules.base.metric_keys import PHASE1_FINETUNE, PHASE1_OBJECTIVE_PRETRAIN
@@ -115,18 +116,8 @@ class CorpusJSONLDataset(Dataset):
 
     def _phase1_item(self, tok: Any, example: Mapping[str, Any]) -> Dict[str, torch.Tensor]:
         """Render Phase 1 as prompt context plus JSON completion labels."""
-        rest_api, allowed_methods, input_json, target_json = self._phase1_fields(example)
-        allowed = ", ".join(allowed_methods) if allowed_methods else "UNKNOWN"
-        prompt = (
-            "### REST API\n"
-            f"{rest_api}\n\n"
-            "### Allowed Methods\n"
-            f"{allowed}\n\n"
-            "### Redfish JSON Input\n"
-            f"{self._json_dumps(input_json)}\n\n"
-            "### Complete Redfish JSON\n"
-        )
-        completion = f"{self._json_dumps(target_json)}\n"
+        prompt, target_json = render_phase1_prompt(example)
+        completion = render_phase1_completion(target_json)
         return self._tokenize_prompt_completion(tok, prompt, completion)
 
     def _tokenize_prompt_completion(
@@ -187,46 +178,6 @@ class CorpusJSONLDataset(Dataset):
                 return ids_tensor.squeeze(0) if ids_tensor.dim() > 1 else ids_tensor
             out = tok(text, padding=False, truncation=False, return_tensors="pt")
         return out["input_ids"].squeeze(0).long()
-
-    @staticmethod
-    def _phase1_fields(
-            example: Mapping[str, Any]) -> tuple[str, List[str], Dict[str, Any], Dict[str, Any]]:
-        """Extract Phase 1 ``x``/``y_true`` from explicit or normalized corpus rows."""
-        x = example.get("x")
-        y_true = example.get("y_true")
-        if isinstance(x, Mapping) and isinstance(y_true, Mapping):
-            input_json = x.get("json", {})
-            target_json = y_true.get("json", input_json)
-            rest_api = str(x.get("rest_api") or CorpusJSONLDataset._odata_id(input_json))
-            methods = CorpusJSONLDataset._methods(x.get("allowed_methods", []))
-            return rest_api, methods, dict(input_json), dict(target_json)
-
-        action = example.get("request_or_action", {}) or {}
-        response = example.get("response", {}) or {}
-        rest_api = str(action.get("url") or CorpusJSONLDataset._odata_id(response))
-        methods = CorpusJSONLDataset._methods(example.get("allowed_methods", []))
-        return rest_api, methods, dict(response), dict(response)
-
-    @staticmethod
-    def _methods(value: Any) -> List[str]:
-        """Normalize an allowed-method field to uppercase strings."""
-        if value is None:
-            return []
-        if isinstance(value, str):
-            value = [value]
-        if not isinstance(value, Sequence):
-            return []
-        return [str(method).upper() for method in value]
-
-    @staticmethod
-    def _odata_id(body: Any) -> str:
-        """Best-effort ``@odata.id`` extraction from a JSON body."""
-        return str(body.get("@odata.id", "")) if isinstance(body, Mapping) else ""
-
-    @staticmethod
-    def _json_dumps(value: Any) -> str:
-        """Stable pretty JSON rendering used by Phase 1/2/3 renderers."""
-        return json.dumps(value or {}, indent=2, sort_keys=True)
 
     # --- provenance for run reports -----------------------------------------------
 
