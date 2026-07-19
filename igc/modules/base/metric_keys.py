@@ -41,8 +41,12 @@ PHASE1_WANDB_METRIC_KEYS = (
     phase_metric(PHASE1_FINETUNE, "eval", "loss"),
     phase_metric(PHASE1_FINETUNE, "eval", "perplexity"),
     phase_metric(PHASE1_FINETUNE, "eval", "token_accuracy"),
+    phase_metric(PHASE1_FINETUNE, "eval", "key_presence_rate"),
+    phase_metric(PHASE1_FINETUNE, "eval", "value_exact_match_rate"),
     phase_metric(PHASE1_FINETUNE, "throughput", "train_tokens_per_sec"),
     phase_metric(PHASE1_FINETUNE, "throughput", "train_samples_per_sec"),
+    phase_metric(PHASE1_FINETUNE, "calibration", "nll"),
+    phase_metric(PHASE1_FINETUNE, "calibration", "brier_score"),
 )
 
 PHASE1_ACCEPTANCE_METRIC_KEYS = (

@@ -44,7 +44,7 @@ rect.c-purple{fill:#EEEDFE;stroke:#AFA9EC}.c-purple text{fill:#26215C}
 <rect x="40" y="244" width="190" height="54" rx="8" fill="var(--surface-1)" stroke="var(--border)"/>
 <text class="th" x="135" y="265" text-anchor="middle">API discovery</text>
 <text class="ts" x="135" y="281" text-anchor="middle">endpoints + allowable values</text>
-<text class="ts" x="135" y="294" text-anchor="middle">(idrac_ctl crawl → actions)</text>
+<text class="ts" x="135" y="294" text-anchor="middle">(redfish_ctl crawl → actions)</text>
 <rect x="245" y="244" width="190" height="54" rx="8" fill="var(--surface-1)" stroke="var(--border)"/>
 <text class="th" x="340" y="265" text-anchor="middle">state-space discovery</text>
 <text class="ts" x="340" y="281" text-anchor="middle">learn the state machine</text>

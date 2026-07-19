@@ -10,10 +10,23 @@ hide the dataset objective. Launchable profiles use `phase1_*`, `phase2_*`, and 
 while model artifacts use explicit roles such as `model_x`, `goal_extractor`, and
 `argument_extractor`.
 
+## Pro Usage Across Phases
+
+The private Shared Brain Pro backend is the reviewer/judge/code-drafting helper for IGC; it is
+not a Phase 1/2/3 training checkpoint and it is not used to run GPU training. Use Pro with Think Max
+when live Brain metadata advertises the required long context. If Pro is unreachable for required
+private-source review or judging, report `BLOCKED:` rather than substituting an external reviewer.
+
+| Phase | When Pro Is Required | What Pro Must Not Replace |
+| --- | --- | --- |
+| 1 | Substantial changes to the Redfish JSON renderer, trainer, launcher, W&B metrics, checkpoint/report flow, artifact publishing, or acceptance review. | The actual `model_x` training run, W&B evidence, corpus validation, DDP/FSDP2 sanity, or local/offline gates. |
+| 2 | `D1` text cleanup/judging, `rest_api_list` schema review, hard-negative/set-coverage metric design, dataset-builder changes, and acceptance review. | The `goal_extractor` checkpoint, accepted `D1` rows, or metric evidence. |
+| 3 | Method/argument schema review, row judging for method/argument evidence, unsafe/unsupported argument rejection review, metric design, and acceptance review. | The `argument_extractor` checkpoint, exact argument labels, guardrail evidence, or metric evidence. |
+
 | Phase | Profile prefix | Weight role | W&B namespace | Dataset objective | Checkpoint rule |
 | --- | --- | --- | --- | --- | --- |
 | 1 | `phase1_*` | `model_x` | `phase1_finetune/*` | `phase1_pretrain` / Redfish JSON reconstruction | writes a separate Phase 1 checkpoint |
-| 2 | `phase2_goal_extractor_*` (planned) | `goal_extractor` | `phase2_goal_extraction/*` | `text_to_ordered_rest_api_list` | initializes from `model_x` only when requested; never overwrites it |
+| 2 | `phase2_goal_extractor_*` (planned) | `goal_extractor` | `phase2_goal_extraction/*` | `text_to_rest_api_list` | initializes from `model_x` only when requested; never overwrites it |
 | 3 | `phase3_argument_extractor_*` (planned) | `argument_extractor` | `phase3_argument_extraction/*` | `text_and_rest_api_list_to_calls` | initializes from `model_x` or `goal_extractor` only when requested; never overwrites either |
 
 Phase 2 and Phase 3 profile names are planned until their trainers land. Do not add live profiles
@@ -52,7 +65,18 @@ representation is useful.
 ## Phase 2: Build And Train `D1`
 
 Purpose: after Phase 1, use `model_x` plus a review/judging pass to build `D1`, then fine-tune a
-specialized model that maps operator text and current Redfish context to an ordered `rest_api_list`.
+specialized model that maps operator text and current Redfish context to a canonical `rest_api_list`.
+Phase 2 is primarily set coverage: generated text does not need to mention the sampled APIs in the
+canonical row order unless it uses explicit ordering language.
+
+The corpus itself has no human operator sentence labels. It only provides Redfish REST API paths,
+allowed methods, and JSON bodies. `D1.x.text` is therefore a synthetic label: sample one, two, or
+three API records from the corpus, let the Phase 1 Redfish-tuned `model_x` draft a plausible human
+request, then keep that row only if Pro judges that the text maps back to exactly the sampled API set.
+This is how a roughly five-thousand-record API corpus can produce a much larger supervised text
+dataset without asking a human to inspect every synthetic sentence. Rows must stay human-plausible:
+one small request or a short related bundle, not a sentence that asks for twenty unrelated REST
+operations.
 
 Current P0 scope: mock-dataset plumbing and offline tests only.
 
@@ -62,9 +86,9 @@ Real dataset build waits for the Phase 1 checkpoint. The accepted row shape is:
 {
   "phase": 2,
   "dataset": "D1",
-  "task": "text_to_ordered_rest_api_list",
+  "task": "text_to_rest_api_list",
   "x": {
-    "text": "check the task queue, then list the available computer systems",
+    "text": "check the task queue and list the available computer systems",
     "json": [],
     "allowed_methods": {}
   },
@@ -77,14 +101,22 @@ Real dataset build waits for the Phase 1 checkpoint. The accepted row shape is:
 }
 ```
 
-Evaluation must report ordered exact match and set match separately.
-W&B metrics live under `phase2_goal_extraction/*`, with train/eval/order/throughput/data/calibration/test
-subgroups.
+Phase 2 training uses token-level cross entropy over one canonical serialized JSON target because
+causal-LM fine-tuning needs a single sequence. That canonical order is a serialization convention,
+not the main correctness rule. Evaluation must report REST API set match as primary: `[B, A]` is
+correct for canonical target `[A, B]` when the human text does not explicitly require order, and
+`[]` is correct for a hard-negative/no-action row whose true `rest_api_list` is empty. Ordered exact
+match is only an auxiliary metric for rows with explicit order evidence. W&B metrics live under
+`phase2_goal_extraction/*`, with train/eval/throughput/data/calibration/test subgroups.
 
 ## Phase 3: Method And Argument Extraction
 
-Purpose: after Phase 2, fine-tune a specialized model that maps operator text plus the ordered
-`rest_api_list` to ordered calls with `rest_api`, `allowed_methods`, `method`, and `arguments`.
+Purpose: after Phase 2, fine-tune a specialized model that maps operator text plus the canonical
+`rest_api_list` to one call per `rest_api`, each with `allowed_methods`, `method`, and `arguments`.
+Phase 3 reuses the same accepted `D1.x.text`; it does not generate a new human sentence. Here
+`arguments` means the request-body or action-parameter bindings for a selected `rest_api` and
+`method`, for example `Address = "192.168.1.1"` in an EthernetInterface PATCH body. For read-only
+`GET`/`HEAD` calls, `arguments` is `{}`.
 
 Current P0 scope: mock-dataset plumbing and offline tests only.
 W&B metrics live under `phase3_argument_extraction/*`, with train/eval/order/throughput/data/calibration/test
@@ -97,13 +129,22 @@ The accepted row shape is:
   "phase": 3,
   "task": "text_and_rest_api_list_to_calls",
   "x": {
-    "text": "check the task queue, then list the available computer systems",
+    "text": "check the task queue and list the available computer systems",
     "rest_api_list": [
       "/redfish/v1/TaskService/Tasks",
       "/redfish/v1/Systems"
     ],
     "json": [],
-    "allowed_methods": {}
+    "allowed_methods": {
+      "/redfish/v1/TaskService/Tasks": [
+        "GET",
+        "HEAD"
+      ],
+      "/redfish/v1/Systems": [
+        "GET",
+        "HEAD"
+      ]
+    }
   },
   "y_true": {
     "calls": [
@@ -132,12 +173,12 @@ The accepted row shape is:
 
 ## Inference Contract
 
-After Phase 2 and Phase 3, a sentence should produce testable JSON:
+After Phase 2 and Phase 3, a sentence should produce testable target calls:
 
 ```json
 {
-  "text": "check the task queue, then list the available computer systems",
-  "ordered_goals": [
+  "text": "check the task queue and list the available computer systems",
+  "target_calls": [
     {
       "rest_api": "/redfish/v1/TaskService/Tasks",
       "allowed_methods": [
@@ -160,8 +201,20 @@ After Phase 2 and Phase 3, a sentence should produce testable JSON:
 }
 ```
 
-Order matters in this JSON. RL can still learn execution strategy, retries, and recovery from the
-environment, but the language pipeline should preserve operator-stated order whenever it is present.
+These target calls are not a forced execution script. RL receives them as the visible goal
+specification and still acts over the legal action catalog from the current Redfish state. It may add
+reads, waits, retries, verification, prerequisites, or recovery calls outside the target list. The
+full simulator/HER contract for hidden dependencies, such as ejecting an existing ISO before mounting
+a new one, lives in [RL_SCALING_PLAN.md](RL_SCALING_PLAN.md).
+
+After Phase 3, goal representation becomes an RL research choice. Same-surface experiments may use
+concrete `target_calls` directly. Transfer/HER experiments should try a low-dimensional semantic
+`z_goal` / `z_sub_goal` derived from `target_calls`, with goal items treated as unordered by default
+and dependency edges carried only when explicit evidence says order matters.
+
+Treat RL enablement after Phase 3 as a refactor gate across SIM, HER, DQN/candidate scoring, TD/replay
+targets, evaluator/reward, and rollout record shape. Phase 3 target-call quality does not by itself
+make RL curves trustworthy.
 
 Author:
 Mus mbayramo@stanford.edu
