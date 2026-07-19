@@ -20,7 +20,7 @@ import warnings
 import requests
 import urllib3
 
-# redfish_ctl is the renamed idrac_ctl; install with: pip install "redfish_ctl>=1.1.4"
+# Redfish control client; install with: pip install "redfish_ctl>=1.1.4"
 from redfish_ctl import IDracManager, CustomArgumentDefaultsHelpFormatter, ApiRequestType
 from redfish_ctl.cmd_exceptions import AuthenticationFailed
 from redfish_ctl.redfish_main import console_error_printer
@@ -89,7 +89,7 @@ def igc_main_ctl():
                                      synchronous options to interact with iDRAC.|n
                                      Author Mus''',
         epilog='''For more detail, for example, documentation. Make sure to check.
-                                             https://github.com/spyroot/idrac_ctl |n
+                                             https://github.com/spyroot/redfish_ctl |n
                                              The example folder container many examples.
                                              Author Mustafa Bayramov spyroot@gmail.com
                                              ''',

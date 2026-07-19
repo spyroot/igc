@@ -4,7 +4,7 @@
 # Runs redfish_ctl's `discovery` crawl against ONE approved, non-production BMC and
 # writes ~/.json_responses/<ip>/<path>.json per resource plus rest_api_map.npy — the
 # numpy {"url_file_mapping", "allowed_methods_mapping"} dict the igc pipeline loads
-# (igc/ds/ds_rest_trajectories.py). Output contract is unchanged from idrac_ctl.
+# (igc/ds/ds_rest_trajectories.py). This is the binding redfish_ctl corpus contract.
 #
 # SAFETY: a naive recursive crawl has knocked a live BMC offline. Only run against an
 # approved, NON-PRODUCTION host, with pacing. Never hardcode a host or credentials —

@@ -18,6 +18,15 @@ Names are fixed as follows:
 - `allowed_methods`: methods from the same discovery run's `rest_api_map.npy`.
 - `json`: full Redfish JSON resource body.
 
+The starting data fact is intentionally narrow: Phase 1 has Redfish REST API paths, allowed methods,
+and JSON bodies. It does not have human operator text such as "mount an ISO and boot the server".
+Phase 1 therefore does not train goal extraction. It trains a Redfish-aware `model_x` so the next
+phase can use that checkpoint to draft plausible human text from machine-side API evidence.
+
+The current serious Phase 1 profile family is the Qwen2.5 7B rsLoRA path:
+`phase1_7b_rslora_r32` in the executable profile registry, with run names that may use
+`phase1-finetune-qwen2_5-7b-rslora`. GPT-2 remains a path smoke only.
+
 Training is normal causal-LM next-token learning. The rendered prompt contains `x`; labels are
 `-100` over the prompt tokens and actual token IDs over the `y_true` completion tokens. In other
 words, this phase trains:
@@ -29,6 +38,14 @@ P(y_true.json | x.rest_api, x.allowed_methods, x.json)
 Checkpoint rule: Phase 1 writes `model_x` only. Later Phase 2/3 runs may initialize from that
 checkpoint, but they must write `goal_extractor` and `argument_extractor` checkpoints in distinct
 output directories and W&B groups.
+
+## Pro Usage
+
+Phase 1 uses the private Shared Brain Pro backend only as a helper for code drafting, review,
+judging, planning, and acceptance checks. Use Pro with Think Max for substantial changes to the
+dataset renderer, trainer loop, launcher, metrics, checkpoint/report flow, or artifact-publishing
+path. Pro does not train `model_x`, replace GB300 DDP/FSDP2 sanity, replace W&B readback, or count as
+evidence that Phase 1 converged.
 
 ## JSONL Row
 
