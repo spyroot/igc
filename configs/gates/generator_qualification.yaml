@@ -23,16 +23,16 @@ thresholds:
 records:
   - text: "power on system 1"
     allowed_methods: { "/redfish/v1/Systems/1": ["GET", "PATCH"] }
-    judge_response: '{"accepted": true, "rest_api_list": ["/redfish/v1/Systems/1"], "nonsense": false}'
+    judge_response: '{"accepted": true, "natural": true, "nonsense": false, "ambiguous": false, "duplicate_intent": false, "method_semantics_valid": true, "coverage": [{"rest_api": "/redfish/v1/Systems/1", "text_span": "power on system 1", "supported": true}], "extra_intents": [], "reason": "covers the sampled set"}'
   - text: "read system 1 and manager 1"
     allowed_methods: { "/redfish/v1/Systems/1": ["GET"], "/redfish/v1/Managers/1": ["GET"] }
-    judge_response: '{"accepted": true, "rest_api_list": ["/redfish/v1/Systems/1", "/redfish/v1/Managers/1"], "nonsense": false}'
+    judge_response: '{"accepted": true, "natural": true, "nonsense": false, "ambiguous": false, "duplicate_intent": false, "method_semantics_valid": true, "coverage": [{"rest_api": "/redfish/v1/Systems/1", "text_span": "read system 1", "supported": true}, {"rest_api": "/redfish/v1/Managers/1", "text_span": "manager 1", "supported": true}], "extra_intents": [], "reason": "both APIs covered"}'
   - text: "check chassis 1 status"
     allowed_methods: { "/redfish/v1/Chassis/1": ["GET"] }
-    judge_response: '{"accepted": true, "rest_api_list": ["/redfish/v1/Chassis/1"], "nonsense": false}'
+    judge_response: '{"accepted": true, "natural": true, "nonsense": false, "ambiguous": false, "duplicate_intent": false, "method_semantics_valid": true, "coverage": [{"rest_api": "/redfish/v1/Chassis/1", "text_span": "check chassis 1 status", "supported": true}], "extra_intents": [], "reason": "covers the sampled set"}'
   - text: "read system 1 then read system 1"
     allowed_methods: { "/redfish/v1/Systems/1": ["GET"] }
-    judge_response: '{"accepted": false, "rest_api_list": ["/redfish/v1/Systems/1", "/redfish/v1/Systems/1"], "nonsense": false, "reason": "duplicate"}'
+    judge_response: '{"accepted": false, "natural": true, "nonsense": false, "ambiguous": false, "duplicate_intent": true, "method_semantics_valid": true, "coverage": [{"rest_api": "/redfish/v1/Systems/1", "text_span": "read system 1", "supported": true}, {"rest_api": "/redfish/v1/Systems/1", "text_span": "read system 1 again", "supported": true}], "extra_intents": [], "reason": "duplicate intent"}'
   - text: "do the thing"
     allowed_methods: { "/redfish/v1/Systems/1": ["GET"] }
-    judge_response: '{"accepted": false, "rest_api_list": [], "nonsense": false, "reason": "ambiguous"}'
+    judge_response: '{"accepted": false, "natural": true, "nonsense": false, "ambiguous": true, "duplicate_intent": false, "method_semantics_valid": true, "coverage": [], "extra_intents": [], "reason": "ambiguous"}'

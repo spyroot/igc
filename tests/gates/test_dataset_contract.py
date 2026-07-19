@@ -31,6 +31,7 @@ from typing import Any, List
 import torch
 
 from igc.ds.corpus_dataset import CorpusJSONLDataset, PHASE1_PRETRAIN_OBJECTIVE
+from igc.ds.phase1_render import _phase1_fields
 from igc.ds.rest_goal_contract import (
     RedfishContext,
     build_d1_rest_api_list_row,
@@ -84,7 +85,7 @@ def test_phase1_fields_consume_x_and_y_true_keys() -> None:
             "json": {"@odata.id": "/redfish/v1/Systems/1", "PowerState": "Off"},
         },
     }
-    rest_api, methods, input_json, target_json = CorpusJSONLDataset._phase1_fields(example)
+    rest_api, methods, input_json, target_json = _phase1_fields(example)
     assert rest_api == "/redfish/v1/Systems/1"
     assert methods == ["GET", "PATCH"]  # allowed_methods normalized to upper-case.
     assert input_json == example["x"]["json"]

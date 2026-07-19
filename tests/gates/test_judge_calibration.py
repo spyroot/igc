@@ -19,7 +19,7 @@ SUITE = REPO_ROOT / "configs/gates/judge_calibration_suite.yaml"
 _REQUIRED_CATEGORIES = {
     "correct_single_api",
     "correct_multi_api",
-    "reversed_explicit_order",
+    "mention_order_variant",
     "missing_api",
     "extra_api",
     "duplicate",
@@ -46,7 +46,11 @@ def test_reference_suite_is_calibrated() -> None:
 
 def test_lenient_judge_fails_the_gate() -> None:
     """A judge that accepts everything is caught by dangerous false-accepts."""
-    accept_all = '{"accepted": true, "rest_api_list": [], "nonsense": false}'
+    accept_all = (
+        '{"accepted": true, "natural": true, "nonsense": false, "ambiguous": false, '
+        '"duplicate_intent": false, "method_semantics_valid": true, "coverage": [], '
+        '"extra_intents": [], "reason": "lenient"}'
+    )
     report = run(load_suite(SUITE), judge_fn=lambda _case: accept_all)
     assert report["dangerous_false_accepts"], "lenient judge must trip the gate"
     assert not is_calibrated(report)
@@ -54,7 +58,11 @@ def test_lenient_judge_fails_the_gate() -> None:
 
 def test_paranoid_judge_flags_false_rejects_but_no_false_accepts() -> None:
     """A judge that rejects everything has false-rejects, not dangerous accepts."""
-    reject_all = '{"accepted": false, "rest_api_list": [], "nonsense": false}'
+    reject_all = (
+        '{"accepted": false, "natural": true, "nonsense": false, "ambiguous": false, '
+        '"duplicate_intent": false, "method_semantics_valid": true, "coverage": [], '
+        '"extra_intents": [], "reason": "paranoid"}'
+    )
     report = run(load_suite(SUITE), judge_fn=lambda _case: reject_all)
     assert report["dangerous_false_accepts"] == []
     assert report["false_rejects"], "correct_* cases should be false-rejected here"
