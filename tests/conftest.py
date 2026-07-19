@@ -24,7 +24,7 @@ import torch
 # Legacy test files quarantined from collection: each imports a module path that no longer
 # exists (e.g. igc.shared.huggingface_utils, igc.modules.llm_module) and aborts the whole
 # pytest run with a collection error. Repairing their imports (or retiring them) is queued
-# as a Codex-lane task; remove entries here as they are fixed.
+# as a follow-up task; remove entries here as they are fixed.
 collect_ignore = [
     "hugging_face_test.py",
     "mock_server_test.py",

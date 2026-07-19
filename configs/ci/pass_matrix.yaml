@@ -1,0 +1,67 @@
+# CI pass matrix — the single source for WHERE every validation pass runs.
+#
+# Used by:
+#   scripts/gates/ci_surface_guard.py  (gate ci.surface-guard — MERGE-BLOCKING)
+#   .gitlab-ci.yml                     (jobs must agree with this matrix)
+#   tests/gates/test_ci_surface_guard.py
+#
+# Surfaces (binding separation — CPU and GPU never mix):
+#   cpu — offline, no GPU/network/downloads. Runs on BOTH shared-code CIs:
+#         GitHub Actions (ubuntu runners) and the internal GitLab CI on the
+#         in-cluster `homelab-k8s` runner. The home-lab cluster has NO GPU;
+#         a cpu pass must never request one.
+#   gpu — needs real GPUs. Runs ONLY on approved GB300 slot containers,
+#         launched outside merge-request pipelines. CI never live-executes a
+#         gpu pass; the pipeline validates RECORDED evidence bundles instead
+#         (schema below). The `gb300` runner tag deliberately has no runner in
+#         home-lab, so a mis-tagged job can never schedule there.
+version: 1
+
+# Runner tags per surface. cpu jobs must carry homelab-k8s (binding); gpu jobs
+# carry gb300 (a tag with NO registered runner in home-lab — scheduling proof).
+runner_tags:
+  cpu: homelab-k8s
+  gpu: gb300
+
+passes:
+  # ---- CPU passes: the offline gate everything merges through. ----
+  lint:                     { surface: cpu, tool: "ruff check igc tests" }
+  offline_pytest:           { surface: cpu, tool: "pytest -q (markers gpu/slow/download excluded)" }
+  shell_suite:              { surface: cpu, tool: "bats + shellcheck over scripts" }
+  orchestration_dry_runs:   { surface: cpu, tool: "render_run/launch_run --dry-run spec renders" }
+  contract_gates:           { surface: cpu, tool: "scripts/gates/* structural + schema gates" }
+  docs_consistency:         { surface: cpu, tool: "scripts/gates/docs_consistency.py" }
+  perf_budgets:             { surface: cpu, tool: "pytest -m perf (machine-loose tripwires)" }
+  no_gpu_homelab_policy:    { surface: cpu, tool: "policy scan: no GPU resource requests in home-lab CI/manifests" }
+  gpu_evidence_validation:  { surface: cpu, tool: "validate committed GPU evidence manifests against the schema below" }
+  agent_leak_guard:         { surface: cpu, tool: "scripts/gates/agent_leak_guard.py: no agent artifacts tracked, no agent attribution/chatter in commit+PR/MR messages, no internal endpoint literals" }
+  # SHARED gate class (same gate ships in every project): the per-project GitLab
+  # token exists, is bound to THIS project's bot, has API access, and is DENIED
+  # on canary projects. Live run needs the gitignored token env file + network;
+  # offline tests mock the fetcher.
+  gitlab_project_token:     { surface: cpu, tool: "scripts/gates/gitlab_project_token.py --env-file <gitignored token env>: gitlab.project-token.{exists,project-bound,api-access,no-cross-project-access}" }
+
+  # ---- GPU passes: GB300 only; CI sees their EVIDENCE, never runs them. ----
+  single_gpu_smoke:         { surface: gpu, evidence: required }
+  ddp_same_node_sanity:     { surface: gpu, evidence: required }
+  fsdp2_same_node_sanity:   { surface: gpu, evidence: required }
+  two_node_sanity:          { surface: gpu, evidence: required }
+  phase1_full_pretrain:     { surface: gpu, evidence: required }
+  phase1_golden_acceptance: { surface: gpu, evidence: required }
+  corpus_full_validation:   { surface: gpu, evidence: required }   # runs in slot containers against /models
+  cuda_profile:             { surface: gpu, evidence: required }
+  latent_invariance_acceptance: { surface: gpu, evidence: required }  # z_rest/z_method model-acceptance
+
+# Evidence manifest schema for gpu passes (one JSON per recorded run under
+# reports/gpu-evidence/). Mirrors the Blackwell acceptance-gate record fields.
+evidence_schema:
+  required_fields:
+    - pass_name        # one of the gpu passes above
+    - commit_sha       # exact commit the run used
+    - command          # exact command/profile/spec
+    - world_size       # rank count
+    - nodes            # slot list, e.g. ["slot2", "slot11"]
+    - precision        # dtype/precision used
+    - wandb_run        # W&B run path or id (or "none" with reason)
+    - artifact_path    # /models/... output location
+    - status           # pass | fail

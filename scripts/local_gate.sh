@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # local_gate.sh — run the offline gate serialized across agent sessions.
 #
-# Many agents (Claude passes, Codex workers) each running `pytest -q` at the
+# Several concurrent tool sessions each running `pytest -q` at the
 # same time starve the laptop: suites wedge (the fake-nvidia-smi fixture under
 # contention), shells hang, and the desktop goes laggy. This wrapper makes the
 # heavy local gate a one-at-a-time, low-priority operation:

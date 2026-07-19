@@ -8,7 +8,7 @@
 # prints PASS/FAIL per config; any failure means "do NOT start full training".
 #
 # Usage (on a node, or from a control host with ssh to the nodes):
-#   SANITY_NODES="172.25.230.42 172.25.230.49" scripts/gb300_sanity_check.sh   # runs 1,4,8
+#   SANITY_NODES="<node-ip> <node-ip>" scripts/gb300_sanity_check.sh           # runs 1,4,8
 #   SANITY_GPUS="1 4" scripts/gb300_sanity_check.sh                            # single-node only
 #   IGC_IMAGE=igc-train:ngc26.03-py3 SANITY_NODES="…" scripts/gb300_sanity_check.sh
 #
