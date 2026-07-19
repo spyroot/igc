@@ -14,11 +14,11 @@ never inventing a call that does not exist.**
 > "Phase 0": a Redfish MDP shell (mock REST env + state encoder + a goal-conditioned DQN/HER trainer)
 > plus the module-by-module plan to make it real. The *mechanism* every page relies on — legal
 > candidate actions, verified success, HER, multi-vendor transfer — is grounded in the current
-> architecture: see [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the current-vs-target map and
-> [`../DECISIONS.md`](../DECISIONS.md) for the accepted design decisions (D-001 action selection,
+> architecture: see [`architecture overview`](../architecture/overview.md) for the current-vs-target map and
+> [`decisions`](../roadmap/decisions.md) for the accepted design decisions (D-001 action selection,
 > D-002 candidate representation). Where a page describes a surface that does not exist yet (a UI, a
 > daemon), it says so explicitly. Nothing here is a claim that a metric was hit — that is what the
-> offline gate and [`../MATH_CHECKS.md`](../MATH_CHECKS.md) are for.
+> offline gate and [`math checks`](../research/math-checks.md) are for.
 
 ## The one-paragraph version
 
@@ -63,7 +63,7 @@ Start with the two conceptual pages, then pick the scenarios relevant to you:
 - **Operators / SREs** deciding whether to trust an autonomous agent against real BMCs — the guarded
   execution and verified-success model is designed for exactly that scrutiny.
 - **ML / RL engineers** who want the problem framing (MDP, goal-conditioning, action space) before
-  the module details in `ARCHITECTURE.md`.
+  the module details in `docs/external/architecture/overview.md`.
 - **Reviewers and newcomers** who want, in fifteen minutes, a true picture of where IGC is going and
   why the RL framing is load-bearing rather than decorative.
 

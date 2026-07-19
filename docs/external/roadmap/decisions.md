@@ -2,8 +2,8 @@
 
 Durable record of architecture decisions: what was decided, the alternatives considered, why,
 the risks accepted, and the experiment that validates (or falsifies) each decision. Newest first.
-Deeper design context lives in [ARCHITECTURE.md](ARCHITECTURE.md); training mechanics in
-[TRAINING.md](TRAINING.md).
+Deeper design context lives in [architecture overview](../architecture/overview.md). Private training
+mechanics live in `docs/internal/training.md` when the operator context is present.
 
 ---
 
@@ -70,7 +70,8 @@ codebase that the safety contract says must go through redfish_ctl.
   is not required. Use current state-of-the-art long-context RoPE models now — the backbone is already
   decoupled (`--model_type` + `--seq_len`, see D-003). PPA plugs in later via a per-layer
   attention-adapter seam (eager path, native rotary disabled).
-- **Profiling gap**: `HOW_TO_PROFILE.md` covers CPU hot-paths only; add a CUDA-profiling section
+- **Profiling gap**: private `docs/internal/profiling.md` covers CPU hot-paths only; add a
+  CUDA-profiling section
   (`torch.profiler` CUDA activities / Nsight Systems / memory) for the GPU training path.
 
 ### Risks accepted
@@ -402,7 +403,8 @@ pragmatic operator viewpoints run independently with full reasoning, then synthe
 
 At each state the environment exposes a *dynamic* catalog of legal actions — an endpoint URL
 from the walked Redfish resource tree, an HTTP method from that endpoint's `allowed_methods`
-(both produced by the discovery crawl described in TRAINING.md §2), and optional argument
+(both produced by the discovery crawl described in private `docs/internal/training.md` §2), and
+optional argument
 slots. Catalog size varies per state (tens to hundreds); the endpoint vocabulary is open —
 new hosts and vendors introduce URLs never seen in training. The RL stack already has a replay
 buffer with HER relabeling, DQN-style targets with terminal masking, and a per-slot enum

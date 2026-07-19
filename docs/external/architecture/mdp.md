@@ -155,7 +155,7 @@ Two consequences, stated plainly:
 ### Generalization beyond Redfish
 
 Nothing in Sections 1-7 is Redfish-specific once stated abstractly. The argument transfers to operating
-any system exposed as a discoverable API — the target framework in [ARCHITECTURE.md](ARCHITECTURE.md) —
+any system exposed as a discoverable API — the target framework in [architecture overview](../architecture/overview.md) —
 under three conditions:
 
 1. **Bounded, readable state** — a finite, Markov-sufficient abstraction of the system's configuration

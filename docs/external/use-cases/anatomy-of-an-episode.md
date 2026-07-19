@@ -8,7 +8,7 @@ The example goal: **"PXE-boot this server once, then power it on."** It is delib
 real changes — so the loop is visible without drowning in detail.
 
 > The transcript below is illustrative of the **target** decision loop described in
-> [`../ARCHITECTURE.md`](../ARCHITECTURE.md). URLs and bodies follow standard Redfish/DMTF schemas;
+> [`architecture overview`](../architecture/overview.md). URLs and bodies follow standard Redfish/DMTF schemas;
 > exact ids differ per vendor, which is precisely the point of step 1.
 
 ## The setup

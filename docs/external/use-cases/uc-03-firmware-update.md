@@ -1,6 +1,6 @@
 # UC-03 — Firmware update workflow
 
-> Target loop, grounded in `docs/ARCHITECTURE.md` + `docs/DECISIONS.md`. Today the code is a Phase-0 Redfish MDP shell (captured-data replay, one-hot actions); the behavior below is the end-to-end loop IGC is being built to run.
+> Target loop, grounded in `docs/external/architecture/overview.md` + `docs/external/roadmap/decisions.md`. Today the code is a Phase-0 Redfish MDP shell (captured-data replay, one-hot actions); the behavior below is the end-to-end loop IGC is being built to run.
 
 ## The goal (in the operator's words, and the machine-checkable spec)
 

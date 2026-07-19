@@ -19,7 +19,7 @@ extracts a high-level goal, decomposes it into sub-goals, *discovers* the action
 REST API (or other tool backend) it is plugged into, finds an optimal strategy to reach the goal, and
 carries that capability to new, unseen environments with little or no retraining.
 
-> Status: working design. Diagrams are theme-aware SVGs under [`docs/diagrams/`](diagrams/).
+> Status: working design. Diagrams are theme-aware SVGs under [`docs/diagrams/`](../diagrams/).
 
 ---
 
@@ -86,7 +86,7 @@ flowchart LR
 The model stack is a dependency graph, not six independent training jobs. The backbone has to be
 made config-driven before downstream heads can be trusted; the RL policy should not report real
 learning metrics until structured state, legal actions, evaluator rewards, and replay masks are in
-place. The math gate for these claims lives in [MATH_CHECKS.md](MATH_CHECKS.md).
+place. The math gate for these claims lives in [math checks](../research/math-checks.md).
 
 ```mermaid
 flowchart TD
@@ -139,7 +139,7 @@ The legacy trainer is useful for smoke/debug work, not for trusted RL metrics ye
 clean layers behind one interface. The map below marks each layer **refactor existing** (reuse what is
 there) vs **build new** (greenfield), and calls out the keystone change.
 
-![Five-layer gap map](diagrams/01-five-layer-gap-map.svg)
+![Five-layer gap map](../diagrams/01-five-layer-gap-map.svg)
 
 - **Goal** — `Goal(instruction, spec, constraints, plan)`. Today only a `GoalTypeState`
   enum + a loose `self.goals` dict. *Build new.*
@@ -220,9 +220,9 @@ that preserves the mock-server seam.
 | SQL (SQLite) | self-simulating, exact verification | exact `verify()` + `BEGIN/ROLLBACK` as the dry-run guardrail primitive |
 | GitHub | a real third-party REST API via record/replay | the capture→simulate→live story generalizes; multi-step planning |
 
-![GitHub environment](diagrams/02-github-env.svg)
+![GitHub environment](../diagrams/02-github-env.svg)
 
-![SQL environment](diagrams/03-sql-env.svg)
+![SQL environment](../diagrams/03-sql-env.svg)
 
 ## 3. Workloads are hierarchical: planning, preconditions, discovery
 
@@ -232,7 +232,7 @@ object, applied only after a config **job** and a **reboot**). The terminal rewa
 sparse, so the agent must *plan*, and it must *discover* both the API (action space) and the state
 machine (Current→Pending→Applied, job Scheduled→Running→Done).
 
-![Hierarchical workload plan](diagrams/04-hierarchical-workload-plan.svg)
+![Hierarchical workload plan](../diagrams/04-hierarchical-workload-plan.svg)
 
 Design consequences: `GoalEnvelope` carries atomic `GoalRef` targets and only the dependency hints
 explicitly stated in text; `ToolAction` carries `preconditions` and `effects`; the simulator models
@@ -276,7 +276,7 @@ reward, world-model, and policy components must name their own weight roles and 
 instead of reusing historical `M*` aliases. If hidden size `H` changes, every downstream magic dim
 breaks, so dims are de-hardcoded before the first backbone fit.
 
-![Training curriculum](diagrams/05-training-curriculum.svg)
+![Training curriculum](../diagrams/05-training-curriculum.svg)
 
 | Stage | Component | Objective | Key metric | Compute |
 | --- | --- | --- | --- | --- |
@@ -321,7 +321,7 @@ The target loader should use `AutoTokenizer` + a class arg, and `ValueHead` shou
 
 ## 7. Infra · monitoring · deploy (NVL72)
 
-The canonical runtime setup lives in [ENVIRONMENT.md](ENVIRONMENT.md). Architecturally, training stays
+The canonical runtime setup lives in private `docs/internal/environment.md` when the operator context is present. Architecturally, training stays
 separate from local development: Phase 0 gates on CPU, while training/fine-tuning runs on the GB300
 NVL72 through a one-GPU-first Slurm/pyxis workflow.
 

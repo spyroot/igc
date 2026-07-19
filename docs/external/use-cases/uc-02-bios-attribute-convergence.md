@@ -1,6 +1,6 @@
 # UC-02 — BIOS / attribute convergence
 
-> Target loop, grounded in `docs/ARCHITECTURE.md` + `docs/DECISIONS.md`. Today the code is a Phase-0 Redfish MDP shell (captured-replay env, one-hot actions); the observe → choose → guard → verify loop below is the behavior we are building toward, not what ships in Phase 0.
+> Target loop, grounded in `docs/external/architecture/overview.md` + `docs/external/roadmap/decisions.md`. Today the code is a Phase-0 Redfish MDP shell (captured-replay env, one-hot actions); the observe → choose → guard → verify loop below is the behavior we are building toward, not what ships in Phase 0.
 
 ## The goal (in the operator's words, and the machine-checkable spec)
 

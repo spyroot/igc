@@ -12,12 +12,12 @@ architecture, not implemented training evidence.
 ## State And Goal Graph Anchor
 
 The compact state and goal graph plan already lives in
-[ARCHITECTURE.md](ARCHITECTURE.md). Its `RedfishStateV0` contract describes a
+[architecture overview](../architecture/overview.md). Its `RedfishStateV0` contract describes a
 structured state with resource identity, topology, health/control fields, legal
 actions, deferred state, observation metadata, and goal context.
 
 The action-candidate graph feature decision lives in
-[DECISIONS.md](DECISIONS.md). The v1 scope uses text plus graph features for
+[decisions](../roadmap/decisions.md). The v1 scope uses text plus graph features for
 candidate actions; learned graph-neighborhood embeddings are deferred until the
 structured state and offline evaluation contracts are stable.
 
