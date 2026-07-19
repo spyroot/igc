@@ -34,8 +34,8 @@ ruff check igc/core tests/core
 Success means `pytest` exits 0 for `tests/core` and `ruff` exits 0 for `igc/core` and `tests/core`.
 Until the broader harness and markers are fully in place, keep new tests explicit, offline, and
 CPU-only.
-For Docker, GPU, and cluster details, see [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md), the runtime
-and verification guide.
+Docker, GPU, and cluster details live in the private operator runtime guide under
+`docs/internal/environment.md` when the private context is present.
 
 ## What is in this repository
 
@@ -96,7 +96,7 @@ recording, evaluators, and runtime guardrails.
 Training is intentionally staged. First the backbone language model learns Redfish JSON structure;
 then pooling/autoencoder, planner, reward, world-model, and RL policy pieces build on that
 representation. The full plan and model curriculum live in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+[docs/external/architecture/overview.md](docs/external/architecture/overview.md).
 
 ## Working rules
 
@@ -110,8 +110,8 @@ representation. The full plan and model curriculum live in
 
 ## Next reading
 
-- [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — local CPU env, Docker test image, and GB300/NVL72
-  training surfaces.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — target architecture, simulator plugin model,
+- [docs/external/architecture/overview.md](docs/external/architecture/overview.md) — target architecture, simulator plugin model,
   training curriculum, and current implementation status.
 - [docs/README.md](docs/README.md) — index for the docs directory and diagrams.
+- Private operator context: `docs/internal/environment.md` for runtime, Docker, GPU, and cluster
+  details when available.

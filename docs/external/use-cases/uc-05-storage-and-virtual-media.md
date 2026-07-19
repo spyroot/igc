@@ -1,6 +1,6 @@
 # UC-05 — Storage & virtual media
 
-> Target-loop description, grounded in `docs/ARCHITECTURE.md` + `docs/DECISIONS.md`. Today the code is a Phase-0 Redfish MDP shell (captured-replay env, one-hot actions); the observe → choose → dry-run → execute → evaluate loop below is the target behavior those documents commit to, not what the current trainer emits.
+> Target-loop description, grounded in `docs/external/architecture/overview.md` + `docs/external/roadmap/decisions.md`. Today the code is a Phase-0 Redfish MDP shell (captured-replay env, one-hot actions); the observe → choose → dry-run → execute → evaluate loop below is the target behavior those documents commit to, not what the current trainer emits.
 
 ## The goal (in the operator's words, and the machine-checkable spec)
 

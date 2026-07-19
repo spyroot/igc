@@ -7,7 +7,7 @@
 > `scripts/code_reality_check.py`.
 
 > Target-loop status: this describes IGC's end-to-end target behavior, grounded in
-> `docs/ARCHITECTURE.md` and `docs/DECISIONS.md` (esp. D-002). Today the code is a Phase-0
+> `docs/external/architecture/overview.md` and `docs/external/roadmap/decisions.md` (esp. D-002). Today the code is a Phase-0
 > Redfish MDP shell — captured-data replay, a legacy one-hot action space, and smoke-only
 > DQN/HER metrics. The transfer result below is the design's central bet, and its go/no-go
 > experiment is honest (see the last section).

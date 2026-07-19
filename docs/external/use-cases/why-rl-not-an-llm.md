@@ -65,7 +65,7 @@ At every state the environment exposes a **dynamic catalog of legal actions**: a
 the *walked* Redfish resource tree, paired with an HTTP method from *that endpoint's* advertised
 `allowed_methods`, plus optional typed argument slots. The policy scores and picks **only from this
 set** — it has no way to emit a URL or method that the API did not offer. This is a deliberate design
-decision (see [`../DECISIONS.md`](../DECISIONS.md), D-001): the alternative of "let the LLM generate
+decision (see [`decisions`](../roadmap/decisions.md), D-001): the alternative of "let the LLM generate
 the action" was considered and **rejected**, both because it re-introduces hallucination and because
 it breaks the offline TD/HER learning the agent depends on. Hallucinated endpoints are not filtered
 out after the fact — they are **impossible to express**.

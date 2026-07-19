@@ -1,7 +1,7 @@
 # IGC Architecture
 
 This document is the current architecture anchor for `igc`. It is intentionally shorter than older
-design notes: historical experiments and rejected names belong in [DECISIONS.md](DECISIONS.md), while
+design notes: historical experiments and rejected names belong in [decisions](../roadmap/decisions.md), while
 this file names the pieces agents should build now.
 
 ## Current Truth
@@ -186,14 +186,14 @@ parity.
 
 ### StateEncoder v1 — binding contract
 
-This locks the v1 contract for the state encoder. The paper (`docs/IGC.tex`) calls this component
+This locks the v1 contract for the state encoder. The paper (`docs/external/research/paper/IGC.tex`) calls this component
 `StateEncoder`; in this document it is the `ObservationEncoder`/`RedfishObservationEncoder` above. It
 emits `z_state` — the paper's `z_t`, the compact RL state that `StateCompressor` produces from a
 Redfish observation. Other components may depend only on what this subsection lists; everything else is
 an internal implementation detail that may change without notice.
 
 - **Backbone.** v1 is built on the **immutable Phase 1 `model_x` backbone** (the Redfish-aware base
-  model produced by Phase 1; see `docs/phase_1.md`). v1 does not fine-tune, replace, or reshape it.
+  model produced by Phase 1; see `docs/external/phases/phase-1.md`). v1 does not fine-tune, replace, or reshape it.
 - **Output.** v1 emits a **fixed-width `z_state`**. Downstream code may rely on the width being
   constant within an experiment; no per-dimension meaning is part of the contract.
 - **Internal pooler is private.** The pooler (`StateCompressor`, the head over backbone hidden states
@@ -206,7 +206,7 @@ an internal implementation detail that may change without notice.
 - **What `z_state` retains.** **Exact observed state values and API/Redfish error facts MUST influence
   `z_state`; they are not discarded.** This is the state-side mirror of the action side: exact argument
   bindings `b_t` stay *outside* `z_rest`/`z_method` and only parameterize execution and transition
-  prediction (see `docs/IGC.tex` and `docs/GOAL_LATENT_DESIGN.md`), whereas observed values and error
+  prediction (see `docs/external/research/paper/IGC.tex` and `docs/external/architecture/goal-latent.md`), whereas observed values and error
   class stay *inside* `z_state`. Concretely, HTTP status, Redfish error class, pending
   task/job/apply-time state, and the concrete field values that distinguish transitions must remain
   recoverable influences on `z_state`.

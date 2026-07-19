@@ -10,7 +10,7 @@
 Human-readable map of every performance-critical code path in igc: **where it is, what it
 costs, what we optimized, and how it is guarded** so a slow path can never silently make
 training take days. Every number here is reproducible with one command
-([HOW_TO_PROFILE.md](HOW_TO_PROFILE.md)); every budget is a test
+(private profiling guide: `docs/internal/profiling.md`); every budget is a test
 (`tests/perf/`, run with `pytest -m perf`).
 
 The rule that produced this doc is binding: **hot-path code ships with numbers** — a PR that
@@ -91,7 +91,7 @@ pinned it to `pointer_policy.py::ActionProjector.forward`. Calling the full
 `Igc_PointerQNetwork.forward` per state re-projects the **same** candidates B times, because a
 host's candidates are static and the projector weights are fixed within an optimizer step.
 
-**Fix (design decision [D-002](DECISIONS.md)).** Project the host's **unique** candidate set once
+**Fix (design decision [D-002](../roadmap/decisions.md)).** Project the host's **unique** candidate set once
 per optimizer step, cache the keys, and score with `score_candidates` (an einsum over cached
 keys) for every state in the batch. The primitive already exists — `score_candidates` takes
 pre-projected keys — so the RLPolicy training loop must use it rather than the full per-state
@@ -134,4 +134,4 @@ forgotten.
 4. Name the dominant function from `--profile`. If you cannot, the work is not done.
 5. Update this table.
 
-See [HOW_TO_PROFILE.md](HOW_TO_PROFILE.md) for the exact commands and the CI job.
+See private `docs/internal/profiling.md` for the exact commands and the CI job.

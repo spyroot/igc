@@ -1,6 +1,6 @@
 # UC-07 — Log & telemetry triage
 
-> Target end-to-end loop, grounded in `docs/ARCHITECTURE.md` + `docs/DECISIONS.md`. Today the code is a Phase-0 Redfish MDP shell: the environment, the walked action catalog, and the guardrail scaffolding exist; the learned policy and evaluator described here are the target behavior, not yet the shipped one.
+> Target end-to-end loop, grounded in `docs/external/architecture/overview.md` + `docs/external/roadmap/decisions.md`. Today the code is a Phase-0 Redfish MDP shell: the environment, the walked action catalog, and the guardrail scaffolding exist; the learned policy and evaluator described here are the target behavior, not yet the shipped one.
 
 Operational hygiene is the friendliest place to meet an RL agent that acts on real hardware, because the blast radius is small and the audit trail is everything. This scenario is almost entirely READ — pull the event log, snapshot a few sensors — wrapped around exactly **one** gated mutation: clearing the log. That single `ClearLog` is where dry-run → approval → execute earns its keep, and where a verified, replayable trajectory beats a human clicking through a BMC UI.
 

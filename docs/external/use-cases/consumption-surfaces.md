@@ -8,7 +8,7 @@ a worked interaction, and is explicit about what exists **today** versus what is
 > (entry scripts `igc_main.py` and `igc_ctl.py`, argument groups in `igc/shared/shared_arg_parser.py`)
 > — you train and evaluate the policy offline against the mock REST environment. The *goal-driven*
 > surfaces below (interactive terminal, UI, SDK, daemon) are the **target product** built on the
-> Phase-0 agent described in [`../ARCHITECTURE.md`](../ARCHITECTURE.md). Each is labelled so you never
+> Phase-0 agent described in [`architecture overview`](../architecture/overview.md). Each is labelled so you never
 > mistake a mock-up for a shipped feature.
 
 ## Surface 0 — Training & evaluation CLI  ·  **implemented today**
