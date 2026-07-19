@@ -3,7 +3,7 @@
 Used by ``scripts/build_phase2_labelled_requests.py`` (the ``P2-LABELS`` dataset
 CLI), which drives ``Phase2LabelledRequestBuilder`` with
 ``load_phase2_labelled_requests_spec`` and provider adapters to write accepted
-``phase2_labelled_requests`` JSONL rows plus a metrics summary; focused tests run
+``D1`` JSONL rows plus a metrics summary; focused tests run
 through ``scripts/validate_phase2_labelled_requests.sh``. The module is
 pure: it loads YAML specs, renders configured prompts, samples tiny records, and
 parses injected judge responses without opening W&B, loading a model, or calling
@@ -23,6 +23,11 @@ from typing import Any, Callable, Mapping, Sequence
 
 import yaml
 
+from igc.ds.rest_goal_contract import (
+    D1,
+    RedfishContext,
+    build_d1_rest_api_list_row,
+)
 from igc.modules.base.metric_keys import (
     PHASE2_LABELLED_REQUESTS,
     PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS,
@@ -52,13 +57,6 @@ _REQUIRED_ACCEPTANCE_KEYS = (
     "max_invalid_json_rate",
 )
 _PROVIDER_ADAPTERS = frozenset({"mock", "file", "openai-compatible"})
-_ORDER_EVIDENCE_VALUES = frozenset((
-    "none",
-    "explicit_then",
-    "explicit_before",
-    "explicit_after",
-    "numbered_steps",
-))
 
 
 class Phase2LabelledRequestsSpecError(ValueError):
@@ -177,11 +175,38 @@ class ProJudgeResult:
     """Parsed private judge decision for one draft text."""
 
     accepted: bool  # whether the judge says this text may enter the dataset.
-    rest_api_list: tuple[str, ...] = ()  # API set the judge extracted from text.
+    natural: bool = False  # true when the text reads like a normal operator request.
     nonsense: bool = False  # true when the draft is junk or not an operator request.
+    ambiguous: bool = False  # true when the text is too vague for a concrete API set.
+    duplicate_intent: bool = False  # true when the text repeats an intent/API.
+    method_semantics_valid: bool = False  # true when text semantics match allowed methods.
+    coverage: tuple[Mapping[str, Any], ...] = ()  # per-selected-API support evidence.
+    extra_intents: tuple[str, ...] = ()  # intents outside the selected API set.
     invalid_json: bool = False  # true when the judge response could not be parsed.
     reason: str = ""  # short non-secret judge reason.
-    order_evidence: str = "none"  # explicit order signal, or ``none``.
+
+    @property
+    def rest_api_list(self) -> tuple[str, ...]:
+        """Return the supported API set from structured coverage entries."""
+        return tuple(
+            str(item["rest_api"])
+            for item in self.coverage
+            if bool(item.get("supported", False))
+        )
+
+    def acceptance_for(self, selected_rest_api_list: Sequence[str]) -> bool:
+        """Apply the locked D1 judge acceptance formula."""
+        return (
+            self.accepted
+            and self.natural
+            and not self.nonsense
+            and not self.ambiguous
+            and not self.duplicate_intent
+            and self.method_semantics_valid
+            and not self.extra_intents
+            and compare_rest_api_sets(selected_rest_api_list, self.rest_api_list)
+            and len(self.rest_api_list) == len(set(self.rest_api_list))
+        )
 
 
 @dataclass(frozen=True)
@@ -190,41 +215,26 @@ class Phase2LabelledRequestRow:
 
     text: str  # human request text accepted by the private judge.
     records: tuple[RestApiRecord, ...]  # sampled Redfish records used as context.
-    rest_api_list: tuple[str, ...]  # canonical sampled REST API list.
-    order_evidence: str  # explicit order signal, or ``none``.
+    rest_api_list: tuple[str, ...]  # sampled REST API set selected before generation.
     prompt_spec_version: str  # prompt/spec version used for this row.
     validation: Mapping[str, Any] = field(default_factory=dict)  # judge validation flags.
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the accepted row as JSON-compatible data."""
-        allowed_methods = {
-            record.rest_api: list(record.allowed_methods)
+        contexts = tuple(
+            RedfishContext(
+                rest_api=record.rest_api,
+                allowed_methods=record.allowed_methods,
+                json=record.json_body,
+            )
             for record in self.records
-        }
-        return {
-            "phase": 2,  # Phase number for labelled-request rows.
-            "dataset": PHASE2_LABELLED_REQUESTS,  # canonical dataset name.
-            "task": "text_to_rest_api_list",  # Phase 2 list field, evaluated as an API set.
-            "x": {
-                "text": self.text,  # accepted human request text.
-                "json": [dict(record.json_body) for record in self.records],  # JSON context.
-                "allowed_methods": allowed_methods,  # legal methods per REST API.
-                "rest_api_list": list(self.rest_api_list),  # context API list.
-            },
-            "y_true": {
-                "rest_api_list": list(self.rest_api_list),  # unordered target API set.
-                "order_evidence": self.order_evidence,  # explicit order signal if any.
-            },
-            "validation": dict(self.validation),  # judge verdict details.
-            "metadata": {
-                "prompt_spec_version": self.prompt_spec_version,  # prompt/config version.
-                "vendor": [record.vendor for record in self.records],  # vendor provenance.
-                "source_corpus": [
-                    record.source_corpus
-                    for record in self.records
-                ],  # corpus provenance.
-            },
-        }
+        )
+        return build_d1_rest_api_list_row(
+            text=self.text,
+            contexts=contexts,
+            rest_api_list=self.rest_api_list,
+            validation=self.validation,
+        )
 
 
 DraftProvider = Callable[[dict[str, Any]], str]
@@ -251,9 +261,9 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
 
     dataset = _mapping(raw, "dataset", required=True)
     dataset_name = _required_string(dataset, "name", "dataset.name")
-    if dataset_name != PHASE2_LABELLED_REQUESTS:
+    if dataset_name != D1:
         raise Phase2LabelledRequestsSpecError(
-            f"dataset.name must be {PHASE2_LABELLED_REQUESTS!r}",
+            f"dataset.name must be {D1!r}",
         )
 
     sampling = _mapping(raw, "sampling", required=True)
@@ -401,10 +411,13 @@ def sample_phase2_contexts(
     *,
     k: int,
     rng: random.Random,
+    sample_widths: Sequence[int],
 ) -> tuple[RestApiRecord, ...]:
-    """Sample one, two, or three REST API records without replacement."""
-    if k not in (1, 2, 3):
-        raise ValueError("sample width must be one of 1, 2, or 3")
+    """Sample one configured REST API record width without replacement."""
+    allowed_widths = tuple(sample_widths)
+    if k not in allowed_widths:
+        joined = ", ".join(str(width) for width in allowed_widths)
+        raise ValueError(f"sample width must be one of {joined}")
     if len(records) < k:
         raise ValueError("not enough records for requested sample width")
     return tuple(rng.sample(list(records), k))
@@ -412,13 +425,20 @@ def sample_phase2_contexts(
 
 def parse_pro_judge_result(raw: str) -> ProJudgeResult:
     """Parse a private judge JSON result without raising on malformed output."""
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
+    sentinel = object()
+    parsed: Any = sentinel
+    last_error = "invalid JSON"
+    for candidate in _judge_json_candidates(raw):
+        try:
+            parsed = json.loads(candidate)
+            break
+        except json.JSONDecodeError as exc:
+            last_error = exc.msg
+    if parsed is sentinel:
         return ProJudgeResult(
             accepted=False,
             invalid_json=True,
-            reason=f"invalid_json: {exc.msg}",
+            reason=f"invalid_json: {last_error}",
         )
     if isinstance(parsed, Mapping) and isinstance(parsed.get("y_pred"), Mapping):
         parsed = parsed["y_pred"]
@@ -429,78 +449,95 @@ def parse_pro_judge_result(raw: str) -> ProJudgeResult:
             reason="judge result is not a mapping",
         )
 
-    if "rest_api_list" in parsed:
-        rest_api_value = parsed["rest_api_list"]
-        rest_api_field = "rest_api_list"
-    elif "rest_api_set" in parsed:
-        rest_api_value = parsed["rest_api_set"]
-        rest_api_field = "rest_api_set"
-    else:
+    bool_fields = {
+        "accepted": _optional_bool(parsed, "accepted"),
+        "natural": _optional_bool(parsed, "natural"),
+        "nonsense": _optional_bool(parsed, "nonsense"),
+        "ambiguous": _optional_bool(parsed, "ambiguous"),
+        "duplicate_intent": _optional_bool(parsed, "duplicate_intent"),
+        "method_semantics_valid": _optional_bool(parsed, "method_semantics_valid"),
+    }
+    missing_or_bad = [key for key, value in bool_fields.items() if value is None]
+    if missing_or_bad:
         return ProJudgeResult(
             accepted=False,
             invalid_json=True,
-            reason="rest_api_list or rest_api_set is required",
+            reason=f"judge boolean fields missing or invalid: {', '.join(missing_or_bad)}",
         )
 
-    if not isinstance(rest_api_value, list):
+    coverage = parsed.get("coverage")
+    if not isinstance(coverage, list):
         return ProJudgeResult(
             accepted=False,
             invalid_json=True,
-            reason=f"{rest_api_field} is not a list",
+            reason="coverage must be a list",
         )
-    if not all(isinstance(item, str) for item in rest_api_value):
-        return ProJudgeResult(
-            accepted=False,
-            invalid_json=True,
-            reason=f"{rest_api_field} must contain only strings",
-        )
+    parsed_coverage: list[Mapping[str, Any]] = []
+    for index, item in enumerate(coverage):
+        if not isinstance(item, Mapping):
+            return ProJudgeResult(
+                accepted=False,
+                invalid_json=True,
+                reason=f"coverage[{index}] must be a mapping",
+            )
+        rest_api = item.get("rest_api")
+        text_span = item.get("text_span")
+        supported = item.get("supported")
+        if not isinstance(rest_api, str):
+            return ProJudgeResult(
+                accepted=False,
+                invalid_json=True,
+                reason=f"coverage[{index}].rest_api must be a string",
+            )
+        if not isinstance(text_span, str):
+            return ProJudgeResult(
+                accepted=False,
+                invalid_json=True,
+                reason=f"coverage[{index}].text_span must be a string",
+            )
+        if not isinstance(supported, bool):
+            return ProJudgeResult(
+                accepted=False,
+                invalid_json=True,
+                reason=f"coverage[{index}].supported must be a boolean",
+            )
+        parsed_coverage.append({
+            "rest_api": rest_api,
+            "text_span": text_span,
+            "supported": supported,
+        })
 
-    if "accepted" in parsed:
-        accepted_key = "accepted"
-    elif "accept" in parsed:
-        accepted_key = "accept"
-    else:
+    extra_intents = parsed.get("extra_intents")
+    if not isinstance(extra_intents, list) or not all(
+        isinstance(item, str)
+        for item in extra_intents
+    ):
         return ProJudgeResult(
             accepted=False,
             invalid_json=True,
-            reason="accepted or accept is required",
-        )
-    accepted = parsed[accepted_key]
-    if not isinstance(accepted, bool):
-        return ProJudgeResult(
-            accepted=False,
-            invalid_json=True,
-            reason=f"{accepted_key} must be a boolean",
-        )
-    nonsense = _optional_bool(parsed, "nonsense")
-    if nonsense is None:
-        return ProJudgeResult(
-            accepted=False,
-            invalid_json=True,
-            reason="nonsense must be a boolean",
-        )
-    order_evidence = parsed.get("order_evidence", "none")
-    if not isinstance(order_evidence, str) or order_evidence not in _ORDER_EVIDENCE_VALUES:
-        return ProJudgeResult(
-            accepted=False,
-            invalid_json=True,
-            reason="order_evidence must be one of "
-            f"{', '.join(sorted(_ORDER_EVIDENCE_VALUES))}",
+            reason="extra_intents must be a list of strings",
         )
 
     return ProJudgeResult(
-        accepted=accepted,
-        rest_api_list=tuple(rest_api_value),
-        nonsense=nonsense,
+        accepted=bool_fields["accepted"] is True,
+        natural=bool_fields["natural"] is True,
+        nonsense=bool_fields["nonsense"] is True,
+        ambiguous=bool_fields["ambiguous"] is True,
+        duplicate_intent=bool_fields["duplicate_intent"] is True,
+        method_semantics_valid=bool_fields["method_semantics_valid"] is True,
+        coverage=tuple(parsed_coverage),
+        extra_intents=tuple(extra_intents),
         invalid_json=False,
         reason=str(parsed.get("reason", "")),
-        order_evidence=order_evidence,
     )
 
 
 def compare_rest_api_sets(expected: Sequence[str], predicted: Sequence[str]) -> bool:
-    """Return true when two REST API lists name the same unordered set."""
-    return set(expected) == set(predicted)
+    """Return true when prediction is the same unordered API set, with no duplicates."""
+    predicted_list = list(predicted)
+    if len(predicted_list) != len(set(predicted_list)):
+        return False
+    return set(expected) == set(predicted_list)
 
 
 def empty_set_matches(expected: Sequence[str], predicted: Sequence[str]) -> bool:
@@ -546,8 +583,12 @@ class Phase2LabelledRequestCounters:
         set_match = (
             not result.invalid_json
             and compare_rest_api_sets(expected_rest_api_list, result.rest_api_list)
+            and len(result.rest_api_list) == len(set(result.rest_api_list))
         )
-        accepted = result.accepted and set_match and not result.nonsense and not result.invalid_json
+        accepted = (
+            not result.invalid_json
+            and result.acceptance_for(expected_rest_api_list)
+        )
 
         if result.nonsense:
             self.nonsense_total += 1
@@ -615,11 +656,16 @@ class Phase2LabelledRequestBuilder:
         """Build and judge one accepted row candidate.
 
         :param records: candidate REST API records.
-        :param k: sample width, one through three.
+        :param k: configured sample width.
         :param rng: deterministic RNG supplied by the caller.
         :return: accepted row plus counters, or ``None`` plus rejection counters.
         """
-        sampled = sample_phase2_contexts(records, k=k, rng=rng)
+        sampled = sample_phase2_contexts(
+            records,
+            k=k,
+            rng=rng,
+            sample_widths=self._spec.sample_widths,
+        )
         expected_rest_api_list = tuple(record.rest_api for record in sampled)
         counters = Phase2LabelledRequestCounters(
             sample_width_k=k,
@@ -651,10 +697,8 @@ class Phase2LabelledRequestBuilder:
 
         set_match = compare_rest_api_sets(expected_rest_api_list, judge_result.rest_api_list)
         accepted = (
-            judge_result.accepted
-            and set_match
-            and not judge_result.nonsense
-            and not judge_result.invalid_json
+            not judge_result.invalid_json
+            and judge_result.acceptance_for(expected_rest_api_list)
         )
         if not accepted:
             return None, counters
@@ -663,22 +707,83 @@ class Phase2LabelledRequestBuilder:
             text=draft_text,
             records=sampled,
             rest_api_list=expected_rest_api_list,
-            order_evidence=judge_result.order_evidence,
             prompt_spec_version=self._spec.prompt_spec_version,
             validation={
                 "text_source": "model_x_then_private_judge",  # draft then judge path.
                 "review_judged": True,  # private judge parsed successfully.
-                "all_rest_api_present": (
-                    set(expected_rest_api_list) <= set(judge_result.rest_api_list)
-                ),
-                "extra_rest_api_present": (
-                    not set(judge_result.rest_api_list) <= set(expected_rest_api_list)
-                ),
-                "set_coverage_preserved": set_match,  # unordered API set contract.
+                "natural": judge_result.natural,
+                "exact_api_coverage": set_match,  # unordered API set contract.
+                "extra_intent": bool(judge_result.extra_intents),
+                "duplicate_intent": judge_result.duplicate_intent,
+                "ambiguous": judge_result.ambiguous,
                 "nonsense": judge_result.nonsense,  # judge nonsense flag.
+                "method_semantics_valid": judge_result.method_semantics_valid,
             },
         )
         return row, counters
+
+    def build_no_action(
+        self,
+        *,
+        draft_text: str,
+        context_records: Sequence[RestApiRecord] = (),
+    ) -> tuple[Phase2LabelledRequestRow | None, Phase2LabelledRequestCounters]:
+        """Build and judge one hard-negative row with an empty REST API target.
+
+        No-action rows are not part of the one-, two-, or three-record sampler.
+        They carry an explicit empty target set and are accepted only when the
+        private judge also maps the draft text to an empty REST API set.
+        """
+        records = tuple(context_records)
+        expected_rest_api_list: tuple[str, ...] = ()
+        counters = Phase2LabelledRequestCounters(
+            sample_width_k=0,
+            vendor_source_corpus=_source_corpus_label(records),
+            prompt_spec_version=self._spec.prompt_spec_version,
+            model_x_artifact_sha=self._spec.model_x.artifact_sha,
+            judge_model=self._spec.judge.model_id,
+            judge_profile=self._spec.judge.profile,
+        )
+        counters.observe_draft(draft_text)
+
+        judge_request = {
+            "prompt": render_pro_judge_prompt(self._spec, records, draft_text),
+            "model_id": self._spec.judge.model_id,
+            "profile": self._spec.judge.profile,
+            "route": self._spec.judge.route,
+            "expected_rest_api_list": [],
+        }
+        judge_result = parse_pro_judge_result(self._judge_provider(judge_request))
+        counters.observe_judge(judge_result, expected_rest_api_list=expected_rest_api_list)
+
+        set_match = empty_set_matches(expected_rest_api_list, judge_result.rest_api_list)
+        accepted = (
+            not judge_result.invalid_json
+            and judge_result.acceptance_for(expected_rest_api_list)
+        )
+        if not accepted:
+            return None, counters
+
+        return (
+            Phase2LabelledRequestRow(
+                text=draft_text,
+                records=records,
+                rest_api_list=expected_rest_api_list,
+                prompt_spec_version=self._spec.prompt_spec_version,
+                validation={
+                    "text_source": "hard_negative_no_action",
+                    "review_judged": True,
+                    "natural": judge_result.natural,
+                    "exact_api_coverage": set_match,
+                    "extra_intent": bool(judge_result.extra_intents),
+                    "duplicate_intent": judge_result.duplicate_intent,
+                    "ambiguous": judge_result.ambiguous,
+                    "nonsense": judge_result.nonsense,
+                    "method_semantics_valid": judge_result.method_semantics_valid,
+                },
+            ),
+            counters,
+        )
 
 
 def to_minimal_phase3_input(row: Phase2LabelledRequestRow | None) -> dict[str, Any]:
@@ -740,6 +845,31 @@ def _render_prompt(
     )
     body = template.format(records_json=records_json, draft_text=draft_text)
     return f"{system.rstrip()}\n\n{body.strip()}"
+
+
+def _judge_json_candidates(raw: str) -> tuple[str, ...]:
+    """Return plausible JSON payloads from common model response wrappers."""
+    stripped = raw.strip()
+    candidates = [stripped]
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        fenced = "\n".join(lines).strip()
+        if fenced:
+            candidates.append(fenced)
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(raw[start:end + 1])
+
+    unique: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in unique:
+            unique.append(candidate)
+    return tuple(unique)
 
 
 def _mapping(source: Mapping[str, Any], key: str, *, required: bool = False) -> Mapping[str, Any]:

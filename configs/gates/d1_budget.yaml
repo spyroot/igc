@@ -1,0 +1,32 @@
+# Phase 2 D1 generation budget — mandatory finite caps for the D1 build loop.
+#
+# Used by scripts/gates/d1_generation_budget.py (gate d1.generation_budget):
+#   - main() validates this file in the offline CI gate.
+#   - A D1 build loop reads the same caps and calls should_stop / combination_full /
+#     api_full so the run is bounded on every axis (total, per-combination, per-API).
+#
+# Phase 2 samples API sets of the widths below from the D0 corpus, model_x drafts the
+# operator text for each set, and the Pro judge accepts/rejects. Every limit here MUST
+# be a finite, positive integer — there is deliberately no "unbounded" or "run until
+# done" setting; the gate rejects the config if any cap is missing, null, 0, negative,
+# a bool, or a float.
+version: 1
+
+# API-set widths to sample: 1-API, 2-API, and 3-API commands (the D1 contract's
+# one-/two-/three-API samples). Each width must be a positive int.
+sample_widths: [1, 2, 3]
+
+# Global caps for the whole build (should_stop fires on either).
+max_accepted_rows: 20000   # stop after this many accepted D1 rows
+max_candidates: 200000     # stop after this many draft/judge attempts (safety ceiling)
+
+# Per sampled API combination caps (combination_full fires on either).
+max_accepted_per_combination: 3   # keep at most N accepted rows per unique API set
+max_attempts_per_combination: 8   # give up on a combination after N failed drafts
+
+# Per single API cap (api_full) — keep any one API from dominating the dataset.
+max_accepted_per_api: 2000
+
+# Whether every selected API in a row must be span-covered by the judge before the
+# row is accepted (the D1 `exact_api_coverage` requirement). Must be an explicit bool.
+require_single_api_coverage: true

@@ -136,6 +136,10 @@ jobs:
           python scripts/slurm_sanity_from_spec.py --spec configs/run/examples/slurm-smoke.yaml --dry-run >/tmp/slurm-sanity-plan.txt
       - name: Lint
         run: ruff check igc tests
+      - name: Contract-authority gate
+        env:
+          IGC_GATE_SURFACE: ci
+        run: python scripts/gates/contract_authority.py
       - name: Offline gate with coverage
         shell: bash
         run: |

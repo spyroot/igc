@@ -1,0 +1,100 @@
+# Judge calibration suite (human-authored ground truth).
+#
+# Used by scripts/gates/judge_calibration.py (gate judge.calibration). Before the
+# Pro judge is trusted at scale to accept/reject Phase 2 D1 drafts, it must agree
+# with this small hand-labelled suite. Each case pins the (sampled API set,
+# operator text) relationship and the verdict a correctly-calibrated judge must
+# return. `reference_judge_response` is the STRUCTURED verdict a good judge emits
+# (the shape parse_pro_judge_result requires: six booleans + per-API coverage +
+# extra_intents) — used for the offline deterministic check; the real Pro judge
+# is called on (text, sampled set) in the cluster run and its verdict is scored
+# against `expected_accepted`.
+#
+# Phase 2 is UNORDERED: different mention orders of the same APIs are the SAME
+# combination (mention_order_variant is an ACCEPT case, not a rejection).
+#
+# SEED suite: 1 case per category. Expand with real hand-labelled examples before
+# trusting the judge at dataset scale. Only accept-class categories accept.
+version: 1
+# Categories whose false-accept is dangerous (a bad D1 row enters the dataset).
+# A single judge false-accept in any of these fails the gate.
+zero_false_accept_categories:
+  - missing_api
+  - extra_api
+  - duplicate
+  - method_incompatible
+  - nonsense
+  - ambiguous
+
+cases:
+  - id: correct-single
+    category: correct_single_api
+    text: "power on system 1"
+    sampled_rest_api_list: ["/redfish/v1/Systems/1"]
+    allowed_methods: { "/redfish/v1/Systems/1": ["GET", "PATCH"] }
+    expected_accepted: true
+    reference_judge_response: '{"accepted": true, "natural": true, "nonsense": false, "ambiguous": false, "duplicate_intent": false, "method_semantics_valid": true, "coverage": [{"rest_api": "/redfish/v1/Systems/1", "text_span": "power on system 1", "supported": true}], "extra_intents": [], "reason": "covers exactly the sampled set"}'
+
+  - id: correct-multi
+    category: correct_multi_api
+    text: "check system 1 power and manager 1 status"
+    sampled_rest_api_list: ["/redfish/v1/Systems/1", "/redfish/v1/Managers/1"]
+    allowed_methods: { "/redfish/v1/Systems/1": ["GET"], "/redfish/v1/Managers/1": ["GET"] }
+    expected_accepted: true
+    reference_judge_response: '{"accepted": true, "natural": true, "nonsense": false, "ambiguous": false, "duplicate_intent": false, "method_semantics_valid": true, "coverage": [{"rest_api": "/redfish/v1/Systems/1", "text_span": "check system 1 power", "supported": true}, {"rest_api": "/redfish/v1/Managers/1", "text_span": "manager 1 status", "supported": true}], "extra_intents": [], "reason": "both sampled APIs covered"}'
+
+  - id: mention-order-variant
+    category: mention_order_variant
+    text: "first read manager 1, then system 1"   # different mention order, SAME unordered set
+    sampled_rest_api_list: ["/redfish/v1/Systems/1", "/redfish/v1/Managers/1"]
+    allowed_methods: { "/redfish/v1/Systems/1": ["GET"], "/redfish/v1/Managers/1": ["GET"] }
+    expected_accepted: true
+    reference_judge_response: '{"accepted": true, "natural": true, "nonsense": false, "ambiguous": false, "duplicate_intent": false, "method_semantics_valid": true, "coverage": [{"rest_api": "/redfish/v1/Systems/1", "text_span": "then system 1", "supported": true}, {"rest_api": "/redfish/v1/Managers/1", "text_span": "first read manager 1", "supported": true}], "extra_intents": [], "reason": "same unordered set; mention order is not execution order"}'
+
+  - id: missing-api
+    category: missing_api
+    text: "power on system 1"                     # text names only 1 of 2 sampled APIs
+    sampled_rest_api_list: ["/redfish/v1/Systems/1", "/redfish/v1/Managers/1"]
+    allowed_methods: { "/redfish/v1/Systems/1": ["GET"], "/redfish/v1/Managers/1": ["GET"] }
+    expected_accepted: false
+    reference_judge_response: '{"accepted": false, "natural": true, "nonsense": false, "ambiguous": false, "duplicate_intent": false, "method_semantics_valid": true, "coverage": [{"rest_api": "/redfish/v1/Systems/1", "text_span": "power on system 1", "supported": true}, {"rest_api": "/redfish/v1/Managers/1", "text_span": "", "supported": false}], "extra_intents": [], "reason": "text omits Managers/1"}'
+
+  - id: extra-api
+    category: extra_api
+    text: "power on system 1 and reset manager 1"  # text names an API not in the sampled set
+    sampled_rest_api_list: ["/redfish/v1/Systems/1"]
+    allowed_methods: { "/redfish/v1/Systems/1": ["GET", "PATCH"] }
+    expected_accepted: false
+    reference_judge_response: '{"accepted": false, "natural": true, "nonsense": false, "ambiguous": false, "duplicate_intent": false, "method_semantics_valid": true, "coverage": [{"rest_api": "/redfish/v1/Systems/1", "text_span": "power on system 1", "supported": true}], "extra_intents": ["/redfish/v1/Managers/1"], "reason": "text adds Managers/1 outside the sampled set"}'
+
+  - id: duplicate
+    category: duplicate
+    text: "read system 1, then read system 1 again"
+    sampled_rest_api_list: ["/redfish/v1/Systems/1"]
+    allowed_methods: { "/redfish/v1/Systems/1": ["GET"] }
+    expected_accepted: false
+    reference_judge_response: '{"accepted": false, "natural": true, "nonsense": false, "ambiguous": false, "duplicate_intent": true, "method_semantics_valid": true, "coverage": [{"rest_api": "/redfish/v1/Systems/1", "text_span": "read system 1", "supported": true}], "extra_intents": [], "reason": "same intent repeated"}'
+
+  - id: ambiguous
+    category: ambiguous
+    text: "check the thing"                        # too vague to map to a concrete API
+    sampled_rest_api_list: ["/redfish/v1/Systems/1"]
+    allowed_methods: { "/redfish/v1/Systems/1": ["GET"] }
+    expected_accepted: false
+    reference_judge_response: '{"accepted": false, "natural": true, "nonsense": false, "ambiguous": true, "duplicate_intent": false, "method_semantics_valid": true, "coverage": [{"rest_api": "/redfish/v1/Systems/1", "text_span": "", "supported": false}], "extra_intents": [], "reason": "too vague for a concrete API"}'
+
+  - id: method-incompatible
+    category: method_incompatible
+    text: "delete system 1"                        # DELETE not in allowed_methods
+    sampled_rest_api_list: ["/redfish/v1/Systems/1"]
+    allowed_methods: { "/redfish/v1/Systems/1": ["GET", "PATCH"] }
+    expected_accepted: false
+    reference_judge_response: '{"accepted": false, "natural": true, "nonsense": false, "ambiguous": false, "duplicate_intent": false, "method_semantics_valid": false, "coverage": [{"rest_api": "/redfish/v1/Systems/1", "text_span": "delete system 1", "supported": true}], "extra_intents": [], "reason": "DELETE not allowed on Systems/1"}'
+
+  - id: nonsense
+    category: nonsense
+    text: "banana helicopter redfish"             # junk, not an operator request
+    sampled_rest_api_list: ["/redfish/v1/Systems/1"]
+    allowed_methods: { "/redfish/v1/Systems/1": ["GET"] }
+    expected_accepted: false
+    reference_judge_response: '{"accepted": false, "natural": false, "nonsense": true, "ambiguous": false, "duplicate_intent": false, "method_semantics_valid": false, "coverage": [], "extra_intents": [], "reason": "not an operator request"}'

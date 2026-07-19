@@ -59,13 +59,19 @@ judge adapters on `mock`; operators must explicitly select the live adapter by
 YAML or CLI and provide the environment variables named by the spec before any
 live `model_x` or private Pro judge call is possible.
 
+Hard-negative/no-action fixture rows use the same CLI with
+`--no-action-text` and `--no-action-count`. These rows bypass the one-, two-,
+or three-record sampler, pass the supplied text to the judge with an expected
+empty REST API set, and enter the output JSONL only when the judge also returns
+`rest_api_list: []`.
+
 The live adapter is only a provider surface. It resolves the model and route
 placeholders from environment variables, reads base URLs from the spec's
 `base_url_env` fields, extracts text from the configured response JSON path,
 and sends no W&B, Redfish, GPU, or dataset-scale work on its own. A live run
-whose `--count` exceeds `safety.live_without_gate_max_candidates` must pass
-`--live-provider-gate-passed`; otherwise the CLI exits before opening a live
-provider connection.
+whose requested candidate total (`--count` plus `--no-action-count`) exceeds
+`safety.live_without_gate_max_candidates` must pass `--live-provider-gate-passed`;
+otherwise the CLI exits before opening a live provider connection.
 
 The P2-LABELS-002 live launch uses the `providers:` block in
 `configs/phase2_labelled_requests.yaml`; `igc/ds/phase2_labelled_requests.py`

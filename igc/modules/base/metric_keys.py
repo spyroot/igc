@@ -68,18 +68,18 @@ PHASE1_ACCEPTANCE_METRIC_KEYS = (
 
 PHASE1_ALL_METRIC_KEYS = PHASE1_WANDB_METRIC_KEYS + PHASE1_ACCEPTANCE_METRIC_KEYS
 
+# Phase 2 is an UNORDERED set task: set match is the primary metric; there are
+# no order/* keys (execution order is RL-oracle evidence, not a Phase 2 output).
 PHASE2_WANDB_METRIC_KEYS = (
     phase_metric(PHASE2_GOAL_EXTRACT, "train", "loss"),
     phase_metric(PHASE2_GOAL_EXTRACT, "train", "perplexity"),
     phase_metric(PHASE2_GOAL_EXTRACT, "train", "optimizer_step"),
-    phase_metric(PHASE2_GOAL_EXTRACT, "eval", "ordered_exact_match_rate"),
     phase_metric(PHASE2_GOAL_EXTRACT, "eval", "set_match_rate"),
     phase_metric(PHASE2_GOAL_EXTRACT, "eval", "precision"),
     phase_metric(PHASE2_GOAL_EXTRACT, "eval", "recall"),
     phase_metric(PHASE2_GOAL_EXTRACT, "eval", "f1"),
-    phase_metric(PHASE2_GOAL_EXTRACT, "eval", "missing_allowed_methods_rate"),
-    phase_metric(PHASE2_GOAL_EXTRACT, "order", "kendall_tau"),
-    phase_metric(PHASE2_GOAL_EXTRACT, "order", "edit_distance"),
+    phase_metric(PHASE2_GOAL_EXTRACT, "eval", "invalid_rest_rate"),
+    phase_metric(PHASE2_GOAL_EXTRACT, "eval", "hard_negative_accuracy"),
 )
 
 PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS = (
@@ -100,16 +100,21 @@ PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS = (
     phase_metric(PHASE2_LABELLED_REQUESTS, "judge", "profile"),
 )
 
+# Phase 3 is an UNORDERED bound-call set task. The contract metric family:
+# method accuracy, argument JSON validity, required-argument coverage,
+# no-argument accuracy, and unsafe/unsupported-argument rejection — plus the
+# overall call-set match. No order/* keys (order is RL-oracle evidence).
 PHASE3_WANDB_METRIC_KEYS = (
     phase_metric(PHASE3_ARGUMENT_EXTRACT, "train", "loss"),
     phase_metric(PHASE3_ARGUMENT_EXTRACT, "train", "perplexity"),
     phase_metric(PHASE3_ARGUMENT_EXTRACT, "train", "optimizer_step"),
-    phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "call_ordered_exact_match_rate"),
+    phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "call_set_exact_match_rate"),
     phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "method_exact_match_rate"),
+    phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "arguments_json_validity_rate"),
     phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "arguments_exact_match_rate"),
-    phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "readonly_empty_arguments_rate"),
-    phase_metric(PHASE3_ARGUMENT_EXTRACT, "order", "kendall_tau"),
-    phase_metric(PHASE3_ARGUMENT_EXTRACT, "order", "edit_distance"),
+    phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "required_argument_coverage_rate"),
+    phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "no_argument_accuracy_rate"),
+    phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "unsafe_argument_rejection_rate"),
 )
 
 PHASE23_WANDB_METRIC_KEYS = PHASE2_WANDB_METRIC_KEYS + PHASE3_WANDB_METRIC_KEYS

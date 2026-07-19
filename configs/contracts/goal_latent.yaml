@@ -1,0 +1,83 @@
+# Goal-latent contract (v1) — z_rest / z_method for Phase 3 -> RL.
+#
+# Used by:
+#   scripts/gates/latent_contract.py  (gate latent.contract — MERGE-BLOCKING structural)
+#   tests/gates/test_latent_contract.py
+#
+# Two SEPARATE encoders (v1 keeps them separate so the hypothesis is testable):
+#   z_rest   = RestEncoder(rest_api + generic API JSON context)
+#   z_method = MethodEncoder(http_method + operation_name/function + argument key/type structure)
+# Exact argument VALUES stay OUTSIDE both latents; the executor/verifier keep the raw
+# bindings (e.g. {"x": 1}). So `set x=1` and `set x=2` must yield the same/near-identical
+# z_rest and z_method but different raw_arguments.
+version: 1
+name: goal_latent
+max_operations: 3          # fixed slot count; operation_mask selects the active ops
+
+# Runtime tensor shapes (structural, merge-blocking).
+tensor_shapes:
+  z_rest:         { rank: 3, dims: ["batch", 3, "d_rest"],   dtype: float32 }
+  z_method:       { rank: 3, dims: ["batch", 3, "d_method"], dtype: float32 }
+  operation_mask: { rank: 2, dims: ["batch", 3],             dtype: bool }
+# A 1-op goal: operation_mask = [true, false, false]; a 3-op goal: [true, true, true].
+
+# Raw material retained alongside the latents (never encoded into z_*).
+retained_raw:
+  - raw_calls        # compiled calls retained for the executor/verifier
+  - raw_arguments    # exact argument bindings retained (e.g. {"x": 1})
+
+# Where each encoder's weights COME FROM (locked 2026-07-18). Each encoder
+# initializes from the phase that learned its representation; initializing
+# from any other source is non-compliant.
+encoder_sources:
+  state_encoder_backbone: model_x         # Phase 1: stable JSON-aware env-state representation
+  z_rest_encoder: goal_extractor          # Phase 2 checkpoint: resources selected from human language
+  z_method_encoder: argument_extractor    # Phase 3 checkpoint: methods/functions + argument structure
+
+# RL-training freeze rule (locked 2026-07-18): during RL training the encoders
+# do not move — only the policy learns. Fine-tuning any frozen component during
+# RL is non-compliant.
+rl_training_freeze:
+  state_encoder: frozen     # StateEncoder parameters are frozen
+  z_rest_encoder: frozen    # Phase 2 parameters are frozen
+  z_method_encoder: frozen  # Phase 3 parameters are frozen
+  rl_policy: trainable      # only the RL policy learns
+
+# MERGE-BLOCKING contract checks (latent.contract; structural, offline-testable):
+merge_blocking_checks:
+  - correct tensor rank, dimensions and dtype
+  - no NaN or infinity
+  - separate encoder ids and versions (rest id != method id)
+  - raw compiled calls retained
+  - raw argument bindings retained
+  - input call permutation canonicalized
+
+# MODEL-ACCEPTANCE checks (need trained encoders; NOT merge-blocking; BLOCKED while the
+# GPU/model surface is off — cannot run on the laptop or CI):
+model_acceptance_checks:
+  - changing only a literal value does not change z_rest or z_method
+  - changing only the method/function does not change z_rest
+  - changing only the API/context does not change z_method
+  - representations do not collapse to one vector
+
+# Deliberately NOT required in v1 (keeping encoders separate keeps the hypothesis testable):
+not_required_v1:
+  - z_rest and z_method share one coordinate system
+  - z_rest and z_method match the StateEncoder distribution
+  - one pooled z_goal
+  - DMTF semantic classes
+  - a planner
+  - execution order prediction
+  - a unified action encoder
+
+# LATER research (an OEM-transfer experiment — a result to prove, NOT part of the v1 schema):
+future_research:
+  - equivalent standard/OEM resources are near in z_rest
+  - equivalent standard/OEM operations are near in z_method
+
+# Order belongs OUTSIDE Phase 2/3. Phase 2/3 describe WHAT must be done; the known
+# successful order is separate RL training evidence with this shape:
+order_evidence_shape:
+  compiled_goal_id: "str"
+  expert_call_order: "list[int]"
+  success_predicate: "dict"
