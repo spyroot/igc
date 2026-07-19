@@ -23,14 +23,13 @@ from igc.ds.corpus_dataset import CorpusJSONLDataset, PHASE1_PRETRAIN_OBJECTIVE 
 from igc.ds.phase1_render import render_phase1_completion, render_phase1_prompt  # noqa: E402
 from igc.ds.rest_goal_contract import (  # noqa: E402
     RedfishContext,
+    build_call_row,
     build_d1_rest_api_list_row,
-    build_ordered_call_row,
-    evaluate_ordered_calls_y_pred,
-    evaluate_rest_api_set,
-    inference_ordered_goals_json,
-    parse_ordered_calls_y_pred,
+    evaluate_calls_y_pred,
+    evaluate_rest_api_list_y_pred,
+    parse_calls_y_pred,
     parse_rest_api_list_y_pred,
-    render_ordered_call_example,
+    render_call_example,
     render_rest_api_list_example,
 )
 
@@ -120,27 +119,29 @@ def build_report(tmp_path: Path, *, max_len: int = 192) -> dict[str, Any]:
     phase2_rendered = render_rest_api_list_example(d1_row)
     phase2_response = json.loads(phase2_rendered.target_json)
     phase2_parsed = parse_rest_api_list_y_pred(phase2_response)
-    phase2_metrics = evaluate_rest_api_set(phase2_parsed, d1_row["y_true"])
+    phase2_metrics = evaluate_rest_api_list_y_pred(d1_row, phase2_response)
+    # Hard-negative shape: an empty selected set matches only an empty prediction.
+    empty_row = build_d1_rest_api_list_row(text="nothing to do", contexts=(), rest_api_list=())
+    empty_metrics = evaluate_rest_api_list_y_pred(empty_row, {"rest_api_list": []})
     judge = lightweight_judge(
         d1_row["x"]["text"],
         list(d1_row["y_true"]["rest_api_list"]),
         phase2_response,
     )
 
-    phase3_row = build_ordered_call_row(
+    phase3_row = build_call_row(
         text=d1_row["x"]["text"],
         contexts=(context,),
         rest_api_list=phase2_parsed,
         method_by_api={context.rest_api: "PATCH"},
         arguments_by_api={context.rest_api: {"PowerState": "On"}},
     )
-    phase3_rendered = render_ordered_call_example(phase3_row)
-    phase3_parsed = parse_ordered_calls_y_pred(phase3_rendered.target_json)
-    phase3_eval = evaluate_ordered_calls_y_pred(phase3_row, phase3_rendered.target_json)
-    handoff = inference_ordered_goals_json(phase3_row)
+    phase3_rendered = render_call_example(phase3_row)
+    phase3_parsed = parse_calls_y_pred(phase3_rendered.target_json)
+    phase3_eval = evaluate_calls_y_pred(phase3_row, phase3_rendered.target_json)
 
     return {
-        "schema": "igc.phase123_conformance.v1",
+        "schema": "igc.phase123_conformance.v2",
         "phase1": {
             "input_keys": sorted(initial["x"].keys()),
             "target_keys": sorted(initial["y_true"].keys()),
@@ -158,15 +159,14 @@ def build_report(tmp_path: Path, *, max_len: int = 192) -> dict[str, Any]:
         "phase2": {
             "prompt_len": len(phase2_rendered.prompt),
             "parsed_rest_api_list": phase2_parsed,
-            "set_match": phase2_metrics.set_match,
-            "empty_set_match_example": evaluate_rest_api_set([], []).empty_set_match,
+            "set_match": phase2_metrics["set_match"],
+            "empty_set_match_example": empty_metrics["set_match"],
         },
         "phase3": {
             "prompt_len": len(phase3_rendered.prompt),
             "parsed_call_count": len(phase3_parsed),
-            "call_ordered_exact_match": phase3_eval["call_ordered_exact_match"],
-            "ordered_goals_keys": sorted(handoff.keys()),
-            "ordered_goal_fields": sorted(handoff["ordered_goals"][0].keys()),
+            "call_set_exact_match": phase3_eval["call_set_exact_match"],
+            "call_fields": sorted(phase3_parsed[0].keys()),
         },
     }
 
@@ -177,17 +177,19 @@ def assert_report(report: dict[str, Any]) -> None:
     assert report["phase1"]["tensor_keys"] == ["attention_mask", "input_ids", "labels"]
     assert report["phase1"]["tensors"]["input_ids"]["shape"] == [192]
     assert report["phase1"]["tensors"]["labels"]["supervised_tokens"] > 0
-    assert report["d1"]["x_keys"] == ["allowed_methods", "json", "text"]
-    assert report["d1"]["y_true_keys"] == ["order_evidence", "rest_api_list"]
+    # D1 x is TEXT-ONLY; y_true is the unordered unique set — no order field.
+    assert report["d1"]["x_keys"] == ["text"]
+    assert report["d1"]["y_true_keys"] == ["rest_api_list"]
     assert report["d1"]["judge"]["accepted"] is True
     assert report["phase2"]["set_match"] is True
     assert report["phase2"]["empty_set_match_example"] is True
-    assert report["phase3"]["call_ordered_exact_match"] is True
-    assert report["phase3"]["ordered_goals_keys"] == ["ordered_goals", "text"]
-    assert report["phase3"]["ordered_goal_fields"] == [
-        "allowed_methods",
+    assert report["phase3"]["call_set_exact_match"] is True
+    # A Call is exactly rest_api/http_method/operation_name/arguments; there is
+    # no ordered handoff — execution order is RL-oracle evidence.
+    assert report["phase3"]["call_fields"] == [
         "arguments",
-        "method",
+        "http_method",
+        "operation_name",
         "rest_api",
     ]
 

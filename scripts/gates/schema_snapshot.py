@@ -1,7 +1,7 @@
 """Gate: repo.schema-snapshot — freeze the canonical Phase 2/3 row schema.
 
 Renders the two canonical contract rows (``build_d1_rest_api_list_row`` and
-``build_ordered_call_row`` from ``igc/ds/rest_goal_contract.py``) with a fixed
+``build_call_row`` from ``igc/ds/rest_goal_contract.py``) with a fixed
 in-gate fixture, reduces each to a *shape* (structure + key names + value types,
 never fixture values), and compares that shape to a committed snapshot. Any change
 to the approved JSON example shape — a renamed/added/removed field, a changed
@@ -43,8 +43,8 @@ def build_canonical_rows() -> dict[str, Any]:
     """
     from igc.ds.rest_goal_contract import (
         RedfishContext,
+        build_call_row,
         build_d1_rest_api_list_row,
-        build_ordered_call_row,
     )
 
     contexts = [
@@ -59,7 +59,7 @@ def build_canonical_rows() -> dict[str, Any]:
         contexts=contexts,
         rest_api_list=[_FIXTURE_REST_API],
     )
-    phase3 = build_ordered_call_row(
+    phase3 = build_call_row(
         text=_FIXTURE_TEXT,
         contexts=contexts,
         rest_api_list=[_FIXTURE_REST_API],

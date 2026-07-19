@@ -10,7 +10,7 @@ canonical code paths (no mocks of the builders themselves):
   tensor keys/shapes.
 * Phase 2 D1: :func:`igc.ds.rest_goal_contract.build_d1_rest_api_list_row` — the
   ``x``/``y_true`` field names and the empty-set (hard-negative) allowance.
-* Phase 3: :func:`igc.ds.rest_goal_contract.build_ordered_call_row` — the ``x``
+* Phase 3: :func:`igc.ds.rest_goal_contract.build_call_row` — the ``x``
   fields and the per-call ``y_true`` field names.
 
 The tests run offline on CI / an approved remote container: a tiny char-level
@@ -34,7 +34,7 @@ from igc.ds.corpus_dataset import CorpusJSONLDataset, PHASE1_PRETRAIN_OBJECTIVE
 from igc.ds.rest_goal_contract import (
     RedfishContext,
     build_d1_rest_api_list_row,
-    build_ordered_call_row,
+    build_call_row,
 )
 
 
@@ -145,7 +145,7 @@ def test_phase1_pretrain_item_keys_shapes_and_prompt_masking(tmp_path) -> None:
 
 
 def test_phase2_labelled_row_field_names() -> None:
-    """Phase 2 D1 row carries x.text/x.json/x.allowed_methods and y_true.rest_api_list."""
+    """Phase 2 D1 row is TEXT-ONLY x with the unordered unique rest_api_list label."""
     context = RedfishContext(
         rest_api="/redfish/v1/Systems/1",
         allowed_methods=["GET", "PATCH"],
@@ -157,10 +157,20 @@ def test_phase2_labelled_row_field_names() -> None:
         rest_api_list=["/redfish/v1/Systems/1"],
     )
     x = row["x"]
-    assert x["text"] == "power off system 1"
-    assert x["json"] == [{"@odata.id": "/redfish/v1/Systems/1"}]  # list of current resource bodies.
-    assert x["allowed_methods"] == {"/redfish/v1/Systems/1": ["GET", "PATCH"]}  # per-API method map.
-    assert row["y_true"]["rest_api_list"] == ["/redfish/v1/Systems/1"]  # ordered API label.
+    assert x == {"text": "power off system 1"}  # json/allowed_methods here = input leakage.
+    assert row["target_semantics"] == "unordered_unique_set"
+    assert row["y_true"] == {"rest_api_list": ["/redfish/v1/Systems/1"]}  # the API-set label.
+    assert set(row["validation"]) == {
+        "text_source",
+        "review_judged",
+        "natural",
+        "exact_api_coverage",
+        "extra_intent",
+        "duplicate_intent",
+        "ambiguous",
+        "nonsense",
+        "method_semantics_valid",
+    }
 
 
 def test_phase2_empty_rest_api_list_is_allowed_hard_negative() -> None:
@@ -178,10 +188,10 @@ def test_phase2_empty_rest_api_list_is_allowed_hard_negative() -> None:
     assert row["y_true"]["rest_api_list"] == []  # empty set is retained, not rejected.
 
 
-# --- Phase 3: build_ordered_call_row -----------------------------------------------
+# --- Phase 3: build_call_row --------------------------------------------------------
 
 
-def test_phase3_ordered_call_row_field_names() -> None:
+def test_phase3_call_row_field_names() -> None:
     """Phase 3 row carries x.text/x.rest_api_list/x.json/x.allowed_methods and per-call y_true keys."""
     read_ctx = RedfishContext(
         rest_api="/redfish/v1/Systems/1",
@@ -194,31 +204,36 @@ def test_phase3_ordered_call_row_field_names() -> None:
         json={"@odata.id": "/redfish/v1/Managers/1/EthernetInterfaces/1"},
     )
     rest_api_list = [read_ctx.rest_api, write_ctx.rest_api]
-    row = build_ordered_call_row(
-        text="read system 1 then set the manager NIC address",
+    row = build_call_row(
+        text="read system 1 and set the manager NIC address",
         contexts=[read_ctx, write_ctx],
         rest_api_list=rest_api_list,
-        method_by_api={write_ctx.rest_api: "PATCH"},
+        method_by_api={read_ctx.rest_api: "GET", write_ctx.rest_api: "PATCH"},
         arguments_by_api={write_ctx.rest_api: {"Address": "192.168.1.1"}},
     )
 
     x = row["x"]
-    assert x["text"] == "read system 1 then set the manager NIC address"
-    assert x["rest_api_list"] == rest_api_list  # ordered API input from Phase 2.
+    assert x["text"] == "read system 1 and set the manager NIC address"
+    # Canonical unique set (sorted identity — never execution order).
+    assert x["rest_api_list"] == sorted(rest_api_list)
     assert x["json"] == [dict(read_ctx.json), dict(write_ctx.json)]  # current resource bodies.
     assert x["allowed_methods"] == {
         read_ctx.rest_api: ["GET"],
         write_ctx.rest_api: ["GET", "PATCH"],
     }  # per-API method legality map.
+    assert row["target_semantics"] == "unordered_call_set"
 
     calls = row["y_true"]["calls"]
-    assert [call["rest_api"] for call in calls] == rest_api_list  # order preserved.
+    assert sorted(call["rest_api"] for call in calls) == sorted(rest_api_list)
     for call in calls:
-        assert set(call.keys()) == {"rest_api", "allowed_methods", "method", "arguments"}
-    read_call, write_call = calls
-    assert read_call["method"] == "GET"
+        # A Call is exactly these four fields; allowed_methods stays in x.
+        assert set(call.keys()) == {"rest_api", "http_method", "operation_name", "arguments"}
+    by_api = {call["rest_api"]: call for call in calls}
+    read_call = by_api[read_ctx.rest_api]
+    write_call = by_api[write_ctx.rest_api]
+    assert read_call["http_method"] == "GET"
     assert read_call["arguments"] == {}  # read-only calls carry no body args.
-    assert write_call["method"] == "PATCH"
+    assert write_call["http_method"] == "PATCH"
     assert write_call["arguments"] == {"Address": "192.168.1.1"}  # explicit body binding.
 
 

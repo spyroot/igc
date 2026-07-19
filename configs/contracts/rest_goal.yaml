@@ -67,13 +67,13 @@ forbidden_module_names:
 # definition anywhere under search_root is a duplicate contract island.
 canonical_symbols:
   - build_d1_rest_api_list_row
-  - build_ordered_call_row
+  - build_call_row
   - render_rest_api_list_example
-  - render_ordered_call_example
+  - render_call_example
   - parse_rest_api_list_y_pred
-  - parse_ordered_calls_y_pred
-  - evaluate_ordered_calls
-  - inference_ordered_goals_json
+  - parse_calls_y_pred
+  - evaluate_rest_api_list_y_pred
+  - evaluate_calls
   - RenderedContractExample
   - RedfishContext
 

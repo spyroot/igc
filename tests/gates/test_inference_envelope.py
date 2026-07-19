@@ -5,7 +5,7 @@ Two layers, matching requirement 4:
 * An OFFLINE, deterministic layer. A fixed fixture "model response" (the exact
   canonical target a perfect model would emit) is fed through the ONE canonical
   parse/eval path in ``igc/ds/rest_goal_contract.py`` and must EXACT-MATCH the
-  expected ``rest_api_list`` (Phase 2) and ordered ``calls`` (Phase 3). A wrong
+  expected ``rest_api_list`` (Phase 2) and unordered ``calls`` (Phase 3). A wrong
   fixture response is also checked so a green result cannot be a vacuous pass.
   This layer imports no torch/transformers, needs no GPU, and is collected by the
   default offline gate (``pytest -q`` over ``tests/``).
@@ -40,11 +40,11 @@ import pytest
 from igc.ds.rest_goal_contract import (
     RedfishContext,
     build_d1_rest_api_list_row,
-    build_ordered_call_row,
-    evaluate_ordered_calls_y_pred,
-    parse_ordered_calls_y_pred,
+    build_call_row,
+    evaluate_calls_y_pred,
+    parse_calls_y_pred,
     parse_rest_api_list_y_pred,
-    render_ordered_call_example,
+    render_call_example,
     render_rest_api_list_example,
 )
 
@@ -79,7 +79,7 @@ def _phase3_row() -> dict:
             json={"@odata.id": _FIXTURE_REST_API, "PowerState": "Off"},
         )
     ]
-    return build_ordered_call_row(
+    return build_call_row(
         text=_FIXTURE_TEXT,
         contexts=contexts,
         rest_api_list=[_FIXTURE_REST_API],
@@ -124,18 +124,18 @@ def test_phase2_malformed_response_raises() -> None:
 
 
 def test_phase3_perfect_response_exact_matches_calls() -> None:
-    """The canonical Phase 3 target evaluates to an exact ordered-call match."""
+    """The canonical Phase 3 target evaluates to an exact call-set match."""
     row = _phase3_row()
-    rendered = render_ordered_call_example(row)
-    result = evaluate_ordered_calls_y_pred(row, rendered.target_json)
+    rendered = render_call_example(row)
+    result = evaluate_calls_y_pred(row, rendered.target_json)
     assert result["parsed"] is True
     assert result["parse_error"] == ""
-    assert result["call_ordered_exact_match"] is True
-    assert result["call_ordered_exact_match_rate"] == 1.0
+    assert result["call_set_exact_match"] is True
+    assert result["call_set_exact_match_rate"] == 1.0
     assert result["method_exact_match_rate"] == 1.0
     assert result["arguments_exact_match_rate"] == 1.0
     # The parsed calls round-trip to the row's y_true calls exactly.
-    assert parse_ordered_calls_y_pred(rendered.target_json) == list(row["y_true"]["calls"])
+    assert parse_calls_y_pred(rendered.target_json) == list(row["y_true"]["calls"])
 
 
 def test_phase3_wrong_method_is_not_exact_match() -> None:
@@ -147,24 +147,24 @@ def test_phase3_wrong_method_is_not_exact_match() -> None:
             "calls": [
                 {
                     "rest_api": _FIXTURE_REST_API,
-                    "allowed_methods": ["GET", "PATCH"],
-                    "method": "GET",
+                    "http_method": "GET",
+                    "operation_name": None,
                     "arguments": {},
                 }
             ]
         }
     )
-    result = evaluate_ordered_calls_y_pred(row, wrong)
+    result = evaluate_calls_y_pred(row, wrong)
     assert result["parsed"] is True
-    assert result["call_ordered_exact_match"] is False
+    assert result["call_set_exact_match"] is False
     assert result["method_exact_match_rate"] == 0.0
 
 
 def test_phase3_invalid_json_reports_parse_failure() -> None:
     """An unparseable Phase 3 response is a recorded failure, not an exception."""
-    result = evaluate_ordered_calls_y_pred(_phase3_row(), "{ broken json")
+    result = evaluate_calls_y_pred(_phase3_row(), "{ broken json")
     assert result["parsed"] is False
-    assert result["call_ordered_exact_match"] is False
+    assert result["call_set_exact_match"] is False
     assert result["parse_error"]
 
 
