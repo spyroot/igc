@@ -65,7 +65,7 @@ def build_backbone(model_type: str, seq_len: int):
     # legacy learned-positional backbones (a GPT-2 with n_positions < seq_len would index-error —
     # exactly the 1024 limit D-003 retires; here we just size the config to the requested seq_len).
     try:
-        config = AutoConfig.from_pretrained(model_type)
+        config = AutoConfig.from_pretrained(model_type, local_files_only=True)
     except Exception:
         config = AutoConfig.for_model(model_type)
     for attr in ("n_positions", "max_position_embeddings"):

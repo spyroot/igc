@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -23,6 +25,7 @@ _SPEC = importlib.util.spec_from_file_location(
 )
 gtp = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(gtp)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_sections_and_dtype_mapping():
@@ -52,6 +55,49 @@ def test_synthetic_batch_shapes():
     assert batch["attention_mask"].shape == (3, 16)
     assert torch.equal(batch["input_ids"], batch["labels"])
     assert batch["attention_mask"].sum().item() == 3 * 16
+
+
+def test_profile_sweep_uses_portable_bash_shebang():
+    """The node/container sweep wrapper must not depend on macOS Homebrew bash."""
+    script = _REPO_ROOT / "scripts" / "gpu_train_profile.sh"
+    assert script.read_text(encoding="utf-8").splitlines()[0] == "#!/usr/bin/env bash"
+
+
+def test_build_backbone_loads_config_from_local_cache(monkeypatch):
+    """Direct profiler invocation must not try a Hugging Face network lookup."""
+    calls = []
+
+    class FakeConfig:
+        n_positions = 8
+        max_position_embeddings = 8
+
+    class FakeAutoConfig:
+        @staticmethod
+        def from_pretrained(model_type, **kwargs):
+            calls.append((model_type, kwargs))
+            return FakeConfig()
+
+        @staticmethod
+        def for_model(_model_type):
+            raise AssertionError("fallback should not be used for this path")
+
+    class FakeAutoModelForCausalLM:
+        @staticmethod
+        def from_config(config):
+            return ("model", config)
+
+    fake_transformers = types.SimpleNamespace(
+        AutoConfig=FakeAutoConfig,
+        AutoModelForCausalLM=FakeAutoModelForCausalLM,
+    )
+    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+
+    model, config = gtp.build_backbone("cached-model", seq_len=16)
+
+    assert model == "model"
+    assert calls == [("cached-model", {"local_files_only": True})]
+    assert config.n_positions == 16
+    assert config.max_position_embeddings == 16
 
 
 @pytest.mark.slow

@@ -1,4 +1,4 @@
-#!/opt/homebrew/bin/bash
+#!/usr/bin/env bash
 # Sweep the per-section training-step profiler across GPU counts / batch sizes on a GB300 node.
 #
 # Mirrors scripts/gpu_dataset_isolation.sh: one profiled configuration per accelerate launch, each
