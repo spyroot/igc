@@ -12,11 +12,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 if [[ -z "${IGC_REDFISH_CTL_DIR:-}" ]]; then
-	if [[ -d "${REPO_ROOT}/redfish_ctl" ]]; then
-		IGC_REDFISH_CTL_DIR="${REPO_ROOT}/redfish_ctl"
-	else
-		IGC_REDFISH_CTL_DIR="${REPO_ROOT}/idrac_ctl"
-	fi
+	IGC_REDFISH_CTL_DIR="${REPO_ROOT}/redfish_ctl"
 fi
 IGC_REDFISH_FULL_CORPUS_DIR="${IGC_REDFISH_FULL_CORPUS_DIR:-${IGC_REDFISH_CTL_DIR}/full_corpus}"
 IGC_GOAL_DATASET_OUT="${IGC_GOAL_DATASET_OUT:-}"
@@ -182,7 +178,7 @@ prepare_redfish_ctl() {
 	require_command git
 	if [[ ! -d "${IGC_REDFISH_CTL_DIR}/.git" && ! -f "${IGC_REDFISH_CTL_DIR}/.git" ]]; then
 		say "initializing redfish_ctl submodule"
-		run_or_print git -C "${REPO_ROOT}" submodule update --init --recursive idrac_ctl
+		run_or_print git -C "${REPO_ROOT}" submodule update --init --recursive redfish_ctl
 	fi
 
 	if [[ "${IGC_LFS_PULL}" = "1" ]]; then

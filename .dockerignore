@@ -32,7 +32,7 @@ test_datasets/
 tests/datasets/
 imgs/
 # submodule (not needed for the offline gate image)
-idrac_ctl/
+redfish_ctl/
 # local agent/coordination docs (gitignored already)
 COORDINATION.md
 CLAUDE.md

@@ -2,6 +2,6 @@
     path = thirdparty/Redfish-Interface-Emulator
     url = git://github.com/some_user/Redfish-Interface-Emulator.git
 
-[submodule "idrac_ctl"]
-    path = idrac_ctl
+[submodule "redfish_ctl"]
+	path = redfish_ctl
     url = git@github.com:spyroot/redfish_ctl.git

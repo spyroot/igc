@@ -29,8 +29,8 @@ from igc.ds.sources.candidate_features import build_candidate_cache
 from igc.ds.sources.resource_graph import RedfishResourceGraph
 from igc.modules.eval.zero_shot_ranking import candidate_text, trigram_embed
 
-SUPERMICRO = "idrac_ctl/tests/supermicro_fixtures"
-HPE = "idrac_ctl/tests/hpe_fixtures"
+SUPERMICRO = "redfish_ctl/tests/supermicro_fixtures"
+HPE = "redfish_ctl/tests/hpe_fixtures"
 
 # Non-operational metadata: the Redfish JSON-schema store, message/attribute registries, and metric
 # DEFINITIONS. An agent never navigates to these; a full "entire dump" walk is dominated by them and
@@ -143,9 +143,9 @@ def train_W(train_hosts: List[Dict], steps: int, lr: float, l2i: float, seed: in
     return W.detach()
 
 
-DELL_FIXT = "idrac_ctl/tests/idrac_fixtures"
+DELL_FIXT = "redfish_ctl/tests/idrac_fixtures"
 DELL_FIXT_NOTE = "point --holdout at a real full walk under datasets/orig/<host> for a large held-out host"
-GENERIC = "idrac_ctl/tests/generic_fixtures"
+GENERIC = "redfish_ctl/tests/generic_fixtures"
 
 DEFAULT_TRAIN = ",".join([SUPERMICRO, DELL_FIXT, GENERIC])
 DEFAULT_HOLDOUT = HPE                             # public fixture; pass --holdout <dir> for a large real walk

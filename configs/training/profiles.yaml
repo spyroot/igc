@@ -1,0 +1,186 @@
+version: 1
+profiles:
+  phase1_gpt2_smoke:
+    model: gpt2
+    phase: phase1_finetune
+    weights_role: model_x
+    llm_stage: latent
+    corpus_objective: phase1_pretrain
+    use_peft: false
+    adapter: null
+    precision: "no"
+    torch_dtype: float32
+    batch_size: 8
+    grad_accum: 1
+    lr: 0.00005
+    scheduler: OneCycleLR
+    warmup_ratio: 0.03
+    epochs: 3
+    max_steps: 50
+    early_stopping_patience: 3
+    early_stopping_min_delta: 0.005
+    sharding: none
+    seq_len: 256
+    num_workers: 8
+
+  phase1_3b_lora:
+    model: Qwen/Qwen2.5-3B-Instruct
+    phase: phase1_finetune
+    weights_role: model_x
+    llm_stage: latent
+    corpus_objective: phase1_pretrain
+    use_peft: true
+    adapter:
+      method: lora
+      r: 16
+      alpha: 32
+      dropout: 0.05
+      init: default
+      target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+    precision: bf16
+    torch_dtype: bfloat16
+    batch_size: 8
+    grad_accum: 2
+    lr: 0.0001
+    scheduler: OneCycleLR
+    warmup_ratio: 0.03
+    epochs: 3
+    max_steps: null
+    early_stopping_patience: 3
+    early_stopping_min_delta: 0.005
+    sharding: none
+    seq_len: 1024
+    num_workers: 8
+
+  phase1_7b_lora:
+    model: Qwen/Qwen2.5-7B-Instruct
+    phase: phase1_finetune
+    weights_role: model_x
+    llm_stage: latent
+    corpus_objective: phase1_pretrain
+    use_peft: true
+    adapter:
+      method: lora
+      r: 16
+      alpha: 32
+      dropout: 0.05
+      init: default
+      target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+    precision: bf16
+    torch_dtype: bfloat16
+    batch_size: 8
+    grad_accum: 4
+    lr: 0.0001
+    scheduler: OneCycleLR
+    warmup_ratio: 0.03
+    epochs: 3
+    max_steps: null
+    early_stopping_patience: 3
+    early_stopping_min_delta: 0.005
+    sharding: none
+    seq_len: 1024
+    num_workers: 8
+
+  phase1_7b_rslora_r32:
+    model: Qwen/Qwen2.5-7B-Instruct
+    phase: phase1_finetune
+    weights_role: model_x
+    llm_stage: latent
+    corpus_objective: phase1_pretrain
+    use_peft: true
+    adapter:
+      method: rslora
+      r: 32
+      alpha: 64
+      dropout: 0.05
+      init: default
+      target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+    precision: bf16
+    torch_dtype: bfloat16
+    batch_size: 8
+    grad_accum: 4
+    lr: 0.0001
+    scheduler: OneCycleLR
+    warmup_ratio: 0.03
+    epochs: 3
+    max_steps: null
+    early_stopping_patience: 3
+    early_stopping_min_delta: 0.005
+    sharding: none
+    seq_len: 1024
+    num_workers: 8
+
+  phase1_local:
+    model: ${IGC_MODEL_DIR}
+    phase: phase1_finetune
+    weights_role: model_x
+    llm_stage: latent
+    corpus_objective: phase1_pretrain
+    use_peft: true
+    adapter:
+      method: lora
+      r: 16
+      alpha: 32
+      dropout: 0.05
+      init: default
+      target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+    precision: bf16
+    torch_dtype: bfloat16
+    batch_size: 8
+    grad_accum: 4
+    lr: 0.0001
+    scheduler: OneCycleLR
+    warmup_ratio: 0.03
+    epochs: 3
+    max_steps: null
+    early_stopping_patience: 3
+    early_stopping_min_delta: 0.005
+    sharding: none
+    seq_len: 1024
+    num_workers: 8
+
+  phase1_3b_full:
+    model: Qwen/Qwen2.5-3B-Instruct
+    phase: phase1_finetune
+    weights_role: model_x
+    llm_stage: latent
+    corpus_objective: phase1_pretrain
+    use_peft: false
+    adapter: null
+    precision: bf16
+    torch_dtype: bfloat16
+    batch_size: 4
+    grad_accum: 8
+    lr: 0.00002
+    scheduler: OneCycleLR
+    warmup_ratio: 0.03
+    epochs: 3
+    max_steps: null
+    early_stopping_patience: 3
+    early_stopping_min_delta: 0.005
+    sharding: zero3
+    seq_len: 1024
+    num_workers: 8
+
+  phase1_7b_full_zero3:
+    model: Qwen/Qwen2.5-7B-Instruct
+    phase: phase1_finetune
+    weights_role: model_x
+    llm_stage: latent
+    corpus_objective: phase1_pretrain
+    use_peft: false
+    adapter: null
+    precision: bf16
+    torch_dtype: bfloat16
+    batch_size: 2
+    grad_accum: 16
+    lr: 0.00001
+    scheduler: OneCycleLR
+    warmup_ratio: 0.03
+    epochs: 3
+    max_steps: null
+    early_stopping_patience: 3
+    early_stopping_min_delta: 0.005
+    sharding: zero3
+    seq_len: 1024
+    num_workers: 8
