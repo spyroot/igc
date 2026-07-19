@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from igc.ds.phase2_labelled_requests import (
     PHASE2_LABELLED_REQUESTS,
@@ -34,6 +35,12 @@ from igc.ds.phase2_labelled_requests import (
     render_pro_judge_prompt,
     sample_phase2_contexts,
     to_minimal_phase3_input,
+)
+from igc.ds.rest_goal_contract import (
+    D1,
+    RedfishContext,
+    build_call_row,
+    parse_calls_y_pred,
 )
 from igc.modules.base.metric_keys import (
     PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS,
@@ -61,7 +68,7 @@ def _write_spec(path: Path) -> Path:
     path.write_text(
         """
 dataset:
-  name: phase2_labelled_requests
+  name: D1
   prompt_spec_version: phase2-labelled-requests-test-v1
 sampling:
   sample_widths: [1, 2, 3]
@@ -144,16 +151,28 @@ def _judge_json(
     accepted: bool = True,
     rest_api_list: list[str] | None = None,
     nonsense: bool = False,
-    order_evidence: str = "none",
+    natural: bool = True,
+    ambiguous: bool = False,
+    duplicate_intent: bool = False,
+    method_semantics_valid: bool = True,
+    extra_intents: list[str] | None = None,
 ) -> str:
     """Return a compact fake Pro judge JSON response."""
+    apis = [] if rest_api_list is None else rest_api_list
     return json.dumps(
         {
             "accepted": accepted,
-            "rest_api_list": [] if rest_api_list is None else rest_api_list,
+            "natural": natural,
             "nonsense": nonsense,
+            "ambiguous": ambiguous,
+            "duplicate_intent": duplicate_intent,
+            "method_semantics_valid": method_semantics_valid,
+            "coverage": [
+                {"rest_api": rest_api, "text_span": "fixture", "supported": True}
+                for rest_api in apis
+            ],
+            "extra_intents": [] if extra_intents is None else extra_intents,
             "reason": "fixture",
-            "order_evidence": order_evidence,
         },
     )
 
@@ -163,11 +182,52 @@ def _phase2_metric(group: str, name: str | None = None) -> str:
     return phase_metric(PHASE2_LABELLED_REQUESTS, group, name)
 
 
+def _phase2_runtime_source() -> str:
+    """Return runtime source text checked for hardcoded config literals."""
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            Path("igc/ds/phase2_labelled_requests.py"),
+            Path("scripts/build_phase2_labelled_requests.py"),
+        )
+    )
+
+
+def _prompt_leaf_literals(raw_spec: dict[str, Any]) -> tuple[str, ...]:
+    """Return non-placeholder prompt lines that must stay out of runtime code."""
+    prompts = raw_spec["prompts"]
+    literals: list[str] = []
+    for prompt in prompts.values():
+        for key in ("system", "template"):
+            for line in str(prompt[key]).splitlines():
+                literal = line.strip()
+                if literal and "{" not in literal and "}" not in literal:
+                    literals.append(literal)
+    return tuple(literals)
+
+
+def _committed_config_literals() -> tuple[str, ...]:
+    """Return model, judge, and prompt literals owned by YAML."""
+    raw = yaml.safe_load(
+        Path("configs/phase2_labelled_requests.yaml").read_text(encoding="utf-8"),
+    )
+    assert isinstance(raw, dict)
+    literals = [
+        str(raw["model_x"]["model_id"]),
+        str(raw["model_x"]["artifact_sha"]),
+        str(raw["judge"]["route"]),
+        str(raw["judge"]["model_id"]),
+        str(raw["judge"]["profile"]),
+    ]
+    literals.extend(_prompt_leaf_literals(raw))
+    return tuple(dict.fromkeys(literal for literal in literals if literal))
+
+
 def test_loads_prompt_model_judge_generation_and_thresholds_from_yaml(tmp_path: Path) -> None:
     """The Phase 2 spec loader keeps every runtime knob in YAML."""
     spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
 
-    assert spec.dataset_name == PHASE2_LABELLED_REQUESTS
+    assert spec.dataset_name == D1
     assert spec.prompt_spec_version == "phase2-labelled-requests-test-v1"
     assert spec.sample_widths == (1, 2, 3)
     assert spec.model_x.model_id == "${PHASE1_MODEL_X_MODEL_ID}"
@@ -198,7 +258,7 @@ def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     wrong_dataset = _write_spec(tmp_path / "wrong-dataset.yaml")
     wrong_dataset.write_text(
         wrong_dataset.read_text(encoding="utf-8").replace(
-            "name: phase2_labelled_requests",
+            "name: D1",
             "name: legacy_dataset",
         ),
         encoding="utf-8",
@@ -238,6 +298,39 @@ def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     )
     with pytest.raises(Phase2LabelledRequestsSpecError, match="sample_widths"):
         load_phase2_labelled_requests_spec(non_integer_widths)
+
+    boolean_width = _write_spec(tmp_path / "boolean-width.yaml")
+    boolean_width.write_text(
+        boolean_width.read_text(encoding="utf-8").replace(
+            "sample_widths: [1, 2, 3]",
+            "sample_widths: [1, true, 3]",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="sample_widths"):
+        load_phase2_labelled_requests_spec(boolean_width)
+
+    reordered_widths = _write_spec(tmp_path / "reordered-widths.yaml")
+    reordered_widths.write_text(
+        reordered_widths.read_text(encoding="utf-8").replace(
+            "sample_widths: [1, 2, 3]",
+            "sample_widths: [3, 2, 1]",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="sample_widths"):
+        load_phase2_labelled_requests_spec(reordered_widths)
+
+    duplicate_widths = _write_spec(tmp_path / "duplicate-widths.yaml")
+    duplicate_widths.write_text(
+        duplicate_widths.read_text(encoding="utf-8").replace(
+            "sample_widths: [1, 2, 3]",
+            "sample_widths: [1, 2, 2]",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="sample_widths"):
+        load_phase2_labelled_requests_spec(duplicate_widths)
 
     wrong_namespace = _write_spec(tmp_path / "wrong-namespace.yaml")
     wrong_namespace.write_text(
@@ -428,7 +521,7 @@ def test_committed_phase2_labelled_requests_config_loads() -> None:
     """The checked-in builder spec stays aligned with the metric registry."""
     spec = load_phase2_labelled_requests_spec("configs/phase2_labelled_requests.yaml")
 
-    assert spec.dataset_name == PHASE2_LABELLED_REQUESTS
+    assert spec.dataset_name == D1
     assert spec.metric_keys == PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS
     assert spec.sample_widths == (1, 2, 3)
     assert spec.model_x.model_id == "${PHASE1_MODEL_X_MODEL_ID}"
@@ -474,13 +567,7 @@ def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Pat
     assert "/redfish/v1/Systems/1" in model_prompt
     assert "show both systems" in judge_prompt
 
-    runtime_sources = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in (
-            Path("igc/ds/phase2_labelled_requests.py"),
-            Path("scripts/build_phase2_labelled_requests.py"),
-        )
-    )
+    runtime_sources = _phase2_runtime_source()
     forbidden_literals = (
         "phase2 test model-x system prompt from YAML",
         "${PHASE1_MODEL_X_MODEL_ID}",
@@ -504,27 +591,66 @@ def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Pat
         assert literal not in lowercase_runtime_sources
 
 
+def test_committed_yaml_literals_do_not_leak_into_runtime_code() -> None:
+    """Prompt, model, and judge route literals stay in the YAML spec."""
+    runtime_sources = _phase2_runtime_source()
+
+    for literal in _committed_config_literals():
+        assert literal not in runtime_sources
+
+
 def test_sampling_accepts_only_k_1_2_3_and_preserves_record_payloads() -> None:
     """The builder samples one, two, or three REST records with deterministic RNG."""
     records = tuple(_record(index) for index in range(5))
+    sample_widths = (1, 2, 3)
 
     for width in (1, 2, 3):
-        sampled = sample_phase2_contexts(records, k=width, rng=random.Random(7))
+        sampled = sample_phase2_contexts(
+            records,
+            k=width,
+            rng=random.Random(7),
+            sample_widths=sample_widths,
+        )
         assert len(sampled) == width
         assert all(record.rest_api.startswith("/redfish/v1/Systems/") for record in sampled)
         assert all(record.allowed_methods == ("GET", "HEAD") for record in sampled)
         assert all(record.json_body["@odata.id"] == record.rest_api for record in sampled)
 
-    first = sample_phase2_contexts(records, k=3, rng=random.Random(13))
-    second = sample_phase2_contexts(records, k=3, rng=random.Random(13))
+    first = sample_phase2_contexts(
+        records,
+        k=3,
+        rng=random.Random(13),
+        sample_widths=sample_widths,
+    )
+    second = sample_phase2_contexts(
+        records,
+        k=3,
+        rng=random.Random(13),
+        sample_widths=sample_widths,
+    )
     assert [record.rest_api for record in first] == [record.rest_api for record in second]
 
     with pytest.raises(ValueError, match="sample width"):
-        sample_phase2_contexts(records, k=0, rng=random.Random(1))
+        sample_phase2_contexts(
+            records,
+            k=0,
+            rng=random.Random(1),
+            sample_widths=sample_widths,
+        )
     with pytest.raises(ValueError, match="sample width"):
-        sample_phase2_contexts(records, k=4, rng=random.Random(1))
+        sample_phase2_contexts(
+            records,
+            k=4,
+            rng=random.Random(1),
+            sample_widths=sample_widths,
+        )
     with pytest.raises(ValueError, match="not enough records"):
-        sample_phase2_contexts(records[:1], k=2, rng=random.Random(1))
+        sample_phase2_contexts(
+            records[:1],
+            k=2,
+            rng=random.Random(1),
+            sample_widths=sample_widths,
+        )
 
 
 def test_unordered_set_comparison_and_empty_set_equality() -> None:
@@ -535,6 +661,7 @@ def test_unordered_set_comparison_and_empty_set_equality() -> None:
     assert compare_rest_api_sets(expected, predicted)
     assert not compare_rest_api_sets(expected, ["/redfish/v1/A"])
     assert not compare_rest_api_sets(expected, expected + ["/redfish/v1/C"])
+    assert not compare_rest_api_sets(expected, expected + ["/redfish/v1/A"])
     assert compare_rest_api_sets([], [])
     assert empty_set_matches([], [])
     assert not empty_set_matches([], ["/redfish/v1/A"])
@@ -547,19 +674,20 @@ def test_pro_judge_result_parsing_accepts_plain_and_wrapped_json() -> None:
     plain = parse_pro_judge_result(
         _judge_json(
             rest_api_list=["/redfish/v1/B", "/redfish/v1/A"],
-            order_evidence="explicit_then",
         ),
     )
     assert plain.accepted is True
+    assert plain.natural is True
     assert plain.rest_api_list == ("/redfish/v1/B", "/redfish/v1/A")
-    assert plain.order_evidence == "explicit_then"
+    assert plain.method_semantics_valid is True
+    assert plain.extra_intents == ()
     assert plain.invalid_json is False
 
     wrapped = parse_pro_judge_result(json.dumps({"y_pred": json.loads(_judge_json())}))
     assert wrapped.accepted is True
     assert wrapped.invalid_json is False
     assert wrapped.nonsense is False
-    assert wrapped.order_evidence == "none"
+    assert wrapped.rest_api_list == ()
 
     rejected = parse_pro_judge_result(
         _judge_json(
@@ -585,149 +713,157 @@ def test_pro_judge_result_parsing_accepts_plain_and_wrapped_json() -> None:
     assert "not a mapping" in non_object.reason
 
 
-def test_pro_judge_result_parsing_requires_nonsense_boolean() -> None:
-    """Judge output must carry an explicit nonsense verdict."""
-    missing = parse_pro_judge_result(
+def test_pro_judge_acceptance_formula_requires_exact_structured_verdict() -> None:
+    """D1 acceptance uses all judge fields, not only accepted=true."""
+    selected = ["/redfish/v1/A", "/redfish/v1/B"]
+    accepted = parse_pro_judge_result(_judge_json(rest_api_list=list(reversed(selected))))
+    extra_intent = parse_pro_judge_result(
+        _judge_json(rest_api_list=selected, extra_intents=["power off chassis"]),
+    )
+    duplicate = parse_pro_judge_result(
+        _judge_json(rest_api_list=selected + [selected[0]]),
+    )
+    unsupported = parse_pro_judge_result(
         json.dumps({
             "accepted": True,
-            "rest_api_list": ["/redfish/v1/Systems/1"],
-        }),
-    )
-    assert missing.accepted is False
-    assert missing.invalid_json is True
-    assert "nonsense" in missing.reason
-
-
-def test_pro_judge_result_parsing_requires_accepted_boolean() -> None:
-    """Judge output must carry an explicit accepted verdict."""
-    missing = parse_pro_judge_result(
-        json.dumps({
-            "rest_api_list": ["/redfish/v1/Systems/1"],
+            "natural": True,
             "nonsense": False,
-        }),
-    )
-    assert missing.accepted is False
-    assert missing.invalid_json is True
-    assert "accepted or accept" in missing.reason
-
-    malformed = parse_pro_judge_result(
-        json.dumps({
-            "accepted": "yes",
-            "rest_api_list": ["/redfish/v1/Systems/1"],
-            "nonsense": False,
-        }),
-    )
-    assert malformed.accepted is False
-    assert malformed.invalid_json is True
-    assert "accepted" in malformed.reason
-    assert "boolean" in malformed.reason
-
-
-def test_pro_judge_result_parsing_rejects_unknown_order_evidence() -> None:
-    """Order evidence is a controlled enum, not arbitrary judge text."""
-    result = parse_pro_judge_result(
-        json.dumps({
-            "accepted": True,
-            "rest_api_list": ["/redfish/v1/Systems/1"],
-            "nonsense": False,
-            "order_evidence": "maybe_later",
-        }),
-    )
-    assert result.accepted is False
-    assert result.invalid_json is True
-    assert "order_evidence" in result.reason
-
-
-def test_pro_judge_result_parsing_accepts_rest_api_set_alias() -> None:
-    """The parser accepts the judge's legacy rest_api_set alias."""
-    result = parse_pro_judge_result(
-        json.dumps({
-            "accepted": True,
-            "rest_api_set": ["/redfish/v1/Systems/2", "/redfish/v1/Systems/1"],
-            "nonsense": False,
+            "ambiguous": False,
+            "duplicate_intent": False,
+            "method_semantics_valid": True,
+            "coverage": [
+                {"rest_api": selected[0], "text_span": "fixture", "supported": True},
+                {"rest_api": selected[1], "text_span": "fixture", "supported": False},
+            ],
+            "extra_intents": [],
             "reason": "fixture",
         }),
     )
 
-    assert result.accepted is True
-    assert result.invalid_json is False
-    assert result.rest_api_list == (
-        "/redfish/v1/Systems/2",
-        "/redfish/v1/Systems/1",
-    )
-
-
-def test_pro_judge_result_parsing_accepts_accept_boolean_alias() -> None:
-    """The parser accepts the judge's legacy accept boolean alias."""
-    result = parse_pro_judge_result(
-        json.dumps({
-            "accept": True,
-            "rest_api_list": ["/redfish/v1/Systems/1"],
-            "nonsense": False,
-            "reason": "fixture",
-        }),
-    )
-
-    assert result.accepted is True
-    assert result.invalid_json is False
-    assert result.rest_api_list == ("/redfish/v1/Systems/1",)
+    assert accepted.acceptance_for(selected)
+    assert not extra_intent.acceptance_for(selected)
+    assert not duplicate.acceptance_for(selected)
+    assert not unsupported.acceptance_for(selected)
 
 
 @pytest.mark.parametrize(
-    ("field_name", "field_value"),
+    "judge_kwargs",
     (
-        ("rest_api_list", "/redfish/v1/Systems"),
-        ("rest_api_list", ["/redfish/v1/Systems", 7]),
-        ("rest_api_list", None),
-        ("rest_api_set", "/redfish/v1/Systems"),
-        ("rest_api_set", ["/redfish/v1/Systems", 7]),
-        ("rest_api_set", None),
+        {"accepted": False},
+        {"natural": False},
+        {"nonsense": True},
+        {"ambiguous": True},
+        {"duplicate_intent": True},
+        {"method_semantics_valid": False},
     ),
 )
-def test_pro_judge_result_parsing_counts_malformed_rest_api_fields_as_invalid(
-    field_name: str,
-    field_value: Any,
+def test_pro_judge_acceptance_formula_rejects_each_boolean_blocker(
+    judge_kwargs: dict[str, bool],
 ) -> None:
-    """Malformed judge REST API fields are invalid output, not exceptions."""
+    """Every structured judge boolean can independently block D1 acceptance."""
+    selected = ["/redfish/v1/A", "/redfish/v1/B"]
     result = parse_pro_judge_result(
-        json.dumps({
-            "accepted": True,
-            field_name: field_value,
-            "nonsense": False,
-            "reason": "fixture",
-        }),
+        _judge_json(rest_api_list=selected, **judge_kwargs),
     )
+
+    assert result.invalid_json is False
+    assert not result.acceptance_for(selected)
+
+
+def test_pro_judge_result_parsing_accepts_fenced_or_explained_json() -> None:
+    """Common model wrappers are stripped before judge JSON validation."""
+    fenced = parse_pro_judge_result(f"```json\n{_judge_json()}\n```")
+    assert fenced.accepted is True
+    assert fenced.invalid_json is False
+
+    explained = parse_pro_judge_result(f"Here is the verdict:\n{_judge_json()}\nThanks.")
+    assert explained.accepted is True
+    assert explained.invalid_json is False
+
+
+def test_pro_judge_result_parsing_rejects_malformed_fenced_json() -> None:
+    """Malformed fenced judge output is counted as invalid JSON."""
+    result = parse_pro_judge_result("```json\n{not json}\n```")
 
     assert result.accepted is False
     assert result.invalid_json is True
     assert result.rest_api_list == ()
+    assert result.reason.startswith("invalid_json:")
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "accepted",
+        "natural",
+        "nonsense",
+        "ambiguous",
+        "duplicate_intent",
+        "method_semantics_valid",
+    ),
+)
+def test_pro_judge_result_parsing_requires_all_contract_booleans(field_name: str) -> None:
+    """Every structured judge boolean is required by the D1 contract."""
+    payload = json.loads(_judge_json(rest_api_list=["/redfish/v1/Systems/1"]))
+    del payload[field_name]
+
+    result = parse_pro_judge_result(json.dumps(payload))
+
+    assert result.accepted is False
+    assert result.invalid_json is True
     assert field_name in result.reason
 
 
-def test_pro_judge_result_parsing_requires_rest_api_field() -> None:
-    """A bare accepted judge result is malformed, not an accepted empty set."""
-    result = parse_pro_judge_result(json.dumps({"accepted": True, "nonsense": False}))
+@pytest.mark.parametrize(
+    ("coverage", "expected_reason"),
+    (
+        ("not-a-list", "coverage must be a list"),
+        ([7], "coverage[0] must be a mapping"),
+        ([{"text_span": "fixture", "supported": True}], "coverage[0].rest_api"),
+        ([{"rest_api": "/redfish/v1/A", "supported": True}], "coverage[0].text_span"),
+        ([{"rest_api": "/redfish/v1/A", "text_span": "fixture"}], "coverage[0].supported"),
+        (
+            [{"rest_api": "/redfish/v1/A", "text_span": "fixture", "supported": "yes"}],
+            "coverage[0].supported",
+        ),
+    ),
+)
+def test_pro_judge_result_parsing_counts_malformed_coverage_as_invalid(
+    coverage: Any,
+    expected_reason: str,
+) -> None:
+    """Malformed judge coverage is invalid output, not an accepted empty set."""
+    payload = json.loads(_judge_json(rest_api_list=["/redfish/v1/A"]))
+    payload["coverage"] = coverage
+
+    result = parse_pro_judge_result(json.dumps(payload))
 
     assert result.accepted is False
     assert result.invalid_json is True
     assert result.rest_api_list == ()
-    assert "rest_api_list" in result.reason
+    assert expected_reason in result.reason
 
 
-def test_pro_judge_result_parsing_requires_acceptance_boolean() -> None:
-    """A judge result without accepted or accept is malformed output."""
-    result = parse_pro_judge_result(
-        json.dumps({
-            "rest_api_list": ["/redfish/v1/Systems"],
-            "nonsense": False,
-            "reason": "fixture",
-        }),
-    )
+@pytest.mark.parametrize(
+    ("extra_intents", "expected_reason"),
+    (
+        ("none", "extra_intents"),
+        ([7], "extra_intents"),
+    ),
+)
+def test_pro_judge_result_parsing_counts_malformed_extra_intents_as_invalid(
+    extra_intents: Any,
+    expected_reason: str,
+) -> None:
+    """The structured judge contract carries extra_intents as list[str]."""
+    payload = json.loads(_judge_json(rest_api_list=["/redfish/v1/A"]))
+    payload["extra_intents"] = extra_intents
+
+    result = parse_pro_judge_result(json.dumps(payload))
 
     assert result.accepted is False
     assert result.invalid_json is True
-    assert result.rest_api_list == ()
-    assert "accepted" in result.reason
+    assert expected_reason in result.reason
 
 
 @pytest.mark.parametrize(
@@ -736,12 +872,21 @@ def test_pro_judge_result_parsing_requires_acceptance_boolean() -> None:
         ("accepted", "true"),
         ("accepted", 1),
         ("accepted", None),
-        ("accept", "true"),
-        ("accept", 1),
-        ("accept", None),
+        ("natural", "true"),
+        ("natural", 1),
+        ("natural", None),
         ("nonsense", "false"),
         ("nonsense", 0),
         ("nonsense", None),
+        ("ambiguous", "false"),
+        ("ambiguous", 0),
+        ("ambiguous", None),
+        ("duplicate_intent", "false"),
+        ("duplicate_intent", 0),
+        ("duplicate_intent", None),
+        ("method_semantics_valid", "true"),
+        ("method_semantics_valid", 1),
+        ("method_semantics_valid", None),
     ),
 )
 def test_pro_judge_result_parsing_counts_malformed_booleans_as_invalid(
@@ -749,17 +894,10 @@ def test_pro_judge_result_parsing_counts_malformed_booleans_as_invalid(
     field_value: Any,
 ) -> None:
     """Malformed judge booleans are invalid output, not truthy/falsy coercions."""
-    payload: dict[str, Any] = {
-        "rest_api_list": ["/redfish/v1/Systems"],
-        "nonsense": False,
-        field_name: field_value,
-    }
-    if field_name not in {"accept", "accepted"}:
-        payload["accepted"] = True
+    payload = json.loads(_judge_json(rest_api_list=["/redfish/v1/Systems"]))
+    payload[field_name] = field_value
 
-    result = parse_pro_judge_result(
-        json.dumps(payload),
-    )
+    result = parse_pro_judge_result(json.dumps(payload))
 
     assert result.accepted is False
     assert result.invalid_json is True
@@ -782,7 +920,7 @@ def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -
         """Accept exactly the sampled REST API set in a different order."""
         seen["judge"] = request
         expected = list(reversed(request["expected_rest_api_list"]))
-        return _judge_json(rest_api_list=expected, order_evidence="explicit_then")
+        return _judge_json(rest_api_list=expected)
 
     builder = Phase2LabelledRequestBuilder(
         spec,
@@ -794,16 +932,36 @@ def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -
 
     assert row is not None
     data = row.to_dict()
-    assert data["dataset"] == PHASE2_LABELLED_REQUESTS
+    assert set(data) == {
+        "phase",
+        "dataset",
+        "source_dataset",
+        "model_x",
+        "task",
+        "target_semantics",
+        "x",
+        "y_true",
+        "validation",
+    }
+    assert data["dataset"] == D1
+    assert data["source_dataset"] == "D0"
+    assert data["target_semantics"] == "unordered_unique_set"
     assert data["task"] == "text_to_rest_api_list"
     assert data["x"]["text"] == "show both sampled systems"
-    assert "records" not in data["x"]
-    assert len(data["x"]["json"]) == 2
-    assert data["x"]["rest_api_list"] == data["y_true"]["rest_api_list"]
-    assert set(data["x"]["allowed_methods"]) == set(data["y_true"]["rest_api_list"])
-    assert data["y_true"]["order_evidence"] == "explicit_then"
-    assert data["validation"]["set_coverage_preserved"] is True
+    assert set(data["x"]) == {"text"}
+    assert set(data["y_true"]) == {"rest_api_list"}
+    assert set(data["y_true"]["rest_api_list"]) == {
+        record.rest_api
+        for record in row.records
+    }
+    assert data["validation"]["exact_api_coverage"] is True
     assert data["validation"]["review_judged"] is True
+    assert data["validation"]["natural"] is True
+    assert data["validation"]["extra_intent"] is False
+    assert data["validation"]["duplicate_intent"] is False
+    assert data["validation"]["ambiguous"] is False
+    assert data["validation"]["nonsense"] is False
+    assert data["validation"]["method_semantics_valid"] is True
     assert set(summary) == set(PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS)
     assert summary[_phase2_metric("draft_total")] == 1
     assert summary[_phase2_metric("accepted_total")] == 1
@@ -819,6 +977,42 @@ def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -
     assert seen["judge"]["model_id"] == "${PHASE2_JUDGE_MODEL_ID}"
     assert seen["judge"]["profile"] == "${PHASE2_JUDGE_PROFILE}"
     assert seen["judge"]["route"] == "private_pro"
+
+
+def test_builder_accepts_no_action_empty_set_rows(tmp_path: Path) -> None:
+    """No-action rows use an explicit empty-set path outside the 1/2/3 sampler."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    seen: dict[str, dict] = {}
+
+    def judge_provider(request: dict) -> str:
+        seen["judge"] = request
+        return _judge_json(rest_api_list=[])
+
+    builder = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=lambda request: "unused",
+        judge_provider=judge_provider,
+    )
+    row, counters = builder.build_no_action(draft_text="do nothing to this server")
+    summary = counters.summary()
+
+    assert row is not None
+    data = row.to_dict()
+    assert data["dataset"] == D1
+    assert data["source_dataset"] == "D0"
+    assert data["target_semantics"] == "unordered_unique_set"
+    assert data["task"] == "text_to_rest_api_list"
+    assert data["x"]["text"] == "do nothing to this server"
+    assert set(data["x"]) == {"text"}
+    assert data["y_true"]["rest_api_list"] == []
+    assert data["validation"]["text_source"] == "hard_negative_no_action"
+    assert data["validation"]["exact_api_coverage"] is True
+    assert seen["judge"]["expected_rest_api_list"] == []
+    assert summary[_phase2_metric("draft_total")] == 1
+    assert summary[_phase2_metric("accepted_total")] == 1
+    assert summary[_phase2_metric("empty_set_match_rate")] == 1.0
+    assert summary[_phase2_metric("empty_set_expected_total")] == 1
+    assert summary[_phase2_metric("sample_width", "k")] == 0
 
 
 def test_builder_returns_none_and_counts_rejection_on_set_mismatch(tmp_path: Path) -> None:
@@ -957,6 +1151,33 @@ def test_acceptance_thresholds_are_enforced_from_yaml(tmp_path: Path) -> None:
     assert not phase2_acceptance_thresholds_pass(spec, failing)
 
 
+@pytest.mark.parametrize(
+    ("metric_key", "bad_value"),
+    (
+        (_phase2_metric("pro_accept_rate"), 0.89),
+        (_phase2_metric("rest_api_set_match_rate"), 0.97),
+        (_phase2_metric("nonsense_rate"), 0.02),
+        (_phase2_metric("invalid_json_rate"), 0.02),
+    ),
+)
+def test_acceptance_thresholds_fail_each_configured_condition(
+    tmp_path: Path,
+    metric_key: str,
+    bad_value: float,
+) -> None:
+    """Every YAML acceptance threshold can independently fail a summary."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    summary = {
+        _phase2_metric("pro_accept_rate"): 0.91,
+        _phase2_metric("rest_api_set_match_rate"): 0.99,
+        _phase2_metric("nonsense_rate"): 0.0,
+        _phase2_metric("invalid_json_rate"): 0.0,
+    }
+    summary[metric_key] = bad_value
+
+    assert not phase2_acceptance_thresholds_pass(spec, summary)
+
+
 def test_phase2_labelled_request_wandb_keys_have_required_namespace_shape() -> None:
     """Every Phase 2 labelled-request metric key stays under one namespace."""
     keys = set(PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS)
@@ -1000,8 +1221,49 @@ def test_minimal_phase3_fixture_keeps_phase3_arguments_separate(tmp_path: Path) 
     assert phase3_input["allowed_methods"]["/redfish/v1/Systems/1"] == ["GET", "HEAD"]
     assert "calls" not in phase3_input
     encoded = json.dumps(phase3_input)
-    assert '"method":' not in encoded
+    assert '"http_method":' not in encoded
     assert '"arguments":' not in encoded
+
+
+def test_minimal_phase3_fixture_feeds_phase3_schema_helper(tmp_path: Path) -> None:
+    """Production Phase 2 output can seed Phase 3 without changing contracts."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    records = (_record(1), _record(2))
+    builder = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=lambda request: "show both systems",
+        judge_provider=lambda request: _judge_json(rest_api_list=request["expected_rest_api_list"]),
+    )
+    row, _ = builder.build_one(records, k=2, rng=random.Random(4))
+    phase3_input = to_minimal_phase3_input(row)
+    phase3_contexts = tuple(
+        RedfishContext(
+            rest_api=rest_api,
+            allowed_methods=phase3_input["allowed_methods"][rest_api],
+            json=phase3_input["json"][index],
+        )
+        for index, rest_api in enumerate(phase3_input["rest_api_list"])
+    )
+
+    phase3_row = build_call_row(
+        text=phase3_input["text"],
+        contexts=phase3_contexts,
+        rest_api_list=phase3_input["rest_api_list"],
+        # Methods are always explicit in Phase 3 — never inferred from context.
+        method_by_api={
+            rest_api: "GET" for rest_api in phase3_input["rest_api_list"]
+        },
+    )
+
+    assert phase3_row["source_dataset"] == D1
+    assert phase3_row["x"]["text"] == phase3_input["text"]
+    # Phase 3 canonicalizes the API list to the sorted unique set.
+    assert phase3_row["x"]["rest_api_list"] == sorted(phase3_input["rest_api_list"])
+    assert phase3_row["x"]["allowed_methods"] == phase3_input["allowed_methods"]
+    assert phase3_row["x"]["json"] == phase3_input["json"]
+    assert phase3_row["y_true"]["calls"] == parse_calls_y_pred({
+        "calls": phase3_row["y_true"]["calls"],
+    })
 
 
 def test_minimal_phase3_fixture_rejects_missing_phase2_row() -> None:
@@ -1011,7 +1273,7 @@ def test_minimal_phase3_fixture_rejects_missing_phase2_row() -> None:
 
 
 def test_phase2_module_does_not_import_phase3_argument_runtime() -> None:
-    """The labelled-request builder stays independent from Phase 3 call logic."""
+    """The labelled-request builder delegates D1 shape without importing Phase 3 runtime."""
     source = Path("igc/ds/phase2_labelled_requests.py").read_text(encoding="utf-8")
     module = ast.parse(source)
     imported_modules: set[str] = set()
@@ -1024,9 +1286,10 @@ def test_phase2_module_does_not_import_phase3_argument_runtime() -> None:
                 imported_modules.add(node.module)
             imported_names.update(alias.name for alias in node.names)
 
-    assert "igc.ds.rest_goal_contract" not in imported_modules
-    assert "build_ordered_call_row" not in imported_names
-    assert "parse_ordered_calls_y_pred" not in imported_names
+    assert "igc.ds.rest_goal_contract" in imported_modules
+    assert "build_d1_rest_api_list_row" in imported_names
+    assert "build_call_row" not in imported_names
+    assert "parse_calls_y_pred" not in imported_names
 
 
 # Author: Mus mbayramo@stanford.edu

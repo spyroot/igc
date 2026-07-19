@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Focused remote validation for the Phase 3 ordered-goals handoff helper.
+# Focused remote validation for the Phase 3 unordered call contract.
 set -euo pipefail
 
 export KMP_DUPLICATE_LIB_OK=TRUE
@@ -11,7 +11,7 @@ python -m pytest -q \
     tests/ds/test_rest_goal_contract.py \
     tests/scripts/test_phase3_argument_smoke.py
 
-bash -n scripts/validate_phase3_ordered_goals_helper.sh
+bash -n scripts/validate_phase3_calls_helper.sh
 
 ruff check \
     igc/ds/rest_goal_contract.py \
