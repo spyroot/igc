@@ -1,14 +1,14 @@
 profile:
   name: phase3_argument_extractor_smoke
-  prompt_spec_version: phase3-argument-extractor-smoke-v1
+  prompt_spec_version: phase3-argument-extractor-smoke-v2
   task: text_and_rest_api_list_to_calls
   base_weights_role: goal_extractor
   weights_role: argument_extractor
-  renderer: render_ordered_call_example
+  renderer: render_call_example
 
 smoke:
   fixtures:
-    - read_only_ordered_get
+    - read_only_get
     - patch_with_arguments
   provider_modes:
     - mock
@@ -17,15 +17,15 @@ smoke:
 wandb:
   namespace: phase3_argument_extraction
   metric_keys:
-    - phase3_argument_extraction/eval/call_ordered_exact_match_rate
-    - phase3_argument_extraction/eval/call_order_correct_rate
-    - phase3_argument_extraction/eval/rest_api_exact_match_rate
-    - phase3_argument_extraction/eval/allowed_methods_exact_match_rate
+    - phase3_argument_extraction/eval/call_set_exact_match_rate
+    - phase3_argument_extraction/eval/rest_api_set_match_rate
     - phase3_argument_extraction/eval/method_exact_match_rate
-    - phase3_argument_extraction/eval/arguments_json_parse_rate
+    - phase3_argument_extraction/eval/arguments_json_validity_rate
     - phase3_argument_extraction/eval/arguments_exact_match_rate
+    - phase3_argument_extraction/eval/required_argument_coverage_rate
+    - phase3_argument_extraction/eval/no_argument_accuracy_rate
+    - phase3_argument_extraction/eval/unsafe_argument_rejection_rate
     - phase3_argument_extraction/eval/invalid_method_rate
-    - phase3_argument_extraction/eval/readonly_empty_arguments_rate
     - phase3_argument_extraction/smoke/rows_total
     - phase3_argument_extraction/smoke/parsed_total
     - phase3_argument_extraction/smoke/accepted_total
@@ -33,10 +33,11 @@ wandb:
     - phase3_argument_extraction/smoke/weights_role
 
 acceptance:
-  min_call_ordered_exact_match_rate: 1.0
-  min_call_order_correct_rate: 1.0
+  min_call_set_exact_match_rate: 1.0
   min_method_exact_match_rate: 1.0
-  min_arguments_json_parse_rate: 1.0
+  min_arguments_json_validity_rate: 1.0
   min_arguments_exact_match_rate: 1.0
-  min_readonly_empty_arguments_rate: 1.0
+  min_required_argument_coverage_rate: 1.0
+  min_no_argument_accuracy_rate: 1.0
+  min_unsafe_argument_rejection_rate: 1.0
   max_invalid_method_rate: 0.0
