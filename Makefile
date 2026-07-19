@@ -11,6 +11,7 @@ PLATFORM    ?= linux/arm64
 SAVE        ?= /models/images/$(TRAIN_IMAGE)-$(TRAIN_TAG).tar.zst
 
 .PHONY: help gate test lint perf coverage metrics profile profile-rl profile-dataset-cuda \
+        profile-remote profile-remote-cpu profile-remote-cuda profile-remote-all \
         docker-test docker-push \
         train-image train-image-arm64 train-image-amd64 train-image-multi train-image-save clean
 
@@ -47,6 +48,18 @@ profile-dataset-cuda: ## Profile Redfish corpus/tokenizer/DataLoader/H2D/CUDA tr
 		exit 2; \
 	)
 	$(PYTHON) scripts/profile_dataset_to_cuda.py $${PROFILE_DATASET_ARGS}
+
+profile-remote: ## Capture remote slot Docker/NVIDIA/profile evidence only
+	PROFILE_MODE=snapshot scripts/nv72_profile_from_slot.sh
+
+profile-remote-cpu: ## Run CPU hot-path profiler inside the remote slot container
+	PROFILE_MODE=cpu scripts/nv72_profile_from_slot.sh
+
+profile-remote-cuda: ## Run full dataset-to-CUDA profiler inside the remote slot container
+	PROFILE_MODE=cuda scripts/nv72_profile_from_slot.sh
+
+profile-remote-all: ## Run CPU hot-path profiler, then full dataset-to-CUDA CUDA profiler remotely
+	PROFILE_MODE=all scripts/nv72_profile_from_slot.sh
 
 docker-test: ## Build the CPU test image and run the gate inside it
 	docker build -f docker/Dockerfile.test -t igc-test:cpu . && docker run --rm igc-test:cpu python -m pytest -q
