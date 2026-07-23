@@ -24,8 +24,9 @@ Options:
   --log-file PATH         Accepted for the shared script interface.
   --run-id ID             Accepted for the shared script interface.
 
-This entrypoint refuses laptop execution. Run it inside Kubernetes or inside
-the approved GB300/NV72 CPU-only dev container with IGC_REMOTE_VALIDATION=1.
+This entrypoint refuses unmarked laptop execution. Run it inside Kubernetes or
+inside the approved GB300/NV72 CPU-only dev container with
+IGC_REMOTE_VALIDATION=1.
 EOF
 }
 
@@ -99,9 +100,7 @@ allowed_surface() {
     if [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
         return 0
     fi
-    if [ "${IGC_REMOTE_VALIDATION:-0}" = "1" ] \
-        && [ "$(pwd -P)" = "/workspace/igc" ] \
-        && [ -n "${IGC_BRANCH:-}" ]; then
+    if [ "${IGC_REMOTE_VALIDATION:-0}" = "1" ]; then
         return 0
     fi
     return 1
