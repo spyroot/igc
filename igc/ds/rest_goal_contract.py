@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from igc.modules.base.metric_keys import (
+    PHASE2_LABELLED_REQUESTS,
     PHASE2_WANDB_METRIC_KEYS,
     PHASE3_WANDB_METRIC_KEYS,
 )
@@ -23,7 +24,6 @@ from igc.modules.base.metric_keys import (
 
 MODEL_X = "model_x"
 D0 = "D0"
-D1 = "D1"
 
 PHASE2_GOAL_EXTRACT_METRIC_KEYS = PHASE2_WANDB_METRIC_KEYS
 PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS = PHASE3_WANDB_METRIC_KEYS
@@ -100,14 +100,14 @@ def _allowed_methods_map(contexts: Sequence[RedfishContext]) -> dict[str, list[s
     }
 
 
-def build_d1_rest_api_list_row(
+def build_phase2_labelled_request_row(
     *,
     text: str,
     contexts: Sequence[RedfishContext],
     rest_api_list: Sequence[str],
     order_evidence: str = "explicit_then",
 ) -> dict[str, Any]:
-    """Build one mock ``D1`` row for text-to-ordered-REST-API training.
+    """Build one mock ``phase2_labelled_requests`` row.
 
     :param text: operator sentence.
     :param contexts: current Redfish JSON/method context.
@@ -118,10 +118,10 @@ def build_d1_rest_api_list_row(
     by_api = _contexts_by_api(contexts)
     _require_context(rest_api_list, by_api)
     return {
-        "phase": 2,                         # Phase 2: text -> ordered rest_api_list.
-        "dataset": D1,                      # D1 is the accepted Phase 2 dataset name.
+        "phase": 2,                         # Phase 2: text -> rest_api_list.
+        "dataset": PHASE2_LABELLED_REQUESTS,  # Canonical Phase 2 dataset name.
         "source_dataset": D0,               # D0 is the Phase 1 JSON reconstruction source.
-        "model_x": MODEL_X,                 # model_x creates/reviews D1 after Phase 1.
+        "model_x": MODEL_X,                 # model_x creates/reviews labels after Phase 1.
         "task": "text_to_rest_api_list",    # Contract name from the phase workflow.
         "x": {
             "text": text,                   # Operator sentence shown to the model.
@@ -129,15 +129,15 @@ def build_d1_rest_api_list_row(
             "allowed_methods": _allowed_methods_map(contexts),  # Method legality context.
         },
         "y_true": {
-            "rest_api_list": list(rest_api_list),  # Ordered API label, never sorted.
+            "rest_api_list": list(rest_api_list),  # API-set label in caller-provided order.
             "order_evidence": order_evidence,     # Whether strict order evidence is explicit.
         },
         "validation": {
-            "text_source": "mock_fixture",         # Tiny offline fixture, not real D1 generation.
+            "text_source": "mock_fixture",         # Tiny offline fixture, not real generation.
             "review_judged": False,                # Real review waits for model_x checkpoint.
             "all_rest_api_present": True,          # All labels are present in current context.
             "extra_rest_api_present": False,       # The mock row carries only requested APIs.
-            "order_preserved": True,               # The label keeps the caller-provided order.
+            "order_preserved": True,               # Captures caller order for secondary metrics.
         },
     }
 
@@ -192,7 +192,7 @@ def build_ordered_call_row(
 
     return {
         "phase": 3,                           # Phase 3: ordered APIs -> ordered calls.
-        "source_dataset": D1,                 # Phase 3 starts from accepted D1 rows.
+        "source_dataset": PHASE2_LABELLED_REQUESTS,  # Phase 3 starts from accepted labels.
         "model_x": MODEL_X,                   # model_x is the Phase 1 checkpoint lineage.
         "task": "text_and_rest_api_list_to_calls",  # Contract name from the workflow.
         "x": {
@@ -210,7 +210,7 @@ def build_ordered_call_row(
 def render_rest_api_list_example(row: Mapping[str, Any]) -> RenderedContractExample:
     """Render a Phase 2 row into prompt and target JSON text.
 
-    :param row: row from :func:`build_d1_rest_api_list_row`.
+    :param row: row from :func:`build_phase2_labelled_request_row`.
     :return: rendered prompt/target split.
     """
     x = row["x"]

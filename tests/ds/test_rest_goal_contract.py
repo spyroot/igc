@@ -14,12 +14,11 @@ import pytest
 
 from igc.ds.rest_goal_contract import (
     D0,
-    D1,
     MODEL_X,
     PHASE2_GOAL_EXTRACT_METRIC_KEYS,
     PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS,
     RedfishContext,
-    build_d1_rest_api_list_row,
+    build_phase2_labelled_request_row,
     build_ordered_call_row,
     inference_target_calls_json,
     parse_ordered_calls_y_pred,
@@ -28,6 +27,7 @@ from igc.ds.rest_goal_contract import (
     render_rest_api_list_example,
 )
 from igc.modules.base.metric_keys import (
+    PHASE2_LABELLED_REQUESTS,
     PHASE2_WANDB_METRIC_KEYS,
     PHASE3_WANDB_METRIC_KEYS,
     PHASE23_WANDB_METRIC_KEYS,
@@ -43,10 +43,10 @@ def test_phase23_locked_name_constants_use_literal_contract_values() -> None:
     """Locked Phase 2/3 names stay literal, not only internally self-consistent."""
     assert MODEL_X == "model_x"
     assert D0 == "D0"
-    assert D1 == "D1"
+    assert PHASE2_LABELLED_REQUESTS == "phase2_labelled_requests"
 
 
-def test_d1_row_preserves_operator_order_independent_of_context_order() -> None:
+def test_phase2_row_preserves_operator_order_independent_of_context_order() -> None:
     """The label order follows the operator-stated order, not JSON context order."""
     systems = _context(
         "/redfish/v1/Systems",
@@ -59,14 +59,14 @@ def test_d1_row_preserves_operator_order_independent_of_context_order() -> None:
         {"@odata.id": "/redfish/v1/TaskService/Tasks", "Name": "Tasks"},
     )
 
-    row = build_d1_rest_api_list_row(
+    row = build_phase2_labelled_request_row(
         text="check the task queue, then list the systems",
         contexts=(systems, tasks),
         rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems"),
     )
 
     assert row["phase"] == 2
-    assert row["dataset"] == D1
+    assert row["dataset"] == PHASE2_LABELLED_REQUESTS
     assert row["source_dataset"] == D0
     assert row["model_x"] == MODEL_X
     assert row["x"]["text"] == "check the task queue, then list the systems"
@@ -88,7 +88,7 @@ def test_d1_row_preserves_operator_order_independent_of_context_order() -> None:
     }
 
 
-def test_d1_row_does_not_leak_extra_context_into_target_list() -> None:
+def test_phase2_row_does_not_leak_extra_context_into_target_list() -> None:
     """Extra current context stays in x and never becomes an unrequested target."""
     systems = _context(
         "/redfish/v1/Systems",
@@ -106,7 +106,7 @@ def test_d1_row_does_not_leak_extra_context_into_target_list() -> None:
         {"@odata.id": "/redfish/v1/Chassis", "Name": "Chassis"},
     )
 
-    row = build_d1_rest_api_list_row(
+    row = build_phase2_labelled_request_row(
         text="check the task queue, then list systems",
         contexts=(systems, tasks, chassis),
         rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems"),
@@ -140,7 +140,7 @@ def test_phase23_rows_pin_locked_field_names() -> None:
     assert serialized["allowed_methods"] is not context.allowed_methods
     assert serialized["json"] is not body
 
-    phase2 = build_d1_rest_api_list_row(
+    phase2 = build_phase2_labelled_request_row(
         text="list systems",
         contexts=(context,),
         rest_api_list=("/redfish/v1/Systems",),
@@ -162,10 +162,12 @@ def test_phase23_rows_pin_locked_field_names() -> None:
         "validation",
     }
     assert phase2["task"] == "text_to_rest_api_list"
+    assert phase2["dataset"] == PHASE2_LABELLED_REQUESTS
     assert set(phase2["x"]) == {"text", "json", "allowed_methods"}
     assert set(phase2["y_true"]) == {"rest_api_list", "order_evidence"}
     assert set(phase3) == {"phase", "source_dataset", "model_x", "task", "x", "y_true"}
     assert phase3["task"] == "text_and_rest_api_list_to_calls"
+    assert phase3["source_dataset"] == PHASE2_LABELLED_REQUESTS
     assert set(phase3["x"]) == {"text", "rest_api_list", "json", "allowed_methods"}
     assert set(phase3["y_true"]) == {"calls"}
     assert set(phase3["y_true"]["calls"][0]) == {
@@ -531,13 +533,13 @@ def test_rows_reject_missing_and_duplicate_contexts() -> None:
     )
 
     with pytest.raises(ValueError, match="not present"):
-        build_d1_rest_api_list_row(
+        build_phase2_labelled_request_row(
             text="list chassis",
             contexts=(context,),
             rest_api_list=("/redfish/v1/Chassis",),
         )
     with pytest.raises(ValueError, match="duplicate rest_api"):
-        build_d1_rest_api_list_row(
+        build_phase2_labelled_request_row(
             text="list systems",
             contexts=(context, context),
             rest_api_list=("/redfish/v1/Systems",),
@@ -558,7 +560,7 @@ def test_rows_reject_missing_and_duplicate_contexts() -> None:
 
 def test_empty_ordered_rows_are_supported_for_noop_context() -> None:
     """Empty mock rows encode no selected REST goals without inventing context."""
-    phase2 = build_d1_rest_api_list_row(
+    phase2 = build_phase2_labelled_request_row(
         text="nothing to do",
         contexts=(),
         rest_api_list=(),
@@ -615,7 +617,7 @@ def test_rendered_examples_have_prompt_target_boundary_and_canonical_json() -> N
         ("GET", "HEAD"),
         {"@odata.id": "/redfish/v1/Systems"},
     )
-    phase2 = build_d1_rest_api_list_row(
+    phase2 = build_phase2_labelled_request_row(
         text="list systems",
         contexts=(context,),
         rest_api_list=("/redfish/v1/Systems",),
@@ -713,7 +715,7 @@ def test_rendered_and_inference_outputs_preserve_multi_item_order() -> None:
         {"@odata.id": "/redfish/v1/TaskService/Tasks"},
     )
 
-    phase2 = build_d1_rest_api_list_row(
+    phase2 = build_phase2_labelled_request_row(
         text="check tasks, then list systems",
         contexts=(systems, tasks),
         rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems"),

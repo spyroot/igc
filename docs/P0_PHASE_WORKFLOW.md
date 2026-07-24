@@ -13,7 +13,7 @@ while model artifacts use explicit roles such as `model_x`, `goal_extractor`, an
 | Phase | Profile prefix | Weight role | W&B namespace | Dataset objective | Checkpoint rule |
 | --- | --- | --- | --- | --- | --- |
 | 1 | `phase1_*` | `model_x` | `phase1_finetune/*` | `phase1_pretrain` / Redfish JSON reconstruction | writes a separate Phase 1 checkpoint |
-| 2 | `phase2_goal_extractor_*` (planned) | `goal_extractor` | `phase2_goal_extraction/*` | `text_to_ordered_rest_api_list` | initializes from `model_x` only when requested; never overwrites it |
+| 2 | `phase2_goal_extractor_*` (planned) | `goal_extractor` | `phase2_goal_extraction/*` | `text_to_rest_api_list` | initializes from `model_x` only when requested; never overwrites it |
 | 3 | `phase3_argument_extractor_*` (planned) | `argument_extractor` | `phase3_argument_extraction/*` | `text_and_rest_api_list_to_calls` | initializes from `model_x` or `goal_extractor` only when requested; never overwrites either |
 
 Phase 2 and Phase 3 profile names are planned until their trainers land. Do not add live profiles
@@ -49,10 +49,13 @@ The first serious model profile should use a 7B instruct backbone with rsLoRA un
 proves that profile cannot run. GPT-2 remains a path smoke only; it is not evidence that the Redfish
 representation is useful.
 
-## Phase 2: Build And Train `D1`
+## Phase 2: Build And Train `phase2_labelled_requests`
 
-Purpose: after Phase 1, use `model_x` plus a review/judging pass to build `D1`, then fine-tune a
-specialized model that maps operator text and current Redfish context to an ordered `rest_api_list`.
+Purpose: after Phase 1, use `model_x` plus a review/judging pass to build the
+canonical `phase2_labelled_requests` dataset, then fine-tune a specialized
+model that maps operator text and current Redfish context to a canonical
+`rest_api_list`. Older notes may call this artifact `D1`; new configs, code,
+metrics, and docs use `phase2_labelled_requests`.
 
 Current P0 scope: mock-dataset plumbing and offline tests only.
 
@@ -61,8 +64,8 @@ Real dataset build waits for the Phase 1 checkpoint. The accepted row shape is:
 ```json
 {
   "phase": 2,
-  "dataset": "D1",
-  "task": "text_to_ordered_rest_api_list",
+  "dataset": "phase2_labelled_requests",
+  "task": "text_to_rest_api_list",
   "x": {
     "text": "check the task queue, then list the available computer systems",
     "json": [],
@@ -77,7 +80,8 @@ Real dataset build waits for the Phase 1 checkpoint. The accepted row shape is:
 }
 ```
 
-Evaluation must report ordered exact match and set match separately.
+Evaluation treats REST API set match as primary; ordered exact match is
+reported separately only for rows with explicit order evidence.
 W&B metrics live under `phase2_goal_extraction/*`, with train/eval/order/throughput/data/calibration/test
 subgroups.
 
