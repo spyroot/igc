@@ -480,6 +480,42 @@ def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Pat
         assert literal not in lowercase_runtime_sources
 
 
+def test_runtime_string_literals_do_not_embed_prompts_or_concrete_model_names() -> None:
+    """Runtime modules keep prompt text and concrete model identities in config."""
+    runtime_paths = (
+        Path("igc/ds/phase2_labelled_requests.py"),
+        Path("scripts/build_phase2_labelled_requests.py"),
+    )
+    forbidden_fragments = (
+        "You draft",
+        "Sampled REST API records:",
+        "Return only the human request text",
+        "Draft operator request:",
+        "Return JSON with accepted",
+        "Qwen/Qwen2.5",
+        "deepseek-v4",
+        "DeepSeek",
+    )
+
+    for path in runtime_paths:
+        source = path.read_text(encoding="utf-8")
+        module = ast.parse(source)
+        docstring_nodes = _docstring_constant_nodes(module)
+        runtime_strings = (
+            node.value
+            for node in ast.walk(module)
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in docstring_nodes
+            )
+        )
+        for literal in runtime_strings:
+            assert not any(fragment in literal for fragment in forbidden_fragments), (
+                f"{path} embeds config-owned prompt/model literal {literal!r}"
+            )
+
+
 def test_prompt_templates_reject_unnamed_placeholders(tmp_path: Path) -> None:
     """Spec load fails closed for unnamed format slots such as ``{}``."""
     spec_path = _write_spec(tmp_path / "phase2.yaml")
@@ -522,6 +558,7 @@ def test_unordered_set_comparison_and_empty_set_equality() -> None:
     predicted = ["/redfish/v1/B", "/redfish/v1/A"]
 
     assert compare_rest_api_sets(expected, predicted)
+    assert compare_rest_api_sets(["/redfish/v1/A"], ["/redfish/v1/A", "/redfish/v1/A"])
     assert not compare_rest_api_sets(expected, ["/redfish/v1/A"])
     assert not compare_rest_api_sets(expected, expected + ["/redfish/v1/C"])
     assert compare_rest_api_sets([], [])
@@ -862,6 +899,30 @@ def test_counters_track_nonsense_invalid_json_and_empty_set_matches() -> None:
     assert summary[_phase2_metric("empty_set_expected_total")] == 1
 
 
+def test_counters_reject_non_empty_prediction_for_no_action_row() -> None:
+    """No-action rows accept empty set only and count invented APIs as rejections."""
+    counters = Phase2LabelledRequestCounters()
+    counters.observe_draft("no supported action requested")
+    counters.observe_judge(
+        parse_pro_judge_result(
+            _judge_json(
+                accepted=True,
+                rest_api_list=["/redfish/v1/Systems/1"],
+            ),
+        ),
+        expected_rest_api_list=(),
+    )
+
+    summary = counters.summary()
+    assert summary[_phase2_metric("draft_total")] == 1
+    assert summary[_phase2_metric("accepted_total")] == 0
+    assert summary[_phase2_metric("rejected_total")] == 1
+    assert summary[_phase2_metric("pro_accept_rate")] == 1.0
+    assert summary[_phase2_metric("rest_api_set_match_rate")] == 0.0
+    assert summary[_phase2_metric("empty_set_match_rate")] == 0.0
+    assert summary[_phase2_metric("empty_set_expected_total")] == 1
+
+
 def test_counter_summary_binds_semantic_metric_names() -> None:
     """Summary values are keyed by metric names, not tuple positions."""
     counters = Phase2LabelledRequestCounters(
@@ -991,6 +1052,24 @@ def test_phase2_module_does_not_import_phase3_argument_runtime() -> None:
     assert "igc.ds.rest_goal_contract" not in imported_modules
     assert "build_ordered_call_row" not in imported_names
     assert "parse_ordered_calls_y_pred" not in imported_names
+
+
+def _docstring_constant_nodes(module: ast.Module) -> set[int]:
+    """Return AST node ids for module, class, and function docstring constants."""
+    docstring_nodes: set[int] = set()
+    for node in ast.walk(module):
+        if not isinstance(
+            node,
+            (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef, ast.Module),
+        ):
+            continue
+        if not node.body:
+            continue
+        first = node.body[0]
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+            if isinstance(first.value.value, str):
+                docstring_nodes.add(id(first.value))
+    return docstring_nodes
 
 
 # Author: Mus mbayramo@stanford.edu

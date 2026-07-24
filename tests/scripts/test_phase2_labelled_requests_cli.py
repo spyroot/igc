@@ -195,6 +195,52 @@ def test_cli_file_providers_are_used_without_network(tmp_path: Path) -> None:
     assert metrics[_metric("accepted_total")] == 1
 
 
+def test_cli_records_accept_nested_x_with_top_level_source_metadata(tmp_path: Path) -> None:
+    """Fixture rows may carry Phase-shaped x records plus top-level provenance."""
+    script = _load_script()
+    records = tmp_path / "records.jsonl"
+    records.write_text(
+        json.dumps({
+            "x": {
+                "rest_api": "/redfish/v1/Systems/1",
+                "allowed_methods": ["get", "head"],
+                "json": {
+                    "@odata.id": "/redfish/v1/Systems/1",
+                    "Name": "System 1",
+                },
+            },
+            "vendor": "top_vendor",
+            "source_corpus": "top_corpus",
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "out" / "phase2_labelled_requests.jsonl"
+    metrics_path = tmp_path / "out" / "metrics.json"
+
+    code = script.main([
+        "--records-jsonl",
+        str(records),
+        "--output-jsonl",
+        str(output),
+        "--metrics-out",
+        str(metrics_path),
+        "--sample-width",
+        "1",
+        "--count",
+        "1",
+    ])
+
+    rows = _read_jsonl(output)
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    assert code == 0
+    assert rows[0]["x"]["rest_api_list"] == ["/redfish/v1/Systems/1"]
+    assert rows[0]["x"]["allowed_methods"]["/redfish/v1/Systems/1"] == ["GET", "HEAD"]
+    assert rows[0]["metadata"]["vendor"] == ["top_vendor"]
+    assert rows[0]["metadata"]["source_corpus"] == ["top_corpus"]
+    assert metrics[_metric("vendor", "source_corpus")] == "top_vendor:top_corpus"
+
+
 def test_cli_config_provider_mode_uses_yaml_mock_adapters(tmp_path: Path) -> None:
     """Default config mode uses the checked-in mock adapters without fixture files."""
     script = _load_script()
@@ -467,6 +513,45 @@ def test_openai_compatible_provider_requires_env_placeholders() -> None:
         transport=lambda *_args: {},
     )
     with pytest.raises(SystemExit, match="PHASE1_MODEL_X_MODEL_ID"):
+        provider({
+            "prompt": "offline prompt",
+            "model_id": "${PHASE1_MODEL_X_MODEL_ID}",
+            "generation": {},
+        })
+
+
+@pytest.mark.parametrize(
+    ("response", "message"),
+    (
+        ({}, "missing choices.0.message.content"),
+        ({"choices": []}, "out of range"),
+        ({"choices": [{"message": {"content": 17}}]}, "did not contain text"),
+        ({"choices": [{"message": {"content": "   "}}]}, "did not contain text"),
+    ),
+)
+def test_openai_compatible_provider_rejects_bad_response_text_paths(
+    response: dict,
+    message: str,
+) -> None:
+    """Provider response-path errors fail closed before a row can be accepted."""
+    script = _load_script()
+    config = script.ProviderAdapterSpec(
+        adapter="openai-compatible",
+        base_url_env="PHASE2_MODEL_X_BASE_URL",
+        endpoint_path="/v1/chat/completions",
+        response_text_path="choices.0.message.content",
+    )
+    provider = script._OpenAICompatibleChatProvider(
+        config,
+        label="draft",
+        env={
+            "PHASE2_MODEL_X_BASE_URL": "http://model.invalid",
+            "PHASE1_MODEL_X_MODEL_ID": "configured-model-x",
+        },
+        transport=lambda *_args: response,
+    )
+
+    with pytest.raises(SystemExit, match=message):
         provider({
             "prompt": "offline prompt",
             "model_id": "${PHASE1_MODEL_X_MODEL_ID}",
