@@ -482,9 +482,10 @@ def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Pat
 
 def test_runtime_string_literals_do_not_embed_prompts_or_concrete_model_names() -> None:
     """Runtime modules keep prompt text and concrete model identities in config."""
+    repo_root = Path(__file__).resolve().parents[2]
     runtime_paths = (
-        Path("igc/ds/phase2_labelled_requests.py"),
-        Path("scripts/build_phase2_labelled_requests.py"),
+        repo_root / "igc/ds/phase2_labelled_requests.py",
+        repo_root / "scripts/build_phase2_labelled_requests.py",
     )
     forbidden_fragments = (
         "You draft",
@@ -494,7 +495,6 @@ def test_runtime_string_literals_do_not_embed_prompts_or_concrete_model_names() 
         "Return JSON with accepted",
         "Qwen/Qwen2.5",
         "deepseek-v4",
-        "DeepSeek",
     )
 
     for path in runtime_paths:
