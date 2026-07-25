@@ -40,30 +40,7 @@ cd "$REPO_ROOT"
 CUR_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 [ "$CUR_BRANCH" = "main" ] || note "current branch is '$CUR_BRANCH' (a data/* branch will be created)"
 
-# 1. Verify each artifact exists and is LFS-tracked by committed attributes.
-# This happens before the git-lfs binary check so a path that would become a
-# normal Git blob fails even on hosts where git-lfs is not installed yet.
-for path in "$@"; do
-  [ -e "$path" ] || die "no such artifact: $path"
-  # Run check-attr separately from the match test so a command failure (e.g.
-  # git older than 2.40, where --source does not exist) dies with its own
-  # message instead of masquerading as "attribute not matched".
-  attr_out="$(git check-attr --source HEAD filter -- "$path" 2>&1)" ||
-    die "cannot read committed LFS attributes for '$path'
-(git check-attr --source needs git >= 2.40 and a committed HEAD): ${attr_out}"
-  if ! printf '%s\n' "$attr_out" | grep -q 'filter: lfs'; then
-    ext="$(basename "$path" | sed 's/^[^.]*//')"
-    pattern_note="an exact path"
-    if [ -n "$ext" ]; then
-      pattern_note="an exact path or extension pattern such as '${ext}'"
-    fi
-    die "'$path' is not matched by a committed LFS filter in HEAD .gitattributes.
-Add ${pattern_note} via PR, then rerun.
-Refusing to stage this artifact as a normal Git object."
-  fi
-done
-
-# 2. Ensure git-lfs is available (no OS change unless opted in).
+# 1. Ensure git-lfs is available (no OS change unless opted in).
 ensure_lfs() {
   if git lfs version >/dev/null 2>&1; then
     LFS_RUN=(git lfs)
@@ -95,6 +72,16 @@ ensure_lfs() {
 }
 ensure_lfs "$@"
 
+# 2. Verify each artifact exists and is LFS-tracked (warn if .gitattributes won't catch it).
+for path in "$@"; do
+  [ -e "$path" ] || die "no such artifact: $path"
+  if ! git check-attr filter -- "$path" 2>/dev/null | grep -q 'filter: lfs'; then
+    note "WARNING: '$path' is not matched by an LFS filter in .gitattributes — it would commit as
+       a normal (large) git object. Add a pattern to .gitattributes first (via PR), e.g.
+       '$(basename "$path" | sed 's/^[^.]*//')' or the exact path, then rerun."
+  fi
+done
+
 # 3. Confirm the push (large, outbound).
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BASENAME="$(basename "${1%/}")"
@@ -114,7 +101,33 @@ note "uploading LFS objects to ${REMOTE} over the node uplink..."
 "${LFS_RUN[@]}" push "${REMOTE}" "${BRANCH}"
 git push -u "${REMOTE}" "${BRANCH}"
 
-# 5. Print the PR URL (PR-only integration).
+# 5. Emit a positive LFS ack for each committed weight/archive path.
+ack_lfs_artifacts() {
+  for path in "$@"; do
+    if [ -d "$path" ]; then
+      find "$path" -type f \( \
+        -name '*.bin' -o \
+        -name '*.pt' -o \
+        -name '*.safetensors' -o \
+        -name '*.tar.gz' -o \
+        -name '*.zip' \
+      \) -print
+    else
+      printf '%s\n' "$path"
+    fi
+  done | while IFS= read -r artifact; do
+    [ -n "$artifact" ] || continue
+    if git check-attr filter -- "$artifact" 2>/dev/null | grep -q 'filter: lfs'; then
+      bash scripts/verify_lfs_weight_ack.sh \
+        --ref "$BRANCH" \
+        --path "$artifact" \
+        --remote "$REMOTE"
+    fi
+  done
+}
+ack_lfs_artifacts "$@"
+
+# 6. Print the PR URL (PR-only integration).
 URL="$(git remote get-url "${REMOTE}")"
 SLUG="$(printf '%s' "$URL" | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')"
 note "pushed. Open a PR to integrate:"
