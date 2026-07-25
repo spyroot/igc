@@ -24,7 +24,7 @@ WORKDIR /workspace/igc
 
 # OS tools on top of the NGC base. Already in the base: git, curl, wget, jq, numactl,
 # vim, less, ssh, ps. We add:
-#   git-lfs  — REQUIRED: the idrac_ctl submodule ships its Redfish walk maps
+#   git-lfs  — REQUIRED: the redfish_ctl submodule ships its Redfish walk maps
 #              (rest_api_map.npy) as git-LFS objects, so `git pull` / `git lfs pull`
 #              inside the container needs it (the pull-inside-container iteration loop).
 #   nvtop    — live per-GPU utilisation/memory view while a run trains.
@@ -33,6 +33,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         wget git-lfs nvtop htop curl bash unzip zip gzip \
     && git lfs install --system \
     && rm -rf /var/lib/apt/lists/*
+
+# Some NGC PyTorch images ship Python and pip without a conda CLI. The lab workflow uses
+# conda for environment introspection, so install a small Miniconda CLI when absent while
+# leaving the NGC Python/PyTorch path untouched.
+RUN if ! command -v conda >/dev/null 2>&1; then \
+        arch="$(uname -m)" \
+        && case "$arch" in \
+            aarch64) miniconda_arch="aarch64" ;; \
+            x86_64) miniconda_arch="x86_64" ;; \
+            *) echo "unsupported Miniconda arch: $arch" >&2; exit 1 ;; \
+        esac \
+        && wget -q -O /tmp/miniconda.sh \
+            "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${miniconda_arch}.sh" \
+        && bash /tmp/miniconda.sh -b -p /opt/conda \
+        && rm -f /tmp/miniconda.sh \
+        && /opt/conda/bin/conda clean -afy \
+        && ln -sf /opt/conda/bin/conda /usr/local/bin/conda; \
+    fi \
+    && command -v conda \
+    && conda --version \
+    && git lfs version
 
 # Extra Python deps on top of the NGC base (transformers / accelerate / peft / wandb /
 # gymnasium / mock-REST-env, etc.). torch is intentionally absent — use the base's.

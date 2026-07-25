@@ -10,7 +10,7 @@
 # Usage (on a node, or from a control host with ssh to the nodes):
 #   SANITY_NODES="<node-ip> <node-ip>" scripts/gb300_sanity_check.sh           # runs 1,4,8
 #   SANITY_GPUS="1 4" scripts/gb300_sanity_check.sh                            # single-node only
-#   IGC_IMAGE=igc-train:ngc26.03-py3 SANITY_NODES="…" scripts/gb300_sanity_check.sh
+#   IGC_IMAGE=igc-train:ngc26.03 SANITY_NODES="…" scripts/gb300_sanity_check.sh
 #
 # For the 8-GPU (multi-node) test the code must be visible on BOTH nodes — point
 # IGC_CODE_DIR at the shared checkout (/models/igc) so every node sees the same file.
@@ -19,7 +19,7 @@
 # Mus mbayramo@stanford.edu
 set -uo pipefail
 
-IMAGE="${IGC_IMAGE:-nvcr.io/nvidia/pytorch:26.03-py3}"
+IMAGE="${IGC_IMAGE:-igc-train:ngc26.03}"
 IGC_CODE_DIR="${IGC_CODE_DIR:-$HOME/igc}"          # /models/igc for the multi-node test
 MODELS_DIR="${MODELS_DIR:-/models}"
 GPUS_LADDER="${SANITY_GPUS:-1 4 8}"

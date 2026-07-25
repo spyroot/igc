@@ -56,7 +56,7 @@ IGC_CODE_DIR="${IGC_CODE_DIR:-${HOME:-/root}/igc}"          # igc checkout (node
 IGC_DATA_DIR="${IGC_DATA_DIR:-${HOME:-/root}/.json_responses}"  # captured Redfish responses (mounted read-only)
 IGC_MODELS_DIR="${IGC_MODELS_DIR:-/models}"                 # shared 240TB BeeGFS (large/durable artifacts)
 IGC_OUTPUT_DIR="${IGC_OUTPUT_DIR:-experiments/${IGC_RUN}}"  # checkpoints + tensorboard land here (relative path resolved under the mounted checkout /workspace/igc)
-IGC_IMAGE="${IGC_IMAGE:-nvcr.io/nvidia/pytorch:26.03-py3}"  # bare NGC (runtime pip) or igc-train:ngc26.03 (deps baked)
+IGC_IMAGE="${IGC_IMAGE:-igc-train:ngc26.03}"               # tracked parent image: deps, conda, and git-lfs baked
 # Training hyper-params (all map to real igc_main.py flags; see igc/shared/shared_arg_parser.py)
 EPOCHS="${EPOCHS:-3}"                                       # --num_train_epochs (ignored in smoke: forced to 1)
 IGC_BATCH="${IGC_BATCH:-128}"                               # --per_device_train_batch_size (256 OOMs a large-vocab backbone; 128 is the safe start)
