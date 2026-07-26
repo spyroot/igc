@@ -147,6 +147,14 @@ prompts:
       {records_json}
       Draft:
       {draft_text}
+  pro_judge_empty_set:
+    system: phase2 test pro judge empty-set system prompt from YAML
+    template: |
+      Judge whether this request correctly matches none of these records.
+      Records:
+      {records_json}
+      Draft:
+      {draft_text}
 wandb:
   namespace: phase2_labelled_requests
   metric_keys:
@@ -799,6 +807,8 @@ def test_builder_rejects_insufficient_unique_source_pool_before_budget_or_provid
     assert budget.summary()["observed"] == {
         "attempts_total": 0,
         "accepted_total": 0,
+        "empty_set_attempts_total": 0,
+        "empty_set_accepted_total": 0,
         "unique_combinations_attempted": 0,
     }
 
@@ -829,6 +839,8 @@ def test_builder_rejects_duplicate_rest_api_source_pool_before_budget_or_provide
     assert budget.summary()["observed"] == {
         "attempts_total": 0,
         "accepted_total": 0,
+        "empty_set_attempts_total": 0,
+        "empty_set_accepted_total": 0,
         "unique_combinations_attempted": 0,
     }
 
@@ -862,10 +874,13 @@ def test_d1_sampling_budget_summary_exposes_limits_and_observed_counts(
             "max_accepted_per_combination": 2,
             "max_attempts_per_combination": 3,
             "max_accepted_per_api": 5,
+            "max_empty_set_candidates": 3,
         },
         "observed": {
             "attempts_total": 1,
             "accepted_total": 1,
+            "empty_set_attempts_total": 0,
+            "empty_set_accepted_total": 0,
             "unique_combinations_attempted": 1,
         },
     }

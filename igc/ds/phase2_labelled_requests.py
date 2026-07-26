@@ -1146,6 +1146,8 @@ def to_minimal_phase3_input(row: Phase2LabelledRequestRow | None) -> dict[str, A
                 rest_api=record.rest_api,
                 allowed_methods=record.allowed_methods,
                 json=record.json_body,
+                operation_names=record.operation_names,
+                argument_schema=record.argument_schema,
             ).to_dict()
             for record in row.records
         ],
