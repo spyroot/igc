@@ -38,8 +38,10 @@ esac
 case "$MASTER_PORT" in
     ''|*[!0-9]*) echo "IGC_MASTER_PORT must be an integer TCP port" >&2; exit 2 ;;
 esac
-[ "$MASTER_PORT" -ge 1 ] && [ "$MASTER_PORT" -le 65535 ] \
-    || { echo "IGC_MASTER_PORT must be an integer TCP port" >&2; exit 2; }
+if [ "$MASTER_PORT" -lt 1 ] || [ "$MASTER_PORT" -gt 65535 ]; then
+    echo "IGC_MASTER_PORT must be an integer TCP port" >&2
+    exit 2
+fi
 
 if [ -n "${IGC_CORPUS_OBJECTIVE:-}" ]; then
     echo "IGC_CORPUS_OBJECTIVE is retired; use IGC_SET=\"corpus_objective=...\" so the resolved profile emits one objective flag." >&2

@@ -101,6 +101,9 @@ EOF
 }
 
 @test "gb300_launch contains no retired stage aliases or direct training flags" {
-    ! grep -Eq 'IGC_RUNG|IGC_STAGE|smoke1|smoke4|run4|fsdp4|train_igc\.sbatch' "$LAUNCH"
-    ! grep -Eq 'igc_main\.py|--train|--llm|--max_steps|--num_train_epochs' "$LAUNCH"
+    run grep -Eq 'IGC_RUNG|IGC_STAGE|smoke1|smoke4|run4|fsdp4|train_igc\.sbatch' "$LAUNCH"
+    [ "$status" -ne 0 ]
+
+    run grep -Eq 'igc_main\.py|--train|--llm|--max_steps|--num_train_epochs' "$LAUNCH"
+    [ "$status" -ne 0 ]
 }

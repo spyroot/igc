@@ -82,6 +82,8 @@ do
     fi
 done
 
+# The variables in this script are intentionally expanded inside the container.
+# shellcheck disable=SC2016
 inner='set -euo pipefail
 for env_file in .internal/hf.env .internal/wandb.env; do
     if [ -f "$env_file" ]; then
