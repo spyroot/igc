@@ -149,7 +149,7 @@ def _plain_trainer(tmp_path):
     trainer._eval_freq = 1
     trainer._save_freq = 1
     trainer.masking_methods = []
-    trainer.dataset_sampler = lambda: None
+    trainer.dataset_sampler = lambda *_args, **_kwargs: None
     trainer.split_dataset = lambda: ([], [])
     trainer.load_checkpoint = lambda *args, **kwargs: CheckpointState(0, None, None, None, 0)
     return trainer, recorder
