@@ -136,6 +136,7 @@ def _plain_trainer(tmp_path):
     trainer._is_shuffle = False
     trainer._pin_memory = False
     trainer._is_quantize = False
+    trainer._max_grad_norm = 1.0
     trainer._best_validation_metric = float("-inf")
     trainer._metric_namespace = ""
     trainer._select_best_by_eval_loss = False
@@ -146,12 +147,14 @@ def _plain_trainer(tmp_path):
     trainer._current_mask_method_idx = 0
     trainer._num_mask_passed = 1
     trainer.on_epoch_eval = False
-    trainer._eval_freq = 1
-    trainer._save_freq = 1
+    trainer._eval_steps = 0
+    trainer._save_steps = 0
+    trainer._best_checkpoint_path = ""
     trainer.masking_methods = []
     trainer.dataset_sampler = lambda *_args, **_kwargs: None
     trainer.split_dataset = lambda: ([], [])
     trainer.load_checkpoint = lambda *args, **kwargs: CheckpointState(0, None, None, None, 0)
+    trainer.save_checkpoint = lambda **_kwargs: str(tmp_path / "best.pt")
     return trainer, recorder
 
 
