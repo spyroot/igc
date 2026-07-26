@@ -1,4 +1,4 @@
-"""Offline tests for ``scripts/rl_env_sanity.py``.
+"""Offline tests for ``scripts/sanity_checkers/current/rl_env_sanity.py``.
 
 The real proof is an opt-in GB300 ``torchrun --nproc_per_node=4`` run. These
 tests cover the CPU helper surface so CI can validate fixture construction,
@@ -18,7 +18,7 @@ import torch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts" / "rl_env_sanity.py"
+SCRIPT = REPO_ROOT / "scripts" / "sanity_checkers" / "current" / "rl_env_sanity.py"
 
 
 def _load_sanity():

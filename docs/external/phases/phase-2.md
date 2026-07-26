@@ -49,7 +49,7 @@ judge route/profile fields, generation settings, sample widths, W&B
 namespace/key lists, safety caps, and acceptance thresholds. Runtime Python
 must load those values rather than hardcoding prompt or model literals.
 
-The offline fixture CLI is `scripts/build_phase2_labelled_requests.py`. It
+The offline fixture CLI is `scripts/bmc_corpus/build_phase2_labelled_requests.py`. It
 loads the YAML spec, reads tiny JSONL records with `rest_api`,
 `allowed_methods`, `json`, `vendor`, and `source_corpus`, then writes accepted
 `phase2_labelled_requests` JSONL plus an aggregate metrics JSON. Its provider
@@ -83,7 +83,7 @@ the OpenAI-compatible provider clients. The concrete environment variables are:
 
 If any required live-provider variable is unset, the builder fails closed before
 generation instead of silently falling back to mock providers or hardcoded
-endpoints; `scripts/build_phase2_labelled_requests.py` enforces that check when
+endpoints; `scripts/bmc_corpus/build_phase2_labelled_requests.py` enforces that check when
 it constructs the live OpenAI-compatible provider.
 
 ## Build Input

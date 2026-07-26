@@ -11,7 +11,7 @@ save-eligible epoch ("epoch-2, one rank diverges post-save").
 
 These run on CPU (no GPU/NCCL): they pin the batch-count invariant and assert the igc train
 DataLoaders are built with ``drop_last=True``. The full multi-rank deadlock reproduction
-lives in ``scripts/gpu_dataset_isolation.py`` (GPU, torchrun).
+lives in ``scripts/sanity_checkers/current/gpu_dataset_isolation.py`` (GPU, torchrun).
 
 Author:
 Mus mbayramo@stanford.edu

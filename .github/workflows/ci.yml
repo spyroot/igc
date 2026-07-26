@@ -63,9 +63,9 @@ jobs:
           # the workflow itself changing re-runs everything
           wf='^\.github/workflows/'
           {
-            echo "shell=$(match "$wf|^scripts/.*\.(sh|sbatch)$|^tests/bats/|^tests/shell/.*\.sh$|^collector\.sh$")"
+            echo "shell=$(match "$wf|^scripts/.*\.(sh|sbatch)$|^tests/bats/|^tests/shell/.*\.sh$")"
             echo "python=$(match "$wf|^igc/|^tests/|^configs/|^scripts/.*\.py$|^docker/requirements|^pytest\.ini$|^setup\.py$|^igc_main\.py$|^igc_ctl\.py$|^redfish_ctl")"
-            echo "perf=$(match "$wf|^igc/|^tests/perf/|^scripts/bench_hot_paths\.py$|^redfish_ctl")"
+            echo "perf=$(match "$wf|^igc/|^tests/perf/|^scripts/profilers/bench_hot_paths\.py$|^redfish_ctl")"
             echo "docker=$(match "$wf|^docker/|^\.dockerignore$|^requirements|^setup\.py$|^conda-recipe\.yaml$")"
           } >> "$GITHUB_OUTPUT"
 
@@ -86,12 +86,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for f in scripts/*.sh scripts/*.sbatch; do
+          while IFS= read -r -d '' f; do
             bash -n "$f"
-          done
+          done < <(find scripts -type f \( -name '*.sh' -o -name '*.sbatch' \) -print0)
       - name: ShellCheck
         shell: bash
-        run: shellcheck scripts/*.sh scripts/*.sbatch tests/bats/*.bats tests/shell/*.sh
+        run: |
+          find scripts tests/bats tests/shell -type f \
+            \( -name '*.sh' -o -name '*.sbatch' -o -name '*.bats' \) \
+            -print0 | xargs -0 shellcheck
       - name: Bats
         shell: bash
         run: bats tests/bats
@@ -147,11 +150,11 @@ jobs:
       - name: Run orchestration dry-runs
         shell: bash
         run: |
-          python scripts/render_run.py --spec configs/run/examples/docker-smoke.yaml >/tmp/docker-plan.txt
-          python scripts/render_run.py --spec configs/run/examples/slurm-smoke.yaml >/tmp/slurm-plan.txt
-          python scripts/launch_run.py --spec configs/run/examples/docker-smoke.yaml --dry-run >/tmp/launch-plan.txt
-          python scripts/docker_image_sync.py --spec configs/run/examples/docker-smoke.yaml --dry-run >/tmp/docker-sync-plan.txt
-          python scripts/slurm_sanity_from_spec.py --spec configs/run/examples/slurm-smoke.yaml --dry-run >/tmp/slurm-sanity-plan.txt
+          python scripts/training/render_run.py --spec configs/run/examples/docker-smoke.yaml >/tmp/docker-plan.txt
+          python scripts/training/render_run.py --spec configs/run/examples/slurm-smoke.yaml >/tmp/slurm-plan.txt
+          python scripts/training/launch_run.py --spec configs/run/examples/docker-smoke.yaml --dry-run >/tmp/launch-plan.txt
+          python scripts/nv72/docker_image_sync.py --spec configs/run/examples/docker-smoke.yaml --dry-run >/tmp/docker-sync-plan.txt
+          python scripts/training/slurm_sanity_from_spec.py --spec configs/run/examples/slurm-smoke.yaml --dry-run >/tmp/slurm-sanity-plan.txt
       - name: Lint
         run: ruff check igc tests
       - name: Offline gate with coverage
@@ -163,7 +166,7 @@ jobs:
       - name: Metrics snapshot
         shell: bash
         run: |
-          python scripts/metrics_snapshot.py --coverage-json coverage.json --out metrics.json | tee -a "$GITHUB_STEP_SUMMARY"
+          python scripts/profilers/metrics_snapshot.py --coverage-json coverage.json --out metrics.json | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Upload coverage and metrics
         if: always()
         uses: actions/upload-artifact@v4

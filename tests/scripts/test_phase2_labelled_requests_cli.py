@@ -18,7 +18,7 @@ from igc.modules.base.metric_keys import (
     phase_metric,
 )
 
-SCRIPT = Path("scripts/build_phase2_labelled_requests.py")
+SCRIPT = Path("scripts/bmc_corpus/build_phase2_labelled_requests.py")
 
 
 def _load_script() -> ModuleType:

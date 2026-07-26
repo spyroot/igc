@@ -67,7 +67,7 @@ def _run(*args):
 
 def test_render_run_prints_docker_plan(tmp_path):
     """The renderer prints a Docker dry-run without touching Docker."""
-    result = _run("scripts/render_run.py", "--spec", str(_write_spec(tmp_path)))
+    result = _run("scripts/training/render_run.py", "--spec", str(_write_spec(tmp_path)))
     assert result.returncode == 0, result.stderr
     assert "backend: docker" in result.stdout
     assert "docker run" in result.stdout
@@ -78,14 +78,14 @@ def test_render_run_reports_validation_errors(tmp_path):
     """Invalid specs fail gracefully with a short spec error."""
     bad = tmp_path / "bad.yaml"
     bad.write_text("backend: docker\nunknown: true\n", encoding="utf-8")
-    result = _run("scripts/render_run.py", "--spec", str(bad))
+    result = _run("scripts/training/render_run.py", "--spec", str(bad))
     assert result.returncode == 2
     assert "RUN SPEC ERROR:" in result.stderr
 
 
 def test_launch_run_refuses_live_launch_without_dry_run(tmp_path):
     """The first implementation slice cannot mutate Docker or Slurm."""
-    result = _run("scripts/launch_run.py", "--spec", str(_write_spec(tmp_path)))
+    result = _run("scripts/training/launch_run.py", "--spec", str(_write_spec(tmp_path)))
     assert result.returncode == 2
     assert "refusing live launch" in result.stderr
 
@@ -93,7 +93,7 @@ def test_launch_run_refuses_live_launch_without_dry_run(tmp_path):
 def test_launch_run_dry_run_delegates_to_renderer(tmp_path):
     """Dry-run launch prints the same safe command plan."""
     result = _run(
-        "scripts/launch_run.py",
+        "scripts/training/launch_run.py",
         "--spec",
         str(_write_spec(tmp_path, backend="slurm")),
         "--dry-run",

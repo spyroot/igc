@@ -10,7 +10,7 @@ setup() {
 
 @test "preflight requires the dashboard URL" {
     run env -u NV72_FLEET_DASHBOARD_URL \
-        bash "${REPO_ROOT}/scripts/preflight_nv72.sh"
+        bash "${REPO_ROOT}/scripts/nv72/preflight_nv72.sh"
 
     [ "$status" -ne 0 ]
     [[ "$output" == *"NV72_FLEET_DASHBOARD_URL"* ]]
@@ -37,7 +37,7 @@ EOF
         PREFLIGHT_STDIN_FILE="${BATS_TEST_TMPDIR}/stdin.json" \
         PREFLIGHT_ARGS_FILE="${BATS_TEST_TMPDIR}/args.txt" \
         PREFLIGHT_PYTHONPATH_FILE="${BATS_TEST_TMPDIR}/pythonpath.txt" \
-        bash "${REPO_ROOT}/scripts/preflight_nv72.sh" --require-endpoint pro
+        bash "${REPO_ROOT}/scripts/nv72/preflight_nv72.sh" --require-endpoint pro
 
     [ "$status" -eq 0 ]
     [ "$(cat "${BATS_TEST_TMPDIR}/stdin.json")" = '{"status":"ok"}' ]
@@ -54,7 +54,7 @@ EOF
 
     run env \
         NV72_FLEET_DASHBOARD_URL=http://example.invalid \
-        bash "${REPO_ROOT}/scripts/preflight_nv72.sh"
+        bash "${REPO_ROOT}/scripts/nv72/preflight_nv72.sh"
 
     [ "$status" -eq 1 ]
     [[ "$output" == *"BLOCKER: fleet dashboard unreachable"* ]]

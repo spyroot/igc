@@ -18,7 +18,7 @@ differs. Without it the agent is stuck with a flat, fixed action list that neith
 adapts to the per-resource legal set. Who needs it: the ranker (the feasibility check today, the
 pointer policy once wired).
 
-Used by ``scripts/bench_hot_paths.py`` (the candidate-cache benchmark stage), feeding
+Used by ``scripts/profilers/bench_hot_paths.py`` (the candidate-cache benchmark stage), feeding
 ``igc/modules/eval/zero_shot_ranking.py``. The candidate dict emitted here is a schema
 contract with that ranker's ``candidate_text`` / ``embed_candidates`` — renaming a field
 silently breaks ranking.

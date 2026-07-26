@@ -1,4 +1,4 @@
-"""CLI smoke tests for ``scripts/bench_hot_paths.py``.
+"""CLI smoke tests for ``scripts/profilers/bench_hot_paths.py``.
 
 The benchmark is documented as a file-path command, so it must be runnable from
 the repository root without relying on an installed package or manual
@@ -16,7 +16,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts" / "bench_hot_paths.py"
+SCRIPT = REPO_ROOT / "scripts" / "profilers" / "bench_hot_paths.py"
 
 
 def test_bench_hot_paths_help_runs_from_repo_root() -> None:

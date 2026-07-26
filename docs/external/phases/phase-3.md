@@ -226,7 +226,7 @@ profile locks `weights_role: argument_extractor`, the
 renderer, and acceptance thresholds for ordered calls, method validity,
 argument JSON, and read-only empty arguments.
 
-Run the smoke through `scripts/build_phase3_argument_smoke.py`. In default mock
+Run the smoke through `scripts/sanity_checkers/current/build_phase3_argument_smoke.py`. In default mock
 mode it renders two built-in fixtures: a read-only ordered GET/HEAD sequence and
 a PATCH row with explicit arguments. File mode accepts one local fake
 `argument_extractor` JSON prediction per fixture via `--predictions-jsonl`.
@@ -236,7 +236,7 @@ weights, opens W&B, downloads corpora, calls Redfish, or uses a GPU.
 Example:
 
 ```bash
-python scripts/build_phase3_argument_smoke.py \
+python scripts/sanity_checkers/current/build_phase3_argument_smoke.py \
   --output-jsonl /tmp/phase3_argument_smoke.jsonl \
   --metrics-out /tmp/phase3_argument_smoke_metrics.json
 ```

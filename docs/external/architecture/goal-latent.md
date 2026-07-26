@@ -152,13 +152,13 @@ The safe bootstrap generation loop is:
 This is how LLM-backed generation is used: it writes candidate language, not labels. A handwritten
 keyword parser is intentionally not part of the label path.
 
-The first implementation path is `scripts/build_goal_dataset.py`, which consumes one or more captured
-JSON directories through `RedfishFixtureSource` and writes `GoalSurface` rows. This is the small,
-local smoke-test path; it proves the builder on tiny fixtures and does not attempt to pull the full
-corpus:
+The original goal-dataset implementation is now parked under
+`scripts/sanity_checkers/need_refactor/`. It is retained as refactor reference only; it is not the
+current Phase 2/3 producer and is not an acceptance gate. The parked helper consumes one or more
+captured JSON directories through `RedfishFixtureSource` and writes legacy `GoalSurface` rows:
 
 ```bash
-python scripts/build_goal_dataset.py \
+python scripts/sanity_checkers/need_refactor/build_goal_dataset.py \
   --capture-root /path/to/captured/redfish-json \
   --vendor dell \
   --source real_dell \
@@ -171,7 +171,7 @@ uses generic OpenAI-compatible environment variables and does not hardcode priva
 ```bash
 GOAL_PARAPHRASE_BASE_URL=<openai-compatible-base-url> \
 GOAL_PARAPHRASE_MODEL=<model-name> \
-python scripts/build_goal_dataset.py \
+python scripts/sanity_checkers/need_refactor/build_goal_dataset.py \
   --capture-root /path/to/captured/redfish-json \
   --surfaces-out /path/to/goal_surfaces.jsonl \
   --text-out /path/to/goal_text_examples.jsonl \
@@ -179,26 +179,27 @@ python scripts/build_goal_dataset.py \
   --goal-id power.computer_system.PowerState.eq.On
 ```
 
-The full dataset build runs inside the NV72 Docker lab, not on a laptop. The lab wrapper
-`scripts/build_goal_dataset_lab.sh` initializes the canonical `redfish_ctl` checkout, runs
+The parked full dataset build runs inside the NV72 Docker lab, not on a laptop. The lab wrapper
+`scripts/sanity_checkers/need_refactor/build_goal_dataset_lab.sh` initializes the canonical `redfish_ctl` checkout, runs
 `git lfs pull` inside that checkout so the full Redfish corpus archives are present, verifies that
 `full_corpus/dell_xr8620t_full_corpus.tar.gz`,
 `full_corpus/hpe_dl360_full_corpus.tar.gz`,
 `full_corpus/supermicro_gb300_full_corpus.tar.gz`, and
 `full_corpus/supermicro_x10_full_corpus.tar.gz` are real tarballs rather than LFS pointer stubs, and
 then extracts their host roots into a private build directory. Each extracted root must carry the
-same-run `rest_api_map.npy`; `scripts/build_goal_dataset.py` loads its `allowed_methods_mapping` so
+same-run `rest_api_map.npy`; `scripts/sanity_checkers/need_refactor/build_goal_dataset.py` loads its `allowed_methods_mapping` so
 action/reward consumers can see the discovered methods in goal-surface provenance. Capture roots can
 also be supplied explicitly with `IGC_CAPTURE_ROOTS`. The model endpoint comes only from environment
 variables or a private env file; the script never hardcodes private hosts.
 
-For a lab-side full-corpus draft pass, generate one text batch per discovered atomic goal and write a
-manifest with the counts:
+For a lab-side legacy draft pass, generate one text batch per discovered atomic goal and write a
+manifest with the counts. Do not use this as a Phase 2/3 training artifact until it is rewritten to
+the current contracts:
 
 ```bash
 IGC_GOAL_DATASET_OUT=/private/or/lfs/path/goal_dataset \
 IGC_GOAL_DATASET_PARAPHRASE_MODE=template \
-bash scripts/build_goal_dataset_lab.sh
+bash scripts/sanity_checkers/need_refactor/build_goal_dataset_lab.sh
 ```
 
 Use `IGC_GOAL_DATASET_PARAPHRASE_MODE=template` for a deterministic, endpoint-free inspection
@@ -209,17 +210,18 @@ IGC_GOAL_DATASET_OUT=/private/or/lfs/path/goal_dataset \
 IGC_GOAL_DATASET_PARAPHRASE_MODE=openai \
 GOAL_PARAPHRASE_BASE_URL=<openai-compatible-base-url> \
 GOAL_PARAPHRASE_MODEL=<model-name> \
-bash scripts/build_goal_dataset_lab.sh
+bash scripts/sanity_checkers/need_refactor/build_goal_dataset_lab.sh
 ```
 
 The generated `goal_surfaces.jsonl`, `goal_text_examples.jsonl`, and `goal_dataset_manifest.json`
 are private dataset artifacts. They are not public documentation and should not be committed to this
 repository.
 
-To inspect a built dataset locally, use the sampler without loading models or calling any endpoint:
+To inspect a parked legacy artifact in an approved validation surface, use the sampler without
+loading models or calling any endpoint:
 
 ```bash
-python scripts/sample_goal_dataset.py \
+python scripts/sanity_checkers/need_refactor/sample_goal_dataset.py \
   --dataset-dir /path/to/goal_dataset \
   --limit 5 \
   --family power
@@ -228,7 +230,7 @@ python scripts/sample_goal_dataset.py \
 If the dataset was packaged as a tarball, sample it directly:
 
 ```bash
-python scripts/sample_goal_dataset.py \
+python scripts/sanity_checkers/need_refactor/sample_goal_dataset.py \
   --dataset-tar datasets/goal_latent_full_corpus.tar.gz \
   --limit 5 \
   --family power

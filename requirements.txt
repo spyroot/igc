@@ -28,7 +28,7 @@ tabulate
 tqdm
 pynvml
 
-# data collection (redfish_ctl discovery crawl driven by collector.sh)
+# data collection (redfish_ctl discovery crawl driven by scripts/bmc_corpus/collector.sh)
 redfish_ctl>=1.1.4
 
 # NOTE: deepspeed is intentionally absent — it is a cluster-only optional extra

@@ -20,8 +20,8 @@ def _load_script(name: str, relpath: str):
     return module
 
 
-gate = _load_script("phase1_gpu_inference_gate", "scripts/phase1_gpu_inference_gate.py")
-policy = _load_script("model_spec_policy_gate", "scripts/model_spec_policy_gate.py")
+gate = _load_script("phase1_gpu_inference_gate", "scripts/gates/phase1_gpu_inference_gate.py")
+policy = _load_script("model_spec_policy_gate", "scripts/gates/model_spec_policy_gate.py")
 
 
 def _write_phase1_spec(tmp_path: Path, *, adapter_config: bool = True) -> Path:

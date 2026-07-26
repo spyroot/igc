@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Offline tests for scripts/local_gate.sh: the machine-wide gate lock that
+# Offline tests for scripts/sanity_checkers/need_refactor/local_gate.sh: the machine-wide gate lock that
 # serializes heavy local test suites across agent sessions. Uses the
 # IGC_GATE_CMD override seam so no pytest suite actually runs.
 #
@@ -8,7 +8,7 @@
 
 setup() {
     REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
-    SCRIPT="$REPO_ROOT/scripts/local_gate.sh"
+    SCRIPT="$REPO_ROOT/scripts/sanity_checkers/need_refactor/local_gate.sh"
     LOCK="$BATS_TEST_TMPDIR/gate.lock"
 }
 

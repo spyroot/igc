@@ -5,7 +5,7 @@
 > live RL trainer builds `Igc_QNetwork` (the legacy DQN) and never touches the pointer or resource
 > graph, so those optimizations are on the *data-gen/benchmark* path, **not** the running RL loop.
 > Only the DQN/HER/TD/replay hot-path items are on the live path. Verify with
-> `scripts/code_reality_check.py`.
+> `scripts/gates/code_reality_check.py`.
 
 Human-readable map of every performance-critical code path in igc: **where it is, what it
 costs, what we optimized, and how it is guarded** so a slow path can never silently make
@@ -35,7 +35,7 @@ the GPU; they are benchmarked for visibility but are not CPU-offline and carry n
 
 Measured on a laptop CPU (single-thread, `OMP_NUM_THREADS=1`); absolute times are machine-relative
 — the **budgets and ratios** are what CI enforces. Reproduce with
-`python scripts/bench_hot_paths.py --profile`.
+`python scripts/profilers/bench_hot_paths.py --profile`.
 
 ### 1. Data-generation path — `igc/ds/sources/`
 
@@ -127,7 +127,7 @@ forgotten.
 
 ## Adding a new hot path
 
-1. Add a stage to `scripts/bench_hot_paths.py` (real corpus or realistic synthetic tensors).
+1. Add a stage to `scripts/profilers/bench_hot_paths.py` (real corpus or realistic synthetic tensors).
 2. Run it, paste the table into your PR; for an optimization, include before/after **and** an
    output-equivalence check against the old code.
 3. Add a `tests/perf/` budget (absolute, 50–100× loose) or a ratio tripwire.

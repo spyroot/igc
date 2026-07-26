@@ -3,7 +3,7 @@
 So a Phase 1 Redfish JSON pretraining/fine-tune can be run by NAME rather than a long,
 error-prone flag list:
 ``python -m igc.modules.train.launch --profile phase1_7b_rslora_r32 --print-argv`` prints
-the exact argv, and ``scripts/run_profile.sh`` feeds it to ``igc_main.py`` with the
+the exact argv, and ``scripts/profilers/run_profile.sh`` feeds it to ``igc_main.py`` with the
 data/output dirs supplied from the environment (kept out of code so nothing endpoint- or
 path-specific is committed). Without ``--print-argv`` it prints the resolved profile
 (:meth:`~igc.modules.train.profiles.TrainingProfile.describe`) for the log.

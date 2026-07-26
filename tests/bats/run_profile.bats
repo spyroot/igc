@@ -36,7 +36,7 @@ EOF
 }
 
 @test "run_profile requires IGC_PROFILE" {
-    run env -u IGC_PROFILE bash "${REPO_ROOT}/scripts/run_profile.sh"
+    run env -u IGC_PROFILE bash "${REPO_ROOT}/scripts/profilers/run_profile.sh"
 
     [ "$status" -ne 0 ]
     [[ "$output" == *"set IGC_PROFILE"* ]]
@@ -54,7 +54,7 @@ EOF
         IGC_SET="batch_size=2 lr=1e-4" \
         RUN_PROFILE_CALLS_FILE="${BATS_TEST_TMPDIR}/calls.txt" \
         RUN_PROFILE_FINAL_ARGS_FILE="${BATS_TEST_TMPDIR}/final-args.txt" \
-        bash "${REPO_ROOT}/scripts/run_profile.sh" -- --recreate_dataset
+        bash "${REPO_ROOT}/scripts/profilers/run_profile.sh" -- --recreate_dataset
 
     [ "$status" -eq 0 ]
     [ -d "${BATS_TEST_TMPDIR}/out" ]
@@ -78,7 +78,7 @@ EOF
     run env \
         IGC_PROFILE=phase1_gpt2_smoke \
         IGC_CORPUS_OBJECTIVE=legacy \
-        bash "${REPO_ROOT}/scripts/run_profile.sh"
+        bash "${REPO_ROOT}/scripts/profilers/run_profile.sh"
 
     [ "$status" -eq 2 ]
     [[ "$output" == *"IGC_CORPUS_OBJECTIVE is retired"* ]]

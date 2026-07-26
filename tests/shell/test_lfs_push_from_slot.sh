@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Focused regression for scripts/lfs_push_from_slot.sh.
+# Focused regression for scripts/artifacts/lfs_push_from_slot.sh.
 #
 # Runs without network or git-lfs: the unsafe-path failure must happen before
 # the helper checks for a git-lfs binary, creates a data branch, or stages files.
@@ -8,7 +8,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-bash -n scripts/lfs_push_from_slot.sh
+bash -n scripts/artifacts/lfs_push_from_slot.sh
 
 tmp="$(mktemp -d)"
 cleanup() { rm -rf "$tmp"; }
@@ -28,7 +28,7 @@ out="$tmp/lfs_push.out"
 set +e
 (
     cd "$tmp"
-    IGC_YES=1 IGC_REMOTE=origin "$repo_root/scripts/lfs_push_from_slot.sh" raw.bin
+    IGC_YES=1 IGC_REMOTE=origin "$repo_root/scripts/artifacts/lfs_push_from_slot.sh" raw.bin
 ) >"$out" 2>&1
 status=$?
 set -e
@@ -70,7 +70,7 @@ set +e
 (
     cd "$tracked"
     PATH="$tracked/fake-bin:$PATH" IGC_YES=1 IGC_REMOTE=origin \
-        "$repo_root/scripts/lfs_push_from_slot.sh" raw.bin
+        "$repo_root/scripts/artifacts/lfs_push_from_slot.sh" raw.bin
 ) >"$tracked_out" 2>&1
 tracked_status=$?
 set -e
@@ -116,7 +116,7 @@ set +e
 (
     cd "$attrfail"
     PATH="$attrfail/fake-bin:$PATH" IGC_YES=1 IGC_REMOTE=origin \
-        "$repo_root/scripts/lfs_push_from_slot.sh" raw.bin
+        "$repo_root/scripts/artifacts/lfs_push_from_slot.sh" raw.bin
 ) >"$attrfail_out" 2>&1
 attrfail_status=$?
 set -e
@@ -152,7 +152,7 @@ set +e
 (
     cd "$unborn"
     IGC_YES=1 IGC_REMOTE=origin \
-        "$repo_root/scripts/lfs_push_from_slot.sh" raw.bin
+        "$repo_root/scripts/artifacts/lfs_push_from_slot.sh" raw.bin
 ) >"$unborn_out" 2>&1
 unborn_status=$?
 set -e

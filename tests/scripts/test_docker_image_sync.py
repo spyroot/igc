@@ -13,7 +13,7 @@ import textwrap
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "docker_image_sync.py"
+SCRIPT = ROOT / "scripts" / "nv72" / "docker_image_sync.py"
 
 
 def _load_module():

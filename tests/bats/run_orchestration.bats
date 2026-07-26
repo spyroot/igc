@@ -69,7 +69,7 @@ EOF
 }
 
 @test "render_run renders committed docker example" {
-    run "${PYTHON_BIN}" "${REPO_ROOT}/scripts/render_run.py" \
+    run "${PYTHON_BIN}" "${REPO_ROOT}/scripts/training/render_run.py" \
         --spec "${REPO_ROOT}/configs/run/examples/docker-smoke.yaml"
 
     [ "$status" -eq 0 ]
@@ -79,7 +79,7 @@ EOF
 }
 
 @test "launch_run refuses live execution without dry-run" {
-    run "${PYTHON_BIN}" "${REPO_ROOT}/scripts/launch_run.py" \
+    run "${PYTHON_BIN}" "${REPO_ROOT}/scripts/training/launch_run.py" \
         --spec "${REPO_ROOT}/configs/run/examples/docker-smoke.yaml"
 
     [ "$status" -eq 2 ]
@@ -89,7 +89,7 @@ EOF
 @test "slurm sanity dry-run renders sbatch without calling scheduler" {
     write_slurm_spec
 
-    run "${PYTHON_BIN}" "${REPO_ROOT}/scripts/slurm_sanity_from_spec.py" \
+    run "${PYTHON_BIN}" "${REPO_ROOT}/scripts/training/slurm_sanity_from_spec.py" \
         --spec "${BATS_TEST_TMPDIR}/slurm.yaml" --dry-run
 
     [ "$status" -eq 0 ]
@@ -101,7 +101,7 @@ EOF
     write_slurm_spec
     install_completed_slurm_fakes
 
-    run env IGC_SLURM_SANITY_TEST=1 "${PYTHON_BIN}" "${REPO_ROOT}/scripts/slurm_sanity_from_spec.py" \
+    run env IGC_SLURM_SANITY_TEST=1 "${PYTHON_BIN}" "${REPO_ROOT}/scripts/training/slurm_sanity_from_spec.py" \
         --spec "${BATS_TEST_TMPDIR}/slurm.yaml" --live
 
     [ "$status" -eq 0 ]
@@ -113,7 +113,7 @@ EOF
     install_completed_slurm_fakes
 
     run env IGC_SLURM_SANITY_TEST=1 FAKE_SLURM_STATE=FAILED \
-        "${PYTHON_BIN}" "${REPO_ROOT}/scripts/slurm_sanity_from_spec.py" \
+        "${PYTHON_BIN}" "${REPO_ROOT}/scripts/training/slurm_sanity_from_spec.py" \
         --spec "${BATS_TEST_TMPDIR}/slurm.yaml" --live
 
     [ "$status" -eq 1 ]
@@ -122,7 +122,7 @@ EOF
 }
 
 @test "docker image sync dry-run renders inspect and pull" {
-    run "${PYTHON_BIN}" "${REPO_ROOT}/scripts/docker_image_sync.py" \
+    run "${PYTHON_BIN}" "${REPO_ROOT}/scripts/nv72/docker_image_sync.py" \
         --spec "${REPO_ROOT}/configs/run/examples/docker-smoke.yaml" --dry-run
 
     [ "$status" -eq 0 ]
@@ -145,7 +145,7 @@ exit 99
 EOF
     chmod +x "${BATS_TEST_TMPDIR}/bin/docker"
 
-    run "${PYTHON_BIN}" "${REPO_ROOT}/scripts/docker_image_sync.py" \
+    run "${PYTHON_BIN}" "${REPO_ROOT}/scripts/nv72/docker_image_sync.py" \
         --spec "${REPO_ROOT}/configs/run/examples/docker-smoke.yaml"
 
     [ "$status" -eq 1 ]

@@ -166,7 +166,7 @@ objective change.** This fork is recorded, not yet closed.
   absolute-position models only); read the length cap from `config.max_position_embeddings`; replace
   the hard-coded `GPT2Tokenizer` fallbacks with `AutoTokenizer`; fix the `"gpt-2"` id. **GPT-2 stays
   the default**, so the offline CPU gate stays green. This is the prerequisite for any swap, and it
-  ships with a `scripts/bench_hot_paths.py` number plus a perf-budget update per the hot-path rule
+  ships with a `scripts/profilers/bench_hot_paths.py` number plus a perf-budget update per the hot-path rule
   (the encode path is a hot path).
 - **Phase 1 — a modern small default, opt-in first.** Add SmolLM2-135M as a benchmarked option; flip
   the default only once it (a) beats GPT-2 on the zero-shot ranking harness
@@ -284,7 +284,7 @@ HER relabeling then re-scores cached embeddings against the new goal-conditioned
 (one matmul) instead of re-encoding candidates. This resolves D-001 binding requirement #2 by
 construction.
 
-**Measured throughput consequence (2026-07-11, `scripts/bench_hot_paths.py --section rl`).** The
+**Measured throughput consequence (2026-07-11, `scripts/profilers/bench_hot_paths.py --section rl`).** The
 pointer forward's ONLY expensive step is the candidate projection: projecting `[B, N, H]`
 embeddings through the `ActionProjector` MLP (GELU + two Linears over 76.8M elements at B=256,
 N=300, H=768) is 0.193s/step on CPU, while every other RL critical section — DQN target, HER
@@ -329,7 +329,7 @@ held-out vendor (HPE) for the real go/no-go.
 
 ### Experiment result 2 (2026-07-11) — GO: a mildly-anchored, multi-vendor bilinear projection transfers
 
-Running that next step (`scripts/exp_d002_bc_ranking.py`; frozen trigram encoder, D-002 v1 features,
+Running that next step (`scripts/research/exp_d002_bc_ranking.py`; frozen trigram encoder, D-002 v1 features,
 top-5, HPE held out of training):
 
 | Ranker | Supermicro (in-domain) | HPE (held-out) | verdict |
@@ -353,7 +353,7 @@ vendor, which passes.
 
 **Consequence: GO.** The learned bilinear projection is confirmed both load-bearing *and* transferable
 — unblocking M6 training spend — *provided* `W` is anchored to cosine and trained multi-vendor (a
-free-form single-vendor `W` is a trap). Reproduce: `python scripts/exp_d002_bc_ranking.py`.
+free-form single-vendor `W` is a trap). Reproduce: `python scripts/research/exp_d002_bc_ranking.py`.
 
 ### Experiment result 3 (2026-07-11) — a LARGE held-out host is NOT cleared by v1 features
 
@@ -378,7 +378,7 @@ v1 alone.** The anchored-`W` + multi-vendor recipe is confirmed (large lift ever
 held-out host must be earned by the planned responses before M6 scaling: the D-002 **v2
 graph-neighborhood features**, the learned **M1 encoder** (vs the frozen trigram floor used here), and
 the trained **TD/HER pointer** (vs pure representation similarity). Reproduce:
-`python scripts/exp_d002_bc_ranking.py --holdout datasets/orig/<dell-host>`.
+`python scripts/research/exp_d002_bc_ranking.py --holdout datasets/orig/<dell-host>`.
 
 **Data-hygiene correction (same day).** The Dell walk is a full "entire dump": **~73% of its 2352
 nodes are the Redfish schema/metric registry** (`JsonSchemaFile`, `/Schemas`, `MetricDefinition`) —

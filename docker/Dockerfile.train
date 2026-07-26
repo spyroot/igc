@@ -6,13 +6,13 @@
 #
 # The igc SOURCE is NOT baked: it is bind-mounted at run time
 # (`-v <checkout>:/workspace/igc`), so a code fix is `git pull` + re-run with NO image
-# rebuild. This is what scripts/gb300_launch.sh does.
+# rebuild. This is what scripts/nv72/gb300_launch.sh does.
 #
 # Build (on a node; the base is cached, so this is just the pip layer, ~1-2 min):
 #   docker build -f docker/Dockerfile.train -t igc-train:ngc26.03 .
 #
 # Run (via the launcher, which mounts code+data and guards the node):
-#   IGC_IMAGE=igc-train:ngc26.03 IGC_GPUS=4 IGC_MODEL=gpt2 scripts/gb300_launch.sh
+#   IGC_IMAGE=igc-train:ngc26.03 IGC_GPUS=4 IGC_MODEL=gpt2 scripts/nv72/gb300_launch.sh
 #
 # Share to all 18 nodes without rebuilding 18x (optional — big file, node uplink only):
 #   docker save igc-train:ngc26.03 | zstd > /models/images/igc-train-ngc26.03.tar.zst

@@ -143,7 +143,7 @@ calibration, and test-time evidence.
 - `phase1_finetune/throughput/train_tokens_per_sec`
 - `phase1_finetune/throughput/train_samples_per_sec`
 
-The held-out producer in `scripts/phase1_inference_gate.py` consumes existing
+The held-out producer in `scripts/gates/phase1_inference_gate.py` consumes existing
 baseline and `model_x` prediction JSONL artifacts, compares them under the
 spec in `configs/inference/phase1_golden_acceptance.yaml`, and writes compact
 metrics/evidence to caller-supplied paths. These keys are listed in

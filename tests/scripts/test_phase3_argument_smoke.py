@@ -15,7 +15,7 @@ import pytest
 
 from igc.modules.base.metric_keys import PHASE3_ARGUMENT_EXTRACT, phase_metric
 
-SCRIPT = Path("scripts/build_phase3_argument_smoke.py")
+SCRIPT = Path("scripts/sanity_checkers/current/build_phase3_argument_smoke.py")
 
 
 def _load_script() -> ModuleType:

@@ -63,7 +63,7 @@ vendor/model/capture layout. IGC consumes that output through `--corpus_manifest
 ```bash
 IGC_PROFILE=phase1_gpt2_smoke \
 IGC_METRIC_REPORT=tensorboard \
-bash scripts/run_profile.sh \
+bash scripts/profilers/run_profile.sh \
   --corpus_manifest /path/to/redfish_ctl/corpora/manifest.v1.json \
   --corpus_root /path/to/materialized/corpus \
   --corpus_kind dataset \

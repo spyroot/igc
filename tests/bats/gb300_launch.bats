@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Offline render/validation tests for scripts/gb300_launch.sh.
+# Offline render/validation tests for scripts/nv72/gb300_launch.sh.
 #
 # Everything runs in DRY-RUN mode (IGC_DRY_RUN=1): the launcher prints the exact docker
 # and igc_main.py command(s) and exits without touching docker, a GPU, or a node — so these
@@ -12,7 +12,7 @@
 setup() {
     REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
     export REPO_ROOT
-    LAUNCH="${REPO_ROOT}/scripts/gb300_launch.sh"
+    LAUNCH="${REPO_ROOT}/scripts/nv72/gb300_launch.sh"
     export LAUNCH
     # keep paths off $HOME so the tests are hermetic
     export IGC_CODE_DIR="${BATS_TEST_TMPDIR}/igc"

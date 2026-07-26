@@ -24,7 +24,10 @@ _SCRIPTS = pathlib.Path(__file__).resolve().parents[2] / "scripts"
 
 
 def _load_nccl_smoke():
-    spec = importlib.util.spec_from_file_location("nccl_smoke", _SCRIPTS / "nccl_smoke.py")
+    spec = importlib.util.spec_from_file_location(
+        "nccl_smoke",
+        _SCRIPTS / "sanity_checkers" / "current" / "nccl_smoke.py",
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

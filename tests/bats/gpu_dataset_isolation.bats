@@ -55,7 +55,7 @@ EOF
         CASE_TIMEOUT=1 \
         WORLDS="1 2" \
         FAKE_TIMEOUT_MODE=expected \
-        bash "${REPO_ROOT}/scripts/gpu_dataset_isolation.sh"
+        bash "${REPO_ROOT}/scripts/sanity_checkers/current/gpu_dataset_isolation.sh"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"indivisible_NO_drop_last"* ]]
@@ -68,7 +68,7 @@ EOF
         CASE_TIMEOUT=1 \
         WORLDS="1 2" \
         FAKE_TIMEOUT_MODE=all-pass \
-        bash "${REPO_ROOT}/scripts/gpu_dataset_isolation.sh"
+        bash "${REPO_ROOT}/scripts/sanity_checkers/current/gpu_dataset_isolation.sh"
 
     [ "$status" -eq 1 ]
     [[ "$output" == *"MISMATCH"* ]]

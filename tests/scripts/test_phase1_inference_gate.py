@@ -1,4 +1,4 @@
-"""CLI tests for ``scripts/phase1_inference_gate.py``.
+"""CLI tests for ``scripts/gates/phase1_inference_gate.py``.
 
 Author:
 Mus mbayramo@stanford.edu
@@ -12,7 +12,7 @@ from pathlib import Path
 from igc.modules.base.metric_keys import PHASE1_FINETUNE, phase_metric
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts" / "phase1_inference_gate.py"
+SCRIPT = REPO_ROOT / "scripts" / "gates" / "phase1_inference_gate.py"
 
 
 def _load_script():

@@ -32,13 +32,13 @@ coverage: ## Run the offline gate with coverage (term + coverage.xml + coverage.
 	KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 $(PYTHON) -m pytest -q --cov=igc --cov-report=term --cov-report=xml --cov-report=json
 
 metrics: coverage ## Write a per-commit metrics snapshot (tests + coverage + hot-path timings) to metrics.json
-	$(PYTHON) scripts/metrics_snapshot.py --coverage-json coverage.json --out metrics.json
+	$(PYTHON) scripts/profilers/metrics_snapshot.py --coverage-json coverage.json --out metrics.json
 
 profile: ## Profile all hot paths with cProfile critical sections
-	$(PYTHON) scripts/bench_hot_paths.py --profile
+	$(PYTHON) scripts/profilers/bench_hot_paths.py --profile
 
 profile-rl: ## Profile only the RL training hot paths
-	$(PYTHON) scripts/bench_hot_paths.py --section rl --profile
+	$(PYTHON) scripts/profilers/bench_hot_paths.py --section rl --profile
 
 profile-dataset-cuda: ## Profile Redfish corpus/tokenizer/DataLoader/H2D/CUDA train step
 	@test "$${PROFILE_DATASET_ARGS}" || ( \
@@ -46,7 +46,7 @@ profile-dataset-cuda: ## Profile Redfish corpus/tokenizer/DataLoader/H2D/CUDA tr
 		echo "       --output-dir /models/igc/profile_runs/<run_id> ...'"; \
 		exit 2; \
 	)
-	$(PYTHON) scripts/profile_dataset_to_cuda.py $${PROFILE_DATASET_ARGS}
+	$(PYTHON) scripts/profilers/profile_dataset_to_cuda.py $${PROFILE_DATASET_ARGS}
 
 docker-test: ## Build the CPU test image and run the gate inside it
 	docker build -f docker/Dockerfile.test -t igc-test:cpu . && docker run --rm igc-test:cpu python -m pytest -q

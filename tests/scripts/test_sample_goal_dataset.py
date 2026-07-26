@@ -1,4 +1,4 @@
-"""Offline tests for ``scripts/sample_goal_dataset.py``.
+"""Offline tests for ``scripts/sanity_checkers/need_refactor/sample_goal_dataset.py``.
 
 Author:
 Mus mbayramo@stanford.edu
@@ -14,7 +14,7 @@ import pytest
 from igc.ds.goal_dataset import GoalRef, GoalSurface, GoalTextExample
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts" / "sample_goal_dataset.py"
+SCRIPT = REPO_ROOT / "scripts" / "sanity_checkers" / "need_refactor" / "sample_goal_dataset.py"
 
 
 def _load_script():

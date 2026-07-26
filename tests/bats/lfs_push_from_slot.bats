@@ -16,7 +16,7 @@ setup() {
     printf 'payload\n' >"${tmp}/raw.bin"
     before_branch="$(git -C "${tmp}" symbolic-ref --short HEAD)"
 
-    run bash -c 'cd "$1" && env IGC_YES=1 IGC_REMOTE=origin "$2/scripts/lfs_push_from_slot.sh" raw.bin' \
+    run bash -c 'cd "$1" && env IGC_YES=1 IGC_REMOTE=origin "$2/scripts/artifacts/lfs_push_from_slot.sh" raw.bin' \
         _ "${tmp}" "${REPO_ROOT}"
 
     [ "$status" -ne 0 ]
@@ -37,7 +37,7 @@ setup() {
     printf 'payload\n' >"${tmp}/raw.bin"
     before_branch="$(git -C "${tmp}" symbolic-ref --short HEAD)"
 
-    run bash -c 'cd "$1" && env IGC_YES=1 IGC_REMOTE=origin "$2/scripts/lfs_push_from_slot.sh" raw.bin' \
+    run bash -c 'cd "$1" && env IGC_YES=1 IGC_REMOTE=origin "$2/scripts/artifacts/lfs_push_from_slot.sh" raw.bin' \
         _ "${tmp}" "${REPO_ROOT}"
 
     [ "$status" -ne 0 ]
@@ -67,7 +67,7 @@ exec "${real_git}" "\$@"
 EOF
     chmod +x "${tmp}/fake-bin/git"
 
-    run bash -c 'cd "$1" && env PATH="$1/fake-bin:$PATH" IGC_YES=1 IGC_REMOTE=origin "$2/scripts/lfs_push_from_slot.sh" raw.bin' \
+    run bash -c 'cd "$1" && env PATH="$1/fake-bin:$PATH" IGC_YES=1 IGC_REMOTE=origin "$2/scripts/artifacts/lfs_push_from_slot.sh" raw.bin' \
         _ "${tmp}" "${REPO_ROOT}"
 
     [ "$status" -ne 0 ]
@@ -99,7 +99,7 @@ exec "${real_git}" "\$@"
 EOF
     chmod +x "${tmp}/fake-bin/git"
 
-    run bash -c 'cd "$1" && env PATH="$1/fake-bin:$PATH" IGC_YES=1 IGC_REMOTE=origin "$2/scripts/lfs_push_from_slot.sh" raw.bin' \
+    run bash -c 'cd "$1" && env PATH="$1/fake-bin:$PATH" IGC_YES=1 IGC_REMOTE=origin "$2/scripts/artifacts/lfs_push_from_slot.sh" raw.bin' \
         _ "${tmp}" "${REPO_ROOT}"
 
     [ "$status" -ne 0 ]
@@ -120,7 +120,7 @@ EOF
     printf '*.bin filter=lfs diff=lfs merge=lfs -text\n' >"${tmp}/.gitattributes"
     printf 'payload\n' >"${tmp}/raw.bin"
 
-    run bash -c 'cd "$1" && env IGC_YES=1 IGC_REMOTE=origin "$2/scripts/lfs_push_from_slot.sh" raw.bin' \
+    run bash -c 'cd "$1" && env IGC_YES=1 IGC_REMOTE=origin "$2/scripts/artifacts/lfs_push_from_slot.sh" raw.bin' \
         _ "${tmp}" "${REPO_ROOT}"
 
     [ "$status" -ne 0 ]

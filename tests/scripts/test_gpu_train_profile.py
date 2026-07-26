@@ -1,5 +1,5 @@
 """
-Offline smoke tests for the multi-GPU training-step profiler (``scripts/gpu_train_profile.py``).
+Offline smoke tests for the multi-GPU training-step profiler (``scripts/profilers/gpu_train_profile.py``).
 
 The profiler's value is on a GB300 node under ``accelerate launch``; these CPU tests just guard that
 the section decomposition, the timer, and a single-process run stay wired — so a refactor cannot

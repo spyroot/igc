@@ -12,7 +12,7 @@ import textwrap
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "slurm_sanity_from_spec.py"
+SCRIPT = ROOT / "scripts" / "training" / "slurm_sanity_from_spec.py"
 
 
 def _load_module():

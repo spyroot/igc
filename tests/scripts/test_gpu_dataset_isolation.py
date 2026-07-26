@@ -1,4 +1,4 @@
-"""Offline boundary tests for ``scripts/gpu_dataset_isolation.py``.
+"""Offline boundary tests for ``scripts/sanity_checkers/current/gpu_dataset_isolation.py``.
 
 The multi-rank NCCL deadlock case is intentionally opt-in on GB300. These tests
 exercise the same harness in single-rank CPU mode so edge cases around zero
@@ -16,7 +16,7 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-HARNESS = REPO_ROOT / "scripts" / "gpu_dataset_isolation.py"
+HARNESS = REPO_ROOT / "scripts" / "sanity_checkers" / "current" / "gpu_dataset_isolation.py"
 
 
 def _load_harness():

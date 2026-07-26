@@ -478,7 +478,7 @@ def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Pat
         path.read_text(encoding="utf-8")
         for path in (
             Path("igc/ds/phase2_labelled_requests.py"),
-            Path("scripts/build_phase2_labelled_requests.py"),
+            Path("scripts/bmc_corpus/build_phase2_labelled_requests.py"),
         )
     )
     forbidden_literals = (

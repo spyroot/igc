@@ -16,7 +16,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts" / "gpu_dataset_isolation.sh"
+SCRIPT = REPO_ROOT / "scripts" / "sanity_checkers" / "current" / "gpu_dataset_isolation.sh"
 
 
 def _write_executable(path: Path, text: str) -> None:

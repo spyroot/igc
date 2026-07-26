@@ -4,7 +4,7 @@ TEAM_GUIDE makes checking the NV72 fleet dashboard a hard blocker before any
 GB300 work: RoCE degraded, the shared ``/models`` mount missing, or a required
 model endpoint absent means "stop and report a BLOCKER", never "submit anyway".
 This module holds the pure decision logic — it never talks to the network.
-``scripts/preflight_nv72.sh`` (which owns the curl against
+``scripts/nv72/preflight_nv72.sh`` (which owns the curl against
 ``$NV72_FLEET_DASHBOARD_URL``, defined in the caller's environment) pipes the
 ``/api/v1/state`` JSON into :func:`main`; tests feed fixture payloads straight
 into :func:`evaluate_state` per TEAM_GUIDE's offline-testing mandate.

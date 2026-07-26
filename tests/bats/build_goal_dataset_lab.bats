@@ -97,7 +97,7 @@ make_nested_map_archive() {
 		IGC_REDFISH_CTL_DIR="${corpus}" \
 		GOAL_PARAPHRASE_BASE_URL=http://example.invalid \
 		GOAL_PARAPHRASE_MODEL=local-pro \
-		bash "${REPO_ROOT}/scripts/build_goal_dataset_lab.sh"
+		bash "${REPO_ROOT}/scripts/sanity_checkers/need_refactor/build_goal_dataset_lab.sh"
 
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"IGC_GOAL_DATASET_OUT"* ]]
@@ -116,7 +116,7 @@ make_nested_map_archive() {
 		IGC_GOAL_DATASET_OUT="${BATS_TEST_TMPDIR}/out" \
 		GOAL_PARAPHRASE_BASE_URL=http://example.invalid \
 		GOAL_PARAPHRASE_MODEL=local-pro \
-		bash "${REPO_ROOT}/scripts/build_goal_dataset_lab.sh"
+		bash "${REPO_ROOT}/scripts/sanity_checkers/need_refactor/build_goal_dataset_lab.sh"
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"pulling redfish_ctl Git LFS objects"* ]]
@@ -144,7 +144,7 @@ make_nested_map_archive() {
 		IGC_GOAL_DATASET_OUT="${BATS_TEST_TMPDIR}/out" \
 		GOAL_PARAPHRASE_BASE_URL=http://example.invalid \
 		GOAL_PARAPHRASE_MODEL=local-pro \
-		bash "${REPO_ROOT}/scripts/build_goal_dataset_lab.sh"
+		bash "${REPO_ROOT}/scripts/sanity_checkers/need_refactor/build_goal_dataset_lab.sh"
 
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"missing required redfish_ctl full corpus archive"* ]]
@@ -164,7 +164,7 @@ make_nested_map_archive() {
 		IGC_GOAL_DATASET_OUT="${BATS_TEST_TMPDIR}/out" \
 		GOAL_PARAPHRASE_BASE_URL=http://example.invalid \
 		GOAL_PARAPHRASE_MODEL=local-pro \
-		bash "${REPO_ROOT}/scripts/build_goal_dataset_lab.sh"
+		bash "${REPO_ROOT}/scripts/sanity_checkers/need_refactor/build_goal_dataset_lab.sh"
 
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"unsafe link entry in redfish_ctl full corpus archive"* ]]
@@ -184,7 +184,7 @@ make_nested_map_archive() {
 		IGC_GOAL_DATASET_OUT="${BATS_TEST_TMPDIR}/out" \
 		GOAL_PARAPHRASE_BASE_URL=http://example.invalid \
 		GOAL_PARAPHRASE_MODEL=local-pro \
-		bash "${REPO_ROOT}/scripts/build_goal_dataset_lab.sh"
+		bash "${REPO_ROOT}/scripts/sanity_checkers/need_refactor/build_goal_dataset_lab.sh"
 
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"lacks top-level host rest_api_map.npy"* ]]
