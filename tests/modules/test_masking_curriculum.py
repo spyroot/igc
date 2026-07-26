@@ -12,7 +12,7 @@ Mus mbayramo@stanford.edu
 
 import pytest
 
-from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
+from igc.modules.train.sft import SFTTrainer
 
 
 class _Dataset:
@@ -24,7 +24,7 @@ class _Dataset:
 
 
 def _trainer(freq=2, passes=10):
-    trainer = LlmEmbeddingsTrainer.__new__(LlmEmbeddingsTrainer)
+    trainer = SFTTrainer.__new__(SFTTrainer)
     trainer._masked_freq = freq
     trainer._num_mask_passed = passes
     trainer._current_mask_method_idx = 0

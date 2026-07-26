@@ -16,14 +16,32 @@ import pytest
 from igc.modules.train.report import ResultBundle, RunManifest, capture_environment, compare
 
 
-def _bundle(arm_method, rank, metrics, *, data="ds-v1", split="held-out-a", steps=200, seq=1024):
+def _bundle(
+    arm_method,
+    rank,
+    metrics,
+    *,
+    data="sha256:" + "1" * 64,
+    train_sha="sha256:" + "2" * 64,
+    eval_sha="sha256:" + "3" * 64,
+    source_sha="sha256:" + "4" * 64,
+    registry_sha="sha256:" + "5" * 64,
+    steps=200,
+    seq=1024,
+):
     """A ResultBundle for one arm with a shared (fair) manifest by default."""
     return ResultBundle(
         manifest=RunManifest(
             run_id=f"run-{arm_method}-{rank}", profile="phase1_7b_lora",
             model="Qwen/Qwen2.5-7B-Instruct", tokenizer="qwen2.5",
             adapter_method=arm_method, adapter_rank=rank,
-            data_manifest=data, eval_split=split, max_steps=steps, seq_len=seq,
+            data_manifest=data,
+            train_data_sha=train_sha,
+            eval_data_sha=eval_sha,
+            source_manifest_sha=source_sha,
+            source_registry_sha=registry_sha,
+            max_steps=steps,
+            seq_len=seq,
         ),
         metrics=metrics,
     )
@@ -108,13 +126,42 @@ def test_enriched_manifest_round_trips(tmp_path: Path) -> None:
     assert back.manifest.warnings and back.manifest.environment.get("python")
 
 
+def test_run_manifest_records_warmup_and_lora_profile_fields(tmp_path: Path) -> None:
+    """Run reports preserve scheduler warmup and exact adapter config fields."""
+    bundle = ResultBundle(
+        manifest=RunManifest(
+            run_id="r-warmup",
+            profile="phase1_7b_rslora_r32",
+            model="Qwen/Qwen2.5-7B-Instruct",
+            adapter_method="rslora",
+            adapter_rank=32,
+            warmup_ratio=0.03,
+            lora_init="pissa",
+            lora_target_modules=["q_proj", "v_proj", "down_proj"],
+        ),
+        metrics={"recall@1": 0.72},
+    )
+    path = tmp_path / "report.json"
+
+    bundle.write(str(path))
+    payload = ResultBundle.read(str(path)).to_dict()["manifest"]
+
+    assert payload["warmup_ratio"] == 0.03
+    assert payload["adapter_method"] == "rslora"
+    assert payload["lora_init"] == "pissa"
+    assert payload["lora_target_modules"] == ["q_proj", "v_proj", "down_proj"]
+
+
 @pytest.mark.parametrize(
     ("field", "other"),
     [
         ("model", "Qwen/Qwen2.5-3B-Instruct"),
         ("tokenizer", "other-tokenizer"),
         ("data_manifest", "ds-v2"),
-        ("eval_split", "held-out-b"),
+        ("train_data_sha", "sha256:" + "6" * 64),
+        ("eval_data_sha", "sha256:" + "7" * 64),
+        ("source_manifest_sha", "sha256:" + "8" * 64),
+        ("source_registry_sha", "sha256:" + "9" * 64),
         ("max_steps", 400),
         ("seq_len", 2048),
     ],
@@ -150,14 +197,14 @@ def test_from_dict_defaults_missing_optional_collections() -> None:
 def test_duplicate_arm_labels_remain_visible_in_report() -> None:
     """Duplicate arm labels stay visible instead of hiding that two bundles collided."""
     first = _bundle("lora", 16, {"recall@1": 0.6})
-    second = _bundle("lora", 16, {"recall@1": 0.7}, split="held-out-b")
+    second = _bundle("lora", 16, {"recall@1": 0.7}, eval_sha="sha256:" + "6" * 64)
     rep = compare([first, second], baseline="lora")
 
     assert rep.arms == ["lora-r16", "lora-r16"]
     assert rep.baseline == "lora-r16"
     assert "lora-r16" in rep.table
     assert rep.table["lora-r16"]["recall@1"] == 0.7
-    assert any("eval_split differs" in issue for issue in rep.fairness_issues)
+    assert any("eval_data_sha differs" in issue for issue in rep.fairness_issues)
 
 
 def test_markdown_renders_missing_metrics_and_baseline() -> None:

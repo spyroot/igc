@@ -2,7 +2,7 @@
 """Run the offline Phase 3 method/argument extraction smoke.
 
 The runner is spec-driven and provider-injected. It uses tiny built-in
-fixtures, renders them through the ordered-goal contract, and parses fake model
+fixtures, renders them through the unordered call-set contract, and parses fake model
 outputs from either deterministic mock mode or a local JSONL file. It never
 loads model weights, opens W&B, downloads corpora, calls Redfish, or uses a GPU.
 
@@ -27,33 +27,36 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from igc.ds.rest_goal_contract import (
     RedfishContext,
-    build_ordered_call_row,
-    evaluate_ordered_calls_y_pred,
-    inference_ordered_goals_json,
-    render_ordered_call_example,
+    build_call_row,
+    evaluate_calls_y_pred,
+    inference_calls_json,
+    render_call_example,
 )
 from igc.modules.base.metric_keys import PHASE3_ARGUMENT_EXTRACT, phase_metric
 
 PHASE3_ARGUMENT_SMOKE = "phase3_argument_extractor_smoke"
 
-_CALL_ORDERED_EXACT_KEY = phase_metric(
+_CALL_SET_EXACT_KEY = phase_metric(
     PHASE3_ARGUMENT_EXTRACT,
     "eval",
-    "call_ordered_exact_match_rate",
+    "call_set_exact_match_rate",
 )
-_CALL_ORDER_CORRECT_KEY = phase_metric(
+_REST_API_SET_EXACT_KEY = phase_metric(
     PHASE3_ARGUMENT_EXTRACT,
     "eval",
-    "call_order_correct_rate",
+    "rest_api_set_match_rate",
 )
-_REST_API_EXACT_KEY = phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "rest_api_exact_match_rate")
-_ALLOWED_METHODS_EXACT_KEY = phase_metric(
+_METHOD_EXACT_KEY = phase_metric(
     PHASE3_ARGUMENT_EXTRACT,
     "eval",
-    "allowed_methods_exact_match_rate",
+    "http_method_exact_match_rate",
 )
-_METHOD_EXACT_KEY = phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "method_exact_match_rate")
-_ARGS_PARSE_KEY = phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "arguments_json_parse_rate")
+_OPERATION_EXACT_KEY = phase_metric(
+    PHASE3_ARGUMENT_EXTRACT,
+    "eval",
+    "operation_name_exact_match_rate",
+)
+_JSON_PARSE_KEY = phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "json_parse_rate")
 _ARGS_EXACT_KEY = phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "arguments_exact_match_rate")
 _INVALID_METHOD_KEY = phase_metric(PHASE3_ARGUMENT_EXTRACT, "eval", "invalid_method_rate")
 _READONLY_EMPTY_KEY = phase_metric(
@@ -72,12 +75,11 @@ _PROMPT_SPEC_VERSION_KEY = phase_metric(
 _WEIGHTS_ROLE_KEY = phase_metric(PHASE3_ARGUMENT_EXTRACT, "smoke", "weights_role")
 
 _RATE_KEYS = (
-    _CALL_ORDERED_EXACT_KEY,
-    _CALL_ORDER_CORRECT_KEY,
-    _REST_API_EXACT_KEY,
-    _ALLOWED_METHODS_EXACT_KEY,
+    _CALL_SET_EXACT_KEY,
+    _REST_API_SET_EXACT_KEY,
     _METHOD_EXACT_KEY,
-    _ARGS_PARSE_KEY,
+    _OPERATION_EXACT_KEY,
+    _JSON_PARSE_KEY,
     _ARGS_EXACT_KEY,
     _INVALID_METHOD_KEY,
     _READONLY_EMPTY_KEY,
@@ -175,15 +177,15 @@ def load_phase3_argument_smoke_spec(path: str | Path) -> Phase3ArgumentSmokeSpec
     if weights_role != "argument_extractor":
         raise Phase3ArgumentSmokeSpecError("profile.weights_role must be 'argument_extractor'")
     renderer = _required_string(profile, "renderer", "profile.renderer")
-    if renderer != "render_ordered_call_example":
+    if renderer != "render_call_example":
         raise Phase3ArgumentSmokeSpecError(
-            "profile.renderer must be 'render_ordered_call_example'",
+            "profile.renderer must be 'render_call_example'",
         )
 
     fixtures = tuple(str(item) for item in _sequence(smoke, "fixtures"))
-    if fixtures != ("read_only_ordered_get", "patch_with_arguments"):
+    if fixtures != ("read_only_get_set", "patch_with_arguments"):
         raise Phase3ArgumentSmokeSpecError(
-            "smoke.fixtures must be read_only_ordered_get and patch_with_arguments",
+            "smoke.fixtures must be read_only_get_set and patch_with_arguments",
         )
     provider_modes = tuple(str(item) for item in _sequence(smoke, "provider_modes"))
     if provider_modes != ("mock", "file"):
@@ -237,6 +239,7 @@ def default_phase3_smoke_rows() -> tuple[dict[str, Any], ...]:
             "Members@odata.count": 1,
             "Name": "Computer System Collection",
         },
+        operation_names=("get_system_collection",),
     )
     tasks = RedfishContext(
         rest_api="/redfish/v1/TaskService/Tasks",
@@ -248,6 +251,7 @@ def default_phase3_smoke_rows() -> tuple[dict[str, Any], ...]:
             "Members@odata.count": 0,
             "Name": "Task Collection",
         },
+        operation_names=("get_task_collection",),
     )
     bios_settings = RedfishContext(
         rest_api="/redfish/v1/Systems/System.Embedded.1/Bios/Settings",
@@ -256,20 +260,39 @@ def default_phase3_smoke_rows() -> tuple[dict[str, Any], ...]:
             "@odata.id": "/redfish/v1/Systems/System.Embedded.1/Bios/Settings",
             "Attributes": {"BootMode": "LegacyBios"},
         },
+        operation_names=("set_bios_attributes",),
+        argument_schema={"Attributes": {"BootMode": "string"}},
     )
 
     return (
-        build_ordered_call_row(
-            text="check the task queue, then list the available computer systems",
+        build_call_row(
+            text="check the task queue and list the available computer systems",
             contexts=(systems, tasks),
             rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems"),
+            method_by_api={
+                "/redfish/v1/TaskService/Tasks": "GET",
+                "/redfish/v1/Systems": "GET",
+            },
+            operation_name_by_api={
+                "/redfish/v1/TaskService/Tasks": "get_task_collection",
+                "/redfish/v1/Systems": "get_system_collection",
+            },
+            arguments_by_api={
+                "/redfish/v1/TaskService/Tasks": {},
+                "/redfish/v1/Systems": {},
+            },
         ),
-        build_ordered_call_row(
+        build_call_row(
             text="set the embedded system bios boot mode to Uefi",
             contexts=(bios_settings,),
             rest_api_list=("/redfish/v1/Systems/System.Embedded.1/Bios/Settings",),
             method_by_api={
                 "/redfish/v1/Systems/System.Embedded.1/Bios/Settings": "PATCH",
+            },
+            operation_name_by_api={
+                "/redfish/v1/Systems/System.Embedded.1/Bios/Settings": (
+                    "set_bios_attributes"
+                ),
             },
             arguments_by_api={
                 "/redfish/v1/Systems/System.Embedded.1/Bios/Settings": {
@@ -291,7 +314,7 @@ def build_phase3_argument_smoke(
     evaluations: list[dict[str, Any]] = []
 
     for row_index, row in enumerate(rows):
-        rendered = render_ordered_call_example(row)
+        rendered = render_call_example(row)
         request = {
             "row_index": row_index,
             "profile": spec.profile_name,
@@ -302,7 +325,7 @@ def build_phase3_argument_smoke(
             "expected_calls": list(row["y_true"]["calls"]),
         }
         raw_prediction = prediction_provider(request)
-        evaluation = evaluate_ordered_calls_y_pred(row, raw_prediction)
+        evaluation = evaluate_calls_y_pred(row, raw_prediction)
         evaluations.append(evaluation)
         artifacts.append({
             "dataset": spec.profile_name,
@@ -319,7 +342,7 @@ def build_phase3_argument_smoke(
             },
             "y_pred_raw": raw_prediction,
             "evaluation": evaluation,
-            "inference": inference_ordered_goals_json(row),
+            "inference": inference_calls_json(row),
         })
 
     summary = aggregate_phase3_argument_smoke_metrics(spec, evaluations)
@@ -340,7 +363,7 @@ def aggregate_phase3_argument_smoke_metrics(
         _ACCEPTED_TOTAL_KEY: sum(
             1
             for item in evaluations
-            if item.get("call_ordered_exact_match")
+            if item.get("accepted")
         ),
         _PROMPT_SPEC_VERSION_KEY: spec.prompt_spec_version,
         _WEIGHTS_ROLE_KEY: spec.weights_role,
@@ -359,14 +382,16 @@ def phase3_argument_smoke_thresholds_pass(
     """Return true when aggregate smoke metrics satisfy YAML thresholds."""
     thresholds = spec.acceptance_thresholds
     return (
-        float(summary.get(_CALL_ORDERED_EXACT_KEY, 0.0))
-        >= thresholds["min_call_ordered_exact_match_rate"]
-        and float(summary.get(_CALL_ORDER_CORRECT_KEY, 0.0))
-        >= thresholds["min_call_order_correct_rate"]
+        float(summary.get(_CALL_SET_EXACT_KEY, 0.0))
+        >= thresholds["min_call_set_exact_match_rate"]
+        and float(summary.get(_REST_API_SET_EXACT_KEY, 0.0))
+        >= thresholds["min_rest_api_set_match_rate"]
         and float(summary.get(_METHOD_EXACT_KEY, 0.0))
-        >= thresholds["min_method_exact_match_rate"]
-        and float(summary.get(_ARGS_PARSE_KEY, 0.0))
-        >= thresholds["min_arguments_json_parse_rate"]
+        >= thresholds["min_http_method_exact_match_rate"]
+        and float(summary.get(_OPERATION_EXACT_KEY, 0.0))
+        >= thresholds["min_operation_name_exact_match_rate"]
+        and float(summary.get(_JSON_PARSE_KEY, 0.0))
+        >= thresholds["min_json_parse_rate"]
         and float(summary.get(_ARGS_EXACT_KEY, 0.0))
         >= thresholds["min_arguments_exact_match_rate"]
         and float(summary.get(_READONLY_EMPTY_KEY, 0.0))
@@ -479,10 +504,11 @@ def _expected_metric_keys() -> tuple[str, ...]:
 def _acceptance_thresholds(raw: Mapping[str, Any]) -> dict[str, float]:
     """Validate and normalize acceptance thresholds."""
     required = {
-        "min_call_ordered_exact_match_rate",
-        "min_call_order_correct_rate",
-        "min_method_exact_match_rate",
-        "min_arguments_json_parse_rate",
+        "min_call_set_exact_match_rate",
+        "min_rest_api_set_match_rate",
+        "min_http_method_exact_match_rate",
+        "min_operation_name_exact_match_rate",
+        "min_json_parse_rate",
         "min_arguments_exact_match_rate",
         "min_readonly_empty_arguments_rate",
         "max_invalid_method_rate",

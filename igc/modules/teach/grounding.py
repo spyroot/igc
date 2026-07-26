@@ -14,7 +14,7 @@ gates of §12.5 over a :class:`~igc.core.tool_card.ToolCard`:
   :class:`~igc.core.tool_card.Grounding` tallies, promoting a confirmed card to
   ``GROUNDED`` and a contradicted one to ``CONTRADICTED`` (prior zeroed).
 
-Gate 3 (M4 replay via :class:`~igc.core.protocols.Evaluator`) lands in a later
+Gate 3 (replay verification via :class:`~igc.core.protocols.Evaluator`) lands in a later
 slice; this module stays pure stdlib so it runs in the offline CPU subset.
 
 Author:
@@ -78,8 +78,8 @@ class ToolCardGrounder:
         """Return a cleaned copy of ``card`` with ungrounded claims removed.
 
         Applies gate 1 (evidence) and gate 2 (schema + enum). The returned card is
-        still ``PROVISIONAL``: only real observations (via :meth:`observe`) or M4
-        replay (a later slice) promote it to ``GROUNDED``. A card that is stale
+        still ``PROVISIONAL``: only real observations (via :meth:`observe`) or
+        replay verification (a later slice) promote it to ``GROUNDED``. A card that is stale
         relative to ``spec`` (:meth:`ToolCard.is_stale`) is emptied and marked
         contradicted — its schema moved out from under it.
 

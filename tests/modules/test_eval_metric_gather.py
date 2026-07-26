@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import inspect
 
-from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
+from igc.modules.train.sft import SFTTrainer
 
 
 def test_validate_all_reduces_the_metric():
     """validate() must all-reduce eval counts/loss so every rank sees one global metric."""
-    src = inspect.getsource(LlmEmbeddingsTrainer.validate)
+    src = inspect.getsource(SFTTrainer.validate)
     assert "accelerator.reduce" in src, (
         "validate() must reduce (correct, total, loss_sum, loss_tokens) across ranks so every "
         "rank computes the same global eval metric; rank-local best values deadlock the save."
@@ -34,7 +34,7 @@ def test_best_metric_tracked_on_all_ranks_not_only_rank_zero():
     If only rank 0 tracks the best, the non-zero ranks keep stale metrics, compute best-save state
     differently, and enter the save collective asymmetrically -> the _ALLGATHER_BASE hang.
     """
-    src = inspect.getsource(LlmEmbeddingsTrainer)
+    src = inspect.getsource(SFTTrainer)
     assert src.count("self._best_validation_metric = selection_metric") == 1, (
         "expected exactly one best-metric assignment (the rank-0-only one was removed)"
     )
@@ -48,7 +48,7 @@ def test_best_metric_tracked_on_all_ranks_not_only_rank_zero():
 
 def test_phase1_best_metric_is_eval_loss_minimize_with_min_delta():
     """Phase 1 must select checkpoints by lower eval loss, not higher token accuracy."""
-    src = inspect.getsource(LlmEmbeddingsTrainer._train)
+    src = inspect.getsource(SFTTrainer._train)
     assert "self._select_best_by_eval_loss" in src
     assert "selection_metric = validation_eval_loss" in src
     assert "self._early_stopping_min_delta" in src

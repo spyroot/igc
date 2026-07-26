@@ -1,6 +1,6 @@
 """Offline regression for the resume-time ``validation_accuracy`` seed in the encoder trainer.
 
-``LlmEmbeddingsTrainer`` seeds the pre-loop ``validation_accuracy`` from the checkpoint before
+``SFTTrainer`` seeds the pre-loop ``validation_accuracy`` from the checkpoint before
 the training loop starts. On epochs where evaluation does not run, that seed is the value fed to
 the best-checkpoint comparison ``validation_accuracy > self._best_validation_metric``. It must be
 the restored accuracy (``CheckpointState.best_accuracy``), NOT the epoch counter

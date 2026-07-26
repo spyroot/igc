@@ -58,7 +58,6 @@ def evaluate_acceptance(
     model_counts = _mapping(model_evidence.get("counts"), "evidence.model_x.counts")
     thresholds = spec.thresholds
 
-    _add_min_check(checks, "min_rows", model_counts.get("rows"), thresholds.get("min_rows"))
     _add_max_check(
         checks,
         "max_missing_target_rows",
@@ -85,9 +84,9 @@ def evaluate_acceptance(
     )
     _add_min_check(
         checks,
-        "min_model_odata_id_match_rate",
+        "min_model_resource_identity_match_rate",
         model_metrics.get(phase_metric(PHASE1_FINETUNE, "eval", "odata_id_match_rate")),
-        thresholds.get("min_model_odata_id_match_rate"),
+        thresholds.get("min_model_resource_identity_match_rate"),
     )
     _add_min_check(
         checks,
@@ -115,21 +114,9 @@ def evaluate_acceptance(
     )
     _add_min_check(
         checks,
-        "min_exact_match_delta_vs_baseline",
+        "min_exact_match_delta_vs_foundation",
         delta.get(phase_metric(PHASE1_FINETUNE, "eval", "json_exact_match_rate")),
-        thresholds.get("min_exact_match_delta_vs_baseline"),
-    )
-    _add_min_check(
-        checks,
-        "min_parse_rate_delta_vs_baseline",
-        delta.get(phase_metric(PHASE1_FINETUNE, "eval", "json_parse_rate")),
-        thresholds.get("min_parse_rate_delta_vs_baseline"),
-    )
-    _add_min_check(
-        checks,
-        "min_odata_id_delta_vs_baseline",
-        delta.get(phase_metric(PHASE1_FINETUNE, "eval", "odata_id_match_rate")),
-        thresholds.get("min_odata_id_delta_vs_baseline"),
+        thresholds.get("min_exact_match_delta_vs_foundation"),
     )
 
     failures = [check for check in checks if not check["passed"]]

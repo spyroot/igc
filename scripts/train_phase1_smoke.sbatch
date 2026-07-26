@@ -1,12 +1,7 @@
 #!/bin/bash
 # First end-to-end GPU loop: Phase 1 Redfish JSON pretraining
-# (igc/modules/llm_train_state_encoder.py LlmEmbeddingsTrainer) on ONE GB300.
-# Validate on a small model first, then set IGC_MODEL to a large decoder and scale.
-# Runbook + cautions: GPU_ACCESS.md. Full guide: docs/TRAINING.md.
-#
-#   export WANDB_API_KEY=...            # in your shell, NOT here (rotate if ever shared)
-#   sbatch scripts/train_phase1_smoke.sbatch                          # gpt2 smoke -> wandb
-#   IGC_MODEL=<hf-repo-id> EPOCHS=3 sbatch scripts/train_phase1_smoke.sbatch
+# (igc/modules/train/sft.py SFTTrainer) on ONE GB300.
+# This is only a Slurm/container wrapper around the canonical YAML profile runner.
 #
 #SBATCH --job-name=igc-phase1
 #SBATCH --partition=debug
@@ -24,50 +19,25 @@ set -euo pipefail
 export NCCL_NVLS_ENABLE=0
 export PYTHONUNBUFFERED=1
 
-# Overridable knobs (env). Stage code + captured data on the node's local NVMe.
-IGC_MODEL="${IGC_MODEL:-gpt2}"                   # small for the smoke; large HF decoder to scale
-IGC_DIR="${IGC_DIR:-$HOME/igc}"                  # node-local igc checkout
-DATA_DIR="${DATA_DIR:-$HOME/.json_responses}"    # node-local captured Redfish responses
-EPOCHS="${EPOCHS:-3}"
+# Paths are deployment inputs. Model and training knobs come only from the profile.
+IGC_DIR="${IGC_DIR:?set IGC_DIR to the remote checkout}"
+IGC_CORPUS_ROOT="${IGC_CORPUS_ROOT:?set IGC_CORPUS_ROOT to the materialized Phase 1 corpus}"
+IGC_PROFILE="${IGC_PROFILE:-phase1_gpt2_smoke}"
+IGC_OUTPUT_ROOT="${IGC_OUTPUT_ROOT:?set IGC_OUTPUT_ROOT to a remote artifact directory}"
 NGC_IMAGE="${NGC_IMAGE:-nvcr.io/nvidia/pytorch:26.03-py3}"
-SEED="${SEED:-42}"
 
-# LoRA/PEFT for a large backbone (the gpt2 smoke uses full FT). Set IGC_USE_PEFT=1 to enable.
-export EXTRA_ARGS=""
-[ "${IGC_USE_PEFT:-0}" = "1" ] && EXTRA_ARGS="--use_peft --lora_r ${LORA_R:-16} --lora_alpha ${LORA_ALPHA:-32}"
-
-# Experiment tracking. Default to wandb; the API key MUST come from your environment
-# (export WANDB_API_KEY=...). Never hardcode or commit it. WANDB_PROJECT is safe to set.
-IGC_REPORT="${IGC_REPORT:-wandb}"
-if [ "${IGC_REPORT}" = "wandb" ]; then
-    # convenience: source a node-local gitignored key file if present (.internal/ is never committed)
-    # shellcheck source=/dev/null
-    [ -f "${IGC_DIR}/.internal/wandb.env" ] && . "${IGC_DIR}/.internal/wandb.env"
-    : "${WANDB_API_KEY:?set WANDB_API_KEY in your env or ${IGC_DIR}/.internal/wandb.env to use wandb}"
-    export WANDB_API_KEY
-    export WANDB_PROJECT="${WANDB_PROJECT:-igc}"
-    export WANDB_NAME="${WANDB_NAME:-phase1-${IGC_MODEL//\//_}-${SLURM_JOB_ID:-local}}"
-fi
-
-echo "igc Phase 1 SFT | model=${IGC_MODEL} epochs=${EPOCHS} report=${IGC_REPORT} node=$(hostname)"
+echo "igc Phase 1 SFT | profile=${IGC_PROFILE} node=$(hostname)"
 
 # shellcheck disable=SC2016  # The single-quoted payload is evaluated inside the container.
 srun --container-image="${NGC_IMAGE}" \
-     --container-mounts="${IGC_DIR}:/workspace/igc,${DATA_DIR}:/root/.json_responses" \
+     --container-mounts="${IGC_DIR}:/workspace/igc,${IGC_CORPUS_ROOT}:/data/phase1,${IGC_OUTPUT_ROOT}:/outputs" \
      bash -lc '
         set -euo pipefail
         cd /workspace/igc
-        pip install --no-cache-dir -r docker/requirements-train.txt
         nvidia-smi -L
-        python igc_main.py \
-            --train llm --llm latent \
-            --weights_role model_x \
-            --corpus_objective phase1_pretrain \
-            --model_type "'"${IGC_MODEL}"'" \
-            --num_train_epochs "'"${EPOCHS}"'" \
-            --json_data_dir /root/.json_responses \
-            --device cuda:0 --seed "'"${SEED}"'" \
-            --metric_report "'"${IGC_REPORT}"'" \
-            ${EXTRA_ARGS} \
-            --log_level info --llm_log_level info
+        IGC_PROFILE="'"${IGC_PROFILE}"'" \
+        IGC_CORPUS_DIR=/data/phase1/train \
+        IGC_CORPUS_EVAL_DIR=/data/phase1/heldout \
+        IGC_OUTPUT_DIR="/outputs/'"${IGC_PROFILE}"'-${SLURM_JOB_ID}" \
+        bash scripts/run_profile.sh
      '

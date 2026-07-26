@@ -1,17 +1,15 @@
 # Critical sections & performance
 
-> **⚠️ STATUS (2026-07-13, code audit).** The "RL training path" hot-path claims below (pointer
-> forward, `score_candidates` cache 51×, `resource_graph.neighbors` O(1)) are **offline-only** — the
-> live RL trainer builds `Igc_QNetwork` (the legacy DQN) and never touches the pointer or resource
-> graph, so those optimizations are on the *data-gen/benchmark* path, **not** the running RL loop.
-> Only the DQN/HER/TD/replay hot-path items are on the live path. Verify with
-> `scripts/code_reality_check.py`.
+> **STATUS (2026-07-27).** This is an experimental benchmark inventory, not an architecture
+> authority. The pointer, candidate-cache, and resource-graph measurements below cover retained
+> research implementations; they are not evidence that those implementations are active in the
+> Phase 1/2/3 or RL runtime. The current architecture is
+> [`overview.md`](../architecture/overview.md).
 
 Human-readable map of every performance-critical code path in igc: **where it is, what it
 costs, what we optimized, and how it is guarded** so a slow path can never silently make
-training take days. Every number here is reproducible with one command
-(private profiling guide: `docs/internal/profiling.md`); every budget is a test
-(`tests/perf/`, run with `pytest -m perf`).
+training take days. The benchmark definitions live in `scripts/bench_hot_paths.py`; their
+authoritative execution belongs in the project CI/Kubernetes performance gate.
 
 The rule that produced this doc is binding: **hot-path code ships with numbers** — a PR that
 touches a hot path without a benchmark table, a budget tripwire, and (for optimizations) a
@@ -33,9 +31,9 @@ the GPU; they are benchmarked for visibility but are not CPU-offline and carry n
 
 ## The map
 
-Measured on a laptop CPU (single-thread, `OMP_NUM_THREADS=1`); absolute times are machine-relative
-— the **budgets and ratios** are what CI enforces. Reproduce with
-`python scripts/bench_hot_paths.py --profile`.
+The table preserves historical single-thread CPU measurements. Absolute times are
+machine-relative; only budgets and ratios reproduced by the project CI/Kubernetes performance
+gate are acceptance evidence.
 
 ### 1. Data-generation path — `igc/ds/sources/`
 
@@ -44,7 +42,7 @@ Measured on a laptop CPU (single-thread, `OMP_NUM_THREADS=1`); absolute times ar
 | Fixture load | `redfish_fixture_source.py` | 0.08 s / 1,499 records | JSON parse; linear |
 | Graph build | `resource_graph.py::from_records` | 0.047 s / 1,499 nodes | one-pass; harvests `@odata.id` refs whole-body |
 | **Neighbors, all nodes** | `resource_graph.py::neighbors` | **0.001 s** (was 0.710 s) | see optimization O-1 |
-| Candidate cache | `candidate_features.py::build_candidate_cache` | 0.004 s | static per host (D-002) |
+| Candidate cache | `candidate_features.py::build_candidate_cache` | 0.004 s | static per host |
 | Candidate embedding | `zero_shot_ranking.py::embed_candidates` | 0.12 s / 1,499 | trigram hash; once per host |
 | Zero-shot rank+score | `zero_shot_ranking.py::top_k_hit_rate` | 4.0 s / 1,499 states | **known offline-eval cost** (O-3) |
 
@@ -83,7 +81,7 @@ are now O(1) dict lookups.
 **Guard.** `tests/perf/test_hot_path_budgets.py::test_neighbors_all_nodes_budget` — 0.5 s per
 1,000 nodes; the old O(V²) would fail it.
 
-### O-2 — Candidate key cache (D-002 static-per-host, PR #37)
+### O-2 — Candidate key cache
 
 **Problem.** The pointer's only expensive step is the `ActionProjector` MLP (GELU + two Linears)
 projecting `[B, N, H]` candidate embeddings — 76.8 M elements at B=256, N=300, H=768. cProfile
@@ -91,7 +89,7 @@ pinned it to `pointer_policy.py::ActionProjector.forward`. Calling the full
 `Igc_PointerQNetwork.forward` per state re-projects the **same** candidates B times, because a
 host's candidates are static and the projector weights are fixed within an optimizer step.
 
-**Fix (design decision [D-002](../roadmap/decisions.md)).** Project the host's **unique** candidate set once
+**Fix.** Project the host's **unique** candidate set once
 per optimizer step, cache the keys, and score with `score_candidates` (an einsum over cached
 keys) for every state in the batch. The primitive already exists — `score_candidates` takes
 pre-projected keys — so the RLPolicy training loop must use it rather than the full per-state
@@ -117,9 +115,8 @@ forgotten.
 
 ## How the guards work
 
-- `tests/perf/` holds every budget. They carry `@pytest.mark.perf` and are **excluded from the
-  default gate** (`pytest.ini`) so machine speed never flakes a normal run; they run explicitly
-  with `pytest -m perf` and in the CI `perf` job.
+- `tests/perf/` holds every budget. They carry `@pytest.mark.perf`, are excluded from the default
+  gate, and run only through the project CI/Kubernetes performance job.
 - Absolute budgets are set **50–100× looser than measured** — only an algorithmic regression
   (accidental O(V²), a per-item body walk, re-projecting duplicates) trips them.
 - Where an absolute time would be too machine-dependent, the guard is a **ratio** between two
@@ -128,10 +125,11 @@ forgotten.
 ## Adding a new hot path
 
 1. Add a stage to `scripts/bench_hot_paths.py` (real corpus or realistic synthetic tensors).
-2. Run it, paste the table into your PR; for an optimization, include before/after **and** an
+2. Dispatch the project CI/Kubernetes performance gate and include its table in the PR; for an
+   optimization, include before/after **and** an
    output-equivalence check against the old code.
 3. Add a `tests/perf/` budget (absolute, 50–100× loose) or a ratio tripwire.
-4. Name the dominant function from `--profile`. If you cannot, the work is not done.
+4. Name the dominant function from the captured profile. If you cannot, the work is not done.
 5. Update this table.
 
-See private `docs/internal/profiling.md` for the exact commands and the CI job.
+See the private profiling runbook for the exact CI job.

@@ -1,6 +1,8 @@
 # UC-01 — Power & boot orchestration
 
-> **Target loop, not shipped code.** This page describes the intended end-to-end IGC agent loop, grounded in `docs/external/architecture/overview.md` (target interaction model) and `docs/external/roadmap/decisions.md` (D-001/D-002 action-candidate design). Today the code is a Phase-0 Redfish MDP shell: a mock server replays captured responses and a legacy one-hot policy runs a smoke DQN/HER loop. The behavior below is where that shell is going.
+> **Target loop, not shipped code.** This page describes the intended end-to-end IGC agent loop,
+> grounded in `docs/external/architecture/overview.md`. Today the current unlock path is Phase 1/2/3;
+> the behavior below is a target RL workflow, not a shipped runtime.
 
 ## The goal (in the operator's words, and the machine-checkable spec)
 

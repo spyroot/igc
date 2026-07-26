@@ -1,5 +1,5 @@
 dataset:
-  name: phase2_labelled_requests
+  name: D1
   prompt_spec_version: phase2-labelled-requests-v1
 
 sampling:
@@ -7,6 +7,13 @@ sampling:
     - 1
     - 2
     - 3
+  context_distractors: 4
+  empty_set_candidates: 1000
+  max_accepted_rows: 100000
+  max_candidates: 300000
+  max_accepted_per_combination: 8
+  max_attempts_per_combination: 24
+  max_accepted_per_api: 200
 
 model_x:
   model_id: ${PHASE1_MODEL_X_MODEL_ID}
@@ -54,10 +61,21 @@ prompts:
       {records_json}
 
       Return only the human request text.
+  model_x_empty_set_draft:
+    system: |
+      Draft one concise, natural infrastructure-operator request that cannot be
+      fulfilled by any of the candidate Redfish APIs shown. Do not mention the
+      candidate APIs and do not turn the request into nonsense.
+    template: |
+      Candidate Redfish API records:
+      {records_json}
+
+      Return only one human request whose covered API set is empty.
   pro_judge:
     system: |
       You judge whether a draft operator request maps back to the exact sampled REST API set.
-      Treat API order as irrelevant unless the text explicitly uses ordering language.
+      API order is irrelevant. Reject missing APIs, extra APIs, ambiguity, repeated intent,
+      unnatural or nonsensical text, and method semantics unsupported by allowed_methods.
     template: |
       Sampled REST API records:
       {records_json}
@@ -65,7 +83,24 @@ prompts:
       Draft operator request:
       {draft_text}
 
-      Return JSON with accepted, rest_api_list, nonsense, reason, and order_evidence.
+      Return JSON with exactly accepted, natural, nonsense, ambiguous,
+      duplicate_intent, extra_intents, method_semantics_valid, covered_api_set,
+      and reason.
+  pro_judge_empty_set:
+    system: |
+      You judge whether a draft operator request is natural and maps to none of
+      the candidate Redfish APIs. Reject any request covered by a candidate API,
+      as well as ambiguity, repeated intent, unnatural text, or nonsense.
+    template: |
+      Candidate Redfish API records:
+      {records_json}
+
+      Draft operator request:
+      {draft_text}
+
+      Return JSON with exactly accepted, natural, nonsense, ambiguous,
+      duplicate_intent, extra_intents, method_semantics_valid, covered_api_set,
+      and reason. covered_api_set must be [] for acceptance.
 
 wandb:
   namespace: phase2_labelled_requests
@@ -77,6 +112,11 @@ wandb:
     - phase2_labelled_requests/invalid_json_rate
     - phase2_labelled_requests/pro_accept_rate
     - phase2_labelled_requests/rest_api_set_match_rate
+    - phase2_labelled_requests/natural_command_rate
+    - phase2_labelled_requests/ambiguous_rate
+    - phase2_labelled_requests/duplicate_intent_rate
+    - phase2_labelled_requests/extra_intent_rate
+    - phase2_labelled_requests/method_semantics_valid_rate
     - phase2_labelled_requests/empty_set_match_rate
     - phase2_labelled_requests/empty_set_expected_total
     - phase2_labelled_requests/sample_width/k
@@ -89,5 +129,11 @@ wandb:
 acceptance:
   min_pro_accept_rate: 0.9
   min_rest_api_set_match_rate: 0.98
+  min_empty_set_accepted_rows: 100
   max_nonsense_rate: 0.01
   max_invalid_json_rate: 0.01
+
+judge_calibration:
+  min_precision: 0.99
+  min_recall: 0.90
+  max_false_accept_rate: 0.01

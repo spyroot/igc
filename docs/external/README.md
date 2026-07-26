@@ -11,7 +11,6 @@ Current buckets:
 - [`phases/`](phases/)
 - [`research/`](research/)
 - [`use-cases/`](use-cases/)
-- [`diagrams/`](diagrams/)
 
 Operational material belongs in gitignored `docs/internal/` or the private
 context repository, not in this public-facing tree.

@@ -2,7 +2,7 @@
 Offline tests for run-report emission.
 
 Pins that build_run_bundle maps the parsed spec into a RunManifest (model, adapter
-from use_peft, corpus data_manifest/eval_split, scrubbed settings), that sensitive
+from use_peft, exact corpus data lineage, scrubbed settings), that sensitive
 key names can never leak into the emitted settings, that emit_run_report writes a
 report.json that ResultBundle.read round-trips, and that the bundle feeds the
 existing compare() fairness check. Pure stdlib — no torch, no trainer construction.
@@ -42,8 +42,15 @@ def _bundle(**over):
         training={"final_epoch_loss": 3.1, "epochs_done": 3, "optimizer_steps": 200,
                   "best_eval": 0.72},
         metrics={"eval/accuracy": 0.72},
-        dataset_fields={"data_manifest": "70a2db0b0e90e194",
-                        "eval_split": "floor=REAL:frac=0.15:seed=0"},
+        dataset_fields={
+            "data_manifest": "sha256:" + "7" * 64,
+            "train_data_sha": "sha256:" + "8" * 64,
+            "eval_data_sha": "sha256:" + "9" * 64,
+            "eval_manifest_sha": "sha256:" + "0" * 64,
+            "source_manifest_sha": "sha256:" + "a" * 64,
+            "source_registry_sha": "sha256:" + "b" * 64,
+            "source_artifact_manifest_shas": {"real_dell": "sha256:" + "c" * 64},
+        },
         argv=["igc_main.py", "--train", "llm", "--llm", "latent"],
         started_at="2026-07-10T01:00:00", ended_at="2026-07-10T02:00:00",
         wall_clock_sec=3600.0, checkpoint_path="experiments/run1",
@@ -56,8 +63,14 @@ def test_manifest_maps_spec_and_corpus_fields():
     m = b.manifest
     assert m.model == "Qwen/Qwen2.5-7B-Instruct"
     assert m.adapter_method == "rslora" and m.adapter_rank == 32
-    assert m.data_manifest == "70a2db0b0e90e194"
-    assert m.eval_split == "floor=REAL:frac=0.15:seed=0"
+    assert m.data_manifest == "sha256:" + "7" * 64
+    assert m.train_data_sha == "sha256:" + "8" * 64
+    assert m.eval_data_sha == "sha256:" + "9" * 64
+    assert m.eval_manifest_sha == "sha256:" + "0" * 64
+    assert m.source_manifest_sha == "sha256:" + "a" * 64
+    assert m.source_registry_sha == "sha256:" + "b" * 64
+    assert m.source_artifact_manifest_shas == {"real_dell": "sha256:" + "c" * 64}
+    assert m.eval_split == ""
     assert m.max_steps == 200 and m.seq_len == 1024
     assert m.training["optimizer_steps"] == 200
     assert m.argv[0] == "igc_main.py"

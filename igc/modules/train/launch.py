@@ -1,4 +1,4 @@
-"""Resolve a named Phase 1 profile into an ``igc_main.py`` command line.
+"""Resolve a named Phase 1/2/3 profile into an ``igc_main.py`` command line.
 
 So a Phase 1 Redfish JSON pretraining/fine-tune can be run by NAME rather than a long,
 error-prone flag list:
@@ -22,32 +22,23 @@ from typing import List
 from igc.modules.train.profiles import TrainingProfile, profile_names, resolve_profile
 
 
-_RENAMED_PROFILES = {
-    "m1_gpt2_smoke": "phase1_gpt2_smoke",
-    "m1_3b_lora": "phase1_3b_lora",
-    "m1_7b_lora": "phase1_7b_lora",
-    "m1_7b_rslora_r32": "phase1_7b_rslora_r32",
-    "m1_local": "phase1_local",
-    "m1_3b_full": "phase1_3b_full",
-    "m1_7b_full_zero3": "phase1_7b_full_zero3",
-}
-
-
 def profile_to_argv(profile: TrainingProfile) -> List[str]:
-    """Map a resolved profile to the ``igc_main.py`` Phase 1 argv.
+    """Map a resolved profile to the shared ``igc_main.py`` SFT argv.
 
     Data/output locations are intentionally NOT included — the launcher supplies
     ``--json_data_dir`` / ``--output_dir`` from the environment so no path or endpoint is
     baked into committed code. The profile does include ``--corpus_objective`` so the
-    resolved command states the real data objective instead of hiding Phase 1 behind the
-    internal ``--llm latent`` trainer route.
+    resolved command states the real data objective and selects the one shared
+    ``--llm sft`` trainer route.
 
     :param profile: the resolved :class:`~igc.modules.train.profiles.TrainingProfile`.
     :return: the argv list (train stage, model, optimization, adapter, sharding).
     """
     argv = [
         "--profile", profile.name,
+        "--phase", profile.phase,
         "--weights_role", profile.weights_role,
+        "--sft_task", profile.task,
         "--train", "llm", "--llm", profile.llm_stage,
         "--corpus_objective", profile.corpus_objective,
         "--model_type", profile.model,
@@ -55,12 +46,37 @@ def profile_to_argv(profile: TrainingProfile) -> List[str]:
         "--per_device_train_batch_size", str(profile.batch_size),
         "--gradient_accumulation_steps", str(profile.grad_accum),
         "--num_workers", str(profile.num_workers),
+        "--llm_optimizer", profile.optimizer,
         "--llm_learning_rate", str(profile.lr),
+        "--llm_weight_decay", str(profile.weight_decay),
+        "--max_grad_norm", str(profile.max_grad_norm),
         "--llm_scheduler", profile.scheduler,
+        "--max_lr", str(profile.max_lr),
+        "--warmup_ratio", str(profile.warmup_ratio),
+        "--div_factor", str(profile.div_factor),
+        "--final_div_factor", str(profile.final_div_factor),
+        "--anneal_strategy", profile.anneal_strategy,
+        "--seed", str(profile.seed),
         "--early_stopping_patience", str(profile.early_stopping_patience),
         "--early_stopping_min_delta", str(profile.early_stopping_min_delta),
+        "--eval_steps", str(profile.eval_steps),
+        "--save_steps", str(profile.save_steps),
         "--seq_len", str(profile.seq_len),
     ]
+    argv.append(
+        "--gradient_checkpointing"
+        if profile.gradient_checkpointing
+        else "--no-gradient_checkpointing"
+    )
+    argv.append("--cycle_momentum" if profile.cycle_momentum else "--no-cycle_momentum")
+    if profile.parent_adapter:
+        argv += ["--parent_adapter_dir", profile.parent_adapter]
+    if profile.parent_artifact_sha:
+        argv += ["--parent_artifact_sha", profile.parent_artifact_sha]
+    if profile.foundation_model_sha:
+        argv += ["--foundation_model_sha", profile.foundation_model_sha]
+    if profile.tokenizer_sha:
+        argv += ["--tokenizer_sha", profile.tokenizer_sha]
     if profile.max_steps is not None:
         argv += ["--max_train_steps", str(profile.max_steps)]
     else:
@@ -71,6 +87,7 @@ def profile_to_argv(profile: TrainingProfile) -> List[str]:
             "--use_peft",
             "--lora_r", str(a.r), "--lora_alpha", str(a.alpha), "--lora_dropout", str(a.dropout),
             "--adapter_method", a.method, "--lora_init", a.init,
+            "--lora_target_modules", *a.target_modules,
         ]
     if profile.sharding and profile.sharding != "none":
         argv += ["--use_accelerator", "--sharding", profile.sharding,
@@ -80,7 +97,9 @@ def profile_to_argv(profile: TrainingProfile) -> List[str]:
 
 def main(argv=None) -> int:
     """CLI: resolve ``--profile`` and print either its argv or its description."""
-    ap = argparse.ArgumentParser(description="Resolve a Phase 1 training profile to a command line.")
+    ap = argparse.ArgumentParser(
+        description="Resolve a Phase 1/2/3 SFT profile to a command line."
+    )
     ap.add_argument("--profile", required=True,
                     help="Named training profile from igc.modules.train.profiles.")
     ap.add_argument("--print-argv", action="store_true",
@@ -96,9 +115,6 @@ def main(argv=None) -> int:
     try:
         profile = resolve_profile(args.profile, **overrides)
     except KeyError:
-        renamed = _RENAMED_PROFILES.get(args.profile)
-        if renamed is not None:
-            ap.error(f"profile {args.profile!r} was renamed to {renamed!r}; use phase1_* names")
         ap.error(
             f"unknown profile {args.profile!r}; valid profiles: {', '.join(profile_names())}"
         )

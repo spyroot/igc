@@ -68,7 +68,7 @@ class AutoencoderTrainer(IgcModule):
                          f" {self._input_dim} {self._latent_dim} batch_size: {self.batch_size}")
 
         # Backbone-agnostic base module + embedding dims via backbone_module()/emb_shape():
-        # works for both the GPT-2 smoke backbone (m1_gpt2_smoke) and modern decoders (Qwen).
+        # Works for both the GPT-2 smoke backbone and modern decoders such as Qwen.
         # The old .transformer/.wpe access only worked for GPT-2 — kept agnostic on purpose.
         self._encoder_model = backbone_module(self.model)
         backbone_module(llm_model).config.is_decoder = False

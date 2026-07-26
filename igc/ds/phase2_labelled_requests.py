@@ -14,10 +14,11 @@ Mus mbayramo@stanford.edu
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
-from pathlib import Path
 import random
+from collections import Counter
+from dataclasses import dataclass, field
+from pathlib import Path
 from string import Formatter
 from typing import Any, Callable, Mapping, Sequence
 
@@ -28,7 +29,13 @@ from igc.modules.base.metric_keys import (
     PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS,
     phase_metric,
 )
+from igc.ds.rest_goal_contract import (
+    RedfishContext,
+    build_d1_rest_api_list_row,
+    d1_row_id,
+)
 
+D1_DATASET = "D1"
 _DRAFT_TOTAL_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "draft_total")
 _ACCEPTED_TOTAL_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "accepted_total")
 _REJECTED_TOTAL_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "rejected_total")
@@ -36,6 +43,14 @@ _NONSENSE_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "nonsense_rate")
 _INVALID_JSON_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "invalid_json_rate")
 _PRO_ACCEPT_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "pro_accept_rate")
 _REST_API_SET_MATCH_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "rest_api_set_match_rate")
+_NATURAL_COMMAND_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "natural_command_rate")
+_AMBIGUOUS_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "ambiguous_rate")
+_DUPLICATE_INTENT_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "duplicate_intent_rate")
+_EXTRA_INTENT_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "extra_intent_rate")
+_METHOD_SEMANTICS_VALID_RATE_KEY = phase_metric(
+    PHASE2_LABELLED_REQUESTS,
+    "method_semantics_valid_rate",
+)
 _EMPTY_SET_MATCH_RATE_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_match_rate")
 _EMPTY_SET_EXPECTED_TOTAL_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_expected_total")
 _SAMPLE_WIDTH_KEY = phase_metric(PHASE2_LABELLED_REQUESTS, "sample_width", "k")
@@ -51,14 +66,12 @@ _REQUIRED_ACCEPTANCE_KEYS = (
     "max_nonsense_rate",
     "max_invalid_json_rate",
 )
+_REQUIRED_JUDGE_CALIBRATION_KEYS = (
+    "min_precision",
+    "min_recall",
+    "max_false_accept_rate",
+)
 _PROVIDER_ADAPTERS = frozenset({"mock", "file", "openai-compatible"})
-_ORDER_EVIDENCE_VALUES = frozenset((
-    "none",
-    "explicit_then",
-    "explicit_before",
-    "explicit_after",
-    "numbered_steps",
-))
 
 
 class Phase2LabelledRequestsSpecError(ValueError):
@@ -79,6 +92,8 @@ class RestApiRecord:
     rest_api: str  # concrete Redfish URI that becomes part of the known target set.
     allowed_methods: tuple[str, ...]  # HTTP methods legal on this URI.
     json_body: Mapping[str, Any]  # Redfish response body shown as evidence.
+    operation_names: tuple[str, ...] = ()  # named actions/functions available on this URI.
+    argument_schema: Mapping[str, Any] = field(default_factory=dict)
     vendor: str = ""  # vendor/source family for W&B grouping.
     source_corpus: str = ""  # corpus artifact or fixture name for provenance.
 
@@ -87,6 +102,8 @@ class RestApiRecord:
         return {
             "rest_api": self.rest_api,  # sampled API path the text must cover.
             "allowed_methods": list(self.allowed_methods),  # legal methods for this API.
+            "operation_names": list(self.operation_names),
+            "argument_schema": dict(self.argument_schema),
             "json": dict(self.json_body),  # JSON evidence for this API.
             "vendor": self.vendor,  # vendor/source family for provenance.
             "source_corpus": self.source_corpus,  # corpus artifact or fixture name.
@@ -157,31 +174,120 @@ class Phase2LabelledRequestsSpec:
     dataset_name: str  # canonical emitted dataset name.
     prompt_spec_version: str  # prompt/spec version copied into rows.
     sample_widths: tuple[int, ...]  # accepted sample widths.
+    context_distractors: int  # distractor contexts added only after text is judged.
+    empty_set_candidates: int  # separately bounded negative candidates for k=0.
+    max_accepted_rows: int  # hard release-wide accepted-row ceiling.
+    max_candidates: int  # hard release-wide provider-attempt ceiling.
+    max_accepted_per_combination: int  # variants retained for one API set.
+    max_attempts_per_combination: int  # provider attempts allowed for one API set.
+    max_accepted_per_api: int  # accepted rows containing any one API.
     model_x: ModelXSpec  # draft model identity from YAML.
     judge: JudgeSpec  # judge route and model identity from YAML.
     generation: Mapping[str, Any]  # generation settings passed through unchanged.
     model_x_system: str  # YAML system prompt for model_x draft generation.
     model_x_template: str  # YAML prompt template for sampled records.
+    empty_set_model_x_system: str  # system prompt for no-matching-API requests.
+    empty_set_model_x_template: str  # template showing only distractor contexts.
     judge_system: str  # YAML system prompt for private judge review.
     judge_template: str  # YAML prompt template for judge input.
+    empty_set_judge_system: str  # judge system prompt for no-match requests.
+    empty_set_judge_template: str  # judge template for no-match requests.
     draft_provider: ProviderAdapterSpec  # draft adapter config from YAML.
     judge_provider: ProviderAdapterSpec  # judge adapter config from YAML.
     live_without_gate_max_candidates: int  # live candidate cap before gate flag is required.
     wandb_namespace: str  # W&B metric namespace.
     metric_keys: tuple[str, ...]  # metric keys declared by the spec.
     acceptance_thresholds: Mapping[str, float]  # acceptance threshold values.
+    judge_calibration_thresholds: Mapping[str, float]  # labelled judge quality floors.
 
 
 @dataclass(frozen=True)
 class ProJudgeResult:
     """Parsed private judge decision for one draft text."""
 
-    accepted: bool  # whether the judge says this text may enter the dataset.
-    rest_api_list: tuple[str, ...] = ()  # API set the judge extracted from text.
+    valid_json: bool  # true only when the complete strict verdict parsed.
+    accepted: bool  # judge's own acceptance decision.
+    natural: bool = False  # true when the text is a natural operator command.
     nonsense: bool = False  # true when the draft is junk or not an operator request.
-    invalid_json: bool = False  # true when the judge response could not be parsed.
+    ambiguous: bool = False  # true when more than one API interpretation remains.
+    duplicate_intent: bool = False  # true when an intent is repeated.
+    extra_intents: bool = False  # true when unsupported work was added.
+    method_semantics_valid: bool = False  # true when the request matches legal methods.
+    covered_api_set: tuple[str, ...] = ()  # APIs actually covered by the text.
     reason: str = ""  # short non-secret judge reason.
-    order_evidence: str = "none"  # explicit order signal, or ``none``.
+
+    @property
+    def invalid_json(self) -> bool:
+        """Compatibility readout used by aggregate invalid-JSON metrics."""
+        return not self.valid_json
+
+
+@dataclass
+class D1SamplingBudget:
+    """Mutable bounded-build state shared across positive and negative generation."""
+
+    max_accepted_rows: int
+    max_candidates: int
+    max_accepted_per_combination: int
+    max_attempts_per_combination: int
+    max_accepted_per_api: int
+    attempts_total: int = 0
+    accepted_total: int = 0
+    attempts_by_combination: Counter[tuple[str, ...]] = field(default_factory=Counter)
+    accepted_by_combination: Counter[tuple[str, ...]] = field(default_factory=Counter)
+    accepted_by_api: Counter[str] = field(default_factory=Counter)
+
+    @classmethod
+    def from_spec(cls, spec: Phase2LabelledRequestsSpec) -> "D1SamplingBudget":
+        """Create an empty budget from the YAML-owned finite controls."""
+        return cls(
+            max_accepted_rows=spec.max_accepted_rows,
+            max_candidates=spec.max_candidates,
+            max_accepted_per_combination=spec.max_accepted_per_combination,
+            max_attempts_per_combination=spec.max_attempts_per_combination,
+            max_accepted_per_api=spec.max_accepted_per_api,
+        )
+
+    def reserve_attempt(self, apis: Sequence[str]) -> bool:
+        """Reserve one provider attempt only while every configured bound permits it."""
+        combination = tuple(sorted(apis))
+        if self.attempts_total >= self.max_candidates:
+            return False
+        if self.accepted_total >= self.max_accepted_rows:
+            return False
+        if self.attempts_by_combination[combination] >= self.max_attempts_per_combination:
+            return False
+        if self.accepted_by_combination[combination] >= self.max_accepted_per_combination:
+            return False
+        if any(self.accepted_by_api[api] >= self.max_accepted_per_api for api in combination):
+            return False
+        self.attempts_total += 1
+        self.attempts_by_combination[combination] += 1
+        return True
+
+    def record_accept(self, apis: Sequence[str]) -> None:
+        """Record one accepted row after a previously reserved provider attempt."""
+        combination = tuple(sorted(apis))
+        self.accepted_total += 1
+        self.accepted_by_combination[combination] += 1
+        self.accepted_by_api.update(combination)
+
+    def summary(self) -> dict[str, Any]:
+        """Return bounded, non-secret counters for manifests and metrics."""
+        return {
+            "limits": {
+                "max_accepted_rows": self.max_accepted_rows,
+                "max_candidates": self.max_candidates,
+                "max_accepted_per_combination": self.max_accepted_per_combination,
+                "max_attempts_per_combination": self.max_attempts_per_combination,
+                "max_accepted_per_api": self.max_accepted_per_api,
+            },
+            "observed": {
+                "attempts_total": self.attempts_total,
+                "accepted_total": self.accepted_total,
+                "unique_combinations_attempted": len(self.attempts_by_combination),
+            },
+        }
 
 
 @dataclass(frozen=True)
@@ -191,40 +297,47 @@ class Phase2LabelledRequestRow:
     text: str  # human request text accepted by the private judge.
     records: tuple[RestApiRecord, ...]  # sampled Redfish records used as context.
     rest_api_list: tuple[str, ...]  # canonical sampled REST API list.
-    order_evidence: str  # explicit order signal, or ``none``.
     prompt_spec_version: str  # prompt/spec version used for this row.
+    sample_width_k: int  # number of selected APIs represented by the text.
     validation: Mapping[str, Any] = field(default_factory=dict)  # judge validation flags.
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the accepted row as JSON-compatible data."""
-        allowed_methods = {
-            record.rest_api: list(record.allowed_methods)
-            for record in self.records
+        selected_apis = set(self.rest_api_list)
+        target_records = tuple(
+            record for record in self.records if record.rest_api in selected_apis
+        )
+        heldout_groups = sorted({
+            record.vendor or record.source_corpus
+            for record in target_records
+            if record.vendor or record.source_corpus
+        })
+        if not heldout_groups and not selected_apis:
+            heldout_groups = ["empty_set"]
+        row = build_d1_rest_api_list_row(
+            text=self.text,
+            contexts=tuple(
+                RedfishContext(
+                    rest_api=record.rest_api,
+                    allowed_methods=record.allowed_methods,
+                    json=record.json_body,
+                    operation_names=record.operation_names,
+                    argument_schema=record.argument_schema,
+                )
+                for record in self.records
+            ),
+            rest_api_list=self.rest_api_list,
+            validation=self.validation,
+        )
+        row["metadata"] = {
+            "row_id": d1_row_id(row),
+            "prompt_spec_version": self.prompt_spec_version,
+            "sample_width_k": self.sample_width_k,
+            "vendor": [record.vendor for record in self.records],
+            "source_corpus": [record.source_corpus for record in self.records],
+            "heldout_vendor_or_model": heldout_groups,
         }
-        return {
-            "phase": 2,  # Phase number for labelled-request rows.
-            "dataset": PHASE2_LABELLED_REQUESTS,  # canonical dataset name.
-            "task": "text_to_rest_api_list",  # Phase 2 list field, evaluated as an API set.
-            "x": {
-                "text": self.text,  # accepted human request text.
-                "json": [dict(record.json_body) for record in self.records],  # JSON context.
-                "allowed_methods": allowed_methods,  # legal methods per REST API.
-                "rest_api_list": list(self.rest_api_list),  # context API list.
-            },
-            "y_true": {
-                "rest_api_list": list(self.rest_api_list),  # unordered target API set.
-                "order_evidence": self.order_evidence,  # explicit order signal if any.
-            },
-            "validation": dict(self.validation),  # judge verdict details.
-            "metadata": {
-                "prompt_spec_version": self.prompt_spec_version,  # prompt/config version.
-                "vendor": [record.vendor for record in self.records],  # vendor provenance.
-                "source_corpus": [
-                    record.source_corpus
-                    for record in self.records
-                ],  # corpus provenance.
-            },
-        }
+        return row
 
 
 DraftProvider = Callable[[dict[str, Any]], str]
@@ -251,9 +364,9 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
 
     dataset = _mapping(raw, "dataset", required=True)
     dataset_name = _required_string(dataset, "name", "dataset.name")
-    if dataset_name != PHASE2_LABELLED_REQUESTS:
+    if dataset_name != D1_DATASET:
         raise Phase2LabelledRequestsSpecError(
-            f"dataset.name must be {PHASE2_LABELLED_REQUESTS!r}",
+            f"dataset.name must be {D1_DATASET!r}",
         )
 
     sampling = _mapping(raw, "sampling", required=True)
@@ -268,20 +381,95 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
     sample_widths = tuple(raw_sample_widths)
     if sample_widths != (1, 2, 3):
         raise Phase2LabelledRequestsSpecError("sampling.sample_widths must be [1, 2, 3]")
+    context_distractors = _optional_non_negative_int(
+        sampling,
+        "context_distractors",
+        default=4,
+        label="sampling.context_distractors",
+    )
+    if context_distractors < 4:
+        raise Phase2LabelledRequestsSpecError(
+            "sampling.context_distractors must be at least 4",
+        )
+    empty_set_candidates = _optional_non_negative_int(
+        sampling,
+        "empty_set_candidates",
+        default=0,
+        label="sampling.empty_set_candidates",
+    )
+    if empty_set_candidates < 1:
+        raise Phase2LabelledRequestsSpecError(
+            "sampling.empty_set_candidates must be positive",
+        )
+    finite_controls: dict[str, int] = {}
+    for key in (
+        "max_accepted_rows",
+        "max_candidates",
+        "max_accepted_per_combination",
+        "max_attempts_per_combination",
+        "max_accepted_per_api",
+    ):
+        value = _optional_non_negative_int(
+            sampling,
+            key,
+            default=0,
+            label=f"sampling.{key}",
+        )
+        if value < 1:
+            raise Phase2LabelledRequestsSpecError(f"sampling.{key} must be positive")
+        finite_controls[key] = value
+    if (
+        finite_controls["max_accepted_per_combination"]
+        > finite_controls["max_attempts_per_combination"]
+    ):
+        raise Phase2LabelledRequestsSpecError(
+            "sampling.max_accepted_per_combination cannot exceed "
+            "sampling.max_attempts_per_combination"
+        )
 
     model_x_raw = _mapping(raw, "model_x", required=True)
     judge_raw = _mapping(raw, "judge", required=True)
     prompts = _mapping(raw, "prompts", required=True)
     model_prompt = _mapping(prompts, "model_x_draft", required=True)
+    empty_set_prompt = _mapping(
+        prompts,
+        "model_x_empty_set_draft",
+        required=True,
+    )
     judge_prompt = _mapping(prompts, "pro_judge", required=True)
+    empty_set_judge_prompt = _mapping(
+        prompts,
+        "pro_judge_empty_set",
+        required=True,
+    )
     model_x_system = _required_string(model_prompt, "system", "prompts.model_x_draft.system")
     model_x_template = _required_string(
         model_prompt,
         "template",
         "prompts.model_x_draft.template",
     )
+    empty_set_model_x_system = _required_string(
+        empty_set_prompt,
+        "system",
+        "prompts.model_x_empty_set_draft.system",
+    )
+    empty_set_model_x_template = _required_string(
+        empty_set_prompt,
+        "template",
+        "prompts.model_x_empty_set_draft.template",
+    )
     judge_system = _required_string(judge_prompt, "system", "prompts.pro_judge.system")
     judge_template = _required_string(judge_prompt, "template", "prompts.pro_judge.template")
+    empty_set_judge_system = _required_string(
+        empty_set_judge_prompt,
+        "system",
+        "prompts.pro_judge_empty_set.system",
+    )
+    empty_set_judge_template = _required_string(
+        empty_set_judge_prompt,
+        "template",
+        "prompts.pro_judge_empty_set.template",
+    )
     _validate_prompt_template(
         model_x_template,
         label="prompts.model_x_draft.template",
@@ -289,8 +477,20 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
         allowed_fields=("records_json",),
     )
     _validate_prompt_template(
+        empty_set_model_x_template,
+        label="prompts.model_x_empty_set_draft.template",
+        required_fields=("records_json",),
+        allowed_fields=("records_json",),
+    )
+    _validate_prompt_template(
         judge_template,
         label="prompts.pro_judge.template",
+        required_fields=("records_json", "draft_text"),
+        allowed_fields=("records_json", "draft_text"),
+    )
+    _validate_prompt_template(
+        empty_set_judge_template,
+        label="prompts.pro_judge_empty_set.template",
         required_fields=("records_json", "draft_text"),
         allowed_fields=("records_json", "draft_text"),
     )
@@ -338,6 +538,24 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
                 f"acceptance.{key} must be numeric",
             ) from exc
 
+    calibration = _mapping(raw, "judge_calibration", required=True)
+    missing_calibration = sorted(
+        set(_REQUIRED_JUDGE_CALIBRATION_KEYS) - set(calibration)
+    )
+    if missing_calibration:
+        raise Phase2LabelledRequestsSpecError(
+            "judge_calibration missing required keys: "
+            + ", ".join(missing_calibration),
+        )
+    judge_calibration_thresholds: dict[str, float] = {}
+    for key, value in calibration.items():
+        try:
+            judge_calibration_thresholds[str(key)] = float(value)
+        except (TypeError, ValueError) as exc:
+            raise Phase2LabelledRequestsSpecError(
+                f"judge_calibration.{key} must be numeric",
+            ) from exc
+
     return Phase2LabelledRequestsSpec(
         dataset_name=dataset_name,
         prompt_spec_version=_required_string(
@@ -346,6 +564,17 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
             "dataset.prompt_spec_version",
         ),
         sample_widths=sample_widths,
+        context_distractors=context_distractors,
+        empty_set_candidates=empty_set_candidates,
+        max_accepted_rows=finite_controls["max_accepted_rows"],
+        max_candidates=finite_controls["max_candidates"],
+        max_accepted_per_combination=finite_controls[
+            "max_accepted_per_combination"
+        ],
+        max_attempts_per_combination=finite_controls[
+            "max_attempts_per_combination"
+        ],
+        max_accepted_per_api=finite_controls["max_accepted_per_api"],
         model_x=ModelXSpec(
             model_id=_required_string(model_x_raw, "model_id", "model_x.model_id"),
             artifact_sha=str(model_x_raw.get("artifact_sha", "")),
@@ -358,14 +587,19 @@ def load_phase2_labelled_requests_spec(path: str | Path) -> Phase2LabelledReques
         generation=dict(_mapping(raw, "generation", required=True)),
         model_x_system=model_x_system,
         model_x_template=model_x_template,
+        empty_set_model_x_system=empty_set_model_x_system,
+        empty_set_model_x_template=empty_set_model_x_template,
         judge_system=judge_system,
         judge_template=judge_template,
+        empty_set_judge_system=empty_set_judge_system,
+        empty_set_judge_template=empty_set_judge_template,
         draft_provider=draft_provider,
         judge_provider=judge_provider,
         live_without_gate_max_candidates=live_without_gate_max_candidates,
         wandb_namespace=wandb_namespace,
         metric_keys=metric_keys,
         acceptance_thresholds=acceptance_thresholds,
+        judge_calibration_thresholds=judge_calibration_thresholds,
     )
 
 
@@ -382,15 +616,32 @@ def render_model_x_prompt(
     )
 
 
+def render_model_x_empty_set_prompt(
+    spec: Phase2LabelledRequestsSpec,
+    records: Sequence[RestApiRecord],
+) -> str:
+    """Render a request that must map to none of the shown API contexts."""
+    return _render_prompt(
+        system=spec.empty_set_model_x_system,
+        template=spec.empty_set_model_x_template,
+        records=records,
+        draft_text="",
+    )
+
+
 def render_pro_judge_prompt(
     spec: Phase2LabelledRequestsSpec,
     records: Sequence[RestApiRecord],
     draft_text: str,
+    *,
+    empty_set: bool = False,
 ) -> str:
     """Render the private judge prompt from YAML-provided prompt fields."""
     return _render_prompt(
-        system=spec.judge_system,
-        template=spec.judge_template,
+        system=(spec.empty_set_judge_system if empty_set else spec.judge_system),
+        template=(
+            spec.empty_set_judge_template if empty_set else spec.judge_template
+        ),
         records=records,
         draft_text=draft_text,
     )
@@ -416,85 +667,172 @@ def parse_pro_judge_result(raw: str) -> ProJudgeResult:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:
         return ProJudgeResult(
+            valid_json=False,
             accepted=False,
-            invalid_json=True,
             reason=f"invalid_json: {exc.msg}",
         )
     if isinstance(parsed, Mapping) and isinstance(parsed.get("y_pred"), Mapping):
         parsed = parsed["y_pred"]
     if not isinstance(parsed, Mapping):
         return ProJudgeResult(
+            valid_json=False,
             accepted=False,
-            invalid_json=True,
             reason="judge result is not a mapping",
         )
 
-    if "rest_api_list" in parsed:
-        rest_api_value = parsed["rest_api_list"]
-        rest_api_field = "rest_api_list"
-    elif "rest_api_set" in parsed:
-        rest_api_value = parsed["rest_api_set"]
-        rest_api_field = "rest_api_set"
-    else:
+    required_fields = {
+        "accepted",
+        "natural",
+        "nonsense",
+        "ambiguous",
+        "duplicate_intent",
+        "extra_intents",
+        "method_semantics_valid",
+        "covered_api_set",
+        "reason",
+    }
+    if set(parsed) != required_fields:
         return ProJudgeResult(
+            valid_json=False,
             accepted=False,
-            invalid_json=True,
-            reason="rest_api_list or rest_api_set is required",
+            reason=f"judge result must contain exactly {sorted(required_fields)}",
         )
 
-    if not isinstance(rest_api_value, list):
+    covered_api_value = parsed["covered_api_set"]
+    if not isinstance(covered_api_value, list):
         return ProJudgeResult(
+            valid_json=False,
             accepted=False,
-            invalid_json=True,
-            reason=f"{rest_api_field} is not a list",
+            reason="covered_api_set is not a list",
         )
-    if not all(isinstance(item, str) for item in rest_api_value):
+    if not all(isinstance(item, str) and item.strip() for item in covered_api_value):
         return ProJudgeResult(
+            valid_json=False,
             accepted=False,
-            invalid_json=True,
-            reason=f"{rest_api_field} must contain only strings",
+            reason="covered_api_set must contain only non-empty strings",
         )
-
-    if "accepted" in parsed:
-        accepted_key = "accepted"
-    elif "accept" in parsed:
-        accepted_key = "accept"
-    else:
+    if len(covered_api_value) != len(set(covered_api_value)):
         return ProJudgeResult(
+            valid_json=False,
             accepted=False,
-            invalid_json=True,
-            reason="accepted or accept is required",
-        )
-    accepted = parsed[accepted_key]
-    if not isinstance(accepted, bool):
-        return ProJudgeResult(
-            accepted=False,
-            invalid_json=True,
-            reason=f"{accepted_key} must be a boolean",
-        )
-    nonsense = _optional_bool(parsed, "nonsense")
-    if nonsense is None:
-        return ProJudgeResult(
-            accepted=False,
-            invalid_json=True,
-            reason="nonsense must be a boolean",
-        )
-    order_evidence = parsed.get("order_evidence", "none")
-    if not isinstance(order_evidence, str) or order_evidence not in _ORDER_EVIDENCE_VALUES:
-        return ProJudgeResult(
-            accepted=False,
-            invalid_json=True,
-            reason="order_evidence must be one of "
-            f"{', '.join(sorted(_ORDER_EVIDENCE_VALUES))}",
+            reason="covered_api_set must not contain duplicates",
         )
 
+    bool_fields = (
+        "accepted",
+        "natural",
+        "nonsense",
+        "ambiguous",
+        "duplicate_intent",
+        "extra_intents",
+        "method_semantics_valid",
+    )
+    invalid_bool_fields = [
+        name for name in bool_fields if not isinstance(parsed.get(name), bool)
+    ]
+    if invalid_bool_fields:
+        return ProJudgeResult(
+            valid_json=False,
+            accepted=False,
+            reason="judge boolean fields are invalid: " + ", ".join(invalid_bool_fields),
+        )
+    if not isinstance(parsed["reason"], str):
+        return ProJudgeResult(
+            valid_json=False,
+            accepted=False,
+            reason="reason must be a string",
+        )
     return ProJudgeResult(
-        accepted=accepted,
-        rest_api_list=tuple(rest_api_value),
-        nonsense=nonsense,
-        invalid_json=False,
-        reason=str(parsed.get("reason", "")),
-        order_evidence=order_evidence,
+        valid_json=True,
+        accepted=parsed["accepted"],
+        natural=parsed["natural"],
+        nonsense=parsed["nonsense"],
+        ambiguous=parsed["ambiguous"],
+        duplicate_intent=parsed["duplicate_intent"],
+        extra_intents=parsed["extra_intents"],
+        method_semantics_valid=parsed["method_semantics_valid"],
+        covered_api_set=tuple(covered_api_value),
+        reason=parsed["reason"],
+    )
+
+
+def judge_result_is_accepted(
+    verdict: ProJudgeResult,
+    *,
+    selected_api_set: Sequence[str],
+) -> bool:
+    """Apply the complete D1 judge acceptance predicate."""
+    return (
+        verdict.valid_json
+        and verdict.accepted
+        and verdict.natural
+        and not verdict.nonsense
+        and not verdict.ambiguous
+        and not verdict.duplicate_intent
+        and not verdict.extra_intents
+        and verdict.method_semantics_valid
+        and set(verdict.covered_api_set) == set(selected_api_set)
+    )
+
+
+def evaluate_judge_calibration(
+    examples: Sequence[tuple[ProJudgeResult, Sequence[str], bool]],
+) -> dict[str, float | int]:
+    """Measure strict judge decisions against human calibration labels."""
+    if not examples:
+        raise ValueError("judge calibration requires at least one labelled example")
+    true_positive = false_positive = true_negative = false_negative = 0
+    positive_examples = sum(bool(human_accept) for _, _, human_accept in examples)
+    negative_examples = len(examples) - positive_examples
+    if positive_examples == 0 or negative_examples == 0:
+        raise ValueError(
+            "judge calibration requires both human-accepted and human-rejected examples"
+        )
+    for verdict, selected_api_set, human_accept in examples:
+        predicted_accept = judge_result_is_accepted(
+            verdict,
+            selected_api_set=selected_api_set,
+        )
+        if predicted_accept and human_accept:
+            true_positive += 1
+        elif predicted_accept:
+            false_positive += 1
+        elif human_accept:
+            false_negative += 1
+        else:
+            true_negative += 1
+    precision = _rate(true_positive, true_positive + false_positive)
+    recall = _rate(true_positive, true_positive + false_negative)
+    false_accept_rate = (
+        0.0
+        if false_positive + true_negative == 0
+        else false_positive / (false_positive + true_negative)
+    )
+    return {
+        "precision": precision,
+        "recall": recall,
+        "false_accept_rate": false_accept_rate,
+        "true_positive": true_positive,
+        "false_positive": false_positive,
+        "true_negative": true_negative,
+        "false_negative": false_negative,
+        "positive_examples": positive_examples,
+        "negative_examples": negative_examples,
+        "examples": len(examples),
+    }
+
+
+def judge_calibration_passes(
+    spec: Phase2LabelledRequestsSpec,
+    metrics: Mapping[str, float | int],
+) -> bool:
+    """Apply the YAML-owned judge calibration floors."""
+    thresholds = spec.judge_calibration_thresholds
+    return (
+        float(metrics.get("precision", 0.0)) >= thresholds["min_precision"]
+        and float(metrics.get("recall", 0.0)) >= thresholds["min_recall"]
+        and float(metrics.get("false_accept_rate", 1.0))
+        <= thresholds["max_false_accept_rate"]
     )
 
 
@@ -519,6 +857,11 @@ class Phase2LabelledRequestCounters:
     nonsense_total: int = 0  # number of drafts flagged as nonsense.
     invalid_json_total: int = 0  # number of judge responses with invalid JSON.
     rest_api_set_match_total: int = 0  # number of rows with matching API sets.
+    natural_total: int = 0  # number of strict verdicts marking the request natural.
+    ambiguous_total: int = 0  # number of strict verdicts marking ambiguity.
+    duplicate_intent_total: int = 0  # number of strict verdicts marking duplicate intent.
+    extra_intent_total: int = 0  # number of strict verdicts marking extra intent.
+    method_semantics_valid_total: int = 0  # strict verdicts with legal method semantics.
     empty_set_expected_total: int = 0  # number of valid judged no-action rows.
     empty_set_match_total: int = 0  # number of valid judged no-action matches.
     sample_width_k: int = 0  # sampled REST API count for this candidate.
@@ -543,23 +886,36 @@ class Phase2LabelledRequestCounters:
         expected_rest_api_list: Sequence[str],
     ) -> None:
         """Count one parsed judge decision against the known sampled API set."""
-        set_match = (
-            not result.invalid_json
-            and compare_rest_api_sets(expected_rest_api_list, result.rest_api_list)
+        set_match = result.valid_json and compare_rest_api_sets(
+            expected_rest_api_list,
+            result.covered_api_set,
         )
-        accepted = result.accepted and set_match and not result.nonsense and not result.invalid_json
+        accepted = judge_result_is_accepted(
+            result,
+            selected_api_set=expected_rest_api_list,
+        )
 
         if result.nonsense:
             self.nonsense_total += 1
-        if result.invalid_json:
+        if not result.valid_json:
             self.invalid_json_total += 1
-        if result.accepted and not result.invalid_json:
+        if result.natural and result.valid_json:
+            self.natural_total += 1
+        if result.ambiguous and result.valid_json:
+            self.ambiguous_total += 1
+        if result.duplicate_intent and result.valid_json:
+            self.duplicate_intent_total += 1
+        if result.extra_intents and result.valid_json:
+            self.extra_intent_total += 1
+        if result.method_semantics_valid and result.valid_json:
+            self.method_semantics_valid_total += 1
+        if accepted:
             self.pro_accept_total += 1
         if set_match:
             self.rest_api_set_match_total += 1
-        if not result.invalid_json and not expected_rest_api_list:
+        if result.valid_json and not expected_rest_api_list:
             self.empty_set_expected_total += 1
-            if empty_set_matches(expected_rest_api_list, result.rest_api_list):
+            if empty_set_matches(expected_rest_api_list, result.covered_api_set):
                 self.empty_set_match_total += 1
         if accepted:
             self.accepted_total += 1
@@ -576,6 +932,17 @@ class Phase2LabelledRequestCounters:
             _INVALID_JSON_RATE_KEY: _rate(self.invalid_json_total, self.draft_total),
             _PRO_ACCEPT_RATE_KEY: _rate(self.pro_accept_total, self.draft_total),
             _REST_API_SET_MATCH_RATE_KEY: _rate(self.rest_api_set_match_total, self.draft_total),
+            _NATURAL_COMMAND_RATE_KEY: _rate(self.natural_total, self.draft_total),
+            _AMBIGUOUS_RATE_KEY: _rate(self.ambiguous_total, self.draft_total),
+            _DUPLICATE_INTENT_RATE_KEY: _rate(
+                self.duplicate_intent_total,
+                self.draft_total,
+            ),
+            _EXTRA_INTENT_RATE_KEY: _rate(self.extra_intent_total, self.draft_total),
+            _METHOD_SEMANTICS_VALID_RATE_KEY: _rate(
+                self.method_semantics_valid_total,
+                self.draft_total,
+            ),
             _EMPTY_SET_MATCH_RATE_KEY: _rate(
                 self.empty_set_match_total,
                 self.empty_set_expected_total,
@@ -599,11 +966,13 @@ class Phase2LabelledRequestBuilder:
         *,
         draft_provider: DraftProvider,
         judge_provider: JudgeProvider,
+        sampling_budget: D1SamplingBudget | None = None,
     ) -> None:
         """Create a builder with pure injected provider callables."""
         self._spec = spec
         self._draft_provider = draft_provider
         self._judge_provider = judge_provider
+        self._sampling_budget = sampling_budget or D1SamplingBudget.from_spec(spec)
 
     def build_one(
         self,
@@ -615,12 +984,36 @@ class Phase2LabelledRequestBuilder:
         """Build and judge one accepted row candidate.
 
         :param records: candidate REST API records.
-        :param k: sample width, one through three.
+        :param k: target width, zero through three.
         :param rng: deterministic RNG supplied by the caller.
         :return: accepted row plus counters, or ``None`` plus rejection counters.
         """
-        sampled = sample_phase2_contexts(records, k=k, rng=rng)
-        expected_rest_api_list = tuple(record.rest_api for record in sampled)
+        rest_apis = [record.rest_api for record in records]
+        if len(rest_apis) != len(set(rest_apis)):
+            raise ValueError("Phase 2 source pool must contain unique rest_api values")
+        required_records = (
+            self._spec.context_distractors
+            if k == 0
+            else k + self._spec.context_distractors
+        )
+        if len(records) < required_records:
+            raise ValueError(
+                "Phase 2 source pool cannot satisfy targets plus distractors: "
+                f"need {required_records}, got {len(records)}"
+            )
+
+        if k == 0:
+            sampled = tuple(
+                rng.sample(list(records), self._spec.context_distractors)
+            )
+            expected_rest_api_list: tuple[str, ...] = ()
+            budget_identity = tuple(
+                f"empty_context:{record.rest_api}" for record in sampled
+            )
+        else:
+            sampled = sample_phase2_contexts(records, k=k, rng=rng)
+            expected_rest_api_list = tuple(record.rest_api for record in sampled)
+            budget_identity = expected_rest_api_list
         counters = Phase2LabelledRequestCounters(
             sample_width_k=k,
             vendor_source_corpus=_source_corpus_label(sampled),
@@ -629,9 +1022,15 @@ class Phase2LabelledRequestBuilder:
             judge_model=self._spec.judge.model_id,
             judge_profile=self._spec.judge.profile,
         )
+        if not self._sampling_budget.reserve_attempt(budget_identity):
+            return None, counters
 
         draft_request = {
-            "prompt": render_model_x_prompt(self._spec, sampled),  # full configured prompt.
+            "prompt": (
+                render_model_x_empty_set_prompt(self._spec, sampled)
+                if k == 0
+                else render_model_x_prompt(self._spec, sampled)
+            ),
             "model_id": self._spec.model_x.model_id,  # draft model from YAML.
             "generation": dict(self._spec.generation),  # generation knobs from YAML.
             "sample_width": k,  # current sample width metric value.
@@ -640,7 +1039,12 @@ class Phase2LabelledRequestBuilder:
         counters.observe_draft(draft_text)
 
         judge_request = {
-            "prompt": render_pro_judge_prompt(self._spec, sampled, draft_text),  # judge prompt.
+            "prompt": render_pro_judge_prompt(
+                self._spec,
+                sampled,
+                draft_text,
+                empty_set=k == 0,
+            ),
             "model_id": self._spec.judge.model_id,  # judge model from YAML.
             "profile": self._spec.judge.profile,  # judge profile from YAML.
             "route": self._spec.judge.route,  # judge route from YAML.
@@ -649,33 +1053,48 @@ class Phase2LabelledRequestBuilder:
         judge_result = parse_pro_judge_result(self._judge_provider(judge_request))
         counters.observe_judge(judge_result, expected_rest_api_list=expected_rest_api_list)
 
-        set_match = compare_rest_api_sets(expected_rest_api_list, judge_result.rest_api_list)
-        accepted = (
-            judge_result.accepted
-            and set_match
-            and not judge_result.nonsense
-            and not judge_result.invalid_json
+        set_match = compare_rest_api_sets(
+            expected_rest_api_list,
+            judge_result.covered_api_set,
+        )
+        accepted = judge_result_is_accepted(
+            judge_result,
+            selected_api_set=expected_rest_api_list,
         )
         if not accepted:
             return None, counters
+        self._sampling_budget.record_accept(budget_identity)
+
+        selected_apis = set(expected_rest_api_list)
+        context_records = list(sampled)
+        if k > 0:
+            distractor_pool = [
+                record for record in records if record.rest_api not in selected_apis
+            ]
+            context_records.extend(
+                rng.sample(distractor_pool, self._spec.context_distractors)
+            )
+        rng.shuffle(context_records)
 
         row = Phase2LabelledRequestRow(
             text=draft_text,
-            records=sampled,
+            records=tuple(context_records),
             rest_api_list=expected_rest_api_list,
-            order_evidence=judge_result.order_evidence,
             prompt_spec_version=self._spec.prompt_spec_version,
+            sample_width_k=k,
             validation={
                 "text_source": "model_x_then_private_judge",  # draft then judge path.
                 "review_judged": True,  # private judge parsed successfully.
-                "all_rest_api_present": (
-                    set(expected_rest_api_list) <= set(judge_result.rest_api_list)
-                ),
-                "extra_rest_api_present": (
-                    not set(judge_result.rest_api_list) <= set(expected_rest_api_list)
-                ),
+                "valid_json": judge_result.valid_json,
+                "accepted": judge_result.accepted,
+                "natural": judge_result.natural,
+                "nonsense": judge_result.nonsense,
+                "ambiguous": judge_result.ambiguous,
+                "duplicate_intent": judge_result.duplicate_intent,
+                "extra_intents": judge_result.extra_intents,
+                "method_semantics_valid": judge_result.method_semantics_valid,
+                "covered_api_set": sorted(judge_result.covered_api_set),
                 "set_coverage_preserved": set_match,  # unordered API set contract.
-                "nonsense": judge_result.nonsense,  # judge nonsense flag.
             },
         )
         return row, counters
@@ -685,15 +1104,17 @@ def to_minimal_phase3_input(row: Phase2LabelledRequestRow | None) -> dict[str, A
     """Convert an accepted Phase 2 row into a Phase 3 input fixture."""
     if row is None:
         raise ValueError("phase2 row is required")
-    allowed_methods = {
-        record.rest_api: list(record.allowed_methods)
-        for record in row.records
-    }
     return {
         "text": row.text,  # accepted human request text.
-        "rest_api_list": list(row.rest_api_list),  # Phase 2 API-set target.
-        "json": [dict(record.json_body) for record in row.records],  # same-row JSON context.
-        "allowed_methods": allowed_methods,  # same-row allowed methods.
+        "rest_api_list": sorted(row.rest_api_list),  # canonical form of the unordered set.
+        "api_context": [
+            RedfishContext(
+                rest_api=record.rest_api,
+                allowed_methods=record.allowed_methods,
+                json=record.json_body,
+            ).to_dict()
+            for record in row.records
+        ],
     }
 
 

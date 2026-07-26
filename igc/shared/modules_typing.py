@@ -40,7 +40,7 @@ class IgcModuleType(Enum):
     GOAL_EXTRACTOR = "goal_extractor"
     STATE_ENCODER = "state_encoder"
     STATE_AUTOENCODER = "state_autoencoder"
-    PARAMETER_EXTRACTOR = "parameter_extractor"
+    ARGUMENT_EXTRACTOR = "argument_extractor"
 
     @staticmethod
     def from_string(module_str: str) -> 'IgcModuleType':

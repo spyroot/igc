@@ -1,7 +1,7 @@
 """Offline guard for the epoch-boundary save-collective deadlock (the "epoch-2 hang").
 
 Under accelerate multi-rank training, the epoch boundary in
-``igc/modules/llm_train_state_encoder.py`` calls ``broadcast_flag`` +
+``igc/modules/sft.py`` calls ``broadcast_flag`` +
 ``accelerator.get_state_dict`` — collectives EVERY rank must reach together (its own
 comment: "every rank participates or the fleet deadlocks"). Ranks reach them together
 only if they process the SAME number of train batches. A train ``DataLoader`` without
@@ -48,7 +48,7 @@ def test_igc_train_dataloaders_use_drop_last():
     This is the exact fix for the epoch-boundary save-collective deadlock; if a future edit
     drops it, this test fails before a 72-GPU run hangs.
     """
-    from igc.modules import llm_train_state_encoder as trainer_mod
+    from igc.modules import sft as trainer_mod
     src = inspect.getsource(trainer_mod)
     blocks = re.findall(r"train_dataloader = DataLoader\((.*?)\n        \)", src, re.S)
     assert blocks, "no train_dataloader = DataLoader(...) construction found"

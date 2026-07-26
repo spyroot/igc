@@ -32,6 +32,7 @@ class PredictionRecord:
 
     key: str
     line_number: int
+    corpus_group: str
     rest_api: str
     target_json: JsonValue | None
     prediction_json: JsonValue | None
@@ -41,6 +42,8 @@ class PredictionRecord:
     odata_id_match: bool | None = None
     top_k_match: bool | None = None
     sequence_length: int | None = None
+    target_tokens: int | None = None
+    generation_budget: int | None = None
     generated_tokens: int | None = None
     padding_tokens: int | None = None
     latency_sec: float | None = None
@@ -84,7 +87,10 @@ class ArtifactMetrics:
     total_generated_tokens: int
     total_latency_sec: float
     row_keys: tuple[str, ...]
+    records: tuple[PredictionRecord, ...]
     sequence_lengths: list[int] = field(default_factory=list)
+    target_token_lengths: list[int] = field(default_factory=list)
+    generation_budgets: list[int] = field(default_factory=list)
     padding_ratios: list[float] = field(default_factory=list)
     latencies_sec: list[float] = field(default_factory=list)
     memory_peaks_mb: list[float] = field(default_factory=list)
@@ -129,6 +135,13 @@ class ArtifactMetrics:
             phase_metric(PHASE1_FINETUNE, "data", "max_sequence_length"): (
                 None if not self.sequence_lengths else max(self.sequence_lengths)
             ),
+            phase_metric(PHASE1_FINETUNE, "data", "target_completion_tokens_p95"): percentile(
+                self.target_token_lengths,
+                95,
+            ),
+            phase_metric(PHASE1_FINETUNE, "eval", "min_generation_budget"): (
+                None if not self.generation_budgets else min(self.generation_budgets)
+            ),
             phase_metric(PHASE1_FINETUNE, "calibration", "log_prob_per_token"): (
                 _weighted_mean(self.row_log_prob_per_token)
             ),
@@ -163,8 +176,12 @@ class ArtifactMetrics:
                 "odata_id_match_count": self.odata_id_match_count,
                 "top_k_rows": self.top_k_rows,
                 "top_k_match_count": self.top_k_match_count,
+                "target_token_rows": len(self.target_token_lengths),
+                "generation_budget_rows": len(self.generation_budgets),
             },
             "metrics": self.to_metric_dict(ece_bins=ece_bins),
+            "by_corpus": _corpus_breakdown(self),
+            "row_keys": list(self.row_keys),
         }
 
 
@@ -305,12 +322,19 @@ def _metrics_from_records(
         total_generated_tokens=sum(record.generated_tokens or 0 for record in records),
         total_latency_sec=sum(record.latency_sec or 0.0 for record in records),
         row_keys=tuple(record.key for record in records),
+        records=tuple(records),
     )
     metrics.latencies_sec.extend(
         record.latency_sec for record in records if record.latency_sec is not None
     )
     metrics.sequence_lengths.extend(
         record.sequence_length for record in records if record.sequence_length is not None
+    )
+    metrics.target_token_lengths.extend(
+        record.target_tokens for record in records if record.target_tokens is not None
+    )
+    metrics.generation_budgets.extend(
+        record.generation_budget for record in records if record.generation_budget is not None
     )
     metrics.padding_ratios.extend(_padding_ratios(records))
     metrics.memory_peaks_mb.extend(
@@ -339,10 +363,13 @@ def normalize_prediction_row(row: Mapping[str, Any], index: int) -> PredictionRe
         odata_match = None
     generated_tokens = _int_from_paths(row, _GENERATED_TOKEN_PATHS)
     sequence_length = _int_from_paths(row, _SEQUENCE_LENGTH_PATHS)
+    target_tokens = _int_from_paths(row, _TARGET_TOKEN_PATHS)
+    generation_budget = _int_from_paths(row, _GENERATION_BUDGET_PATHS)
     padding_tokens = _int_from_paths(row, _PADDING_TOKEN_PATHS)
     return PredictionRecord(
         key=_row_key(row, index),
         line_number=index + 1,
+        corpus_group=_corpus_group(row),
         rest_api=rest_api,
         target_json=target,
         prediction_json=prediction_json,
@@ -352,6 +379,8 @@ def normalize_prediction_row(row: Mapping[str, Any], index: int) -> PredictionRe
         odata_id_match=odata_match,
         top_k_match=_top_k_match(row, target),
         sequence_length=sequence_length,
+        target_tokens=target_tokens,
+        generation_budget=generation_budget,
         generated_tokens=generated_tokens,
         padding_tokens=padding_tokens,
         latency_sec=_float_from_paths(row, _LATENCY_PATHS),
@@ -360,6 +389,21 @@ def normalize_prediction_row(row: Mapping[str, Any], index: int) -> PredictionRe
         log_prob=_float_from_paths(row, _LOG_PROB_PATHS),
         log_prob_per_token=_float_from_paths(row, _LOG_PROB_PER_TOKEN_PATHS),
     )
+
+
+def _corpus_group(row: Mapping[str, Any]) -> str:
+    value = _first_path(
+        row,
+        (
+            ("source_corpus",),
+            ("metadata", "source_corpus"),
+            ("x", "source_corpus"),
+            ("source",),
+        ),
+    )
+    if not isinstance(value, str) or not value.strip():
+        raise Phase1GoldenError("prediction row is missing source_corpus")
+    return value.strip()
 
 
 def compare_prediction_artifacts(
@@ -400,6 +444,31 @@ def _validate_unique_row_keys(records: Iterable[PredictionRecord], *, role: str)
         )
 
 
+def _corpus_breakdown(metrics: ArtifactMetrics) -> dict[str, dict[str, Any]]:
+    records_by_group: dict[str, list[PredictionRecord]] = {}
+    for record in metrics.records:
+        records_by_group.setdefault(record.corpus_group, []).append(record)
+    result: dict[str, dict[str, Any]] = {}
+    for group, records in sorted(records_by_group.items()):
+        rows = len(records)
+        parsed = sum(record.parse_ok for record in records)
+        exact_rows = sum(record.exact_match is not None for record in records)
+        exact = sum(record.exact_match is True for record in records)
+        identity_rows = sum(record.odata_id_match is not None for record in records)
+        identity = sum(record.odata_id_match is True for record in records)
+        result[group] = {
+            "rows": rows,
+            "json_parse_rate": parsed / rows,
+            "json_exact_match_rate": (
+                None if exact_rows == 0 else exact / exact_rows
+            ),
+            "resource_identity_match_rate": (
+                None if identity_rows == 0 else identity / identity_rows
+            ),
+        }
+    return result
+
+
 def _validate_comparable_artifact_keys(
     baseline: ArtifactMetrics,
     model: ArtifactMetrics,
@@ -409,6 +478,17 @@ def _validate_comparable_artifact_keys(
     missing_from_model = sorted(baseline_keys - model_keys)
     missing_from_baseline = sorted(model_keys - baseline_keys)
     if not missing_from_model and not missing_from_baseline:
+        baseline_groups = {record.key: record.corpus_group for record in baseline.records}
+        model_groups = {record.key: record.corpus_group for record in model.records}
+        mismatched_groups = [
+            key for key in baseline_keys
+            if baseline_groups[key] != model_groups[key]
+        ]
+        if mismatched_groups:
+            raise Phase1GoldenError(
+                "baseline and model_x disagree on source_corpus for "
+                f"{len(mismatched_groups)} rows"
+            )
         return
     details = []
     if missing_from_model:
@@ -606,7 +686,7 @@ def _row_key(row: Mapping[str, Any], index: int) -> str:
         (("id",), ("row_id",), ("sample_id",), ("example_id",), ("uid",)),
     )
     if value is not None:
-        return f"id:{value}"
+        return str(value)
     target = _target_json(row)
     rest_api = _rest_api(row, target)
     identity = {
@@ -764,6 +844,18 @@ _SEQUENCE_LENGTH_PATHS = (
     ("tokens", "sequence_length"),
     ("usage", "total_tokens"),
     ("metrics", "sequence_length"),
+)
+
+_TARGET_TOKEN_PATHS = (
+    ("target_tokens",),
+    ("tokens", "target"),
+    ("metrics", "target_tokens"),
+)
+
+_GENERATION_BUDGET_PATHS = (
+    ("max_new_tokens",),
+    ("generation", "max_new_tokens"),
+    ("metrics", "max_new_tokens"),
 )
 
 _PADDING_TOKEN_PATHS = (

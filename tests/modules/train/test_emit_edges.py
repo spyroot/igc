@@ -38,7 +38,7 @@ def _spec(**overrides):
 
 
 def test_missing_dataset_fields_default_to_empty_manifest_ids():
-    """Reports from raw-capture training keep manifest/split ids empty, not missing."""
+    """Reports from raw-capture training keep exact lineage ids empty, not missing."""
     bundle = build_run_bundle(
         _spec(),
         training={"optimizer_steps": 120},
@@ -49,6 +49,11 @@ def test_missing_dataset_fields_default_to_empty_manifest_ids():
 
     assert bundle.manifest.data_manifest == ""
     assert bundle.manifest.eval_split == ""
+    assert bundle.manifest.train_data_sha == ""
+    assert bundle.manifest.eval_data_sha == ""
+    assert bundle.manifest.source_manifest_sha == ""
+    assert bundle.manifest.source_registry_sha == ""
+    assert bundle.manifest.source_artifact_manifest_shas == {}
     assert bundle.metrics == {}
 
 

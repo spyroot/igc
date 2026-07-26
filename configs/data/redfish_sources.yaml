@@ -1,0 +1,37 @@
+version: 1
+artifact_contract:
+  producer: redfish_ctl_discovery
+  json_glob: "**/_redfish_v1_*.json"
+  api_map:
+    accepted_names:
+      - rest_api_map.v1.json
+      - rest_api_map.npy
+    required_keys:
+      - url_file_mapping
+      - allowed_methods_mapping
+  semantics_bundle: ${REDFISH_CTL_DIR}/spec/redfish-http-semantics-bundle
+
+sources:
+  redfish_ctl_full_corpus:
+    origin: captured_vendor_bmc
+    trust_level: REAL
+    root_env: IGC_REDFISH_CORPUS_ROOT
+    manifest_env: IGC_REDFISH_CORPUS_MANIFEST
+    training_weight: 1.0
+    evaluation_group: real_vendor
+
+  dsp2043_redfish_ctl_corpus:
+    origin: dsp2043_reference_bmc_pod
+    trust_level: REPLAY
+    root_env: IGC_DSP2043_CORPUS_ROOT
+    manifest_env: IGC_DSP2043_CORPUS_MANIFEST
+    training_weight: 1.0
+    evaluation_group: dsp2043_platform
+
+evaluation:
+  min_heldout_rows_per_source: 100
+  report_by:
+    - source
+    - evaluation_group
+  real_observation_anchor: redfish_ctl_full_corpus
+  require_all_configured_sources: true

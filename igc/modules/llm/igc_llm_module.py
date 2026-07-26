@@ -19,8 +19,8 @@ from ...ds.redfish_masked_dataset import MaskedJSONDataset
 from ...modules.base.igc_llm_base_module import LlmModule
 from ...modules.base.igc_metric_logger import MetricLogger
 from ...modules.igc_train_auto_state_encoder import AutoencoderTrainer
-from ...modules.legacy.llm_train_goal_extract import GoalExtractorTrainer
-from ...modules.llm_train_state_encoder import LlmEmbeddingsTrainer
+from ...modules.train.sft import SFTTrainer
+from ...modules.train.sft_tasks import resolve_sft_task
 from ...modules.shared.llm_shared import (
     from_pretrained_default,
     load_igc_tokenizer,
@@ -34,7 +34,7 @@ class IgcLanguageModule:
     """
     modules = [
         "goal_extractor",
-        "parameter_extractor",
+        "argument_extractor",
         "state_encoder",
         "state_autoencoder"
     ]
@@ -43,19 +43,21 @@ class IgcLanguageModule:
                  spec: argparse.Namespace,
                  metric_logger: MetricLogger,
                  ds: Union[JSONDataset, MaskedJSONDataset],
+                 eval_ds=None,
                  from_pretrained=from_pretrained_default):
         """
 
         :param spec: all model specs.
         :param metric_logger: a metric logger objet use to report metric.
         :param ds: A dataset used to train llm model.
+        :param eval_ds: Explicit immutable held-out dataset for shared SFT.
         :param from_pretrained:
         """
         if spec is None:
             raise ValueError("Specs cannot be None")
 
         self.modules = ["goal_extractor",
-                        "parameter_extractor",
+                        "argument_extractor",
                         "state_encoder",
                         "state_autoencoder"]
 
@@ -63,6 +65,7 @@ class IgcLanguageModule:
         self._metric_logger = metric_logger
         self._spec = spec
         self._dataset = ds
+        self._eval_dataset = eval_ds
         self._configure_logger()
 
     def _configure_logger(self):
@@ -103,9 +106,12 @@ class IgcLanguageModule:
         llm_model = None
         llm_tokenizer = None
 
-        # we train State Encoder the goal here take rest api response, and re-present as state.
-        if self._spec.llm == "latent" or self._spec.llm == "all":
-            self.logger.info("Starting training state encoder.")
+        if self._spec.llm in ("sft", "all"):
+            task_name = getattr(self._spec, "sft_task", "") or ""
+            if not task_name:
+                raise ValueError("--sft_task is required for shared SFT training")
+            task = resolve_sft_task(task_name)
+            self.logger.info(f"Starting shared SFT task {task.name}.")
             pretrained_model, t = self._from_pretrained_fn(
                 self._spec,
                 only_tokenizer=False,
@@ -120,7 +126,8 @@ class IgcLanguageModule:
             # rows on a tied Qwen backbone is not yet stable — whole-matrix modules_to_save
             # diverges and trainable_token_indices breaks the tied embed/lm_head. Tracked
             # as a follow-up; the double-shift label fix is the active correctness change.
-            if getattr(self._spec, 'use_peft', False):
+            parent_adapter = getattr(self._spec, "parent_adapter_dir", "") or ""
+            if getattr(self._spec, 'use_peft', False) and not parent_adapter:
                 from .peft_lora import apply_lora
                 lora_init = getattr(self._spec, 'lora_init', 'default')
                 pretrained_model = apply_lora(
@@ -134,33 +141,53 @@ class IgcLanguageModule:
                     init_lora_weights=(True if lora_init in ('', 'default') else lora_init),
                 )
                 pretrained_model.print_trainable_parameters()
+            elif parent_adapter and not hasattr(pretrained_model, "peft_config"):
+                raise RuntimeError(
+                    "parent_adapter_dir was configured but the model loader did not "
+                    "return a PEFT model"
+                )
+            elif parent_adapter:
+                from .peft_lora import validate_loaded_adapter_profile
 
-            llm_embeddings = LlmEmbeddingsTrainer(
-                module_name="state_encoder",
+                validate_loaded_adapter_profile(
+                    pretrained_model,
+                    r=getattr(self._spec, 'lora_r'),
+                    alpha=getattr(self._spec, 'lora_alpha'),
+                    dropout=getattr(self._spec, 'lora_dropout'),
+                    target_modules=getattr(self._spec, 'lora_target_modules'),
+                    adapter_method=getattr(self._spec, 'adapter_method'),
+                )
+
+            sft_trainer = SFTTrainer(
+                module_name=task.output_role,
                 spec=self._spec,
                 llm_model=pretrained_model,
                 llm_tokenizer=self._dataset.tokenizer,
                 dataset=self._dataset,
+                eval_dataset=self._eval_dataset,
                 metric_logger=self._metric_logger,
                 is_inference=False,
                 device=self._spec.device
             )
 
-            llm_embeddings.train()
-            llm_model = llm_embeddings.get_model()
-            llm_tokenizer = llm_embeddings.get_tokenizer()
+            sft_trainer.train()
+            llm_model = sft_trainer.get_model()
+            llm_tokenizer = sft_trainer.get_tokenizer()
 
-        # The downstream stages (goal/parameter extractor, state autoencoder) consume the
-        # state encoder trained in a PRIOR run. When this run does not train it itself
-        # (llm != latent/all), load the fine-tuned encoder from disk so the model handed to
-        # those trainers is never None — which previously crashed them with a NoneType.
-        if llm_model is None and self._spec.llm in ("goal", "parameter", "encoder"):
+        # The legacy state-autoencoder experiment consumes an accepted model_x from
+        # a prior run. Phase 2/3 use the shared SFT path above instead.
+        if self._spec.llm in ("goal", "parameter"):
+            raise RuntimeError(
+                "legacy goal/parameter trainers are retired; select a Phase 2 or "
+                "Phase 3 --sft_task and run --llm sft"
+            )
+
+        if llm_model is None and self._spec.llm == "encoder":
             llm_model = self.load_finetuned_state_encoder()
             llm_tokenizer = self._dataset.tokenizer
             if llm_model is None:
                 raise RuntimeError(
-                    "No fine-tuned state encoder checkpoint found; train stage m1 "
-                    f"(--train llm --llm latent) before --llm {self._spec.llm}.")
+                    "No accepted model_x checkpoint found before --llm encoder.")
             llm_state = ModelType.FINETUNED
 
         return llm_model, llm_tokenizer, llm_state
@@ -202,38 +229,6 @@ class IgcLanguageModule:
         if model_state == ModelType.FINETUNED:
             _model = self.load_finetuned_state_encoder()
 
-        # we train goal extractor
-        if self._spec.llm == "goal" or self._spec.llm == "all":
-            self.logger.info("Starting training goal extractor.")
-            goal_extractor = GoalExtractorTrainer(
-                "goal_extractor",
-                self._spec,
-                _model,
-                tokenizer,
-                ds=self._dataset,
-                metric_logger=self._metric_logger
-            )
-            if hasattr(_model, 'resize_token_embeddings'):
-                safe_resize_token_embeddings(_model, tokenizer)
-            goal_extractor.train_goal_representation()
-
-        # we train goal and parameter extractor, the goal here to extract
-        # high level goal and parameters for that goal.
-        if self._spec.llm == "parameter" or self._spec.llm == "all":
-            self.logger.info("Starting training goal parameter extractor.")
-            parameter_extractor = GoalExtractorTrainer(
-                "parameter_extractor",
-                self._spec,
-                _model,
-                tokenizer,
-                ds=self._dataset,
-                metric_logger=self._metric_logger,
-                is_inference=False
-            )
-            if hasattr(_model, 'resize_token_embeddings'):
-                safe_resize_token_embeddings(_model, tokenizer)
-            parameter_extractor.train_goal_and_parameter_extractor()
-
         # we train auto encoder the aim here to reduce state re-presentation
         if self._spec.llm == "encoder" or self._spec.llm == "all":
             self.logger.info("Starting training state auto encoder.")
@@ -250,10 +245,6 @@ class IgcLanguageModule:
             if hasattr(_model, 'resize_token_embeddings'):
                 safe_resize_token_embeddings(_model, tokenizer)
             autoencoder.train()
-
-        # self.llm_autoencoder.train_autoencoder()
-        # self.goal_extractor.train_goal_and_parameter_extractor()
-        # self.goal_extractor.train_goal_representation()
 
     def _register_tokens(self):
         pass

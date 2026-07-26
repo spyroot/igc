@@ -1,7 +1,7 @@
 """
 Run-report emission: turn a finished training run into a ResultBundle on disk.
 
-Called only from ``LlmEmbeddingsTrainer._train`` (``igc/modules/llm_train_state_encoder.py``)
+Called only from ``SFTTrainer._train`` (``igc/modules/train/sft.py``)
 at end of run, on rank zero. Report failures propagate because the Phase 1 acceptance
 gate requires a machine-readable ``report.json`` for the comparison tooling.
 
@@ -28,8 +28,15 @@ _SETTINGS_KEYS = (
     "per_device_train_batch_size", "gradient_accumulation_steps", "num_train_epochs",
     "llm_learning_rate", "llm_scheduler", "llm_optimizer", "mixed_precision",
     "sharding", "use_accelerator", "use_peft", "lora_r", "lora_alpha", "lora_dropout",
+    "lora_target_modules", "adapter_method", "lora_init", "warmup_ratio", "max_lr",
+    "div_factor", "final_div_factor", "cycle_momentum", "anneal_strategy",
+    "llm_weight_decay", "max_grad_norm", "gradient_checkpointing",
     "early_stopping_patience", "early_stopping_min_delta", "masking_type", "num_workers",
+    "eval_steps", "save_steps",
     "seed", "profile", "weights_role", "corpus_objective",
+    "phase", "sft_task", "parent_role", "parent_artifact_sha", "output_role",
+    "task_spec_sha", "phase_number",
+    "foundation_model_sha", "tokenizer_sha", "promotion_source",
 )
 
 # any spec key containing one of these is never emitted, whatever its value.
@@ -80,22 +87,39 @@ def build_run_bundle(spec_vars: Dict, *,
     use_peft = bool(spec_vars.get("use_peft", False))
     started_tag = started_at.replace(":", "").replace("-", "") or "run"
     profile = str(spec_vars.get("profile", "") or "")
-    is_phase1 = (
-        spec_vars.get("phase") == "phase1_finetune"
-        or spec_vars.get("corpus_objective") == "phase1_pretrain"
-        or profile.startswith("phase1_")
-    )
-    family = "phase1" if is_phase1 else "m1"
+    phase = str(spec_vars.get("phase", "") or "")
+    task = str(spec_vars.get("sft_task", "") or "")
+    family = phase or task or "sft"
     manifest = RunManifest(
         run_id=f"{family}-{os.path.basename(model) or 'model'}-{started_tag}",
         profile=profile,
         model=model,
+        phase=phase,
+        task=task,
+        parent_role=str(spec_vars.get("parent_role", "") or ""),
+        parent_artifact_sha=str(spec_vars.get("parent_artifact_sha", "") or ""),
+        output_role=str(spec_vars.get("output_role", "") or ""),
+        task_spec_sha=str(spec_vars.get("task_spec_sha", "") or ""),
+        foundation_model_sha=str(spec_vars.get("foundation_model_sha", "") or ""),
+        tokenizer_sha=str(spec_vars.get("tokenizer_sha", "") or ""),
+        promotion_source=str(spec_vars.get("promotion_source", "") or ""),
+        promoted_artifact_path=str(
+            spec_vars.get("promoted_artifact_path", "") or ""
+        ),
         tokenizer=model,
         adapter_method=str(spec_vars.get("adapter_method", "lora")) if use_peft else "none",
         adapter_rank=int(spec_vars["lora_r"]) if use_peft and "lora_r" in spec_vars else None,
         adapter_init=str(spec_vars.get("lora_init", "default") or "default"),
         data_manifest=str(dataset_fields.get("data_manifest", "")),
         eval_split=str(dataset_fields.get("eval_split", "")),
+        train_data_sha=str(dataset_fields.get("train_data_sha", "")),
+        eval_data_sha=str(dataset_fields.get("eval_data_sha", "")),
+        eval_manifest_sha=str(dataset_fields.get("eval_manifest_sha", "")),
+        source_manifest_sha=str(dataset_fields.get("source_manifest_sha", "")),
+        source_registry_sha=str(dataset_fields.get("source_registry_sha", "")),
+        source_artifact_manifest_shas=dict(
+            dataset_fields.get("source_artifact_manifest_shas", {})
+        ),
         max_steps=spec_vars.get("max_train_steps"),
         seq_len=spec_vars.get("seq_len"),
         settings=_scrub(spec_vars),
@@ -104,6 +128,10 @@ def build_run_bundle(spec_vars: Dict, *,
         ended_at=ended_at,
         wall_clock_sec=wall_clock_sec,
         checkpoint_path=str(checkpoint_path or ""),
+        git_commit=str(
+            spec_vars.get("git_commit", "")
+            or os.environ.get("CI_COMMIT_SHA", "")
+        ),
         environment=capture_environment(),
         training=dict(training),
     )

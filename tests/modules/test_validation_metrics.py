@@ -12,8 +12,8 @@ Mus mbayramo@stanford.edu
 
 import torch
 
-from igc.modules.llm_train_state_encoder import (
-    LlmEmbeddingsTrainer,
+from igc.modules.train.sft import (
+    SFTTrainer,
     ValidationMetrics,
     shifted_token_loss,
 )
@@ -33,7 +33,7 @@ def _aligned_logits(targets, vocab=7):
 def test_perfect_predictions_score_one():
     """Aligned argmax == targets gives 100% (old double-shift gave less)."""
     targets = torch.tensor([[1, 2, 3, 4]])
-    accuracy = LlmEmbeddingsTrainer.compute_accuracy(
+    accuracy = SFTTrainer.compute_accuracy(
         _aligned_logits(targets), targets, original_mask=None
     )
     assert accuracy == 1.0
@@ -42,7 +42,7 @@ def test_perfect_predictions_score_one():
 def test_pad_positions_do_not_deflate_accuracy():
     """-100 labels are excluded, not counted as wrong."""
     targets = torch.tensor([[1, 2, -100, -100]])
-    accuracy = LlmEmbeddingsTrainer.compute_accuracy(
+    accuracy = SFTTrainer.compute_accuracy(
         _aligned_logits(targets), targets, original_mask=None
     )
     assert accuracy == 1.0
@@ -54,14 +54,14 @@ def test_wrong_predictions_counted_over_valid_only():
     logits = _aligned_logits(targets)
     logits[0, 1] = torch.zeros(7)
     logits[0, 1, 5] = 5.0  # wrong prediction at the second valid slot
-    accuracy = LlmEmbeddingsTrainer.compute_accuracy(logits, targets, None)
+    accuracy = SFTTrainer.compute_accuracy(logits, targets, None)
     assert accuracy == 0.5
 
 
 def test_all_pad_batch_is_zero_not_nan():
     """A fully-padded batch returns 0.0 instead of dividing by zero."""
     targets = torch.full((1, 3), -100)
-    accuracy = LlmEmbeddingsTrainer.compute_accuracy(
+    accuracy = SFTTrainer.compute_accuracy(
         torch.zeros(1, 3, 7), targets, None
     )
     assert accuracy == 0.0
@@ -88,7 +88,7 @@ def test_validate_returns_loss_and_accuracy_from_labels():
     logits = torch.zeros(1, 4, 5)
     logits[0, 0, 1] = 5.0  # predicts labels[:, 1] correctly
     logits[0, 1, 3] = 5.0  # predicts labels[:, 2] incorrectly
-    trainer = LlmEmbeddingsTrainer.__new__(LlmEmbeddingsTrainer)
+    trainer = SFTTrainer.__new__(SFTTrainer)
     trainer.model = _ValidationModel(logits)
     trainer._device = torch.device("cpu")
     trainer.tokenizer = type("Tok", (), {"pad_token_id": 0})()

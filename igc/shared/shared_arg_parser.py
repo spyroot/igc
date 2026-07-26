@@ -102,7 +102,8 @@ def add_optimizer_group(parser):
 
     optimizer_group.add_argument(
         "--gradient_checkpointing",
-        type=bool, default=True,
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Gradient checkpointing to save memory."
     )
 
@@ -222,6 +223,13 @@ def add_scheduler_group(parser):
     )
 
     scheduler_group.add_argument(
+        "--warmup_ratio",
+        type=float,
+        default=None,
+        help="Fraction of OneCycleLR optimizer steps spent increasing the learning rate."
+    )
+
+    scheduler_group.add_argument(
         "--base_lr",
         type=float, default=0.01,
         help="Initial learning rate which is the lower boundary in the cycle for each parameter group.."
@@ -237,6 +245,27 @@ def add_scheduler_group(parser):
         "--div_factor",
         type=float, default=None,
         help="Determines the initial learning rate via initial_lr = max_lr/div_factor ."
+    )
+
+    scheduler_group.add_argument(
+        "--final_div_factor",
+        type=float,
+        default=10000.0,
+        help="Determines the OneCycleLR final learning rate relative to the initial rate."
+    )
+
+    scheduler_group.add_argument(
+        "--cycle_momentum",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Cycle optimizer momentum inversely to OneCycleLR learning rate."
+    )
+
+    scheduler_group.add_argument(
+        "--anneal_strategy",
+        choices=("cos", "linear"),
+        default="cos",
+        help="OneCycleLR learning-rate annealing strategy."
     )
 
     return parser
@@ -443,10 +472,47 @@ def add_trainer_group(parser):
              "from the explicit CLI flags."
     )
     parser.add_argument(
+        "--phase",
+        type=str,
+        default="",
+        help="Phase namespace resolved from the selected YAML training profile.",
+    )
+    parser.add_argument(
         "--weights_role",
         type=str, default="",
         help="Named checkpoint role written by this run, such as model_x, "
              "goal_extractor, or argument_extractor."
+    )
+    parser.add_argument(
+        "--sft_task",
+        type=str,
+        default="",
+        help="Task name from configs/training/sft_tasks.yaml. The task owns the "
+             "phase contract, prompt renderer, metric namespace, and checkpoint roles.",
+    )
+    parser.add_argument(
+        "--parent_adapter_dir",
+        type=str,
+        default="",
+        help="Prior accepted PEFT adapter used to initialize this SFT phase.",
+    )
+    parser.add_argument(
+        "--parent_artifact_sha",
+        type=str,
+        default="",
+        help="Immutable digest of the prior accepted adapter recorded in run lineage.",
+    )
+    parser.add_argument(
+        "--foundation_model_sha",
+        type=str,
+        default="",
+        help="Immutable foundation-model revision or artifact digest for run lineage.",
+    )
+    parser.add_argument(
+        "--tokenizer_sha",
+        type=str,
+        default="",
+        help="Immutable tokenizer artifact digest for run lineage.",
     )
 
     # indicate that we train
@@ -460,7 +526,7 @@ def add_trainer_group(parser):
     # setting what llm model we train
     parser.add_argument(
         "--llm",
-        choices=["all", "latent", "goal", "parameter", "encoder", "none"],
+        choices=["all", "sft", "latent", "goal", "parameter", "encoder", "none"],
         type=str, default="none",
         help="if we training llm we can train all or particular sub-model."
              "(A model we use for state encoder, goal encoder, "
@@ -502,6 +568,18 @@ def add_trainer_group(parser):
         default=-1,
         help="If set to a positive number, the total "
              "number of training steps to perform."
+    )
+    parser.add_argument(
+        "--eval_steps",
+        type=int,
+        default=0,
+        help="Evaluate every N optimizer steps; 0 runs only the final evaluation.",
+    )
+    parser.add_argument(
+        "--save_steps",
+        type=int,
+        default=0,
+        help="Save a rolling checkpoint every N optimizer steps; best always saves.",
     )
 
     # this mainly for debug model to overfit on a batch.
@@ -767,6 +845,45 @@ def add_dataset_dataloader(parser):
              "provenance-tagged corpus instead of building from --json_data_dir.")
 
     group.add_argument(
+        "--corpus_eval_dir",
+        type=str,
+        default="",
+        help="Directory holding the immutable Phase 1 held-out corpus. Required with "
+             "--corpus_dir for shared SFT.",
+    )
+
+    group.add_argument(
+        "--sft_data_path",
+        type=str,
+        default="",
+        help="Phase 2/3 JSONL path. Rows are validated and rendered by the adapter "
+             "named in --sft_task.",
+    )
+
+    group.add_argument(
+        "--sft_eval_data_path",
+        type=str,
+        default="",
+        help="Immutable Phase 2/3 held-out JSONL paired with --sft_data_path.",
+    )
+
+    group.add_argument(
+        "--sft_data_manifest",
+        type=str,
+        default="",
+        help="Immutable release manifest whose artifact SHA and row count bind "
+             "--sft_data_path.",
+    )
+
+    group.add_argument(
+        "--sft_eval_manifest",
+        type=str,
+        default="",
+        help="Immutable release manifest whose artifact SHA and row count bind "
+             "--sft_eval_data_path.",
+    )
+
+    group.add_argument(
         "--corpus_manifest",
         type=str, default="",
         help="redfish_ctl corpus manifest, such as corpora/manifest.v1.json. "
@@ -788,7 +905,7 @@ def add_dataset_dataloader(parser):
     group.add_argument(
         "--corpus_objective",
         type=str, default="legacy",
-        choices=["legacy", "phase1_pretrain"],
+        choices=["legacy", "phase1_pretrain", "labelled_requests", "labelled_calls"],
         help="Objective for --corpus_dir. 'legacy' preserves the historical whole-text "
              "causal-LM bridge; 'phase1_pretrain' renders x={rest_api, allowed_methods, "
              "json} and masks labels so loss applies only to the y_true JSON completion.")

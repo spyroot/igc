@@ -5,7 +5,7 @@ Composes several provenance-tagged Redfish data sources (real vendor captures, t
 mockup replay tree, vendor/synthetic emulators) into a single training corpus. The eval split
 is drawn ONLY from the highest-trust tier, so real captures serve as held-out ground truth
 while the more synthetic tiers always feed training for coverage. The split is deterministic —
-a stable hash of each resource URL rather than an RNG — so it reproduces across runs and stays
+a stable hash of each source-qualified resource URL rather than an RNG — so it reproduces across runs and stays
 stable as the corpus grows, and a serializable :class:`DataManifest` records the mix (for the
 training run manifest and as a fair-comparison key).
 
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
 from igc.ds.sources.base import SourceAdapter, SourceRecord, TrustLevel
@@ -33,7 +33,7 @@ def unit_hash(key: str, seed: int) -> float:
     Uses blake2b so the value is identical across processes and runs (unlike the builtin
     ``hash()``); the first 8 digest bytes are read big-endian and divided by ``2 ** 64``.
 
-    :param key: the string to hash (a resource URL).
+    :param key: the string to hash (normally a source-qualified resource URL).
     :param seed: split seed, mixed into the digest.
     :return: a deterministic float in ``[0.0, 1.0)``.
     """
@@ -55,6 +55,15 @@ class DataManifest:
     :param eval_fraction: fraction of eligible records held out for eval.
     :param seed: the split seed.
     :param sources: sorted unique source labels.
+    :param train_row_ids: stable, non-URL identifiers assigned to training.
+    :param heldout_row_ids: stable, non-URL identifiers reserved for evaluation.
+    :param required_heldout_sources: sorted source labels whose trust tier makes
+        them eligible for held-out evaluation, including a source that happened
+        to receive zero rows under the deterministic split.
+    :param heldout_by_source: observed held-out row count per source label.
+    :param source_registry_sha: exact source-registry spec identity, when used.
+    :param source_manifest_shas: exact upstream manifest identity per registry source.
+    :param min_eval_per_source: minimum held-out rows per eligible source.
     """
     total: int
     train_count: int
@@ -66,29 +75,37 @@ class DataManifest:
     eval_fraction: float
     seed: int
     sources: List[str]
+    train_row_ids: List[str]
+    heldout_row_ids: List[str]
+    required_heldout_sources: List[str] = field(default_factory=list)
+    heldout_by_source: Dict[str, int] = field(default_factory=dict)
+    source_registry_sha: str = ""
+    source_manifest_shas: Dict[str, str] = field(default_factory=dict)
+    min_eval_per_source: int = 0
 
     def content_hash(self) -> str:
-        """Return a stable 16-hex-char hash over the manifest fields.
+        """Return a canonical SHA-256 identity over the manifest fields.
 
         Two manifests with equal contents hash equal, so this can key reproducibility and
         fair-comparison checks. Field (and nested-dict) order is canonicalized via sorted-key
         JSON before hashing.
 
-        :return: a 16-character hex digest.
+        :return: a ``sha256:<64 lowercase hex>`` digest.
         """
         payload = json.dumps(self.__dict__, sort_keys=True, default=str)
-        return hashlib.blake2b(payload.encode("utf-8"), digest_size=8).hexdigest()
+        return f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
 
     def eval_split_id(self) -> str:
-        """Return a stable id of the eval-split policy (floor / fraction / seed).
+        """Return a SHA-256 identity for the exact held-out row-id set.
 
         Distinct from :meth:`content_hash` (which identifies the exact record mix): this
         identifies HOW the split was drawn, so two runs over the same corpus with the same
         policy share an ``eval_split`` id.
 
-        :return: e.g. ``"floor=REAL:frac=0.15:seed=0"``.
+        :return: a ``sha256:<64 lowercase hex>`` digest.
         """
-        return f"floor={self.eval_trust_floor}:frac={self.eval_fraction}:seed={self.seed}"
+        payload = json.dumps(self.heldout_row_ids, sort_keys=True, separators=(",", ":"))
+        return f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
 
     def to_run_manifest_fields(self) -> Dict[str, str]:
         """Fields to populate a training ``RunManifest`` from this mix.
@@ -109,28 +126,39 @@ class SourceMix:
     :param eval_fraction: fraction of eval-eligible records held out (``0.0``-``1.0``).
     :param eval_trust_floor: only records at or above this tier are eval-eligible.
     :param seed: seed for the deterministic split hash.
-    :param dedup: when true, keep one record per URL (highest trust; first-seen on a tie).
+    :param dedup: when true, keep one record per source/URL pair (highest trust;
+        first-seen on a tie), preserving different platform observations of the
+        same standard Redfish endpoint.
+    :param min_eval_per_source: deterministic minimum held-out count for each
+        eligible source; a smaller source is held out in full.
     :raises ValueError: if ``eval_fraction`` is outside ``[0.0, 1.0]``.
     """
 
     def __init__(self, adapters: List[SourceAdapter], *, eval_fraction: float = 0.15,
                  eval_trust_floor: TrustLevel = TrustLevel.REAL, seed: int = 0,
-                 dedup: bool = True):
+                 dedup: bool = True, min_eval_per_source: int = 0):
         if not 0.0 <= eval_fraction <= 1.0:
             raise ValueError(f"eval_fraction must be in [0.0, 1.0], got {eval_fraction}")
+        if (
+            not isinstance(min_eval_per_source, int)
+            or isinstance(min_eval_per_source, bool)
+            or min_eval_per_source < 0
+        ):
+            raise ValueError("min_eval_per_source must be a non-negative integer")
         self._adapters = list(adapters)
         self.eval_fraction = eval_fraction
         self.eval_trust_floor = eval_trust_floor
         self.seed = seed
         self.dedup = dedup
+        self.min_eval_per_source = min_eval_per_source
         self._records_cache: List[SourceRecord] = None
 
     def records(self) -> List[SourceRecord]:
         """Collect all records from every adapter, optionally deduped by URL.
 
-        With dedup on, a URL seen in several sources collapses to its highest-trust copy
-        (first-seen wins a trust tie, so adapter order is the tie-break); the record keeps its
-        first-appearance position. The result is cached for repeated calls.
+        With dedup on, repeated copies of one URL within the same source collapse
+        to the highest-trust copy. Different sources retain their own observation
+        of a shared standard endpoint. The result is cached for repeated calls.
 
         :return: the composed list of records.
         """
@@ -141,36 +169,67 @@ class SourceMix:
             self._records_cache = [rec for adapter in self._adapters for rec in adapter.iter_records()]
             return self._records_cache
 
-        best: Dict[str, SourceRecord] = {}
-        order: List[str] = []
+        best: Dict[tuple[str, str], SourceRecord] = {}
+        order: List[tuple[str, str]] = []
         for adapter in self._adapters:
             for rec in adapter.iter_records():
-                current = best.get(rec.url)
+                key = (rec.source, rec.url)
+                current = best.get(key)
                 if current is None:
-                    best[rec.url] = rec
-                    order.append(rec.url)
+                    best[key] = rec
+                    order.append(key)
                 elif rec.trust_level > current.trust_level:
-                    best[rec.url] = rec
-        self._records_cache = [best[url] for url in order]
+                    best[key] = rec
+        self._records_cache = [best[key] for key in order]
         return self._records_cache
 
     def split(self) -> Tuple[List[SourceRecord], List[SourceRecord]]:
         """Partition the corpus into ``(train, eval)`` deterministically.
 
-        A record is held out for eval iff it is at or above ``eval_trust_floor`` AND
-        ``unit_hash(url, seed) < eval_fraction``; everything else trains. Input order is
-        preserved within each list.
+        Eligible records first use the stable hash threshold. When a source falls
+        below ``min_eval_per_source``, the lowest-hash records extend its held-out
+        set to the required count, capped by all available rows. Input order is
+        preserved within each output list.
 
         :return: ``(train_records, eval_records)``.
         """
+        records = self.records()
+        heldout_keys = {
+            _record_key(record)
+            for record in records
+            if record.trust_level >= self.eval_trust_floor
+            and unit_hash(_record_key(record), self.seed) < self.eval_fraction
+        }
+        if self.min_eval_per_source:
+            eligible_by_source: Dict[str, List[SourceRecord]] = {}
+            for record in records:
+                if record.trust_level >= self.eval_trust_floor:
+                    eligible_by_source.setdefault(record.source, []).append(record)
+            for source_records in eligible_by_source.values():
+                selected = sum(
+                    _record_key(record) in heldout_keys
+                    for record in source_records
+                )
+                required = min(self.min_eval_per_source, len(source_records))
+                if selected >= required:
+                    continue
+                ranked = sorted(
+                    source_records,
+                    key=lambda record: (
+                        unit_hash(_record_key(record), self.seed),
+                        _record_key(record),
+                    ),
+                )
+                heldout_keys.update(
+                    _record_key(record) for record in ranked[:required]
+                )
         train: List[SourceRecord] = []
         held_out: List[SourceRecord] = []
-        for rec in self.records():
-            eligible = rec.trust_level >= self.eval_trust_floor
-            if eligible and unit_hash(rec.url, self.seed) < self.eval_fraction:
-                held_out.append(rec)
+        for record in records:
+            if _record_key(record) in heldout_keys:
+                held_out.append(record)
             else:
-                train.append(rec)
+                train.append(record)
         return train, held_out
 
     def manifest(self) -> DataManifest:
@@ -188,6 +247,16 @@ class SourceMix:
             by_trust[rec.trust_level.name] = by_trust.get(rec.trust_level.name, 0) + 1
             vendor = rec.vendor or "unknown"
             by_vendor[vendor] = by_vendor.get(vendor, 0) + 1
+        required_heldout_sources = sorted({
+            record.source
+            for record in records
+            if record.trust_level >= self.eval_trust_floor
+        })
+        heldout_by_source: Dict[str, int] = {}
+        for record in held_out:
+            heldout_by_source[record.source] = (
+                heldout_by_source.get(record.source, 0) + 1
+            )
         return DataManifest(
             total=len(records),
             train_count=len(train),
@@ -199,7 +268,25 @@ class SourceMix:
             eval_fraction=self.eval_fraction,
             seed=self.seed,
             sources=sorted(by_source.keys()),
+            train_row_ids=[_record_id(record) for record in train],
+            heldout_row_ids=[_record_id(record) for record in held_out],
+            required_heldout_sources=required_heldout_sources,
+            heldout_by_source=heldout_by_source,
+            min_eval_per_source=self.min_eval_per_source,
         )
+
+
+def _record_id(record: SourceRecord) -> str:
+    """Return a stable non-secret row identifier for one source/url pair."""
+    digest = hashlib.sha256(
+        f"{record.source}\0{record.url}".encode("utf-8")
+    ).hexdigest()
+    return f"sha256:{digest}"
+
+
+def _record_key(record: SourceRecord) -> str:
+    """Return the source-qualified key used by the deterministic split."""
+    return f"{record.source}\0{record.url}"
 
 
 # Author: Mus mbayramo@stanford.edu

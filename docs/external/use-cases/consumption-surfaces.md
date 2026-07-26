@@ -11,20 +11,14 @@ a worked interaction, and is explicit about what exists **today** versus what is
 > Phase-0 agent described in [`architecture overview`](../architecture/overview.md). Each is labelled so you never
 > mistake a mock-up for a shipped feature.
 
-## Surface 0 — Training & evaluation CLI  ·  **implemented today**
+## Surface 0 — Training and evaluation  ·  **implemented today**
 
-Before there is an agent to drive, you train and gate it. This is the real, current surface:
-
-```bash
-# Train the goal-conditioned policy offline against the mock REST env (CPU smoke path).
-python igc_main.py --action_trainer agent --head pointer --model_type gpt2 ...
-
-# Default offline gate — no GPU, no network, no live host.
-pytest -q
-```
-
-`--action_trainer` selects what is trained (`agent`, `llm`, `all`), `--head` selects the action head
-(`pointer` per D-001, or the legacy `onehot`). Everything downstream assumes a policy produced here.
+Before there is an agent to drive, the repository builds and promotes the Phase 1 `model_x`, Phase 2
+`goal_extractor`, and Phase 3 `argument_extractor` described in the
+[`architecture overview`](../architecture/overview.md). Training runs on the approved GPU surface;
+CPU contract and regression validation runs through the project CI/Kubernetes gates. Exact model,
+dataset, prompt, optimizer, evaluation-cadence, and promotion settings come from versioned specs, not
+command-line defaults embedded in Python.
 
 ## Surface 1 — Interactive terminal / CLI  ·  **target**
 

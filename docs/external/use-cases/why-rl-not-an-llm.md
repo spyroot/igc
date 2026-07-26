@@ -65,7 +65,7 @@ At every state the environment exposes a **dynamic catalog of legal actions**: a
 the *walked* Redfish resource tree, paired with an HTTP method from *that endpoint's* advertised
 `allowed_methods`, plus optional typed argument slots. The policy scores and picks **only from this
 set** — it has no way to emit a URL or method that the API did not offer. This is a deliberate design
-decision (see [`decisions`](../roadmap/decisions.md), D-001): the alternative of "let the LLM generate
+constraint: the alternative of "let the LLM generate
 the action" was considered and **rejected**, both because it re-introduces hallucination and because
 it breaks the offline TD/HER learning the agent depends on. Hallucinated endpoints are not filtered
 out after the fact — they are **impossible to express**.
@@ -92,13 +92,12 @@ consequences of real actions*, which is precisely what a stateless prompt cannot
 
 ### 5. It transfers — one policy, many vendors and machines
 Because candidates are encoded by their **structure** (path tokens, HTTP method, resource type,
-how the endpoint is reached, whether it carries an action target — see D-002) rather than by a
+how the endpoint is reached, whether it carries an action target) rather than by a
 memorized id, a Supermicro or HPE URL the agent has never seen lands near the Dell URLs it has. IGC's
 own go/no-go experiment is *zero-shot on a held-out vendor* over the repo's multi-vendor fixture
 corpora. Generalization is the target being measured, not a hope. (That same experiment is honest
 about the bar: representation similarity alone is not enough — the *learned* scoring is load-bearing,
-which is exactly why this is trained RL and not a clever embedding lookup. See D-002's recorded
-result.)
+which is exactly why this is trained RL and not a clever embedding lookup.)
 
 ## Where the LLM still earns its place
 
@@ -106,9 +105,9 @@ The model is doing real work — just not the deciding:
 
 - **Understanding** the observation: turning a nested, vendor-specific JSON body into a state the
   policy can use is a language/code problem the backbone is good at.
-- **Goal extraction**: mapping a high-level `instruction` into atomic `GoalRef` targets and explicit
-  dependency hints is where the model's world knowledge helps; the RL policy still learns execution
-  order from reward.
+- **Goal extraction**: Phase 2 maps a high-level instruction to an unordered `rest_api_list`, and
+  Phase 3 binds explicit methods and arguments. The RL policy still learns execution order from
+  state transitions and reward.
 - **Argument values**: choosing enum values for an action's typed slots draws on the model's grasp of
   what the fields mean.
 

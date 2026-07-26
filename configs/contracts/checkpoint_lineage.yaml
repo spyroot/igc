@@ -1,0 +1,53 @@
+version: 1
+authority: phase_checkpoint_and_encoder_lineage
+
+checkpoint_lineage:
+  model_x:
+    phase: 1
+    role: model_x
+    purpose: phase1_json_backbone
+    parent_role: foundation_instruct
+    immutable_after_promotion: true
+    artifact_sha: ${MODEL_X_SHA}
+
+  goal_extractor:
+    phase: 2
+    role: goal_extractor
+    parent_role: model_x
+    parent_sha: ${MODEL_X_SHA}
+    artifact_sha: ${PHASE2_SHA}
+
+  argument_extractor:
+    phase: 3
+    role: argument_extractor
+    parent_role: goal_extractor
+    parent_sha: ${PHASE2_SHA}
+    artifact_sha: ${PHASE3_SHA}
+
+encoders:
+  state:
+    output: z_state
+    source_role: model_x
+    source_sha: ${MODEL_X_SHA}
+    frozen_during_rl: true
+    fixed_width_within_experiment: true
+    observed_values_retained: true
+    api_errors_retained: true
+
+  rest_goal:
+    output: z_rest
+    source_role: goal_extractor
+    source_sha: ${PHASE2_SHA}
+    frozen_during_rl: true
+
+  method_goal:
+    output: z_method
+    source_role: argument_extractor
+    source_sha: ${PHASE3_SHA}
+    frozen_during_rl: true
+
+invariants:
+  phase3_initializes_from_phase2: true
+  state_encoder_branches_from_model_x: true
+  encoder_versions_pinned_per_rl_experiment: true
+  only_rl_policy_learns_during_rl: true

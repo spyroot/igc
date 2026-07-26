@@ -17,10 +17,10 @@ Phase 2: goal_extractor
   accepted human text -> rest_api_list.
 
 Phase 3: argument_extractor
-  same accepted text + rest_api_list + JSON/method evidence -> target_calls.
+  same accepted text + rest_api_list + JSON/method evidence -> calls.
 
 RL refactor:
-  target_calls or latent z_goal + current Redfish observations -> execution strategy.
+  calls or latent goal representations + current Redfish observations -> execution strategy.
 ```
 
 The legacy code was a complete earlier implementation for GPT-2-scale constraints. It is not the
@@ -30,8 +30,10 @@ replay/HER, DQN targets, simulator seams, launch/profile infrastructure, and off
 search it for already-finished `D1`, Pro judging, `goal_extractor`, or `argument_extractor`
 implementations.
 
-Avoid historical `M1`/`M2`/`M3`/`M4`/`M5`/`M6` aliases in new docs, profiles, metrics, or code. Use
-the component names in this document.
+Avoid historical stage aliases in new docs, profiles, metrics, or code. Use the component names in
+this document. Checkpoint and encoder parentage is machine-readable in
+`configs/contracts/checkpoint_lineage.yaml`; the post-Phase-3 latent boundary is
+`configs/contracts/goal_latent.yaml`.
 
 ## Data And Label Flow
 
@@ -47,7 +49,7 @@ It does not contain human operator text such as "mount an ISO and boot the serve
 that missing label at scale:
 
 ```text
-sample 1-3 REST API records
+sample 1-3 REST API records, plus separately bounded no-match negatives
   -> model_x drafts plausible operator text
   -> Pro judges whether the text maps to exactly that API set
   -> accepted row enters D1
@@ -56,24 +58,29 @@ sample 1-3 REST API records
 Phase 2 then trains in the reverse direction:
 
 ```text
-x = accepted human text plus optional same-row context
+x = accepted human text plus API context containing targets and realistic distractors
 y_true = rest_api_list
 ```
 
-Cross entropy trains against one canonical serialized JSON target, but Phase 2 correctness is API-set
-coverage unless the text explicitly states ordering. `[] == []` is a valid hard-negative/no-action
-match.
+Cross entropy trains against one canonical serialized JSON target, but Phase 2 correctness is always
+unordered API-set coverage. Any execution-order implication in the text belongs to later environment
+planning, not the Phase 2 label. `[] == []` is a valid hard-negative/no-action match.
 
 Phase 3 reuses the same accepted `D1.x.text`. It does not create new text and does not choose new
 APIs. It fills method and argument labels for the Phase 2 APIs:
 
 ```text
-x = text + rest_api_list + allowed_methods + JSON evidence
-y_true = calls[{rest_api, allowed_methods, method, arguments}]
+x = text + rest_api_list + api_context
+y_true = calls[{rest_api, http_method, operation_name, arguments}]
 ```
 
 `arguments` means HTTP request-body fields or Redfish action parameters for that exact selected API
 and method. For read-only `GET`/`HEAD`, `arguments` is `{}`.
+
+The judged text row and explicit grounded call labels are joined by a content-derived D1 `row_id`.
+One private master record owns the call keys and renders separate Phase 2 and Phase 3 training views;
+the views must select the same unordered API set. Mutation values require explicit grounding from
+the operator text plus action/schema evidence and are never copied from arbitrary current JSON.
 
 ## Runtime Contract
 
@@ -82,20 +89,20 @@ The normal inference contract after Phase 3 is:
 ```json
 {
   "text": "mount ISO X and boot from it",
-  "target_calls": [
+  "calls": [
     {
       "rest_api": "/redfish/v1/Managers/1/VirtualMedia/CD/Actions/VirtualMedia.InsertMedia",
-      "allowed_methods": ["POST"],
-      "method": "POST",
+      "http_method": "POST",
+      "operation_name": "VirtualMedia.InsertMedia",
       "arguments": {"Image": "X"}
     }
   ]
 }
 ```
 
-`target_calls` are a visible goal specification, not an execution script. The RL policy may need to
+`calls` is an unordered visible goal specification, not an execution script. The RL policy may need to
 read state, wait for tasks, retry transient failures, verify state, or call prerequisite/recovery APIs
-that are absent from `target_calls`.
+that are absent from `calls`.
 
 Example: if ISO `Y` is already mounted, a correct strategy for "mount ISO X" may be:
 
@@ -111,7 +118,7 @@ The simulator and real BMC path must expose the same kind of evidence to the RL 
 
 ```text
 HTTP status + Redfish JSON + task/error metadata
-  -> ObservationEncoder
+  -> StateEncoder
   -> compact RL observation
   -> legal action catalog / candidate-action scorer
 ```
@@ -122,19 +129,19 @@ After Phase 3, the open research question is how RL should consume the goal. Kee
 
 ```text
 concrete baseline:
-  condition RL directly on target_calls
+  condition RL directly on calls
 
 latent experiment:
-  encode target_calls into z_goal / z_sub_goal
+  encode call structure into z_rest and z_method; carry literal argument values alongside
 
 hybrid:
-  use target_calls plus z_goal
+  use calls plus the latent goal views
 ```
 
-Concrete `target_calls` are enough for same-vendor/same-surface experiments. For transfer, the same
+Concrete `calls` are enough for same-vendor/same-surface experiments. For transfer, the same
 human intent may map to different Dell, HPE/iLO, or Supermicro REST surfaces. In that case the latent
-goal should represent the desired state facts and argument values, while the policy grounds that goal
-against the current BMC's legal action catalog.
+goal should represent the desired action semantics, while literal argument values remain outside the
+latents and the policy grounds the goal against the current BMC's legal action catalog.
 
 The default goal representation should be order-invariant. Phase 3 does not know execution order, and
 it does not include hidden prerequisite actions such as ejecting an existing ISO before inserting a
@@ -146,10 +153,10 @@ transition record, and verifier/reward recomputation contract. HER relabels achi
 verified from future observations; it must not copy future rewards backward or compare only
 vendor-specific REST API strings except in a deliberate same-surface baseline.
 
-## Observation Encoder
+## State Encoder
 
-The architecture name is `ObservationEncoder` or `RedfishObservationEncoder`, not `StatePooler`.
-Pooling is only one possible compression strategy inside the encoder.
+The architecture name is `StateEncoder`, not `StatePooler`. Pooling is only one possible compression
+strategy inside the encoder.
 
 The intended shape is:
 
@@ -186,9 +193,9 @@ parity.
 
 ### StateEncoder v1 — binding contract
 
-This locks the v1 contract for the state encoder. The paper (`docs/external/research/paper/IGC.tex`) calls this component
-`StateEncoder`; in this document it is the `ObservationEncoder`/`RedfishObservationEncoder` above. It
-emits `z_state` — the paper's `z_t`, the compact RL state that `StateCompressor` produces from a
+This locks the v1 contract for the state encoder. The paper
+(`docs/external/research/paper/IGC.tex`) uses the same `StateEncoder` name. It emits `z_state` — the
+paper's `z_t`, the compact RL state that `StateCompressor` produces from a
 Redfish observation. Other components may depend only on what this subsection lists; everything else is
 an internal implementation detail that may change without notice.
 
@@ -219,6 +226,19 @@ an internal implementation detail that may change without notice.
   policy's decisions and RL return; reconstruction quality is supporting evidence, not the acceptance
   gate.
 
+## RL Phase 0: Discovery Pretraining
+
+Phase 1/2/3 remain graph-independent. After those supervised phases and before task-conditioned RL,
+the agent may pretrain on simulator discovery walks analogous to `redfish_ctl` discovery. The
+environment exposes the current discovered resource set, legal `GET` targets, returned JSON, newly
+discovered links, failures, and exact coverage, so discovery has deterministic transition and
+coverage labels.
+
+The non-graph `StateEncoder` is the v1 baseline. In parallel, an opt-in graph experiment may learn
+node embeddings and a graph-pooled `z_state` candidate from the same discovery traces. That candidate
+is only an RL bootstrap; it does not alter D0, D1, Phase 2, or Phase 3 contracts and becomes active
+only after state-sufficiency and downstream RL-performance gates beat the baseline.
+
 ## RL Refactor Surface
 
 Phase 1/2/3 do not make existing RL curves trustworthy by themselves. After Phase 3, the RL stack must
@@ -227,12 +247,12 @@ be refactored around the concrete/latent goal choice and observation-encoder con
 - **Simulator / mutation model:** Redfish-like JSON output, stateful transitions, hidden
   prerequisites, idempotence, async tasks, stale reads, transient transport failure, and
   vendor-shaped errors.
-- **ObservationEncoder:** shared sim/real compression from Redfish JSON/status into compact
+- **StateEncoder:** shared sim/real compression from Redfish JSON/status into compact
   state, graph/history/goal facts, and legal-action features.
 - **HER:** relabel from achieved state facts in before/after journals, including partial successes
   such as "old ISO ejected" or "target field already satisfied."
-- **DQN / candidate-action scorer:** score all legal actions in the current state, not just
-  `target_calls`.
+- **DQN / candidate-action scorer:** score all legal actions in the current state, not just the
+  Phase 3 `calls`.
 - **TD target and replay:** preserve `terminated`, `truncated`, zero-candidate, non-finite, and
   partial-done metadata correctly.
 - **Evaluator / reward:** verify final Redfish state against the intended goal, not a `2xx` or a
@@ -244,26 +264,29 @@ be refactored around the concrete/latent goal choice and observation-encoder con
 
 | Component | Role | Current status |
 | --- | --- | --- |
-| `model_x` | Phase 1 Redfish JSON/API/method model | current training focus |
-| `D1` builder | synthetic-but-judged text-label dataset construction | planned after Phase 1 acceptance |
-| `goal_extractor` | Phase 2 text to `rest_api_list` model | planned |
-| `argument_extractor` | Phase 3 method/argument model | planned |
-| `ObservationEncoder` | Redfish JSON/status to compact RL state | legacy mechanics exist; needs refactor |
-| `StateCompressor` | compression head inside `ObservationEncoder` | implementation choice, not architecture name |
+| `model_x` | Phase 1 Redfish JSON/API/method model | shared SFT, corpus, and promotion gates implemented; accepted rerun pending |
+| `D1` builder | synthetic-but-judged text-label dataset construction | contract, builder, calibration, release, and promotion gates implemented; real release pending |
+| `goal_extractor` | Phase 2 text to `rest_api_list` model | shared SFT and promotion path implemented; promoted run pending |
+| `argument_extractor` | Phase 3 method/argument model | contract, shared SFT, grounded-view release, and promotion path implemented; real call labels and promoted run pending |
+| `StateEncoder` | Redfish JSON/status to compact RL state | legacy mechanics exist; needs refactor |
+| `StateCompressor` | compression head inside `StateEncoder` | implementation choice, not architecture name |
 | `RLPolicy` | execution strategy over legal action catalog | needs SIM/HER/DQN/TD/evaluator refactor |
 | `redfish_ctl` corpus | authoritative Redfish discovery/corpus provider | external data contract |
 
 ## Build Order
 
 1. Finish Phase 1 acceptance: full-corpus `model_x`, W&B/reconstruction/test evidence, and reviewed
-   artifact metadata.
-2. Build Phase 2 `D1`: sample 1-3 APIs, generate text with `model_x`, judge with Pro, train
-   `goal_extractor`, and evaluate API-set coverage.
+   artifact metadata. In parallel, exercise bounded D1 generation against the current checkpoint;
+   only canonical D1 promotion waits for an accepted `model_x` parent.
+2. Build and promote Phase 2 `D1`: sample 1-3 APIs, generate text with `model_x`, judge with Pro,
+   release the balanced immutable dataset, train `goal_extractor`, and evaluate API-set coverage.
 3. Build Phase 3: reuse accepted `D1.text`, label method/arguments from API/method/JSON evidence,
    train `argument_extractor`, and evaluate call/method/argument accuracy.
-4. Refactor RL around the concrete/latent goal choice: simulator, observation encoder, HER,
+4. Run RL Phase 0 discovery pretraining, keeping the non-graph StateEncoder baseline and evaluating
+   any graph/node-embedding bootstrap as an opt-in experiment.
+5. Refactor RL around the concrete/latent goal choice: simulator, StateEncoder, HER,
    DQN/candidate scoring, TD/replay, evaluator/reward, and rollout records.
-5. Only after the refactor, scale rollout/training.
+6. Only after the refactor, scale rollout/training.
 
 ## Safety And Evidence
 

@@ -8,7 +8,10 @@ Author:
 Mus mbayramo@stanford.edu
 """
 import argparse
+import hashlib
+import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -46,6 +49,42 @@ def _install_fakes(monkeypatch):
 
     monkeypatch.setattr(llm_shared, "AutoModelForCausalLM", FakeAutoModel)
     monkeypatch.setattr(llm_shared, "AutoTokenizer", FakeAutoTok)
+    return captured
+
+
+def _write_parent_adapter(adapter_dir: Path, payload: bytes = b"adapter bytes\n") -> str:
+    """Write a fake PEFT parent adapter and return its canonical artifact SHA."""
+    adapter_dir.mkdir()
+    weight = adapter_dir / "adapter_model.safetensors"
+    weight.write_bytes(payload)
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _install_fake_peft(monkeypatch):
+    """Install a fake peft module and capture adapter loads."""
+    captured = {"peft_calls": []}
+
+    class FakePeftModel:
+        @staticmethod
+        def from_pretrained(model, adapter_dir, is_trainable=False):
+            captured["peft_calls"].append(
+                {
+                    "model": model,
+                    "adapter_dir": adapter_dir,
+                    "is_trainable": is_trainable,
+                },
+            )
+            return types.SimpleNamespace(
+                config=types.SimpleNamespace(pad_token_id=None, pad_token=None),
+                base_model=model,
+                peft_config={"default": object()},
+            )
+
+    monkeypatch.setitem(
+        sys.modules,
+        "peft",
+        types.SimpleNamespace(PeftModel=FakePeftModel),
+    )
     return captured
 
 
@@ -96,6 +135,68 @@ def test_only_model_skips_tokenizer_and_padding(monkeypatch):
     assert "tok" not in captured
     assert model.config.pad_token_id is None
     assert model.config.pad_token is None
+
+
+def test_parent_adapter_exact_weight_sha_loads_peft_after_verification(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A configured parent adapter loads only when its safetensors SHA matches."""
+    _install_fakes(monkeypatch)
+    peft = _install_fake_peft(monkeypatch)
+    adapter_sha = _write_parent_adapter(tmp_path / "parent-adapter")
+    spec = argparse.Namespace(
+        model_type="local/model-x",
+        parent_adapter_dir=str(tmp_path / "parent-adapter"),
+        parent_artifact_sha=adapter_sha,
+    )
+
+    model, tokenizer = llm_shared.from_pretrained_default(spec)
+
+    assert model.peft_config
+    assert tokenizer.pad_token == "<eos>"
+    assert len(peft["peft_calls"]) == 1
+    assert peft["peft_calls"][0]["model"] is not None
+    assert peft["peft_calls"][0]["adapter_dir"] == str(tmp_path / "parent-adapter")
+    assert peft["peft_calls"][0]["is_trainable"] is True
+
+
+@pytest.mark.parametrize(
+    ("spec_kwargs", "write_weight", "message"),
+    [
+        ({}, True, "canonical sha256"),
+        ({"parent_artifact_sha": ""}, True, "canonical sha256"),
+        ({"parent_artifact_sha": "sha256:not-a-real-digest"}, True, "canonical sha256"),
+        ({"parent_artifact_sha": "sha256:" + "0" * 64}, True, "does not match"),
+        ({"parent_artifact_sha": None}, True, "canonical sha256"),
+        ({"parent_artifact_sha": "sha256:" + "0" * 64}, False, "does not exist"),
+    ],
+)
+def test_parent_adapter_invalid_evidence_fails_before_peft_load(
+    tmp_path: Path,
+    monkeypatch,
+    spec_kwargs: dict[str, object],
+    write_weight: bool,
+    message: str,
+) -> None:
+    """Missing, empty, malformed, wrong SHA, or missing weights block PEFT loading."""
+    _install_fakes(monkeypatch)
+    peft = _install_fake_peft(monkeypatch)
+    adapter_dir = tmp_path / "parent-adapter"
+    if write_weight:
+        _write_parent_adapter(adapter_dir)
+    else:
+        adapter_dir.mkdir()
+    spec = argparse.Namespace(
+        model_type="local/model-x",
+        parent_adapter_dir=str(adapter_dir),
+        **spec_kwargs,
+    )
+
+    with pytest.raises((FileNotFoundError, ValueError), match=message):
+        llm_shared.from_pretrained_default(spec)
+
+    assert peft["peft_calls"] == []
 
 
 def test_load_pretrained_default_forwards_loader_flags(monkeypatch):

@@ -1,17 +1,18 @@
-"""
-Train the language-model state encoder on masked Redfish JSON examples.
+"""Shared causal-language-model SFT engine for Phases 1, 2, and 3.
 
-The ``MaskedJSONDataset`` provided by ``igc.ds.redfish_masked_dataset`` supplies
-tokenized REST response sequences and masking callbacks. This trainer applies a
-next-token objective, cycles the configured masking methods, and saves
-fine-tuned language-model checkpoints for downstream state encoding.
+The engine consumes fixed-shape tokenized batches containing ``input_ids``,
+``attention_mask``, and completion-only ``labels``. Dataset adapters own raw-row
+validation, prompt rendering, completion rendering, and any optional masking
+curriculum. The trainer owns optimization, distributed execution, checkpointing,
+and phase-namespaced metrics.
 
 Author:Mus mbayramo@stanford.edu
 """
 import argparse
 import time
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union, List
+from pathlib import Path
+from typing import Any, Optional, Tuple, Union, List
 
 import numpy as np
 import torch
@@ -30,7 +31,6 @@ from igc.shared.shared_torch_builder import TorchBuilder
 
 from igc.ds.redfish_masked_dataset import (
     MaskingOption,
-    MaskedJSONDataset,
     MaskingType
 )
 
@@ -160,19 +160,20 @@ def scheduler_epoch_args(
     )
 
 
-def measure_grad_norm(model) -> float:
-    """Measure (never clip) the current global gradient norm.
+def measure_grad_norm(model, max_norm: float = float("inf")) -> float:
+    """Measure and optionally clip the current global gradient norm.
 
     Must run BEFORE ``optimizer.step()``/``zero_grad()`` — afterwards the
     gradients are cleared and the measurement is 0.0 forever, which is exactly
     the bug this helper exists to prevent regressing.
 
     :param model: the module whose parameter gradients are measured.
+    :param max_norm: clipping threshold; infinity preserves measure-only behavior.
     :return: the global grad norm as a float.
     """
     import torch as _torch
     return _torch.nn.utils.clip_grad_norm_(
-        model.parameters(), max_norm=float("inf")).item()
+        model.parameters(), max_norm=max_norm).item()
 
 
 def is_accum_boundary(micro_step_index: int, accum_steps: int, total_batches: int) -> bool:
@@ -206,6 +207,11 @@ def reached_max_steps(global_step: int, max_steps: Optional[int]) -> bool:
     :return: ``True`` when ``max_steps`` is a positive int and ``global_step >= max_steps``.
     """
     return max_steps is not None and max_steps > 0 and global_step >= max_steps
+
+
+def cadence_due(optimizer_step: int, interval: int) -> bool:
+    """Return whether an optimizer-step cadence fires at this update."""
+    return optimizer_step > 0 and interval > 0 and optimizer_step % interval == 0
 
 
 def validation_accuracy(value: Union[ValidationMetrics, float]) -> float:
@@ -350,20 +356,42 @@ def unwrap_accelerate(wrapped, inner_attr: str):
     return getattr(wrapped, inner_attr, wrapped)
 
 
-class LlmEmbeddingsTrainer(LlmModule):
-    """
-    Train a language model on masked Redfish JSON sequences.
+def validate_parent_output_isolation(
+        parent_adapter_dir: str,
+        output_adapter_dir: str,
+) -> None:
+    """Refuse an SFT run that would overwrite its immutable parent adapter.
 
-    The trainer fine-tunes the configured causal model with dataset-controlled
-    masking methods and reports loss, accuracy, perplexity, and scheduler state.
+    Phase 2 continues training from ``model_x`` and Phase 3 continues from the
+    Phase 2 adapter, but each run must write a new artifact.  Path identity is
+    checked after expansion and resolution so aliases such as ``..`` cannot
+    bypass the guard.
+
+    :param parent_adapter_dir: Accepted parent adapter directory, or an empty
+        string for Phase 1.
+    :param output_adapter_dir: Directory where this run saves its adapter.
+    :raises ValueError: when parent and output resolve to the same directory.
     """
+    if not parent_adapter_dir:
+        return
+    parent = Path(parent_adapter_dir).expanduser().resolve()
+    output = Path(output_adapter_dir).expanduser().resolve()
+    if parent == output:
+        raise ValueError(
+            "SFT output adapter directory must differ from immutable parent adapter"
+        )
+
+
+class SFTTrainer(LlmModule):
+    """Fine-tune a causal LM from task-adapter token batches."""
 
     def __init__(self,
                  module_name: str,
                  spec: argparse.Namespace,
                  llm_model: PreTrainedModel = None,
                  llm_tokenizer: PreTrainedTokenizer = None,
-                 dataset: Union[MaskedJSONDataset] = None,
+                 dataset: Any = None,
+                 eval_dataset: Any = None,
                  metric_logger: Optional[MetricLogger] = None,
                  is_inference=False,
                  device=None):
@@ -375,6 +403,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         :param llm_model: Causal language model to fine-tune.
         :param llm_tokenizer: Tokenizer paired with ``llm_model`` and the dataset.
         :param dataset: Masked JSON dataset that owns masking callbacks.
+        :param eval_dataset: Immutable held-out dataset for shared SFT tasks.
         :param metric_logger: Optional metric sink for training and evaluation metrics.
         :param is_inference: Whether to skip training-only setup in the base module.
         :param device: Torch device used for model and batch tensors.
@@ -390,6 +419,11 @@ class LlmEmbeddingsTrainer(LlmModule):
             device=device
         )
 
+        validate_parent_output_isolation(
+            str(getattr(spec, "parent_adapter_dir", "") or ""),
+            self.finetuned_dir(),
+        )
+
         self._is_quantize = False
         self.num_epochs = spec.num_train_epochs
         self.batch_size = spec.per_device_train_batch_size
@@ -399,8 +433,11 @@ class LlmEmbeddingsTrainer(LlmModule):
         self._num_mask_passed = 10
         self._masked_freq = spec.llm_mask_freq
 
-        self._eval_freq = 16
-        self._save_freq = 16
+        self._eval_steps = int(getattr(spec, "eval_steps", 0) or 0)
+        self._save_steps = int(getattr(spec, "save_steps", 0) or 0)
+        if self._eval_steps < 0 or self._save_steps < 0:
+            raise ValueError("eval_steps and save_steps must be non-negative")
+        self._best_checkpoint_path = ""
 
         self._is_shuffle = True
         # pin_memory enables overlapped host->device copies (helps only on GPU). The real
@@ -409,9 +446,12 @@ class LlmEmbeddingsTrainer(LlmModule):
         # not emit the flag) and honor an explicit --dataloader_pin_memory.
         self._pin_memory = bool(
             getattr(spec, "dataloader_pin_memory", False)) or torch.cuda.is_available()
-        self._reset_lr = False if "reset_lr" not in spec else spec.reset_lr
+        self._reset_lr = bool(getattr(spec, "reset_lr", False))
         self._num_workers = spec.num_workers
         self._lr = spec.llm_learning_rate
+        self._max_grad_norm = float(spec.max_grad_norm)
+        if self._max_grad_norm <= 0.0:
+            raise ValueError("max_grad_norm must be positive")
 
         self.optimizer = TorchBuilder.create_optimizer(
             spec.llm_optimizer,
@@ -423,6 +463,7 @@ class LlmEmbeddingsTrainer(LlmModule):
 
         self._mask_probability = 1.0
         self.dataset = dataset
+        self._eval_dataset = eval_dataset
         self._metric_namespace = getattr(dataset, "metric_namespace", "")
         self._select_best_by_eval_loss = bool(self._metric_namespace)
         self._best_validation_metric = float('inf') if self._select_best_by_eval_loss else float('-inf')
@@ -438,17 +479,19 @@ class LlmEmbeddingsTrainer(LlmModule):
             f"is overfit {self._overfit} "
         )
 
-        if spec.masking_type == MaskingType.NO_MASK:
+        masking_type = getattr(spec, "masking_type", MaskingType.NO_MASK)
+        self.masking_methods: list[Union[MaskingOption, MaskingType]] = []
+        if masking_type == MaskingType.NO_MASK:
             self.masking_methods = [
-                spec.masking_type
+                masking_type
             ]
 
-        if spec.masking_type == MaskingType.MASK_SECTION or MaskingType.MASK_NEW_TOKENS:
+        if masking_type in (MaskingType.MASK_SECTION, MaskingType.MASK_NEW_TOKENS):
             self.masking_methods = [
-                spec.masking_type
+                masking_type
             ]
 
-        if spec.masking_type == MaskingType.MASK_JSON_KV:
+        if masking_type == MaskingType.MASK_JSON_KV:
             self.masking_methods = [
                 spec.masking_option
             ]
@@ -456,7 +499,12 @@ class LlmEmbeddingsTrainer(LlmModule):
         # what method we're using for masking. i.e. we can stack
         self._current_mask_method_counter = 0
         self._current_mask_method_idx = 0
-        self._masking_method_dispatcher = LlmEmbeddingsTrainer.create_masking_method(dataset)
+        self._masking_method_dispatcher = SFTTrainer.create_masking_method(dataset)
+        self.masking_methods = [
+            method
+            for method in self.masking_methods
+            if method in self._masking_method_dispatcher
+        ]
 
     def get_model(self) -> PreTrainedModel:
         """Return the underlying language model.
@@ -484,7 +532,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         :return: Batch dictionary with tensor values stacked on the leading axis.
         """
         included_keys = ['input_ids', 'attention_mask']
-        if all(LlmEmbeddingsTrainer._has_prompt_masked_labels(sample) for sample in samples):
+        if all(SFTTrainer._has_prompt_masked_labels(sample) for sample in samples):
             included_keys.append("labels")
         batch = {key: torch.stack([s[key] for s in samples]) for key in included_keys}
 
@@ -519,16 +567,34 @@ class LlmEmbeddingsTrainer(LlmModule):
         target = src[idx + 1:idx + 1 + seq_len].reshape(-1)
         return data, target
 
-    def dataset_sampler(self):
+    def dataset_sampler(self, dataset: Any = None):
         """
         Build the optional dataset sampler configured by trainer arguments.
 
         :return: ``RandomSampler`` when random sampling is enabled, otherwise ``None``.
         """
-        if 'random_sampler_enabled' in self._trainer_args:
-            sampler = RandomSampler(self.dataset) if self._trainer_args.random_sampler_enabled else None
+        selected = self.dataset if dataset is None else dataset
+        random_sampler_enabled = getattr(
+            self._trainer_args,
+            "random_sampler_enabled",
+            None,
+        )
+        if random_sampler_enabled is not None:
+            sampler = RandomSampler(selected) if random_sampler_enabled else None
             return sampler
         return None
+
+    def split_dataset(self, ratio: float = 0.8):
+        """Return explicit train/held-out datasets for shared SFT tasks."""
+        if self._metric_namespace:
+            if self._eval_dataset is None:
+                raise ValueError(
+                    "shared SFT requires an explicit immutable held-out dataset"
+                )
+            if len(self.dataset) <= 0 or len(self._eval_dataset) <= 0:
+                raise ValueError("shared SFT train and held-out datasets must be non-empty")
+            return self.dataset, self._eval_dataset
+        return super().split_dataset(ratio)
 
     @staticmethod
     def compute_perplexity(logits, labels):
@@ -631,29 +697,32 @@ class LlmEmbeddingsTrainer(LlmModule):
         return self.rank == -1 or self.rank == 0
 
     @staticmethod
-    def create_masking_method(dataset: MaskedJSONDataset):
-        """
-        Return dict that store all callable masking methods.
+    def create_masking_method(dataset: Any):
+        """Return masking callbacks exposed by an optional legacy adapter.
 
-        :param dataset: Masked dataset that provides masking callbacks.
-        :return: Mapping from masking enum values to dataset callback methods.
+        Phase 1/2/3 prompt-completion datasets provide labels directly and do
+        not need masking hooks. Keeping callback discovery here allows old
+        captured-data fixtures to remain readable without making masking part
+        of the shared SFT engine contract.
         """
-        masking_methods = {
-            MaskingType.MASK_SECTION: dataset.mask_section,
-            MaskingType.MASK_NEW_TOKENS: dataset.mask_new_tokens,
-            MaskingType.MASK_JSON_KV: dataset.enable_masking,
-            MaskingType.NO_MASK: dataset.disable_masking,
-
-            # options
-            MaskingOption.TARGET: dataset.mask_targets,
-            MaskingOption.ALLOWED_VALUE: dataset.mask_allowed_value,
-            MaskingOption.ODATA_ID: dataset.mask_odata_id,
-            MaskingOption.TARGET_KEY: dataset.mask_targets_key,
-            MaskingOption.JSON_OBJECT: dataset.mask_objects,
-            MaskingOption.JSON_ARRAY: dataset.mask_arrays,
-            MaskingOption.MASK_API_PREFIX: dataset.mask_api_prefix,
+        callback_names = {
+            MaskingType.MASK_SECTION: "mask_section",
+            MaskingType.MASK_NEW_TOKENS: "mask_new_tokens",
+            MaskingType.MASK_JSON_KV: "enable_masking",
+            MaskingType.NO_MASK: "disable_masking",
+            MaskingOption.TARGET: "mask_targets",
+            MaskingOption.ALLOWED_VALUE: "mask_allowed_value",
+            MaskingOption.ODATA_ID: "mask_odata_id",
+            MaskingOption.TARGET_KEY: "mask_targets_key",
+            MaskingOption.JSON_OBJECT: "mask_objects",
+            MaskingOption.JSON_ARRAY: "mask_arrays",
+            MaskingOption.MASK_API_PREFIX: "mask_api_prefix",
         }
-        return masking_methods
+        return {
+            key: callback
+            for key, name in callback_names.items()
+            if callable(callback := getattr(dataset, name, None))
+        }
 
     def enable_masking_method(
             self, mask_type: Union[MaskingOption, MaskingType]
@@ -701,8 +770,118 @@ class LlmEmbeddingsTrainer(LlmModule):
         elif self._current_mask_method_counter >= self._num_mask_passed:
             # enough masked batches seen since activation: back to plain batches.
             # (>= — the counter advances per micro-batch, an exact == is skipped over.)
-            self.dataset.disable_masking()
+            disable_masking = getattr(self.dataset, "disable_masking", None)
+            if callable(disable_masking):
+                disable_masking()
             self._current_mask_method_counter = 0
+
+    def _evaluate_and_checkpoint(
+            self,
+            eval_dataloader,
+            *,
+            epoch: int,
+            optimizer_step: int,
+            validation_result: ValidationMetrics,
+            early_stop_bad_evals: int,
+            force_eval: bool = False,
+    ) -> tuple[ValidationMetrics, int, bool, bool]:
+        """Run due optimizer-step evaluation/checkpoint work on every rank."""
+        did_eval = force_eval or cadence_due(optimizer_step, self._eval_steps)
+        periodic_save = cadence_due(optimizer_step, self._save_steps)
+        is_best_checkpoint = False
+
+        if did_eval:
+            validation_result = self.validate(eval_dataloader)
+            validation_acc = validation_accuracy(validation_result)
+            validation_eval_loss = validation_loss(validation_result)
+            if self.is_rank_zero():
+                self.metric_logger.log_metric(
+                    "eval/accuracy", validation_acc, optimizer_step)
+                if self._metric_namespace:
+                    self.metric_logger.log_metric(
+                        phase_metric(self._metric_namespace, "eval", "token_accuracy"),
+                        validation_acc / 100.0,
+                        optimizer_step,
+                    )
+                    self.metric_logger.log_metric(
+                        phase_metric(self._metric_namespace, "eval", "loss"),
+                        validation_eval_loss,
+                        optimizer_step,
+                    )
+                    self.metric_logger.log_metric(
+                        phase_metric(self._metric_namespace, "eval", "perplexity"),
+                        float(np.exp(min(validation_eval_loss, 20.0))),
+                        optimizer_step,
+                    )
+
+            selection_metric = (
+                validation_eval_loss
+                if self._select_best_by_eval_loss
+                else validation_acc
+            )
+            improved = (
+                selection_metric
+                < self._best_validation_metric - self._early_stopping_min_delta
+                if self._select_best_by_eval_loss
+                else selection_metric > self._best_validation_metric
+            )
+            if improved:
+                self._best_validation_metric = selection_metric
+                early_stop_bad_evals = 0
+                is_best_checkpoint = True
+            else:
+                early_stop_bad_evals += 1
+
+        should_save = periodic_save or is_best_checkpoint
+        gathered_state = None
+        if self.is_accelerator and self._module_checkpoint_dir is not None:
+            should_save = broadcast_flag(self.accelerator, should_save)
+            if should_save:
+                gathered_state = self.accelerator.get_state_dict(self.model)
+
+        if should_save and self.is_rank_zero() and self._module_checkpoint_dir is not None:
+            model = self.accelerator.unwrap_model(self.model) if self.is_accelerator else self.model
+            opt = unwrap_accelerate(self.optimizer, "optimizer")
+            scheduler = unwrap_accelerate(self.scheduler, "scheduler")
+            common = {
+                "checkpoint_dir": self._module_checkpoint_dir,
+                "epoch": epoch,
+                "model": model,
+                "model_state_dict": gathered_state,
+                "optimizer": opt,
+                "scheduler": scheduler,
+                "last_accuracy": validation_accuracy(validation_result),
+                "initial_lr": self._lr,
+                "best_metric": self._best_validation_metric,
+                "best_metric_mode": (
+                    "loss" if self._select_best_by_eval_loss else "accuracy"
+                ),
+                "batch_idx": optimizer_step,
+            }
+            if periodic_save:
+                self.save_checkpoint(is_best_accuracy=False, **common)
+            if is_best_checkpoint:
+                self._best_checkpoint_path = self.save_checkpoint(
+                    is_best_accuracy=True,
+                    **common,
+                )
+                wrapped = self.model
+                self.model = model
+                try:
+                    self.save_finetuned(model_state_dict=gathered_state)
+                finally:
+                    self.model = wrapped
+
+        if self.is_accelerator and should_save:
+            self.accelerator.wait_for_everyone()
+
+        should_stop = (
+            did_eval
+            and self._select_best_by_eval_loss
+            and self._early_stopping_patience > 0
+            and early_stop_bad_evals >= self._early_stopping_patience
+        )
+        return validation_result, early_stop_bad_evals, did_eval, should_stop
 
     def _save_final_checkpoint(self):
         """Persist the trained model once at end-of-train, collective-safe.
@@ -727,7 +906,8 @@ class LlmEmbeddingsTrainer(LlmModule):
         # Rank-0 writers consume the pre-gathered dict (no second rank-0-only
         # state_dict() collective); the plain path passes None and saves locally.
         self.save_model(self._module_checkpoint_dir, model_state_dict=final_state)
-        self.save_finetuned(model_state_dict=final_state)
+        if not self._best_checkpoint_path:
+            self.save_finetuned(model_state_dict=final_state)
 
         if self.is_accelerator:
             # No rank returns (and drops its NCCL group) until every rank is done.
@@ -766,34 +946,32 @@ class LlmEmbeddingsTrainer(LlmModule):
                          f"using accelerate: {'yes' if self.is_accelerator else 'no'}, "
                          f"current mem {torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
 
-        sampler = self.dataset_sampler()
-
         self.logger.info(f"Creating dataloader "
                          f"batch size {self.batch_size} "
                          f"num worker {self._num_workers}")
 
         train_data, eval_data = self.split_dataset()
+        sampler = self.dataset_sampler(train_data)
 
         train_dataloader = DataLoader(
             train_data,
             batch_size=self.batch_size,
             sampler=sampler,
             num_workers=self._num_workers,
-            shuffle=self._is_shuffle,
+            shuffle=self._is_shuffle and sampler is None,
             drop_last=True,  # equal batch count per rank -> no epoch-boundary save-collective deadlock
             pin_memory=self._pin_memory,
-            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn
+            collate_fn=SFTTrainer.custom_collate_fn
         )
 
         eval_dataloader = DataLoader(
             eval_data,
             batch_size=self.batch_size,
-            sampler=sampler,
             num_workers=self._num_workers,
             shuffle=False,
-            drop_last=True,
+            drop_last=False,
             pin_memory=self._pin_memory,
-            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn,
+            collate_fn=SFTTrainer.custom_collate_fn,
         )
 
         last_epoch = checkpoint_state.last_epoch
@@ -818,6 +996,12 @@ class LlmEmbeddingsTrainer(LlmModule):
             checkpoint_state, self._select_best_by_eval_loss)
         if _restored_best is not None:
             self._best_validation_metric = _restored_best
+            restored_best_path = Path(
+                self._module_checkpoint_dir,
+                f"{self.module_name}_epoch_best.pt",
+            )
+            if restored_best_path.is_file():
+                self._best_checkpoint_path = str(restored_best_path)
             self.logger.info(
                 f"Rank {self.rank} resumed best validation metric "
                 f"{self._best_validation_metric} "
@@ -888,7 +1072,7 @@ class LlmEmbeddingsTrainer(LlmModule):
         # Honor --max_train_steps: cap OPTIMIZER updates. Without this the loop runs
         # num_train_epochs (default 1000) and ignores the cap entirely.
         max_steps = getattr(self._trainer_args, "max_train_steps", None)
-        global_opt_steps = 0
+        global_opt_steps = int(getattr(checkpoint_state, "batch_idx", 0) or 0)
 
         # End-of-run report bookkeeping (emitted as report.json on rank zero).
         run_started_at = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -898,6 +1082,8 @@ class LlmEmbeddingsTrainer(LlmModule):
         tokens_processed = 0
         samples_processed = 0
         early_stop_bad_evals = 0
+        last_eval_step = -1
+        stop_training = False
 
         if total_batches == calculated_total_batches:
             print(f"Rank {self.rank}, Staring training, "
@@ -952,7 +1138,10 @@ class LlmEmbeddingsTrainer(LlmModule):
                         loss = outputs.loss
                         self.accelerator.backward(loss)
                         if self.accelerator.sync_gradients:
-                            last_grad_norm = measure_grad_norm(self.model)
+                            last_grad_norm = self.accelerator.clip_grad_norm_(
+                                self.model.parameters(),
+                                self._max_grad_norm,
+                            ).item()
                         self.optimizer.step()
                         self.scheduler.step()
                         self.optimizer.zero_grad()
@@ -966,15 +1155,18 @@ class LlmEmbeddingsTrainer(LlmModule):
                     (loss / accum).backward()
                     is_step = is_accum_boundary(num_batches, accum, total_batches)
                     if is_step:
-                        last_grad_norm = measure_grad_norm(self.model)
+                        last_grad_norm = measure_grad_norm(
+                            self.model,
+                            self._max_grad_norm,
+                        )
                         self.optimizer.step()
                         self.scheduler.step()
                         self.optimizer.zero_grad()
 
                 # Log once per real optimizer step so the curves track optimizer steps, not
-                # micro-batches. grad_norm here is measure-only (max_norm=inf never clips).
+                # micro-batches. grad_norm is measured before configured clipping is applied.
                 if is_step and self.is_rank_zero():
-                    step = epoch * total_batches + num_batches
+                    step = global_opt_steps + 1
                     current_lr = self.optimizer.param_groups[0]['lr']
                     self.metric_logger.log_metric("train/loss", loss.item(), step)
                     self.metric_logger.log_metric("train/lr", current_lr, step)
@@ -1002,6 +1194,25 @@ class LlmEmbeddingsTrainer(LlmModule):
 
                 if is_step:
                     global_opt_steps += 1
+                    if (
+                            cadence_due(global_opt_steps, self._eval_steps)
+                            or cadence_due(global_opt_steps, self._save_steps)):
+                        (
+                            validation_result,
+                            early_stop_bad_evals,
+                            did_eval,
+                            stop_training,
+                        ) = self._evaluate_and_checkpoint(
+                            eval_dataloader,
+                            epoch=epoch + 1,
+                            optimizer_step=global_opt_steps,
+                            validation_result=validation_result,
+                            early_stop_bad_evals=early_stop_bad_evals,
+                        )
+                        if did_eval:
+                            last_eval_step = global_opt_steps
+                        if not stop_training:
+                            self.model.train()
 
                 batch_losses[num_batches] = loss.item()
                 total_loss += loss.item()
@@ -1022,59 +1233,11 @@ class LlmEmbeddingsTrainer(LlmModule):
                 num_batches += 1
                 self._current_mask_method_counter += 1
 
-                if reached_max_steps(global_opt_steps, max_steps):
+                if stop_training or reached_max_steps(global_opt_steps, max_steps):
                     break
 
             # one monotonic step at the epoch boundary for per-epoch metrics
             epoch_step = (epoch + 1) * total_batches - 1
-
-            # validation on epoch or freq
-            did_eval = False
-            is_best_checkpoint = False
-            if self.on_epoch_eval or ((epoch + 1) % self._eval_freq == 0):
-                did_eval = True
-                validation_result = self.validate(eval_dataloader)
-                validation_acc = validation_accuracy(validation_result)
-                validation_eval_loss = validation_loss(validation_result)
-                if self.is_rank_zero():
-                    self.metric_logger.log_metric("eval/accuracy", validation_acc, epoch_step)
-                    if self._metric_namespace:
-                        self.metric_logger.log_metric(
-                            phase_metric(self._metric_namespace, "eval", "token_accuracy"),
-                            validation_acc / 100.0,
-                            epoch_step)
-                        self.metric_logger.log_metric(
-                            phase_metric(self._metric_namespace, "eval", "loss"),
-                            validation_eval_loss,
-                            epoch_step)
-                        self.metric_logger.log_metric(
-                            phase_metric(self._metric_namespace, "eval", "perplexity"),
-                            float(np.exp(min(validation_eval_loss, 20.0))),
-                            epoch_step)
-
-                if self._select_best_by_eval_loss:
-                    # Phase 1: lower validation loss is better. min_delta prevents tiny
-                    # floating-point noise from resetting patience.
-                    selection_metric = validation_eval_loss
-                    improved = (
-                        selection_metric
-                        < self._best_validation_metric - self._early_stopping_min_delta
-                    )
-                else:
-                    # Legacy metric path: higher validation accuracy is better.
-                    selection_metric = validation_acc
-                    improved = selection_metric > self._best_validation_metric
-
-                if improved:
-                    self._best_validation_metric = selection_metric
-                    early_stop_bad_evals = 0
-                    is_best_checkpoint = True
-                else:
-                    early_stop_bad_evals += 1
-
-                print(f"Rank {self.rank} Epoch {epoch + 1} - Validation Loss: "
-                      f"{validation_eval_loss:.6f} Accuracy: {validation_acc:.4f} "
-                      f"Best: {self._best_validation_metric}")
 
             if num_batches > 0:
                 average_loss = total_loss / num_batches
@@ -1092,74 +1255,23 @@ class LlmEmbeddingsTrainer(LlmModule):
                             epoch_step)
                 print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
             epochs_done = epoch + 1
-
-            # Save every evaluation (for Phase 1 restore-best) and still honor the
-            # legacy periodic save frequency on no-eval epochs.
-            should_save = did_eval or (epoch + 1) % self._save_freq == 0
-            gathered_state = None
-            if self.is_accelerator and self._module_checkpoint_dir is not None:
-                # rank 0's verdict must be uniform, and the state-dict gather is a
-                # COLLECTIVE under ZeRO-3/FSDP — every rank participates or the
-                # fleet deadlocks / rank 0 writes shards.
-                should_save = broadcast_flag(self.accelerator, should_save)
-                if should_save:
-                    gathered_state = self.accelerator.get_state_dict(self.model)
-            if self.is_rank_zero():
-                if should_save:
-                    if self._module_checkpoint_dir is not None:
-                        if self.is_accelerator:
-                            model = self.accelerator.unwrap_model(self.model)
-                            # unwrap_model is for nn.Modules only; the optimizer/scheduler
-                            # are accelerate wrappers (see unwrap_accelerate).
-                            opt = unwrap_accelerate(self.optimizer, "optimizer")
-                            shed = unwrap_accelerate(self.scheduler, "scheduler")
-                            self.save_checkpoint(
-                                self._module_checkpoint_dir,
-                                epoch + 1,
-                                model=model,
-                                model_state_dict=gathered_state,
-                                optimizer=opt,
-                                scheduler=shed,
-                                last_accuracy=validation_accuracy(validation_result),
-                                initial_lr=self._lr,
-                                is_best_accuracy=is_best_checkpoint,
-                                best_metric=self._best_validation_metric,
-                                best_metric_mode=(
-                                    "loss" if self._select_best_by_eval_loss
-                                    else "accuracy"),
-                            )
-                        else:
-                            self.save_checkpoint(
-                                self._module_checkpoint_dir,
-                                epoch + 1,
-                                last_accuracy=validation_accuracy(validation_result),
-                                initial_lr=self._lr,
-                                is_best_accuracy=is_best_checkpoint,
-                                best_metric=self._best_validation_metric,
-                                best_metric_mode=(
-                                    "loss" if self._select_best_by_eval_loss
-                                    else "accuracy"),
-                            )
-
-            # Epoch-boundary barrier: all ranks meet here AFTER the rank-0 checkpoint
-            # write, so no rank races into the next epoch's first FSDP collective (an
-            # all-gather) while rank 0 is still saving. Without it, rank 0 sits in the
-            # save while the others wait in the next collective -> the epoch-2 deadlock
-            # (ranks spinning, one idle). Collective — every rank must reach it.
-            if self.is_accelerator:
-                self.accelerator.wait_for_everyone()
-
-            if (
-                    did_eval
-                    and self._select_best_by_eval_loss
-                    and self._early_stopping_patience > 0
-                    and early_stop_bad_evals >= self._early_stopping_patience):
-                if self.is_rank_zero():
-                    self.logger.info(
-                        "Early stopping Phase 1: validation loss did not improve by "
-                        f"{self._early_stopping_min_delta} for "
-                        f"{self._early_stopping_patience} evaluations.")
+            if stop_training:
                 break
+
+        if last_eval_step != global_opt_steps:
+            (
+                validation_result,
+                early_stop_bad_evals,
+                _,
+                _,
+            ) = self._evaluate_and_checkpoint(
+                eval_dataloader,
+                epoch=max(epochs_done, 1),
+                optimizer_step=global_opt_steps,
+                validation_result=validation_result,
+                early_stop_bad_evals=early_stop_bad_evals,
+                force_eval=True,
+            )
 
         if self._is_quantize:
             self.model = convert(self.model)
@@ -1170,6 +1282,10 @@ class LlmEmbeddingsTrainer(LlmModule):
         # every run is comparable through igc.modules.train.report.compare(). Report
         # emission is a hard Phase 1 evidence gate: failures propagate.
         if self.is_rank_zero():
+            self._trainer_args.promotion_source = (
+                "best_checkpoint" if self._best_checkpoint_path else "final_checkpoint"
+            )
+            self._trainer_args.promoted_artifact_path = self.finetuned_dir()
             report_path = emit_final_run_report(
                 trainer_args=self._trainer_args,
                 dataset=self.dataset,
@@ -1181,7 +1297,10 @@ class LlmEmbeddingsTrainer(LlmModule):
                 started_at=run_started_at,
                 ended_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
                 wall_clock_sec=round(time.time() - run_started_clock, 1),
-                checkpoint_path=str(self._module_checkpoint_dir or ""),
+                checkpoint_path=(
+                    self._best_checkpoint_path
+                    or str(self._module_checkpoint_dir or "")
+                ),
                 output_dir=str(self._module_checkpoint_dir or "."),
             )
             self.logger.info(f"Run report written: {report_path}")
@@ -1207,34 +1326,32 @@ class LlmEmbeddingsTrainer(LlmModule):
             f"Rank {self.rank} starting train, device {self.device}")
 
         lr = self._lr if self._reset_lr else None
-        sampler = self.dataset_sampler()
-
         self.logger.info(f"Creating dataloader "
                          f"batch size {self.batch_size} "
                          f"num worker {self._num_workers}")
 
         train_data, eval_data = self.split_dataset()
+        sampler = self.dataset_sampler(train_data)
 
         train_dataloader = DataLoader(
             train_data,
             batch_size=self.batch_size,
             sampler=sampler,
             num_workers=self._num_workers,
-            shuffle=self._is_shuffle,
+            shuffle=self._is_shuffle and sampler is None,
             drop_last=True,  # equal batch count per rank -> no epoch-boundary save-collective deadlock
             pin_memory=self._pin_memory,
-            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn
+            collate_fn=SFTTrainer.custom_collate_fn
         )
 
         eval_dataloader = DataLoader(
             eval_data,
             batch_size=self.batch_size,
-            sampler=sampler,
             num_workers=self._num_workers,
             shuffle=False,
-            drop_last=True,
+            drop_last=False,
             pin_memory=self._pin_memory,
-            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn,
+            collate_fn=SFTTrainer.custom_collate_fn,
         )
 
         last_epoch = 0
@@ -1443,15 +1560,13 @@ class LlmEmbeddingsTrainer(LlmModule):
         :return: Tuple of accuracy percentage and perplexity.
         """
         train_data, eval_data = self.split_dataset()
-        sampler = self.dataset_sampler()
 
         eval_dataloader = DataLoader(
             eval_data,
             batch_size=self.batch_size,
-            sampler=sampler,
             num_workers=self._num_workers,
             shuffle=False,
-            collate_fn=LlmEmbeddingsTrainer.custom_collate_fn)
+            collate_fn=SFTTrainer.custom_collate_fn)
 
         self.model.eval()
         total_loss = 0

@@ -18,7 +18,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
-from typing import Any, Dict, Iterable, Iterator, List
+from typing import Any, Dict, Iterable, Iterator, List, Mapping
 
 from igc.ds.sources.mixer import DataManifest
 from igc.ds.sources.training_object import TrainingExample
@@ -35,8 +35,11 @@ def _ensure_parent(path: str) -> None:
         os.makedirs(parent, exist_ok=True)
 
 
-def write_examples(examples: Iterable[TrainingExample], path: str) -> int:
-    """Write training examples as JSONL (one ``to_dict()`` per line).
+def write_examples(
+        examples: Iterable[TrainingExample | Mapping[str, Any]],
+        path: str,
+) -> int:
+    """Write typed training examples or canonical row mappings as JSONL.
 
     :param examples: the examples to serialize.
     :param path: destination ``.jsonl`` path (parent dirs are created).
@@ -46,7 +49,11 @@ def write_examples(examples: Iterable[TrainingExample], path: str) -> int:
     count = 0
     with open(path, "w") as handle:
         for example in examples:
-            handle.write(json.dumps(example.to_dict()))
+            if isinstance(example, Mapping):
+                value = dict(example)
+            else:
+                value = example.to_dict()
+            handle.write(json.dumps(value))
             handle.write("\n")
             count += 1
     return count
@@ -95,7 +102,7 @@ def read_manifest(path: str) -> Dict[str, Any]:
         return json.load(handle)
 
 
-def write_corpus(examples: Iterable[TrainingExample], manifest: DataManifest,
+def write_corpus(examples: Iterable[TrainingExample | Mapping[str, Any]], manifest: DataManifest,
                  out_dir: str) -> Dict[str, str]:
     """Write a corpus (``examples.jsonl`` + ``manifest.json``) into ``out_dir``.
 

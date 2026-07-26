@@ -30,10 +30,13 @@ def _row(rest_api: str, prediction, **overrides) -> dict:
         "id": rest_api,
         "phase": 1,
         "task": "redfish_json_reconstruction",
+        "source_corpus": overrides.pop("source_corpus", "fixture_corpus"),
         "x": {"rest_api": rest_api, "allowed_methods": ["GET"], "json": target},
         "y_true": {"json": target},
         "y_pred": {"json": prediction},
         "generated_tokens": overrides.pop("generated_tokens", 10),
+        "target_tokens": overrides.pop("target_tokens", 8),
+        "max_new_tokens": overrides.pop("max_new_tokens", 16),
         "sequence_length": overrides.pop("sequence_length", 12),
         "padding_tokens": overrides.pop("padding_tokens", 1),
         "latency_sec": overrides.pop("latency_sec", 1.0),
@@ -61,6 +64,7 @@ def test_build_phase1_golden_payload_compares_baseline_and_model(tmp_path: Path)
             _row(
                 rest_b,
                 {"@odata.id": rest_b, "Name": "wrong"},
+                source_corpus="fixture_corpus_b",
                 generated_tokens=20,
                 latency_sec=2.0,
                 sequence_length=20,
@@ -84,6 +88,7 @@ def test_build_phase1_golden_payload_compares_baseline_and_model(tmp_path: Path)
                 rest_b,
                 _target(rest_b, "1"),
                 target_name="1",
+                source_corpus="fixture_corpus_b",
                 generated_tokens=20,
                 latency_sec=2.0,
                 sequence_length=20,
@@ -108,6 +113,28 @@ def test_build_phase1_golden_payload_compares_baseline_and_model(tmp_path: Path)
     assert model_metrics[phase_metric(PHASE1_FINETUNE, "test", "latency_sec_p95")] == 1.95
     assert payload["evidence"]["model_x"]["artifact"]["name"] == "model_x.jsonl"
     assert "sha256" in payload["evidence"]["model_x"]["artifact"]
+    assert payload["evidence"]["baseline"]["by_corpus"] == {
+        "fixture_corpus": {
+            "json_exact_match_rate": 1.0,
+            "json_parse_rate": 1.0,
+            "resource_identity_match_rate": 1.0,
+            "rows": 1,
+        },
+        "fixture_corpus_b": {
+            "json_exact_match_rate": 0.0,
+            "json_parse_rate": 1.0,
+            "resource_identity_match_rate": 1.0,
+            "rows": 1,
+        },
+    }
+    assert payload["evidence"]["model_x"]["by_corpus"]["fixture_corpus_b"] == {
+        "json_exact_match_rate": 1.0,
+        "json_parse_rate": 1.0,
+        "resource_identity_match_rate": 1.0,
+        "rows": 1,
+    }
+    assert payload["evidence"]["model_x"]["counts"]["target_token_rows"] == 2
+    assert payload["evidence"]["model_x"]["counts"]["generation_budget_rows"] == 2
 
 
 def test_phase1_golden_rejects_mismatched_artifact_row_keys(tmp_path: Path) -> None:
@@ -119,6 +146,9 @@ def test_phase1_golden_rejects_mismatched_artifact_row_keys(tmp_path: Path) -> N
         [
             {
                 "id": "baseline-only",
+                "source_corpus": "fixture_corpus",
+                "target_tokens": 8,
+                "max_new_tokens": 16,
                 "x": {"rest_api": rest_api, "json": target},
                 "y_true": {"json": target},
                 "y_pred": {"json": {"@odata.id": rest_api, "Name": "Wrong"}},
@@ -130,6 +160,9 @@ def test_phase1_golden_rejects_mismatched_artifact_row_keys(tmp_path: Path) -> N
         [
             {
                 "id": "model-only",
+                "source_corpus": "fixture_corpus",
+                "target_tokens": 8,
+                "max_new_tokens": 16,
                 "x": {"rest_api": rest_api, "json": target},
                 "y_true": {"json": target},
                 "y_pred": {"json": target},
@@ -144,8 +177,8 @@ def test_phase1_golden_rejects_mismatched_artifact_row_keys(tmp_path: Path) -> N
     assert "model-only" not in str(excinfo.value)
 
 
-def test_phase1_golden_row_keys_do_not_expand_public_payload(tmp_path: Path) -> None:
-    """Row-key bookkeeping is internal and not part of metric/evidence JSON."""
+def test_phase1_golden_row_keys_are_evidence_not_metric_fields(tmp_path: Path) -> None:
+    """Row-key bookkeeping is emitted only with evidence, not metric tables."""
     rest_a = "/redfish/v1/Systems/1"
     rest_b = "/redfish/v1/Systems/2"
     baseline = _write_jsonl(
@@ -164,12 +197,49 @@ def test_phase1_golden_row_keys_do_not_expand_public_payload(tmp_path: Path) -> 
     )
 
     payload = build_phase1_golden_payload(baseline_jsonl=baseline, model_jsonl=model)
-    rendered = json.dumps(payload)
 
-    assert "row_keys" not in rendered
-    assert "row-a" not in rendered
-    assert "row-b" not in rendered
+    assert payload["evidence"]["baseline"]["row_keys"]
+    assert payload["evidence"]["model_x"]["row_keys"]
+    assert "row_keys" not in json.dumps(payload["metrics"])
     assert payload["comparison"]["row_count_delta"] == 0
+
+
+def test_phase1_golden_preserves_explicit_canonical_row_id_exactly(
+    tmp_path: Path,
+) -> None:
+    """Canonical explicit row_id values must not be prefixed or re-derived."""
+    rest_api = "/redfish/v1/Systems/1"
+    canonical_row_id = "sha256:" + "a" * 64
+    row = _row(rest_api, _target(rest_api, "1"))
+    row.pop("id")
+    row["row_id"] = canonical_row_id
+    path = _write_jsonl(tmp_path / "canonical-row-id.jsonl", [row])
+
+    summary = evaluate_prediction_jsonl(path, role="model_x")
+
+    assert summary.row_keys == (canonical_row_id,)
+    assert summary.to_evidence_dict()["row_keys"] == [canonical_row_id]
+
+
+def test_phase1_golden_derives_fallback_row_key_only_when_explicit_id_absent(
+    tmp_path: Path,
+) -> None:
+    """Fallback row identity is derived only for rows without canonical ids."""
+    rest_a = "/redfish/v1/Systems/1"
+    rest_b = "/redfish/v1/Systems/2"
+    canonical_row_id = "sha256:" + "b" * 64
+    explicit = _row(rest_a, _target(rest_a, "1"))
+    explicit.pop("id")
+    explicit["row_id"] = canonical_row_id
+    fallback = _row(rest_b, _target(rest_b, "2"))
+    fallback.pop("id")
+    path = _write_jsonl(tmp_path / "mixed-row-ids.jsonl", [explicit, fallback])
+
+    summary = evaluate_prediction_jsonl(path, role="model_x")
+
+    assert summary.row_keys[0] == canonical_row_id
+    assert summary.row_keys[1].startswith("position:1:identity:")
+    assert summary.row_keys[1] != canonical_row_id
 
 
 def test_phase1_golden_rejects_duplicate_row_keys(tmp_path: Path) -> None:
@@ -197,11 +267,17 @@ def test_phase1_golden_rejects_reordered_positional_rows(tmp_path: Path) -> None
         tmp_path / "baseline.jsonl",
         [
             {
+                "source_corpus": "fixture_corpus_a",
+                "target_tokens": 8,
+                "max_new_tokens": 16,
                 "x": {"rest_api": rest_a, "json": _target(rest_a, "1")},
                 "y_true": {"json": _target(rest_a, "1")},
                 "y_pred": {"json": _target(rest_a, "1")},
             },
             {
+                "source_corpus": "fixture_corpus_b",
+                "target_tokens": 8,
+                "max_new_tokens": 16,
                 "x": {"rest_api": rest_b, "json": _target(rest_b, "2")},
                 "y_true": {"json": _target(rest_b, "2")},
                 "y_pred": {"json": _target(rest_b, "2")},
@@ -212,11 +288,17 @@ def test_phase1_golden_rejects_reordered_positional_rows(tmp_path: Path) -> None
         tmp_path / "model_x.jsonl",
         [
             {
+                "source_corpus": "fixture_corpus_b",
+                "target_tokens": 8,
+                "max_new_tokens": 16,
                 "x": {"rest_api": rest_b, "json": _target(rest_b, "2")},
                 "y_true": {"json": _target(rest_b, "2")},
                 "y_pred": {"json": _target(rest_b, "2")},
             },
             {
+                "source_corpus": "fixture_corpus_a",
+                "target_tokens": 8,
+                "max_new_tokens": 16,
                 "x": {"rest_api": rest_a, "json": _target(rest_a, "1")},
                 "y_true": {"json": _target(rest_a, "1")},
                 "y_pred": {"json": _target(rest_a, "1")},
@@ -278,6 +360,39 @@ def test_top_k_accuracy_is_reported_when_candidates_exist(tmp_path: Path) -> Non
     assert metrics[phase_metric(PHASE1_FINETUNE, "eval", "top_k_accuracy")] == 1.0
 
 
+def test_phase1_golden_requires_source_corpus(tmp_path: Path) -> None:
+    """Held-out prediction rows must carry corpus provenance."""
+    rest_api = "/redfish/v1/Systems/1"
+    row = _row(rest_api, _target(rest_api, "1"))
+    del row["source_corpus"]
+    path = _write_jsonl(tmp_path / "missing-source-corpus.jsonl", [row])
+
+    with pytest.raises(Phase1GoldenError, match="missing source_corpus"):
+        evaluate_prediction_jsonl(path, role="model_x")
+
+
+def test_phase1_golden_counts_missing_target_and_generation_budget_evidence(
+    tmp_path: Path,
+) -> None:
+    """target_tokens and max_new_tokens feed completeness gates instead of defaults."""
+    rest_api = "/redfish/v1/Systems/1"
+    row = _row(rest_api, _target(rest_api, "1"))
+    del row["target_tokens"]
+    del row["max_new_tokens"]
+    path = _write_jsonl(tmp_path / "missing-token-evidence.jsonl", [row])
+
+    evidence = evaluate_prediction_jsonl(path, role="model_x").to_evidence_dict()
+
+    assert evidence["counts"]["target_token_rows"] == 0
+    assert evidence["counts"]["generation_budget_rows"] == 0
+    assert evidence["metrics"][
+        phase_metric(PHASE1_FINETUNE, "data", "target_completion_tokens_p95")
+    ] is None
+    assert evidence["metrics"][
+        phase_metric(PHASE1_FINETUNE, "eval", "min_generation_budget")
+    ] is None
+
+
 def test_bad_jsonl_row_raises_clear_error(tmp_path: Path) -> None:
     """Malformed JSONL rows fail closed."""
     path = tmp_path / "bad.jsonl"
@@ -295,6 +410,9 @@ def test_missing_prediction_counts_as_missing_prediction_row(tmp_path: Path) -> 
         [
             {
                 "id": "missing",
+                "source_corpus": "fixture_corpus",
+                "target_tokens": 8,
+                "max_new_tokens": 16,
                 "x": {"rest_api": rest_api, "json": target},
                 "y_true": {"json": target},
             }
@@ -315,6 +433,9 @@ def test_missing_target_is_not_filled_from_input_json(tmp_path: Path) -> None:
         [
             {
                 "id": "missing-target",
+                "source_corpus": "fixture_corpus",
+                "target_tokens": 8,
+                "max_new_tokens": 16,
                 "x": {"rest_api": rest_api, "json": target},
                 "y_pred": {"json": target},
             }

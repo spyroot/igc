@@ -24,6 +24,7 @@ runtime:
 
 generation:
   seed: 0
+  target_token_margin: 64
   # Phase 1 training labels are whole target Redfish JSON documents. Keep this
   # default aligned with held-out target length p95+margin; fragment smoke prompts
   # below carry their own smaller overrides.

@@ -2,7 +2,7 @@
 
 ``JSONDataset.load_tokenizer`` (in ``igc/ds/redfish_dataset.py``) loads a *saved*
 tokenizer directory on the resume/inference path — it is called from
-``igc/modules/llm_train_state_encoder.py`` (``_load`` reload) and ``igc/ds/corpus_dataset.py``.
+``igc/modules/sft.py`` (``_load`` reload) and ``igc/ds/corpus_dataset.py``.
 That directory is written by ``_load_tokenizer`` from the current ``--model_type``, so it may
 hold a Qwen/Llama tokenizer, not GPT-2's. The loader must therefore go through
 ``AutoTokenizer`` — loading a non-GPT-2 saved tokenizer with the GPT-2-only class silently

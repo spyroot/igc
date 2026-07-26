@@ -1,0 +1,22 @@
+version: 1
+name: d1-phase23-train-heldout-v1
+seed: d1-phase23-split-v1
+heldout_fraction: 0.15
+min_train_rows: 1000
+min_heldout_rows: 1000
+min_heldout_rows_per_vendor_or_model: 100
+min_empty_set_heldout_rows: 100
+required_phase3_argument_classes:
+  - read_only_empty
+  - patch_scalar
+  - patch_nested
+  - post_no_arguments
+  - post_one_argument
+  - post_multiple_arguments
+  - delete_no_body
+robustness_variants:
+  - base
+  - api_context_shuffled
+  - json_key_order_shuffled
+  - target_serialization_reversed
+  - irrelevant_distractors_added

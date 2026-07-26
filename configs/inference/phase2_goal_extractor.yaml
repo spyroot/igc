@@ -1,0 +1,36 @@
+version: 1
+name: phase2-goal-extractor-heldout
+phase: 2
+task: text_to_rest_api_list
+contract_version: phase2-rest-api-set/v1
+target_semantics: unordered_unique_rest_api_set
+
+base_model:
+  id: Qwen/Qwen2.5-7B-Instruct
+  cache_dir: /models/hf-cache/hub
+  tokenizer: Qwen/Qwen2.5-7B-Instruct
+  foundation_model_sha: ${IGC_FOUNDATION_MODEL_SHA}
+  tokenizer_sha: ${IGC_TOKENIZER_SHA}
+
+adapter:
+  path: ${IGC_GOAL_EXTRACTOR_ADAPTER_DIR}
+  artifact_sha: ${IGC_GOAL_EXTRACTOR_SHA}
+  size_bytes: ${IGC_GOAL_EXTRACTOR_SIZE_BYTES}
+  method: rslora
+  rank: 32
+  alpha: 64
+  parent_role: model_x
+  parent_artifact_sha: ${IGC_MODEL_X_SHA}
+  output_role: goal_extractor
+
+runtime:
+  torch_dtype: bfloat16
+  device: cuda:0
+  device_map: auto
+  require_cuda: true
+  trust_remote_code: false
+
+generation:
+  seed: 42
+  max_new_tokens: 256
+  target_token_margin: 32

@@ -1,9 +1,9 @@
-"""M1 trainer regressions for the CUDA path.
+"""Phase 1/model_x trainer regressions for the CUDA path.
 
 The offline test exercises the plain, non-accelerator end-of-train path so the
 guarded unwrap regression is caught without a GPU. The CUDA-marked test stays
-skipped on CPU-only hosts and checks the M1 device-placement and one-step loss
-surface when a local GPU is available.
+skipped on CPU-only hosts and checks the Phase 1/model_x device-placement and
+one-step loss surface when a local GPU is available.
 
 Author:
 Mus mbayramo@stanford.edu
@@ -16,7 +16,7 @@ import pytest
 import torch
 
 from igc.modules.base.igc_base_module import CheckpointState
-from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
+from igc.modules.train.sft import SFTTrainer
 from igc.shared.shared_torch_builder import TorchBuilder
 
 
@@ -112,7 +112,7 @@ class _CudaBatchDataset(torch.utils.data.Dataset):
 
 def _plain_trainer(tmp_path):
     """Build an uninitialized trainer with only the attributes _train uses."""
-    trainer = LlmEmbeddingsTrainer.__new__(LlmEmbeddingsTrainer)
+    trainer = SFTTrainer.__new__(SFTTrainer)
     recorder = _Recorder()
     trainer.save_model = recorder.save_model
     trainer.save_finetuned = recorder.save_finetuned
@@ -180,7 +180,7 @@ def test_plain_train_routes_model_through_maybe_compile(tmp_path, monkeypatch):
 
 
 def test_plain_end_of_train_skips_accelerator_unwrap(tmp_path, monkeypatch):
-    """A non-accelerator M1 train run reaches save_model with no unwrap_model access."""
+    """A non-accelerator Phase 1/model_x run reaches save_model without unwrap."""
     trainer, recorder = _plain_trainer(tmp_path)
 
     monkeypatch.setattr(
@@ -204,7 +204,7 @@ def test_plain_end_of_train_skips_accelerator_unwrap(tmp_path, monkeypatch):
 
 @pytest.mark.gpu
 def test_cuda_one_step_keeps_model_on_cuda_and_loss_finite(monkeypatch, tmp_path):
-    """A tiny CUDA M1 step keeps parameters on cuda and produces a finite loss."""
+    """A tiny CUDA Phase 1/model_x step keeps parameters on cuda with finite loss."""
     if not torch.cuda.is_available():
         pytest.skip("requires a local CUDA-capable GPU")
 

@@ -5,7 +5,7 @@ igc has offline CPU hot-path benchmarks (``scripts/bench_hot_paths.py`` — the 
 and a distributed dataset-isolation harness (``scripts/gpu_dataset_isolation.py`` — the epoch-2
 deadlock guard), but nothing that answers "where does the GPU time actually go in one training
 step, on 4 or 8 GPUs?" This script fills that gap: it reconstructs the exact training step of
-``LlmEmbeddingsTrainer._train`` (data move -> forward -> backward incl. gradient sync -> optimizer)
+``SFTTrainer._train`` (data move -> forward -> backward incl. gradient sync -> optimizer)
 with the same ``Accelerator.prepare`` / ``accelerator.backward`` path, and times each section with
 CUDA events over N steps, plus a ``torch.profiler`` op-level trace.
 

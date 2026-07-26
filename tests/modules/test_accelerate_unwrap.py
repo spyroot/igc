@@ -11,7 +11,7 @@ Author:
 Mus mbayramo@stanford.edu
 """
 
-from igc.modules.llm_train_state_encoder import unwrap_accelerate
+from igc.modules.train.sft import unwrap_accelerate
 
 
 def test_unwrap_accelerate_returns_inner_for_wrapped():

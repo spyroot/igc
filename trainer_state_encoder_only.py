@@ -7,7 +7,7 @@ Author: Mus mbayramo@stanford.edu
 """
 from igc.ds.redfish_masked_dataset import MaskedJSONDataset
 from igc.modules.base.igc_metric_logger import MetricLogger
-from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
+from igc.modules.train.sft import SFTTrainer
 from igc.modules.shared.llm_shared import from_pretrained_default
 from igc.shared.shared_main import shared_main
 
@@ -25,7 +25,7 @@ def main(cmd):
     model, _ = from_pretrained_default("gpt2", only_model=True)
     model.resize_token_embeddings(len(dataset.tokenizer))
 
-    latent_model = LlmEmbeddingsTrainer(
+    latent_model = SFTTrainer(
         "test_mod", cmd, model, dataset.tokenizer, dataset=dataset,
         metric_logger=metric_logger, is_inference=False)
     latent_model.train()

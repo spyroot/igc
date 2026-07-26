@@ -1,0 +1,103 @@
+version: 1
+authority:
+  phase2_output: rest_api_list
+  phase3_output: calls
+  order_semantics: unordered
+
+phase2:
+  phase: 2
+  dataset: D1
+  task: text_to_rest_api_list
+  target_semantics: unordered_unique_rest_api_set
+  input_fields:
+    - text
+    - api_context
+  output_fields:
+    - rest_api_list
+  output_invariants:
+    object: true
+    list_of_strings: true
+    unique: true
+    APIs_exist_in_api_context: true
+    strict_no_extra_keys: true
+
+phase3:
+  phase: 3
+  source_dataset: D1
+  task: text_and_rest_api_list_to_calls
+  target_semantics: unordered_unique_call_set
+  input_fields:
+    - text
+    - rest_api_list
+    - api_context
+  output_fields:
+    - calls
+  call_fields:
+    - rest_api
+    - http_method
+    - operation_name
+    - arguments
+  output_invariants:
+    calls_is_list: true
+    one_call_per_phase2_api: true
+    no_extra_calls: true
+    no_missing_calls: true
+    unique_rest_api: true
+    explicit_http_method: true
+    legal_http_method: true
+    arguments_is_object: true
+    readonly_arguments_empty: true
+    mutation_arguments_explicit: true
+    operation_name_nullable_string: true
+    allowed_methods_is_input_only: true
+    identity_key: rest_api
+  input_invariants:
+    api_context_non_empty: true
+    every_selected_api_has_context: true
+
+forbidden:
+  - scalar_rest_api_output
+  - scalar_call_output
+  - ordered_goals
+  - list_position_identity
+  - implicit_get
+  - implicit_empty_mutation_arguments
+  - arbitrary_json_argument_copy
+
+promotion_evidence:
+  phase2:
+    expected_parent_role: model_x
+    reload_target: artifact
+  phase3:
+    expected_parent_role: goal_extractor
+    reload_target: artifact
+  required_objects:
+    - immutable_full_manifest
+    - immutable_train_manifest
+    - disjoint_split_release
+    - real_promoted_parent_checkpoint
+    - real_heldout_data
+    - checkpoint_reload
+    - inference_smoke
+  heldout_file_evidence:
+    required_fields: [real, split, rows, manifest_sha, artifact_sha]
+    recompute_manifest_sha: true
+    recompute_artifact_sha: true
+    recompute_row_count: true
+  source_full_file_evidence:
+    required_fields: [rows, manifest_sha, artifact_sha]
+    recompute_manifest_sha: true
+    recompute_artifact_sha: true
+  train_file_evidence:
+    required_fields: [rows, manifest_sha, artifact_sha]
+    recompute_manifest_sha: true
+    recompute_artifact_sha: true
+  split_release_evidence:
+    schema: d1_phase23_split_release.v1
+    immutable: true
+    complete: true
+    disjoint: true
+    recompute_manifest_sha: true
+    phase2_phase3_source_row_ids_aligned: true
+    train_heldout_source_row_ids_disjoint: true
+  artifact_sha_format: sha256

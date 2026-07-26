@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from igc.modules.llm_train_state_encoder import ValidationMetrics, emit_final_run_report
+from igc.modules.train.sft import ValidationMetrics, emit_final_run_report
 
 
 class _DatasetWithManifest:
@@ -13,7 +13,12 @@ class _DatasetWithManifest:
 
     @staticmethod
     def run_manifest_fields():
-        return {"data_manifest": "fixture-manifest", "eval_split": "fixture-heldout"}
+        return {
+            "data_manifest": "sha256:" + "1" * 64,
+            "train_data_sha": "sha256:" + "2" * 64,
+            "eval_data_sha": "sha256:" + "3" * 64,
+            "source_manifest_sha": "sha256:" + "4" * 64,
+        }
 
 
 def _trainer_args() -> Namespace:
@@ -73,5 +78,7 @@ def test_final_report_emission_preserves_accuracy_and_loss_metrics(tmp_path):
     assert report_path == str(tmp_path / "report.json")
     assert report["metrics"]["eval/accuracy"] == 97.5
     assert report["metrics"]["eval/loss"] == 0.25
-    assert report["manifest"]["data_manifest"] == "fixture-manifest"
-    assert report["manifest"]["eval_split"] == "fixture-heldout"
+    assert report["manifest"]["data_manifest"] == "sha256:" + "1" * 64
+    assert report["manifest"]["train_data_sha"] == "sha256:" + "2" * 64
+    assert report["manifest"]["eval_data_sha"] == "sha256:" + "3" * 64
+    assert report["manifest"]["source_manifest_sha"] == "sha256:" + "4" * 64

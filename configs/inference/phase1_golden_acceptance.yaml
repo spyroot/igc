@@ -5,16 +5,50 @@ task: redfish_json_reconstruction
 metrics:
   ece_bins: 10
 thresholds:
-  min_rows: 1
+  require_complete_heldout_manifest: true
   max_missing_target_rows: 0
   max_missing_prediction_rows: 0
-  min_model_json_parse_rate: 1.0
-  min_model_json_exact_match_rate: 0.0
-  min_model_odata_id_match_rate: 1.0
+  min_model_json_parse_rate: 0.995
+  min_model_resource_identity_match_rate: 0.995
+  min_exact_match_delta_vs_foundation: 0.02
+  max_instruction_judge_accept_rate_drop: 0.03
+  generation_target_token_margin: 64
+  min_heldout_rows_per_corpus: 100
+  small_corpus_policy: require_all_available_rows
+  deterministic_golden_json_parse_rate: 1.0
+  deterministic_golden_resource_identity_match_rate: 1.0
   min_model_eval_tokens_per_sec:
   min_model_eval_samples_per_sec:
   max_model_ece:
   max_model_latency_sec_p95:
-  min_exact_match_delta_vs_baseline: 0.0
-  min_parse_rate_delta_vs_baseline: 0.0
-  min_odata_id_delta_vs_baseline: 0.0
+hard_checks:
+  - checkpoint_reload_succeeded
+  - no_missing_target_rows
+  - no_missing_prediction_rows
+  - complete_target_token_evidence
+  - complete_generation_budget_evidence
+  - generation_budget_covers_target_p95
+  - per_corpus_breakdown_complete
+  - per_corpus_row_counts_match_manifest
+  - finite_promotion_metrics
+  - run_report_exists
+  - run_role_and_task_lineage
+  - dataset_manifest_sha_exists
+  - eval_split_sha_exists
+  - train_data_sha_exists
+  - eval_data_sha_exists
+  - source_manifest_sha_exists
+  - eval_split_matches_eval_data
+  - heldout_artifact_matches_run_report
+  - source_manifest_matches_heldout_approval
+  - source_registry_matches_heldout_approval
+  - source_artifact_manifests_match_heldout_approval
+  - full_metrics_match_evidence
+  - golden_metrics_match_evidence
+  - full_prediction_rows_match_heldout_manifest
+  - foundation_model_sha_exists
+  - tokenizer_sha_exists
+  - training_code_commit_exists
+  - optimizer_steps_positive
+  - finite_run_metrics
+  - best_checkpoint_promoted

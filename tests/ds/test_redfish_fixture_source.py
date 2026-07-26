@@ -4,10 +4,10 @@ Offline tests for the provenance-tagged Redfish fixture source.
 Pins that :class:`RedfishFixtureSource` keys records on the canonical
 ``@odata.id`` (falling back to the discovery filename and recording which route
 it took), stamps source/trust/vendor/schema provenance, attaches allowed methods
-from a supplied ``.npy``-style map, skips unparsable and non-object JSON instead
-of crashing, and treats a missing directory as empty. Also pins the trust-tier
-ordering used to split evaluation. Pure stdlib — no torch, no network, no
-checked-out redfish_ctl fixtures on disk.
+from a supplied REST API map, skips unparsable and non-object JSON instead of
+crashing, and treats a missing directory as empty. Also pins the trust-tier
+ordering used to split evaluation. No torch, no network, no checked-out
+redfish_ctl fixtures on disk.
 
 Author:
 Mus mbayramo@stanford.edu
@@ -15,6 +15,8 @@ Mus mbayramo@stanford.edu
 
 import json
 from pathlib import Path
+
+import pytest
 
 from igc.ds.sources import RedfishFixtureSource, SourceRecord, TrustLevel
 
@@ -26,6 +28,44 @@ def _write(root: Path, name: str, body) -> None:
     path = root / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
+
+
+def _write_redfish_ctl_manifest(path: Path, *, corpus_id: str = "dell-xr8620t") -> Path:
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "corpora": [
+                    {
+                        "id": corpus_id,
+                        "kind": "dataset",
+                        "vendor": "dell",
+                        "model": "xr8620t",
+                        "capture_id": "unit-capture",
+                        "archive": f"corpora/dataset/{corpus_id}.tar.gz",
+                    },
+                ],
+            }
+        )
+    )
+    return path
+
+
+def _materialized_manifest_corpus(
+    root: Path,
+    *,
+    corpus_id: str = "dell-xr8620t",
+    map_payload: object | None,
+) -> Path:
+    corpus_root = root / "dataset" / corpus_id
+    _write(
+        corpus_root,
+        "json_responses/_redfish_v1_Systems_1.json",
+        {"@odata.id": "/redfish/v1/Systems/1", "Id": "1"},
+    )
+    if map_payload is not None:
+        _write(corpus_root, "rest_api_map.v1.json", map_payload)
+    return corpus_root
 
 
 def _corpus(tmp_path: Path) -> Path:
@@ -194,6 +234,66 @@ def test_redfish_ctl_manifest_builds_vendor_sources(tmp_path: Path) -> None:
     gb300_only = RedfishFixtureSource.from_redfish_ctl_manifest(
         str(manifest), str(materialized), corpus_ids=["supermicro-gb300"])
     assert [source.source for source in gb300_only] == ["supermicro-gb300"]
+
+
+@pytest.mark.parametrize(
+    ("map_payload", "error_type", "message"),
+    [
+        (None, FileNotFoundError, "REST API map is missing"),
+        (["not", "an", "object"], ValueError, "REST API map must be an object"),
+        (
+            {"allowed_methods_mapping": {"/redfish/v1/Systems/1": ["GET"]}},
+            ValueError,
+            "requires url_file_mapping",
+        ),
+        (
+            {"url_file_mapping": {"/redfish/v1/Systems/1": "json_responses/a.json"}},
+            ValueError,
+            "requires url_file_mapping",
+        ),
+        (
+            {"url_file_mapping": {}, "allowed_methods_mapping": {}},
+            ValueError,
+            "REST API map cannot be empty",
+        ),
+    ],
+)
+def test_redfish_ctl_manifest_requires_complete_api_map_when_requested(
+    tmp_path: Path,
+    map_payload: object | None,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    """Canonical registry use rejects selected corpora without full API maps."""
+    manifest = _write_redfish_ctl_manifest(tmp_path / "manifest.v1.json")
+    materialized = tmp_path / "materialized"
+    _materialized_manifest_corpus(materialized, map_payload=map_payload)
+
+    with pytest.raises(error_type, match=message):
+        RedfishFixtureSource.from_redfish_ctl_manifest(
+            str(manifest),
+            str(materialized),
+            require_api_map=True,
+        )
+
+
+def test_redfish_ctl_manifest_without_required_api_map_remains_legacy_permissive(
+    tmp_path: Path,
+) -> None:
+    """Legacy direct adapter callers can still read captures without API maps."""
+    manifest = _write_redfish_ctl_manifest(tmp_path / "manifest.v1.json")
+    materialized = tmp_path / "materialized"
+    _materialized_manifest_corpus(materialized, map_payload=None)
+
+    sources = RedfishFixtureSource.from_redfish_ctl_manifest(
+        str(manifest),
+        str(materialized),
+    )
+    records = list(sources[0].iter_records())
+
+    assert len(sources) == 1
+    assert [record.url for record in records] == ["/redfish/v1/Systems/1"]
+    assert records[0].allowed_methods is None
 
 
 def test_url_from_filename_helper() -> None:

@@ -89,23 +89,44 @@ class RedfishFixtureSource(SourceAdapter):
         return {"full": "dataset"}.get(str(kind).lower(), str(kind).lower())
 
     @staticmethod
-    def _load_allowed_methods(root: Path) -> Dict[str, List[str]]:
-        """Load the per-capture allowed-method map from portable JSON or legacy NPY."""
+    def _load_allowed_methods(
+        root: Path,
+        *,
+        required: bool = False,
+    ) -> Dict[str, List[str]]:
+        """Load and optionally require the redfish_ctl REST API map contract."""
+        data = None
         portable = root / "rest_api_map.v1.json"
         if portable.is_file():
             with portable.open("r", encoding="utf-8") as fh:
                 data = json.load(fh)
-            methods = data.get("allowed_methods_mapping", {})
-            return methods if isinstance(methods, dict) else {}
-
-        legacy = root / "rest_api_map.npy"
-        if legacy.is_file():
+        else:
+            legacy = root / "rest_api_map.npy"
+            if not legacy.is_file():
+                if required:
+                    raise FileNotFoundError(
+                        f"required redfish_ctl REST API map is missing under {root}"
+                    )
+                return {}
             import numpy as np
 
             data = np.load(legacy, allow_pickle=True).item()
-            methods = data.get("allowed_methods_mapping", {})
-            return methods if isinstance(methods, dict) else {}
-        return {}
+        if not isinstance(data, dict):
+            if required:
+                raise ValueError(f"redfish_ctl REST API map must be an object: {root}")
+            return {}
+        url_files = data.get("url_file_mapping")
+        methods = data.get("allowed_methods_mapping")
+        if not isinstance(url_files, dict) or not isinstance(methods, dict):
+            if required:
+                raise ValueError(
+                    "redfish_ctl REST API map requires url_file_mapping and "
+                    f"allowed_methods_mapping objects: {root}"
+                )
+            return {}
+        if required and (not url_files or not methods):
+            raise ValueError(f"redfish_ctl REST API map cannot be empty: {root}")
+        return methods
 
     @classmethod
     def from_redfish_ctl_manifest(
@@ -115,6 +136,7 @@ class RedfishFixtureSource(SourceAdapter):
         trust_level: TrustLevel = TrustLevel.REAL,
         kind: str = "dataset",
         corpus_ids: Optional[Sequence[str]] = None,
+        require_api_map: bool = False,
     ) -> List["RedfishFixtureSource"]:
         """Create sources for a materialized redfish_ctl corpus manifest.
 
@@ -123,6 +145,8 @@ class RedfishFixtureSource(SourceAdapter):
         :param trust_level: provenance tier stamped on emitted records.
         :param kind: corpus kind to consume, normally ``"dataset"``.
         :param corpus_ids: optional allow-list of manifest IDs.
+        :param require_api_map: fail when a selected corpus lacks the complete
+            ``url_file_mapping`` / ``allowed_methods_mapping`` artifact.
         :return: one source per selected, materialized manifest row.
         """
         manifest_file = Path(os.path.expanduser(manifest_path))
@@ -150,7 +174,10 @@ class RedfishFixtureSource(SourceAdapter):
                     corpus_id or slug,
                     trust_level,
                     vendor=entry.get("vendor"),
-                    allowed_methods_map=cls._load_allowed_methods(root),
+                    allowed_methods_map=cls._load_allowed_methods(
+                        root,
+                        required=require_api_map,
+                    ),
                     corpus_id=corpus_id or slug,
                     capture_id=entry.get("capture_id"),
                     model=entry.get("model"),

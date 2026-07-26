@@ -1,0 +1,46 @@
+schema_version: phase2_goal_extractor_promotion.v1
+phase: 2
+task: text_to_rest_api_list
+target_semantics: unordered_unique_rest_api_set
+thresholds:
+  min_json_parse_rate: 0.995
+  min_set_exact_match_rate: 0.95
+  min_set_exact_match_by_width:
+    "1": 0.98
+    "2": 0.95
+    "3": 0.90
+  max_duplicate_api_rate: 0.0
+  max_invalid_api_rate: 0.001
+  min_heldout_vendor_or_model_set_exact: 0.85
+  min_heldout_rows_per_vendor_or_model: 100
+  min_empty_set_exact_match_rate: 1.0
+hard_checks:
+  - immutable_full_manifest
+  - full_manifest_sha_matches_file
+  - immutable_train_manifest
+  - disjoint_train_heldout_release
+  - real_promoted_parent_checkpoint
+  - real_heldout_data
+  - artifact_sha
+  - checkpoint_reload_succeeded
+  - inference_smoke_succeeded
+  - run_report_exists
+  - run_role_and_task_lineage
+  - run_train_manifest_matches_file
+  - run_source_full_manifest_matches_file
+  - run_train_data_matches_file
+  - run_eval_manifest_matches_file
+  - run_eval_data_matches_file
+  - foundation_model_sha_exists
+  - tokenizer_sha_exists
+  - task_spec_sha_exists
+  - training_code_commit_exists
+  - optimizer_steps_positive
+  - finite_run_metrics
+  - finite_promotion_metrics
+  - best_checkpoint_promoted
+  - empty_set_heldout_present
+  - robustness_api_context_shuffled
+  - robustness_json_key_order_shuffled
+  - robustness_target_serialization_reversed
+  - robustness_irrelevant_distractors_added

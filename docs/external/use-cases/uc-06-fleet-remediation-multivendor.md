@@ -7,9 +7,8 @@
 > `scripts/code_reality_check.py`.
 
 > Target-loop status: this describes IGC's end-to-end target behavior, grounded in
-> `docs/external/architecture/overview.md` and `docs/external/roadmap/decisions.md` (esp. D-002). Today the code is a Phase-0
-> Redfish MDP shell — captured-data replay, a legacy one-hot action space, and smoke-only
-> DQN/HER metrics. The transfer result below is the design's central bet, and its go/no-go
+> `docs/external/architecture/overview.md`. Today the current unlock path is Phase 1/2/3. The
+> transfer result below is the design's central bet, and its go/no-go
 > experiment is honest (see the last section).
 
 ## The goal (in the operator's words, and the machine-checkable spec)
@@ -72,7 +71,7 @@ For a Supermicro node (`/Systems/1`) the catalog around this goal is:
 | `/redfish/v1/Systems/1`                            | PATCH  | `ComputerSystem`         | `Boot` is a writable property            |
 | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | POST | `ComputerSystem`         | body carries `Actions[*].target`         |
 
-Each candidate is encoded **structurally**, per D-002 v1: `endpoint_path_tokens` (ids normalized
+This target example encodes each candidate structurally: `endpoint_path_tokens` (ids normalized
 but kept as trailing tokens), `http_method`, `resource_type` from `@odata.type`,
 `child_relation_name` (the link that made the endpoint reachable), and `has_action_target` (the
 Reset row is the only `True` here — sparse, so discriminative). Nothing in that encoding is the
@@ -155,8 +154,8 @@ GET  /redfish/v1/Systems/Self      → Boot target "Pxe", PowerState "On"
 
 Different member id, different starting state, different number of steps — one policy, one spec.
 Dell iDRAC (`.../Systems/System.Embedded.1`, `Oem/Dell` present) and HPE iLO (`.../Systems/1`,
-`Oem/Hpe` present) resolve the same way; the `Oem` sections are observed but never keyed on
-(D-002 deliberately keeps vendor namespace out of the candidate features).
+`Oem/Hpe` present) resolve the same way; the `Oem` sections are observed but the candidate
+experiment does not key on vendor namespace.
 
 ## What "done" means
 
@@ -183,7 +182,7 @@ tries to Reset a node twice is illegal before it is ever risky.
 
 The transfer payoff is the reason this is RL and not four scripts. Because a candidate is encoded
 by its **structure** — `path_tokens`, `method`, `resource_type`, `child_relation`,
-`has_action_target` (D-002) — and *not* by a memorized member id, a `PATCH` on an unseen vendor's
+`has_action_target` — and *not* by a memorized member id, a `PATCH` on an unseen vendor's
 `/Systems/<UUID>` lands near the `PATCH` on `/Systems/1` and `/Systems/Self` the policy already
 knows: same `resource_type` (`ComputerSystem`), same method, same reachability relation. The
 Evaluator's per-node verdict then feeds **HER**: a run that overshot (issued a Reset on a node that
@@ -191,7 +190,7 @@ was already On, or PATCHed a mode the node did not advertise) is relabeled by it
 so the policy is rewarded toward the shortest safe path — the `/Systems/Self` node above learns the
 one-write solution rather than blindly replaying the two-write one.
 
-Honest bar (D-002): structural similarity alone is **not** enough. The zero-shot go/no-go — a
+Honest bar: structural similarity alone is **not** enough. The zero-shot go/no-go — a
 frozen encoder with no learned projection, ranking each state's true graph neighbors — measured
 **k=5 = 0.293 on the 1,499-node Supermicro corpus and 0.754 on the 167-node HPE iLO corpus**, both
 under the ≥0.80 top-5 bar (NO-GO), though ~30× over random. The read: on a large host, global text

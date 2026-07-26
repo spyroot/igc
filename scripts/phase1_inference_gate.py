@@ -96,6 +96,8 @@ def build_outputs(
             "baseline": metrics_payload["evidence"]["baseline"]["artifact"],
             "model_x": metrics_payload["evidence"]["model_x"]["artifact"],
         },
+        "baseline": metrics_payload["evidence"]["baseline"],
+        "model_x": metrics_payload["evidence"]["model_x"],
         "counts": {
             "baseline": metrics_payload["evidence"]["baseline"]["counts"],
             "model_x": metrics_payload["evidence"]["model_x"]["counts"],

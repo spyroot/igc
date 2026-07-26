@@ -13,10 +13,11 @@ Mus mbayramo@stanford.edu
 """
 
 import math
+import re
 
 import pytest
 
-from igc.modules.llm_train_state_encoder import is_accum_boundary, reached_max_steps
+from igc.modules.train.sft import is_accum_boundary, reached_max_steps
 
 
 def _boundaries(total, accum):
@@ -77,7 +78,7 @@ def test_reached_max_steps_stops_at_the_cap():
 
 def test_optimizer_steps_per_epoch_scales_by_accum():
     """Scheduler steps are optimizer steps: ceil(micro/accum)."""
-    from igc.modules.llm_train_state_encoder import optimizer_steps_per_epoch
+    from igc.modules.train.sft import optimizer_steps_per_epoch
     assert optimizer_steps_per_epoch(100, 1) == 100
     assert optimizer_steps_per_epoch(100, 4) == 25
     assert optimizer_steps_per_epoch(101, 4) == 26
@@ -87,7 +88,7 @@ def test_optimizer_steps_per_epoch_scales_by_accum():
 def test_measure_grad_norm_before_and_after_zero_grad():
     """Nonzero with live grads; 0.0 after zero_grad — the original bug's shape."""
     import torch
-    from igc.modules.llm_train_state_encoder import measure_grad_norm
+    from igc.modules.train.sft import measure_grad_norm
 
     model = torch.nn.Linear(3, 3)
     model(torch.ones(2, 3)).sum().backward()
@@ -95,3 +96,39 @@ def test_measure_grad_norm_before_and_after_zero_grad():
 
     model.zero_grad()
     assert measure_grad_norm(model) == 0.0
+
+
+def test_measure_grad_norm_clips_with_configured_threshold():
+    """The helper applies the configured max_grad_norm threshold to live grads."""
+    import torch
+    from igc.modules.train.sft import measure_grad_norm
+
+    model = torch.nn.Linear(3, 3)
+    model(torch.ones(2, 3)).sum().backward()
+
+    observed = measure_grad_norm(model, max_norm=0.05)
+    clipped = torch.linalg.vector_norm(
+        torch.stack([
+            parameter.grad.detach().norm(2)
+            for parameter in model.parameters()
+            if parameter.grad is not None
+        ]),
+        2,
+    ).item()
+
+    assert observed > 0.05
+    assert clipped <= 0.050001
+
+
+def test_train_paths_use_configured_max_grad_norm_for_clipping():
+    """Plain and accelerator training paths both use self._max_grad_norm."""
+    import inspect
+    from igc.modules.train.sft import SFTTrainer
+
+    source = re.sub(r"\s+", " ", inspect.getsource(SFTTrainer._train))
+
+    assert (
+        "self.accelerator.clip_grad_norm_( self.model.parameters(), "
+        "self._max_grad_norm"
+    ) in source
+    assert "measure_grad_norm( self.model, self._max_grad_norm" in source
