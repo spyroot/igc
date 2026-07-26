@@ -55,7 +55,7 @@ def evaluate_acceptance(
     model_metrics = _mapping(metrics.get("model_x"), "metrics.model_x")
     delta = _mapping(comparison.get("delta"), "comparison.delta")
     model_evidence = _mapping(evidence.get("model_x"), "evidence.model_x")
-    model_counts = _mapping(model_evidence.get("counts"), "evidence.model_x.counts")
+    _model_counts = _mapping(model_evidence.get("counts"), "evidence.model_x.counts")
     thresholds = spec.thresholds
 
     _add_max_check(

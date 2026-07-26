@@ -36,7 +36,6 @@ from igc.ds.phase2_labelled_requests import (
     load_phase2_labelled_requests_spec,
     parse_pro_judge_result,
     phase2_acceptance_thresholds_pass,
-    render_model_x_empty_set_prompt,
     render_model_x_prompt,
     render_pro_judge_prompt,
     sample_phase2_contexts,
