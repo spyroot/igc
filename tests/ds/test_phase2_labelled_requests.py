@@ -1335,6 +1335,51 @@ def test_builder_k0_produces_judged_empty_set_negative_row(tmp_path: Path) -> No
     assert summary[_phase2_metric("sample_width", "k")] == 0
 
 
+def test_builder_k0_uses_separate_budget_from_positive_api_limits(tmp_path: Path) -> None:
+    """Repeated k=0 contexts consume only the separately bounded negative budget."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    records = tuple(_record(index) for index in range(8))
+    budget = D1SamplingBudget(
+        max_accepted_rows=10,
+        max_candidates=10,
+        max_accepted_per_combination=1,
+        max_attempts_per_combination=1,
+        max_accepted_per_api=1,
+        max_empty_set_candidates=2,
+    )
+    calls = {"draft": 0, "judge": 0}
+
+    def draft_provider(_request: dict) -> str:
+        calls["draft"] += 1
+        return "request an operation that matches none of the listed resources"
+
+    def judge_provider(request: dict) -> str:
+        calls["judge"] += 1
+        return _judge_json(rest_api_list=request["expected_rest_api_list"])
+
+    builder = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=draft_provider,
+        judge_provider=judge_provider,
+        sampling_budget=budget,
+    )
+
+    first, _ = builder.build_one(records, k=0, rng=random.Random(17))
+    second, _ = builder.build_one(records, k=0, rng=random.Random(17))
+    exhausted, _ = builder.build_one(records, k=0, rng=random.Random(17))
+    positive, _ = builder.build_one(records, k=1, rng=random.Random(17))
+
+    assert first is not None
+    assert second is not None
+    assert exhausted is None
+    assert positive is not None
+    assert calls == {"draft": 3, "judge": 3}
+    assert budget.empty_set_attempts_total == 2
+    assert budget.empty_set_accepted_total == 2
+    assert budget.accepted_by_combination.total() == 1
+    assert budget.accepted_by_api.total() == 1
+
+
 @pytest.mark.parametrize("width", [1, 2, 3])
 def test_builder_positive_widths_keep_exact_selected_cardinality(
     tmp_path: Path,

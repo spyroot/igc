@@ -231,8 +231,11 @@ class D1SamplingBudget:
     max_accepted_per_combination: int
     max_attempts_per_combination: int
     max_accepted_per_api: int
+    max_empty_set_candidates: int | None = None
     attempts_total: int = 0
     accepted_total: int = 0
+    empty_set_attempts_total: int = 0
+    empty_set_accepted_total: int = 0
     attempts_by_combination: Counter[tuple[str, ...]] = field(default_factory=Counter)
     accepted_by_combination: Counter[tuple[str, ...]] = field(default_factory=Counter)
     accepted_by_api: Counter[str] = field(default_factory=Counter)
@@ -246,31 +249,55 @@ class D1SamplingBudget:
             max_accepted_per_combination=spec.max_accepted_per_combination,
             max_attempts_per_combination=spec.max_attempts_per_combination,
             max_accepted_per_api=spec.max_accepted_per_api,
+            max_empty_set_candidates=spec.empty_set_candidates,
         )
 
-    def reserve_attempt(self, apis: Sequence[str]) -> bool:
+    def reserve_attempt(
+        self,
+        apis: Sequence[str],
+        *,
+        empty_set: bool = False,
+    ) -> bool:
         """Reserve one provider attempt only while every configured bound permits it."""
         combination = tuple(sorted(apis))
         if self.attempts_total >= self.max_candidates:
             return False
         if self.accepted_total >= self.max_accepted_rows:
             return False
-        if self.attempts_by_combination[combination] >= self.max_attempts_per_combination:
-            return False
-        if self.accepted_by_combination[combination] >= self.max_accepted_per_combination:
-            return False
-        if any(self.accepted_by_api[api] >= self.max_accepted_per_api for api in combination):
-            return False
+        if empty_set:
+            if (
+                self.max_empty_set_candidates is not None
+                and self.empty_set_attempts_total >= self.max_empty_set_candidates
+            ):
+                return False
+        else:
+            if self.attempts_by_combination[combination] >= self.max_attempts_per_combination:
+                return False
+            if self.accepted_by_combination[combination] >= self.max_accepted_per_combination:
+                return False
+            if any(self.accepted_by_api[api] >= self.max_accepted_per_api for api in combination):
+                return False
         self.attempts_total += 1
-        self.attempts_by_combination[combination] += 1
+        if empty_set:
+            self.empty_set_attempts_total += 1
+        else:
+            self.attempts_by_combination[combination] += 1
         return True
 
-    def record_accept(self, apis: Sequence[str]) -> None:
+    def record_accept(
+        self,
+        apis: Sequence[str],
+        *,
+        empty_set: bool = False,
+    ) -> None:
         """Record one accepted row after a previously reserved provider attempt."""
         combination = tuple(sorted(apis))
         self.accepted_total += 1
-        self.accepted_by_combination[combination] += 1
-        self.accepted_by_api.update(combination)
+        if empty_set:
+            self.empty_set_accepted_total += 1
+        else:
+            self.accepted_by_combination[combination] += 1
+            self.accepted_by_api.update(combination)
 
     def summary(self) -> dict[str, Any]:
         """Return bounded, non-secret counters for manifests and metrics."""
@@ -281,10 +308,13 @@ class D1SamplingBudget:
                 "max_accepted_per_combination": self.max_accepted_per_combination,
                 "max_attempts_per_combination": self.max_attempts_per_combination,
                 "max_accepted_per_api": self.max_accepted_per_api,
+                "max_empty_set_candidates": self.max_empty_set_candidates,
             },
             "observed": {
                 "attempts_total": self.attempts_total,
                 "accepted_total": self.accepted_total,
+                "empty_set_attempts_total": self.empty_set_attempts_total,
+                "empty_set_accepted_total": self.empty_set_accepted_total,
                 "unique_combinations_attempted": len(self.attempts_by_combination),
             },
         }
@@ -1007,9 +1037,7 @@ class Phase2LabelledRequestBuilder:
                 rng.sample(list(records), self._spec.context_distractors)
             )
             expected_rest_api_list: tuple[str, ...] = ()
-            budget_identity = tuple(
-                f"empty_context:{record.rest_api}" for record in sampled
-            )
+            budget_identity: tuple[str, ...] = ()
         else:
             sampled = sample_phase2_contexts(records, k=k, rng=rng)
             expected_rest_api_list = tuple(record.rest_api for record in sampled)
@@ -1022,7 +1050,10 @@ class Phase2LabelledRequestBuilder:
             judge_model=self._spec.judge.model_id,
             judge_profile=self._spec.judge.profile,
         )
-        if not self._sampling_budget.reserve_attempt(budget_identity):
+        if not self._sampling_budget.reserve_attempt(
+            budget_identity,
+            empty_set=k == 0,
+        ):
             return None, counters
 
         draft_request = {
@@ -1063,7 +1094,10 @@ class Phase2LabelledRequestBuilder:
         )
         if not accepted:
             return None, counters
-        self._sampling_budget.record_accept(budget_identity)
+        self._sampling_budget.record_accept(
+            budget_identity,
+            empty_set=k == 0,
+        )
 
         selected_apis = set(expected_rest_api_list)
         context_records = list(sampled)
