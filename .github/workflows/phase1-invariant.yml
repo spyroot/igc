@@ -1,0 +1,37 @@
+# Focused hard gate: the Phase 1 input-noise invariant test runs on exactly
+# one Python (3.10, the project's env version) with no path filter and no
+# matrix, so a break in the pinned invariant fails the PR visibly on its own
+# check line instead of hiding inside the full offline-gate matrix.
+name: Phase 1 invariant
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  input-noise-invariant:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: docker/requirements-test.txt
+      - name: Install dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r docker/requirements-test.txt
+      - name: Phase 1 input-noise invariant
+        shell: bash
+        run: |
+          set -o pipefail
+          KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 \
+            python -m pytest -q tests/ds/test_phase1_input_noise_gap.py
