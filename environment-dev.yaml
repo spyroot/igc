@@ -46,10 +46,13 @@ dependencies:
       - prettytable
       - tensorboard
       - loguru
+      - pynvml
       - scikit-learn
       - nltk
       - rouge_score
       - evaluate
       # dev / test
       - pytest
-      - ruff
+      - pytest-cov
+      - coverage
+      - ruff==0.15.22
