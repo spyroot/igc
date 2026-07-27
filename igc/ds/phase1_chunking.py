@@ -528,10 +528,9 @@ def _ensure_list_path(
     root: dict[str, Any], path: Sequence[str | int], length: int
 ) -> list[Any]:
     target = _ensure_path(root, path, list)
-    if not target:
-        target.extend([_MISSING] * length)
-    elif len(target) != length:
+    if len(target) > length:
         raise ValueError("Phase 1 array chunks disagree on container length")
+    target.extend([_MISSING] * (length - len(target)))
     return target
 
 

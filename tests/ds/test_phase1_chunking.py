@@ -119,6 +119,26 @@ def test_fitting_resource_still_gets_transform_and_reassembly_lineage() -> None:
     assert reassemble_phase1_rows(chunks) == body
 
 
+def test_array_reassembly_combines_oversized_element_and_later_slice() -> None:
+    """A recursively split item and a compact tail share one original array length."""
+
+    body = {
+        "Members": [
+            {"Payload": "x" * 400},
+            {"Id": "small-1"},
+            {"Id": "small-2"},
+        ]
+    }
+    tokenizer = _CharacterTokenizer()
+
+    chunks = chunk_phase1_row(_row(body), tokenizer=tokenizer, policy=_policy())
+
+    assert any(
+        chunk["metadata"]["chunk"]["kind"] == "array_slice" for chunk in chunks
+    )
+    assert reassemble_phase1_rows(chunks) == body
+
+
 def test_token_distribution_reports_telemetry_without_filtering() -> None:
     """Telemetry classification changes only the report, never row membership."""
 
