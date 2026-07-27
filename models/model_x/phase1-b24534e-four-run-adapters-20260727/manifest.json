@@ -1,0 +1,60 @@
+{
+  "schema_version": "igc.phase1_adapter_collection.v1",
+  "phase": "phase1_finetune",
+  "model_role": "model_x",
+  "task": "redfish_json_reconstruction",
+  "source_commit": "b24534e62a6eaa70ea3ac4364731c3fb3eec214b",
+  "base_model": {
+    "name": "Qwen/Qwen2.5-7B-Instruct",
+    "sha256": "64e7d78e346609e3a47708e4f392f6a7d2a7267c77dcfa13340fc0cc8f45576b"
+  },
+  "tokenizer": {
+    "name": "Qwen/Qwen2.5-7B-Instruct",
+    "sha256": "4a32975ddee367d5fefda2b1c2607efb99378388771bd0cdf3a8fc6706ef88ec"
+  },
+  "dataset": {
+    "source_artifact_manifest_sha256": "322bba41fb7d56dc57b3952d6bd9990a33eec1022d7b68a8c55a7b5ab7e6a4b3",
+    "source_manifest_sha256": "148c57fb4ba872d90f209891d9ddfb926702bb10280cfcfcee7241c93d22344b",
+    "source_registry_sha256": "34fb7551dcf0672953f61686c014805d5338a6dcbaea1e05585c243b917dba78",
+    "data_manifest_sha256": "7e4b6a0c03373fe3a949f363f4bd3a3ba1af07c65db4b3bbbd476a3cae7cf275",
+    "train_data_sha256": "63705f1b89ba81acf392ecf2eee0e3109fcf394603fa47f0a9413253a7ebad5b",
+    "heldout_data_sha256": "23ff72f1e34cbfe0544e5884e30e5c7930f5cf705d9a04398773805604f13ba9"
+  },
+  "task_spec_sha256": "96c2b0d024f4f9c02590838057009095cba66b5cfad9d5e9d99cecc0c79e5f07",
+  "artifacts": [
+    {
+      "path": "rslora-r32-seed42",
+      "profile": "phase1_7b_rslora_r32",
+      "seed": 42,
+      "adapter_sha256": "a570039e6a6b6ada345ed4f96606dd7d0f0209049e36c0ea4674b2384ea1dc7f",
+      "adapter_size_bytes": 323014168
+    },
+    {
+      "path": "lora-r16-seed42",
+      "profile": "phase1_7b_lora",
+      "seed": 42,
+      "adapter_sha256": "38657d3136820069dc7f996ff583d0c52688e479f757377c1ed5fe3358c414b7",
+      "adapter_size_bytes": 161533192
+    },
+    {
+      "path": "rslora-r32-seed43",
+      "profile": "phase1_7b_rslora_r32",
+      "seed": 43,
+      "adapter_sha256": "2730886c856f1b0d55f98ac24218a0c9950b6df3baa857deaaad29c2d1b31797",
+      "adapter_size_bytes": 323014168
+    },
+    {
+      "path": "lora-r16-seed43",
+      "profile": "phase1_7b_lora",
+      "seed": 43,
+      "adapter_sha256": "d4290f7ae451eefcef55573a07d2b1d165f9b622eced2cf46a621a6177a48170",
+      "adapter_size_bytes": 161533192
+    }
+  ],
+  "promotion": {
+    "source": "best_checkpoint",
+    "status": "candidate_pending_golden_gates",
+    "raw_full_checkpoints_in_git_lfs": false,
+    "public_metadata_sanitized": true
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "schema_version": "igc.phase1_report.v2",
+  "phase": "phase1_finetune",
+  "model_role": "model_x",
+  "task": "redfish_json_reconstruction",
+  "source_commit": "b24534e62a6eaa70ea3ac4364731c3fb3eec214b",
+  "profile": "phase1_7b_rslora_r32",
+  "seed": 42,
+  "adapter": {
+    "method": "rslora",
+    "rank": 32,
+    "alpha": 64,
+    "dropout": 0.05,
+    "sha256": "a570039e6a6b6ada345ed4f96606dd7d0f0209049e36c0ea4674b2384ea1dc7f",
+    "size_bytes": 323014168
+  },
+  "training": {
+    "epochs": 3,
+    "optimizer_steps": 357,
+    "wall_clock_seconds": 2149.4,
+    "final_epoch_loss": 0.0000012749841245127563,
+    "best_eval_loss": 0.000002983720481008614
+  },
+  "evaluation": {
+    "token_accuracy_percent": 100.0,
+    "loss": 0.0000015755064500858623
+  },
+  "tracking": {
+    "provider": "wandb",
+    "run_id": "od7urx9r",
+    "url": "https://wandb.ai/spyroot/igc/runs/od7urx9r"
+  },
+  "promotion_source": "best_checkpoint"
+}
