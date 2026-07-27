@@ -209,6 +209,32 @@ def reached_max_steps(global_step: int, max_steps: Optional[int]) -> bool:
     return max_steps is not None and max_steps > 0 and global_step >= max_steps
 
 
+def select_dataset_epoch(dataset: Any, epoch: int) -> None:
+    """Select a reproducible per-epoch dataset view when the dataset supports it.
+
+    Training loaders use non-persistent workers. This hook runs before each loader
+    iteration, so worker processes receive the selected epoch when they are created.
+    """
+
+    set_epoch = getattr(dataset, "set_epoch", None)
+    if callable(set_epoch):
+        set_epoch(epoch)
+
+
+def select_training_epoch(dataset: Any, dataloader: Any, epoch: int) -> None:
+    """Advance both a dynamic dataset view and its prepared sampling order."""
+
+    select_dataset_epoch(dataset, epoch)
+    loader_set_epoch = getattr(dataloader, "set_epoch", None)
+    if callable(loader_set_epoch):
+        loader_set_epoch(epoch)
+        return
+    sampler = getattr(dataloader, "sampler", None)
+    sampler_set_epoch = getattr(sampler, "set_epoch", None)
+    if callable(sampler_set_epoch):
+        sampler_set_epoch(epoch)
+
+
 def cadence_due(optimizer_step: int, interval: int) -> bool:
     """Return whether an optimizer-step cadence fires at this update."""
     return optimizer_step > 0 and interval > 0 and optimizer_step % interval == 0
@@ -961,6 +987,7 @@ class SFTTrainer(LlmModule):
             shuffle=self._is_shuffle and sampler is None,
             drop_last=True,  # equal batch count per rank -> no epoch-boundary save-collective deadlock
             pin_memory=self._pin_memory,
+            persistent_workers=False,
             collate_fn=SFTTrainer.custom_collate_fn
         )
 
@@ -1096,6 +1123,7 @@ class SFTTrainer(LlmModule):
         for epoch in range(last_epoch, self.num_epochs):
             if reached_max_steps(global_opt_steps, max_steps):
                 break
+            select_training_epoch(train_data, train_dataloader, epoch)
             self.model.train()
 
             total_loss = 0.0
@@ -1341,6 +1369,7 @@ class SFTTrainer(LlmModule):
             shuffle=self._is_shuffle and sampler is None,
             drop_last=True,  # equal batch count per rank -> no epoch-boundary save-collective deadlock
             pin_memory=self._pin_memory,
+            persistent_workers=False,
             collate_fn=SFTTrainer.custom_collate_fn
         )
 
@@ -1388,6 +1417,7 @@ class SFTTrainer(LlmModule):
                   f"batch stats freq: {batch_log_frequency}.")
 
         for epoch in range(last_epoch, self.num_epochs):
+            select_training_epoch(train_data, train_dataloader, epoch)
             self.model.train()
 
             total_loss = 0.0

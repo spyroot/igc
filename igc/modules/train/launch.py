@@ -41,6 +41,7 @@ def profile_to_argv(profile: TrainingProfile) -> List[str]:
         "--sft_task", profile.task,
         "--train", "llm", "--llm", profile.llm_stage,
         "--corpus_objective", profile.corpus_objective,
+        "--phase1_structural_loss_profile", profile.phase1_structural_loss_profile,
         "--model_type", profile.model,
         "--llm_torch_dtype", profile.torch_dtype,
         "--per_device_train_batch_size", str(profile.batch_size),

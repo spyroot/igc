@@ -86,6 +86,7 @@ class TrainingProfile:
     weights_role: str = "model_x"
     llm_stage: str = "sft"
     corpus_objective: str = "phase1_pretrain"
+    phase1_structural_loss_profile: str = "none"
     use_peft: bool = True
     adapter: Optional[AdapterSpec] = field(default_factory=AdapterSpec)
     precision: str = "bf16"          # accelerate mixed_precision
@@ -126,6 +127,7 @@ class TrainingProfile:
             "tokenizer_sha": self.tokenizer_sha,
             "phase": self.phase, "weights_role": self.weights_role, "llm_stage": self.llm_stage,
             "corpus_objective": self.corpus_objective,
+            "phase1_structural_loss_profile": self.phase1_structural_loss_profile,
             "precision": self.precision, "torch_dtype": self.torch_dtype,
             "batch_size": self.batch_size, "grad_accum": self.grad_accum, "lr": self.lr,
             "optimizer": self.optimizer, "weight_decay": self.weight_decay,
@@ -151,7 +153,11 @@ class TrainingProfile:
         return d
 
 
-_OPTIONAL_PROFILE_FIELDS = {"foundation_model_sha", "tokenizer_sha"}
+_OPTIONAL_PROFILE_FIELDS = {
+    "foundation_model_sha",
+    "tokenizer_sha",
+    "phase1_structural_loss_profile",
+}
 _PROFILE_FIELDS = (
     set(TrainingProfile.__dataclass_fields__)
     - {"name", "adapter"}
@@ -238,6 +244,16 @@ def _profile_from_raw(name: str, raw: dict) -> TrainingProfile:
         raise ValueError(f"profile {name!r} Phase 1 parent_adapter must be empty")
     if task.phase > 1 and not str(raw["parent_adapter"]):
         raise ValueError(f"profile {name!r} requires parent_adapter")
+    structural_loss_profile = str(raw.get("phase1_structural_loss_profile", "none"))
+    from igc.ds.phase1_structural_loss import load_phase1_structural_loss_profile
+
+    resolved_structural_loss = load_phase1_structural_loss_profile(
+        structural_loss_profile
+    )
+    if task.phase > 1 and resolved_structural_loss.enabled:
+        raise ValueError(
+            f"profile {name!r} Phase {task.phase} cannot enable Phase 1 structural loss"
+        )
     warmup_ratio = float(raw["warmup_ratio"])
     if not 0.0 < warmup_ratio < 1.0:
         raise ValueError(f"profile {name!r} warmup_ratio must be between 0 and 1")
@@ -264,6 +280,7 @@ def _profile_from_raw(name: str, raw: dict) -> TrainingProfile:
         weights_role=str(raw["weights_role"]),
         llm_stage=str(raw["llm_stage"]),
         corpus_objective=str(raw["corpus_objective"]),
+        phase1_structural_loss_profile=structural_loss_profile,
         use_peft=use_peft,
         adapter=adapter,
         precision=str(raw["precision"]),

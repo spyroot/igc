@@ -97,11 +97,20 @@ class IgcMain:
             )
             if corpus_dir:
                 from igc.ds.corpus_dataset import CorpusJSONLDataset
+                structural_loss_profile = getattr(
+                    self._specs,
+                    "phase1_structural_loss_profile",
+                    "none",
+                )
+                structural_loss_seed = int(getattr(self._specs, "seed", 42))
                 self._dataset = CorpusJSONLDataset(
                     corpus_dir,
                     default_tokenize=self._specs.model_type,
                     max_len=self._specs.seq_len,
                     objective=getattr(self._specs, "corpus_objective", "legacy"),
+                    phase1_structural_loss_profile=structural_loss_profile,
+                    phase1_structural_loss_mode="train",
+                    phase1_structural_loss_seed=structural_loss_seed,
                 )
                 self._eval_dataset = CorpusJSONLDataset(
                     eval_corpus_dir,
@@ -109,6 +118,26 @@ class IgcMain:
                     max_len=self._specs.seq_len,
                     tokenizer=self._dataset.tokenizer,
                     objective=getattr(self._specs, "corpus_objective", "legacy"),
+                    phase1_structural_loss_profile=structural_loss_profile,
+                    phase1_structural_loss_mode="evaluation",
+                    phase1_structural_loss_seed=structural_loss_seed,
+                )
+                train_structural_loss_sha = getattr(
+                    self._dataset,
+                    "phase1_structural_loss_spec_sha",
+                    "",
+                )
+                eval_structural_loss_sha = getattr(
+                    self._eval_dataset,
+                    "phase1_structural_loss_spec_sha",
+                    "",
+                )
+                if train_structural_loss_sha != eval_structural_loss_sha:
+                    raise ValueError(
+                        "Phase 1 train and held-out structural-loss specs must match"
+                    )
+                self._specs.phase1_structural_loss_spec_sha = (
+                    train_structural_loss_sha
                 )
                 self._dataset.set_eval_split_sha256(self._eval_dataset.data_sha256)
             elif task is not None:

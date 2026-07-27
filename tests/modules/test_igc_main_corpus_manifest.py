@@ -39,12 +39,19 @@ class _FakeCorpusDataset:
         max_len=None,
         tokenizer=None,
         objective=None,
+        phase1_structural_loss_profile="none",
+        phase1_structural_loss_mode="train",
+        phase1_structural_loss_seed=42,
     ):
         self.corpus_dir = Path(corpus_dir)
         self.default_tokenize = default_tokenize
         self.max_len = max_len
         self.input_tokenizer = tokenizer
         self.objective = objective
+        self.phase1_structural_loss_profile = phase1_structural_loss_profile
+        self.phase1_structural_loss_mode = phase1_structural_loss_mode
+        self.phase1_structural_loss_seed = phase1_structural_loss_seed
+        self.phase1_structural_loss_spec_sha = "sha256:" + "c" * 64
         self.tokenizer = tokenizer or object()
         suffix = "b" if tokenizer is not None else "a"
         self.data_sha256 = "sha256:" + suffix * 64

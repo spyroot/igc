@@ -33,12 +33,19 @@ class _FakeCorpusDataset:
         max_len=None,
         tokenizer=None,
         objective="legacy",
+        phase1_structural_loss_profile="none",
+        phase1_structural_loss_mode="train",
+        phase1_structural_loss_seed=42,
     ):
         self.corpus_dir = corpus_dir
         self.default_tokenize = default_tokenize
         self.max_len = max_len
         self.input_tokenizer = tokenizer
         self.objective = objective
+        self.phase1_structural_loss_profile = phase1_structural_loss_profile
+        self.phase1_structural_loss_mode = phase1_structural_loss_mode
+        self.phase1_structural_loss_seed = phase1_structural_loss_seed
+        self.phase1_structural_loss_spec_sha = "sha256:" + "c" * 64
         self.tokenizer = tokenizer or object()
         suffix = "b" if tokenizer is not None else "a"
         self.data_sha256 = "sha256:" + suffix * 64
@@ -98,6 +105,8 @@ def test_run_with_corpus_dir_does_not_build_legacy_masked_dataset(monkeypatch, t
     assert main.eval_dataset.corpus_dir == str(tmp_path / "heldout_corpus")
     assert main.eval_dataset.input_tokenizer is trained["dataset"].tokenizer
     assert main.eval_dataset.objective == "phase1_pretrain"
+    assert trained["dataset"].phase1_structural_loss_mode == "train"
+    assert main.eval_dataset.phase1_structural_loss_mode == "evaluation"
     assert trained["dataset"].eval_split_sha256 == main.eval_dataset.data_sha256
     assert trained["dataset"].eval_data_sha == main.eval_dataset.data_sha256
 

@@ -9,6 +9,7 @@ profiles:
     weights_role: model_x
     llm_stage: sft
     corpus_objective: phase1_pretrain
+    phase1_structural_loss_profile: none
     use_peft: false
     adapter: null
     precision: "no"
@@ -47,6 +48,7 @@ profiles:
     weights_role: model_x
     llm_stage: sft
     corpus_objective: phase1_pretrain
+    phase1_structural_loss_profile: none
     use_peft: true
     adapter:
       method: lora
@@ -91,6 +93,7 @@ profiles:
     weights_role: model_x
     llm_stage: sft
     corpus_objective: phase1_pretrain
+    phase1_structural_loss_profile: none
     use_peft: true
     adapter:
       method: lora
@@ -137,6 +140,54 @@ profiles:
     weights_role: model_x
     llm_stage: sft
     corpus_objective: phase1_pretrain
+    phase1_structural_loss_profile: none
+    use_peft: true
+    adapter:
+      method: rslora
+      r: 32
+      alpha: 64
+      dropout: 0.05
+      init: default
+      target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+    precision: bf16
+    torch_dtype: bfloat16
+    batch_size: 8
+    grad_accum: 4
+    lr: 0.0001
+    optimizer: AdamW
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    gradient_checkpointing: true
+    scheduler: OneCycleLR
+    max_lr: 0.0001
+    warmup_ratio: 0.03
+    div_factor: 25.0
+    final_div_factor: 10000.0
+    cycle_momentum: true
+    anneal_strategy: cos
+    epochs: 3
+    max_steps: null
+    eval_steps: 100
+    save_steps: 100
+    early_stopping_patience: 3
+    early_stopping_min_delta: 0.005
+    sharding: none
+    seq_len: 2048
+    num_workers: 8
+    seed: 42
+
+  phase1_7b_rslora_r32_structural_mask:
+    model: Qwen/Qwen2.5-7B-Instruct
+    foundation_model_sha: ${IGC_FOUNDATION_MODEL_SHA}
+    tokenizer_sha: ${IGC_TOKENIZER_SHA}
+    task: redfish_json_reconstruction
+    parent_adapter: ""
+    parent_artifact_sha: ""
+    phase: phase1_finetune
+    weights_role: model_x
+    llm_stage: sft
+    corpus_objective: phase1_pretrain
+    phase1_structural_loss_profile: historical_structural_mask_v1
     use_peft: true
     adapter:
       method: rslora
@@ -181,6 +232,7 @@ profiles:
     weights_role: model_x
     llm_stage: sft
     corpus_objective: phase1_pretrain
+    phase1_structural_loss_profile: none
     use_peft: true
     adapter:
       method: lora
@@ -225,6 +277,7 @@ profiles:
     weights_role: model_x
     llm_stage: sft
     corpus_objective: phase1_pretrain
+    phase1_structural_loss_profile: none
     use_peft: false
     adapter: null
     precision: bf16
@@ -263,6 +316,7 @@ profiles:
     weights_role: model_x
     llm_stage: sft
     corpus_objective: phase1_pretrain
+    phase1_structural_loss_profile: none
     use_peft: false
     adapter: null
     precision: bf16
@@ -303,6 +357,7 @@ profiles:
     weights_role: goal_extractor
     llm_stage: sft
     corpus_objective: labelled_requests
+    phase1_structural_loss_profile: none
     use_peft: true
     adapter:
       method: rslora
@@ -349,6 +404,7 @@ profiles:
     weights_role: argument_extractor
     llm_stage: sft
     corpus_objective: labelled_calls
+    phase1_structural_loss_profile: none
     use_peft: true
     adapter:
       method: rslora

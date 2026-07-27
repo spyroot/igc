@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, BinaryIO, Mapping, Protocol
+from typing import Any, BinaryIO, Mapping, Protocol, Sequence
 
 import torch
 from torch.utils.data import Dataset
@@ -50,13 +50,17 @@ def tokenize_prompt_completion(
     prompt: str,
     completion: str,
     max_len: int,
+    *,
+    completion_label_spans: Sequence[tuple[int, int]] | None = None,
 ) -> dict[str, torch.Tensor]:
     """Tokenize one SFT example and mask prompt/padding loss positions.
 
     The returned tensors all have shape ``[max_len]``. ``labels`` is aligned
     with ``input_ids`` because Hugging Face causal LMs shift labels internally;
-    prompt and padding positions are ``-100``. Overflow raises instead of
-    silently truncating a full-document target.
+    prompt and padding positions are ``-100``. When
+    ``completion_label_spans`` is supplied, only completion tokens whose
+    character offsets overlap those spans receive labels. Overflow raises
+    instead of silently truncating a full-document target.
     """
     if max_len < 2:
         raise ValueError("SFT examples require max_len >= 2")
@@ -78,7 +82,13 @@ def tokenize_prompt_completion(
     input_ids = torch.cat((prompt_ids, completion_ids)).long()
     attention_mask = torch.ones_like(input_ids, dtype=torch.long)
     labels = torch.full_like(input_ids, -100)
-    labels[prompt_ids.numel():] = completion_ids
+    completion_labels = _completion_labels(
+        tokenizer,
+        completion,
+        completion_ids,
+        completion_label_spans,
+    )
+    labels[prompt_ids.numel():] = completion_labels
 
     if input_ids.numel() < max_len:
         pad_id = int(getattr(tokenizer, "pad_token_id", 0) or 0)
@@ -98,6 +108,82 @@ def tokenize_prompt_completion(
         "attention_mask": attention_mask,
         "labels": labels,
     }
+
+
+def _completion_labels(
+    tokenizer: Any,
+    completion: str,
+    completion_ids: torch.Tensor,
+    spans: Sequence[tuple[int, int]] | None,
+) -> torch.Tensor:
+    """Return full or character-span-selective completion labels."""
+
+    if spans is None:
+        return completion_ids.clone()
+    normalized = tuple(_validate_label_span(span, len(completion)) for span in spans)
+    if not normalized:
+        raise ValueError("completion_label_spans must not be empty")
+    try:
+        encoded = tokenizer(
+            completion,
+            padding=False,
+            truncation=False,
+            return_tensors="pt",
+            add_special_tokens=False,
+            return_offsets_mapping=True,
+        )
+    except (NotImplementedError, TypeError) as exc:
+        raise TypeError(
+            "selective completion labels require a fast tokenizer with "
+            "return_offsets_mapping support"
+        ) from exc
+    offsets = encoded.get("offset_mapping")
+    encoded_ids = encoded.get("input_ids")
+    if offsets is None or encoded_ids is None:
+        raise TypeError(
+            "selective completion labels require input_ids and offset_mapping"
+        )
+    encoded_ids = torch.as_tensor(encoded_ids).squeeze(0).long()
+    offsets = torch.as_tensor(offsets).squeeze(0).long()
+    if encoded_ids.shape != completion_ids.shape or not torch.equal(
+        encoded_ids,
+        completion_ids,
+    ):
+        raise ValueError("offset tokenization does not match completion tokenization")
+    if offsets.ndim != 2 or offsets.shape != (completion_ids.numel(), 2):
+        raise ValueError("completion offset mapping must have shape [tokens, 2]")
+
+    labels = torch.full_like(completion_ids, -100)
+    for token_index, (token_start, token_end) in enumerate(offsets.tolist()):
+        if token_start == token_end:
+            continue
+        if any(token_start < span_end and token_end > span_start
+               for span_start, span_end in normalized):
+            labels[token_index] = completion_ids[token_index]
+    if not torch.any(labels != -100):
+        raise ValueError("completion label spans selected zero tokens")
+    return labels
+
+
+def _validate_label_span(
+    span: tuple[int, int],
+    completion_length: int,
+) -> tuple[int, int]:
+    """Validate one half-open completion character span."""
+
+    if (
+        not isinstance(span, tuple)
+        or len(span) != 2
+        or any(isinstance(value, bool) or not isinstance(value, int) for value in span)
+    ):
+        raise TypeError("completion label spans must be (int, int) tuples")
+    start, end = span
+    if not 0 <= start < end <= completion_length:
+        raise ValueError(
+            "completion label span must be within the completion: "
+            f"span={span} completion_length={completion_length}"
+        )
+    return start, end
 
 
 class PromptCompletionJSONLDataset(Dataset):

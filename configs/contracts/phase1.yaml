@@ -49,9 +49,27 @@ metadata:
       - chunk_json_sha256
 
 objective:
-  family: causal_lm_completion
+  family: causal_lm_profile_selected_completion
   prompt_tokens_ignored: true
-  completion_tokens_supervised: true
+  completion_tokens_supervised: training_profile.phase1_structural_loss_profile
+  canonical_target_immutable: true
+  full_completion_profile: none
+  structural_loss_registry: configs/training/phase1_structural_loss.yaml
+  structural_loss_registry_role: authoritative_runtime_selector_definitions
+  historical_structural_mask_v1:
+    selection: row_epoch_cycle_with_available_family_fallback
+    evaluation_selection: row_fixed_at_epoch_zero
+    requires_input_target_json_equal_before_masking: true
+    selected_span_hidden_from_input: true
+    api_prefix_policy: supervise_every_removed_occurrence
+    families:
+      - odata_id
+      - action_targets
+      - target_keys
+      - json_objects
+      - json_arrays
+      - allowable_values
+      - api_prefixes
   overflow_policy: reject
 
 chunking:
