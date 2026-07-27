@@ -221,6 +221,20 @@ def select_dataset_epoch(dataset: Any, epoch: int) -> None:
         set_epoch(epoch)
 
 
+def select_training_epoch(dataset: Any, dataloader: Any, epoch: int) -> None:
+    """Advance both a dynamic dataset view and its prepared sampling order."""
+
+    select_dataset_epoch(dataset, epoch)
+    loader_set_epoch = getattr(dataloader, "set_epoch", None)
+    if callable(loader_set_epoch):
+        loader_set_epoch(epoch)
+        return
+    sampler = getattr(dataloader, "sampler", None)
+    sampler_set_epoch = getattr(sampler, "set_epoch", None)
+    if callable(sampler_set_epoch):
+        sampler_set_epoch(epoch)
+
+
 def cadence_due(optimizer_step: int, interval: int) -> bool:
     """Return whether an optimizer-step cadence fires at this update."""
     return optimizer_step > 0 and interval > 0 and optimizer_step % interval == 0
@@ -1109,7 +1123,7 @@ class SFTTrainer(LlmModule):
         for epoch in range(last_epoch, self.num_epochs):
             if reached_max_steps(global_opt_steps, max_steps):
                 break
-            select_dataset_epoch(train_data, epoch)
+            select_training_epoch(train_data, train_dataloader, epoch)
             self.model.train()
 
             total_loss = 0.0
@@ -1403,7 +1417,7 @@ class SFTTrainer(LlmModule):
                   f"batch stats freq: {batch_log_frequency}.")
 
         for epoch in range(last_epoch, self.num_epochs):
-            select_dataset_epoch(train_data, epoch)
+            select_training_epoch(train_data, train_dataloader, epoch)
             self.model.train()
 
             total_loss = 0.0

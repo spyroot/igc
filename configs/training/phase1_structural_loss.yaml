@@ -45,4 +45,4 @@ profiles:
         selector: substring
         patterns:
           - /redfish/v1/
-        max_spans: 16
+        max_spans: all

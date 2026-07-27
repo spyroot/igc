@@ -45,7 +45,7 @@ class StructuralLossFamily:
     name: str
     selector: str
     patterns: tuple[str, ...]
-    max_spans: int
+    max_spans: int | None
 
 
 @dataclass(frozen=True)
@@ -187,7 +187,11 @@ def build_phase1_structural_loss_view(
         candidates = list(candidates)
         rng.shuffle(candidates)
         selected_family = family
-        selected_spans = tuple(candidates[:family.max_spans])
+        selected_spans = tuple(
+            candidates
+            if family.max_spans is None
+            else candidates[:family.max_spans]
+        )
         break
     if selected_family is None:
         raise ValueError("Phase 1 row has no span for any structural-loss family")
@@ -235,9 +239,21 @@ def _family_from_raw(
         raise ValueError(f"{field}.patterns must not be empty for {selector}")
     if selector in {"object", "array"} and patterns:
         raise ValueError(f"{field}.patterns must be empty for {selector}")
-    max_spans = raw["max_spans"]
-    if isinstance(max_spans, bool) or not isinstance(max_spans, int) or max_spans < 1:
-        raise ValueError(f"{field}.max_spans must be a positive integer")
+    raw_max_spans = raw["max_spans"]
+    if raw_max_spans == "all":
+        if selector != "substring":
+            raise ValueError(f"{field}.max_spans='all' is limited to substring selectors")
+        max_spans = None
+    else:
+        max_spans = raw_max_spans
+        if (
+            isinstance(max_spans, bool)
+            or not isinstance(max_spans, int)
+            or max_spans < 1
+        ):
+            raise ValueError(
+                f"{field}.max_spans must be a positive integer or 'all'"
+            )
     return StructuralLossFamily(name, selector, tuple(patterns), max_spans)
 
 
@@ -296,7 +312,7 @@ def _mask_input_family(
             mask_token,
         )
         _replace_substrings(input_json, family.patterns, mask_token)
-        return [f"mask:{family.name}:substring"]
+        return [f"mask:{family.name}:substring:{len(selected_spans)}"]
 
     for selected in selected_spans:
         if not isinstance(selected, Phase1JSONSpan):

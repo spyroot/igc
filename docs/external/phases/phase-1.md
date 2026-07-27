@@ -62,7 +62,10 @@ contains `x`; prompt and padding labels are always `-100`. With
 `historical_structural_mask_v1`, one available family is selected per row and epoch, that evidence
 is hidden from the prompt, and only overlapping completion tokens receive labels. The locked
 families are `@odata.id`, action targets, target keys, JSON objects, JSON arrays, Redfish allowable
-values, and `/redfish/v1/` API prefixes. Held-out family selection is fixed by row. D0 and
+values, and `/redfish/v1/` API prefixes. The starting family index is `(row_index + epoch) % 7`;
+when that family is absent, selection advances to the next available family. Evaluation fixes the
+epoch at zero, so each held-out row has one stable view. Every API-prefix occurrence removed from
+the input is supervised in the completion. D0 and
 `y_true.json` never change; enabled structural loss fails closed unless the materialized row has
 `x.json == y_true.json` before masking.
 
@@ -269,7 +272,8 @@ For Phase 1, evaluation should check:
 - Loss is computed only on profile-selected `y_true` tokens, never prompt, padding, or unselected
   completion tokens.
 - Each historical structural family receives deterministic train coverage and a fixed held-out
-  view; the run report records the profile name and exact structural-loss spec SHA.
+  view in contract tests; the run report records the profile name and exact structural-loss spec
+  SHA.
 
 Author:
 Mus mbayramo@stanford.edu

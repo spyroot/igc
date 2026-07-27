@@ -60,13 +60,21 @@ def test_structural_loss_profile_locks_historical_family_order() -> None:
     assert profile.enabled is True
     assert profile.selection == "row_epoch_cycle"
     assert tuple(family.name for family in profile.families) == EXPECTED_FAMILIES
+    assert profile.families[-1].max_spans is None
     assert profile.spec_sha256.startswith("sha256:")
 
 
-def test_span_renderer_is_byte_identical_to_canonical_json() -> None:
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"empty_array": [], "empty_object": {}},
+        {"nested": [{"value": 1}, [True, None, "text"]]},
+        _row()["y_true"]["json"],
+    ],
+)
+def test_span_renderer_is_byte_identical_to_canonical_json(body: dict) -> None:
     """Adding span indexes must not change the existing Phase 1 target bytes."""
-    body = _row()["y_true"]["json"]
-
     rendered, spans = phase1_json_with_spans(body)
 
     assert rendered == json.dumps(body, indent=2, sort_keys=True)
@@ -83,6 +91,7 @@ def test_train_epochs_cover_each_structural_family_without_mutating_target() -> 
     original = copy.deepcopy(source)
     completion = render_phase1_completion(source["y_true"]["json"])
     observed = []
+    snippets_by_family = {}
 
     for epoch in range(len(EXPECTED_FAMILIES)):
         result = build_phase1_structural_loss_view(
@@ -94,6 +103,10 @@ def test_train_epochs_cover_each_structural_family_without_mutating_target() -> 
             row_index=0,
         )
         observed.append(result.family)
+        snippets_by_family[result.family] = tuple(
+            completion[start:end]
+            for start, end in result.completion_spans
+        )
         assert result.row["y_true"] == original["y_true"]
         assert result.row["x"] != original["x"]
         assert result.operations
@@ -104,7 +117,66 @@ def test_train_epochs_cover_each_structural_family_without_mutating_target() -> 
         )
 
     assert tuple(observed) == EXPECTED_FAMILIES
+    assert all("\"@odata.id\"" in text for text in snippets_by_family["odata_id"])
+    assert all("\"target\"" in text for text in snippets_by_family["action_targets"])
+    assert snippets_by_family["target_keys"] == ('"target"',)
+    assert all(
+        text.startswith("{") and text.endswith("}")
+        for text in snippets_by_family["json_objects"]
+    )
+    assert all(
+        text.startswith("[") and text.endswith("]")
+        for text in snippets_by_family["json_arrays"]
+    )
+    assert all(
+        "@Redfish.AllowableValues" in text
+        for text in snippets_by_family["allowable_values"]
+    )
+    assert set(snippets_by_family["api_prefixes"]) == {"/redfish/v1/"}
     assert source == original
+
+
+def test_train_family_start_depends_on_row_and_falls_forward_when_absent() -> None:
+    """Rows start at different families and missing families use the next available one."""
+    profile = load_phase1_structural_loss_profile(
+        "historical_structural_mask_v1"
+    )
+    source = _row()
+
+    first = build_phase1_structural_loss_view(
+        source,
+        profile=profile,
+        mode="train",
+        run_seed=31,
+        epoch=0,
+        row_index=0,
+    )
+    second = build_phase1_structural_loss_view(
+        source,
+        profile=profile,
+        mode="train",
+        run_seed=31,
+        epoch=0,
+        row_index=1,
+    )
+    sparse = build_phase1_row(
+        rest_api="/redfish/v1/Systems/1",
+        allowed_methods=["GET"],
+        input_json={"Id": "1"},
+        target_json={"Id": "1"},
+    )
+    fallback = build_phase1_structural_loss_view(
+        sparse,
+        profile=profile,
+        mode="train",
+        run_seed=31,
+        epoch=0,
+        row_index=1,
+    )
+
+    assert first.family == "odata_id"
+    assert second.family == "action_targets"
+    assert fallback.family == "json_objects"
 
 
 def test_structural_loss_is_reproducible_and_heldout_is_epoch_fixed() -> None:
@@ -146,6 +218,44 @@ def test_structural_loss_is_reproducible_and_heldout_is_epoch_fixed() -> None:
 
     assert train_a == train_b
     assert heldout_a == heldout_b
+    assert heldout_a.family != "full_completion"
+    assert heldout_a.completion_spans
+    assert heldout_a.row["x"] != source["x"]
+
+
+def test_api_prefix_loss_covers_every_prefix_removed_from_input() -> None:
+    """Substring masking and completion supervision have identical cardinality."""
+    body = {
+        f"Uri{index:02d}": f"/redfish/v1/Systems/{index}"
+        for index in range(20)
+    }
+    source = build_phase1_row(
+        rest_api="/redfish/v1/Systems",
+        allowed_methods=["GET"],
+        input_json=body,
+        target_json=body,
+    )
+    profile = load_phase1_structural_loss_profile(
+        "historical_structural_mask_v1"
+    )
+    result = build_phase1_structural_loss_view(
+        source,
+        profile=profile,
+        mode="train",
+        run_seed=31,
+        epoch=6,
+        row_index=0,
+    )
+    completion = render_phase1_completion(source["y_true"]["json"])
+
+    assert result.family == "api_prefixes"
+    assert len(result.completion_spans) == 20
+    assert all(
+        completion[start:end] == "/redfish/v1/"
+        for start, end in result.completion_spans
+    )
+    assert "/redfish/v1/" not in result.row["x"]["rest_api"]
+    assert "/redfish/v1/" not in json.dumps(result.row["x"]["json"])
 
 
 def test_disabled_profile_preserves_full_completion_contract() -> None:

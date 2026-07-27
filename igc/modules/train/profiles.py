@@ -153,7 +153,11 @@ class TrainingProfile:
         return d
 
 
-_OPTIONAL_PROFILE_FIELDS = {"foundation_model_sha", "tokenizer_sha"}
+_OPTIONAL_PROFILE_FIELDS = {
+    "foundation_model_sha",
+    "tokenizer_sha",
+    "phase1_structural_loss_profile",
+}
 _PROFILE_FIELDS = (
     set(TrainingProfile.__dataclass_fields__)
     - {"name", "adapter"}
@@ -240,7 +244,7 @@ def _profile_from_raw(name: str, raw: dict) -> TrainingProfile:
         raise ValueError(f"profile {name!r} Phase 1 parent_adapter must be empty")
     if task.phase > 1 and not str(raw["parent_adapter"]):
         raise ValueError(f"profile {name!r} requires parent_adapter")
-    structural_loss_profile = str(raw["phase1_structural_loss_profile"])
+    structural_loss_profile = str(raw.get("phase1_structural_loss_profile", "none"))
     from igc.ds.phase1_structural_loss import load_phase1_structural_loss_profile
 
     resolved_structural_loss = load_phase1_structural_loss_profile(

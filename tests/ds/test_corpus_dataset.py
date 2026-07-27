@@ -72,7 +72,10 @@ class _EmptyCompletionTokenizer(_FakeTokenizer):
                  return_offsets_mapping=False):
         if text == '{\n  "empty": true\n}\n':
             empty = torch.empty((1, 0), dtype=torch.long)
-            return {"input_ids": empty, "attention_mask": empty}
+            result = {"input_ids": empty, "attention_mask": empty}
+            if return_offsets_mapping:
+                result["offset_mapping"] = torch.empty((1, 0, 2), dtype=torch.long)
+            return result
         return super().__call__(
             text,
             padding=padding,
@@ -274,6 +277,9 @@ def test_phase1_structural_loss_heldout_view_ignores_epoch_changes(tmp_path: Pat
 
     for key in ("input_ids", "attention_mask", "labels"):
         assert torch.equal(before[key], after[key])
+    active = before["labels"].ne(-100).sum().item()
+    attended = before["attention_mask"].sum().item()
+    assert 0 < active < attended
 
 
 def test_phase1_tiny_sequence_raises_instead_of_truncating_sft(tmp_path: Path):

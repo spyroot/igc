@@ -17,6 +17,7 @@ import yaml
 from igc.modules.train.profiles import (
     AdapterSpec,
     apply_lora_kwargs,
+    load_profiles,
     profile_names,
     resolve_profile,
 )
@@ -185,6 +186,19 @@ def test_profile_yaml_exposes_profile_driven_hyperparameters():
         assert isinstance(profile["cycle_momentum"], bool)
         assert profile["anneal_strategy"] in {"cos", "linear"}
         assert isinstance(profile["seed"], int)
+
+
+def test_older_profile_yaml_defaults_to_full_completion(tmp_path: Path) -> None:
+    """Registries predating structural loss retain the old profile=none behavior."""
+    raw = yaml.safe_load(_PROFILE_YAML.read_text(encoding="utf-8"))
+    profile = raw["profiles"]["phase1_gpt2_smoke"]
+    del profile["phase1_structural_loss_profile"]
+    path = tmp_path / "profiles.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    loaded = load_profiles(path)
+
+    assert loaded["phase1_gpt2_smoke"].phase1_structural_loss_profile == "none"
 
 
 def test_resolved_profile_describe_includes_profile_driven_hyperparameters():
