@@ -62,9 +62,11 @@ assert_no_docker_or_ssh_calls() {
     run grep -F 'StrictHostKeyChecking=yes' "$SCRIPT"
     [ "$status" -eq 0 ]
 
+    # shellcheck disable=SC2016  # Match the literal source expression.
     run grep -F 'DIST_MAX_PARALLEL="${DIST_MAX_PARALLEL:-${#NODES[@]}}"' "$SCRIPT"
     [ "$status" -eq 0 ]
 
+    # shellcheck disable=SC2016  # Match the literal background launch.
     launch_line="$(
         grep -nF 'load_node "${NODES[$index]}" >"$FANOUT_DIR/$index.log" 2>&1 &' "$SCRIPT" \
             | cut -d: -f1 \
@@ -75,6 +77,7 @@ assert_no_docker_or_ssh_calls() {
             | cut -d: -f1 \
             | head -n1
     )"
+    # shellcheck disable=SC2016  # Match the literal PID wait expression.
     wait_line="$(
         grep -nF 'if wait "${PIDS[$offset]}"; then' "$SCRIPT" \
             | cut -d: -f1 \
