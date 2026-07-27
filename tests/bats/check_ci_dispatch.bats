@@ -25,7 +25,7 @@ EOF
     run env \
         HOMELAB_IN_CLUSTER=1 \
         KUBERNETES_SERVICE_HOST=10.0.0.1 \
-        CI_SERVER_HOST=gitlab.rnd.embedings.ai \
+        CI_JOB_ID=123 \
         CI_RUNNER_TAGS=homelab-k8s \
         PATH="${FAKE_BIN}:${PATH}" \
         "$CHECK" --profile merge --gate unknown
@@ -45,7 +45,7 @@ EOF
     run env \
         HOMELAB_IN_CLUSTER=1 \
         KUBERNETES_SERVICE_HOST=10.0.0.1 \
-        CI_SERVER_HOST=gitlab.rnd.embedings.ai \
+        CI_JOB_ID=123 \
         CI_RUNNER_TAGS=homelab-k8s \
         CI_COMMIT_SHA=1111111111111111111111111111111111111111 \
         IGC_GATE_REPORT_DIR="$REPORT_DIR" \

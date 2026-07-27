@@ -43,13 +43,19 @@ done
     printf 'BLOCKER: unknown or inactive focused gate: %s\n' "${gate:-missing}" >&2
     exit 2
 }
-[ "${HOMELAB_IN_CLUSTER:-0}" = "1" ] \
-    && [ -n "${KUBERNETES_SERVICE_HOST:-}" ] \
-    && [ "${CI_SERVER_HOST:-}" = "gitlab.rnd.embedings.ai" ] \
-    && [[ ",${CI_RUNNER_TAGS:-}," == *",homelab-k8s,"* ]] || {
+if [ "${HOMELAB_IN_CLUSTER:-0}" != "1" ] \
+    || [ -z "${KUBERNETES_SERVICE_HOST:-}" ] \
+    || [ -z "${CI_JOB_ID:-}" ]; then
+    printf 'BLOCKER: unit.all requires Internal GitLab homelab-k8s execution\n' >&2
+    exit 3
+fi
+case ",${CI_RUNNER_TAGS:-}," in
+    *",homelab-k8s,"*) ;;
+    *)
         printf 'BLOCKER: unit.all requires Internal GitLab homelab-k8s execution\n' >&2
         exit 3
-    }
+        ;;
+esac
 
 cd "$ROOT"
 command -v bats >/dev/null 2>&1 || {

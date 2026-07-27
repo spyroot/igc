@@ -17,7 +17,8 @@ stages:
 
 default:
   image:
-    name: harbor.rnd.embedings.ai:30443/spyroot/builder/torch-ml-toolbox:latest-amd64
+    # Supplied by private CI from the Builder shared image inventory.
+    name: "$TORCH_ML_TOOLBOX_IMAGE"
     pull_policy: always
   tags: [homelab-k8s]
   before_script:
@@ -25,8 +26,8 @@ default:
 
 workflow:
   rules:
-    - if: '$CI_SERVER_HOST == "gitlab.rnd.embedings.ai" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $MERGE_PROFILE == "merge"'
-    - if: '$CI_SERVER_HOST == "gitlab.rnd.embedings.ai" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && ($MERGE_PROFILE == null || $MERGE_PROFILE == "")'
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $MERGE_PROFILE == "merge"'
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && ($MERGE_PROFILE == null || $MERGE_PROFILE == "")'
       variables:
         FOCUSED_GATE: unit.all
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -35,7 +36,7 @@ workflow:
     - when: never
 
 .focused-dispatch-suppression: &focused-dispatch-suppression
-  if: '$CI_SERVER_HOST == "gitlab.rnd.embedings.ai" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $FOCUSED_GATE != null && $FOCUSED_GATE != ""'
+  if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $FOCUSED_GATE != null && $FOCUSED_GATE != ""'
   when: never
 
 .cpu-base: &cpu-base
@@ -44,8 +45,8 @@ workflow:
   rules:
     - *focused-dispatch-suppression
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_SERVER_HOST == "gitlab.rnd.embedings.ai" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $MERGE_PROFILE == "merge"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $MERGE_PROFILE == "merge"'
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
     - when: never
 
@@ -56,7 +57,7 @@ focused-gate:
     FOCUSED_GATE: unit.all
   tags: [homelab-k8s, homelab-k8s-validation]
   rules:
-    - if: '$CI_SERVER_HOST == "gitlab.rnd.embedings.ai" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $FOCUSED_GATE != null && $FOCUSED_GATE != ""'
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $FOCUSED_GATE != null && $FOCUSED_GATE != ""'
     - when: never
   script:
     - ./scripts/check.sh --profile merge --gate "${FOCUSED_GATE:-unit.all}"
