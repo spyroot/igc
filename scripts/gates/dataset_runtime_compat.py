@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -39,6 +40,13 @@ RAW_COPY_MARKERS = (
 
 class GateError(ValueError):
     """A closed-world validation failure."""
+
+
+class _GateArgumentParser(argparse.ArgumentParser):
+    """Convert usage errors into the gate's machine-readable failure path."""
+
+    def error(self, message: str) -> None:
+        raise GateError(f"argument error: {message}")
 
 
 def sha256_file(path: Path) -> str:
@@ -109,10 +117,13 @@ def validate_release(
     """Validate all D0 rows, exact release bytes, and source identities."""
 
     sys.path.insert(0, str(repo_root))
-    from igc.ds.phase1_chunking import reassemble_phase1_rows
-    from igc.ds.phase1_render import validate_phase1_row
-    from igc.ds.sources.mixer import DataManifest
-    from igc.modules.train.profiles import resolve_profile
+    try:
+        from igc.ds.phase1_chunking import reassemble_phase1_rows
+        from igc.ds.phase1_render import validate_phase1_row
+        from igc.ds.sources.mixer import DataManifest
+        from igc.modules.train.profiles import resolve_profile
+    except (ImportError, SyntaxError) as exc:
+        raise GateError(f"unable to load dataset runtime modules: {exc}") from exc
 
     summary = _load_json(summary_path)
     registry = _load_yaml(source_registry_path)
@@ -147,7 +158,10 @@ def validate_release(
         raise GateError("written manifest SHA mismatch")
 
     manifest_payload = _load_json(train_manifest_path)
-    manifest = DataManifest(**manifest_payload)
+    try:
+        manifest = DataManifest(**manifest_payload)
+    except (TypeError, ValueError) as exc:
+        raise GateError(f"release manifest is invalid: {exc}") from exc
     if summary.get("manifest_sha") != manifest.content_hash():
         raise GateError("semantic manifest SHA mismatch")
     if manifest.source_registry_sha != summary["source_registry_sha"]:
@@ -155,7 +169,10 @@ def validate_release(
     if manifest.source_manifest_shas != dict(source_shas):
         raise GateError("release manifest source artifact SHAs mismatch")
     transform = _mapping(manifest_payload, "phase1_transform")
-    profile = resolve_profile(training_profile)
+    try:
+        profile = resolve_profile(training_profile)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise GateError(f"training profile is invalid: {exc}") from exc
     if summary.get("training_profile") != profile.name:
         raise GateError("release training profile does not match requested profile")
     _validate_transform(summary, transform, profile=profile, repo_root=repo_root)
@@ -188,7 +205,7 @@ def check_dockerfile(path: Path, *, repo_root: Path = REPO_ROOT) -> dict[str, An
     """Reject raw data in Docker COPY/ADD instructions."""
 
     resolved = path if path.is_absolute() else repo_root / path
-    text = resolved.read_text(encoding="utf-8")
+    text = _read_text(resolved)
     violations = []
     required_markers = (
         "ARG IGC_DATASET_CONTRACT_SHA",
@@ -199,20 +216,42 @@ def check_dockerfile(path: Path, *, repo_root: Path = REPO_ROOT) -> dict[str, An
     for marker in required_markers:
         if marker not in text:
             violations.append(f"missing image contract marker: {marker}")
-    for number, raw in enumerate(text.splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
+    for number, line in _dockerfile_instructions(text):
         if line.upper().startswith(("COPY ", "ADD ")):
-            normalized = line.lower()
             for marker in RAW_COPY_MARKERS:
-                if marker.lower() in normalized:
+                pattern = (
+                    rf"(?:^|[/\s\"'\[\],]){re.escape(marker)}"
+                    r"(?:$|[/\s\"'\[\],])"
+                )
+                if re.search(pattern, line, flags=re.IGNORECASE):
                     violations.append(f"line {number}: COPY/ADD references {marker}")
     return {
         "status": "passed" if not violations else "failed",
         "dockerfile": str(path),
         "violations": violations,
     }
+
+
+def _dockerfile_instructions(text: str) -> list[tuple[int, str]]:
+    """Return Dockerfile logical instructions with their starting line."""
+
+    instructions: list[tuple[int, str]] = []
+    parts: list[str] = []
+    start_line = 0
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not parts and (not line or line.startswith("#")):
+            continue
+        if not parts:
+            start_line = number
+        continued = line.endswith("\\")
+        parts.append(line[:-1].rstrip() if continued else line)
+        if not continued:
+            instructions.append((start_line, " ".join(parts)))
+            parts = []
+    if parts:
+        instructions.append((start_line, " ".join(parts)))
+    return instructions
 
 
 def _validate_transform(
@@ -237,11 +276,18 @@ def _validate_transform(
         manifest.get("tokenizer_sha"),
         "phase1_transform.tokenizer_sha",
     )
-    if tokenizer_sha != profile.tokenizer_sha:
+    profile_tokenizer_sha = _sha_value(
+        getattr(profile, "tokenizer_sha", None),
+        "training_profile.tokenizer_sha",
+    )
+    if tokenizer_sha != profile_tokenizer_sha:
         raise GateError("release tokenizer SHA does not match training profile")
     if not isinstance(manifest.get("max_tokens"), int) or manifest["max_tokens"] < 2:
         raise GateError("phase1_transform.max_tokens must be >= 2")
-    if manifest["max_tokens"] != profile.seq_len:
+    profile_seq_len = getattr(profile, "seq_len", None)
+    if not isinstance(profile_seq_len, int) or profile_seq_len < 2:
+        raise GateError("training_profile.seq_len must be >= 2")
+    if manifest["max_tokens"] != profile_seq_len:
         raise GateError("release max_tokens does not match training profile seq_len")
 
 
@@ -299,15 +345,22 @@ def _labels_from_json(text: str) -> dict[str, str]:
     return {str(key): str(value) for key, value in labels.items()}
 
 
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeError as exc:
+        raise GateError(f"{path}: expected UTF-8 text") from exc
+
+
 def _load_json(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(_read_text(path))
     if not isinstance(payload, dict):
         raise GateError(f"{path}: expected JSON object")
     return payload
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    payload = yaml.safe_load(_read_text(path))
     if not isinstance(payload, dict):
         raise GateError(f"{path}: expected YAML object")
     return payload
@@ -338,30 +391,31 @@ def _source_manifest_args(values: Sequence[str]) -> dict[str, Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--log-format", choices=("text", "json"), default="json")
-    parser.add_argument("--log-level", default="info")
-    parser.add_argument("--log-file")
-    parser.add_argument("--run-id", default="")
-    commands = parser.add_subparsers(dest="command", required=True)
-    identity = commands.add_parser("contract-sha")
-    identity.add_argument("--output", choices=("json", "text"), default="json")
-    transform = commands.add_parser("transform")
-    transform.add_argument("--output", choices=("json", "text"), default="json")
-    image = commands.add_parser("check-image")
-    image.add_argument("--image", required=True)
-    image.add_argument("--labels-json")
-    release = commands.add_parser("check-release")
-    release.add_argument("--release-root", required=True)
-    release.add_argument("--summary", required=True)
-    release.add_argument("--source-registry", required=True)
-    release.add_argument("--training-profile", required=True)
-    release.add_argument("--source-manifest", action="append", required=True)
-    dockerfile = commands.add_parser("check-dockerfile")
-    dockerfile.add_argument("--dockerfile", default="docker/Dockerfile.train")
-    args = parser.parse_args(argv)
     try:
+        parser = _GateArgumentParser(description=__doc__)
+        parser.add_argument("--dry-run", action="store_true")
+        parser.add_argument("--log-format", choices=("text", "json"), default="json")
+        parser.add_argument("--log-level", default="info")
+        parser.add_argument("--log-file")
+        parser.add_argument("--run-id", default="")
+        commands = parser.add_subparsers(dest="command", required=True)
+        identity = commands.add_parser("contract-sha")
+        identity.add_argument("--output", choices=("json", "text"), default="json")
+        transform = commands.add_parser("transform")
+        transform.add_argument("--output", choices=("json", "text"), default="json")
+        image = commands.add_parser("check-image")
+        image.add_argument("--image", required=True)
+        image.add_argument("--labels-json")
+        release = commands.add_parser("check-release")
+        release.add_argument("--release-root", required=True)
+        release.add_argument("--summary", required=True)
+        release.add_argument("--source-registry", required=True)
+        release.add_argument("--training-profile", required=True)
+        release.add_argument("--source-manifest", action="append", required=True)
+        dockerfile = commands.add_parser("check-dockerfile")
+        dockerfile.add_argument("--dockerfile", default="docker/Dockerfile.train")
+        args = parser.parse_args(argv)
+
         digest, version, inputs = contract_identity()
         if args.command == "contract-sha":
             result: Any = digest if args.output == "text" else {
@@ -375,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
                 text = (
                     sys.stdin.read()
                     if args.labels_json == "-"
-                    else Path(args.labels_json).read_text(encoding="utf-8")
+                    else _read_text(Path(args.labels_json))
                 )
                 labels = _labels_from_json(text)
             result = compare_image(args.image, labels=labels)

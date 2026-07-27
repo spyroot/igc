@@ -182,6 +182,17 @@ def test_image_labels_report_compatible_or_update_required(tmp_path: Path) -> No
     assert compatible["status"] == "compatible"
     assert stale["status"] == "update-required"
 
+    stale_transform = gate.compare_image(
+        "igc-train:test",
+        labels={
+            gate.CONTRACT_LABEL: digest,
+            gate.TRANSFORM_LABEL: "phase1.stale-transform.v0",
+        },
+        repo_root=repo,
+    )
+    assert stale_transform["status"] == "update-required"
+    assert stale_transform["reasons"] == ["dataset transform version mismatch"]
+
 
 def test_release_gate_rechecks_both_source_manifests(
     tmp_path: Path,
@@ -232,6 +243,73 @@ def test_dockerfile_gate_rejects_raw_dataset_copy(tmp_path: Path) -> None:
     assert result["violations"] == ["line 6: COPY/ADD references datasets"]
 
 
+def test_dockerfile_gate_rejects_raw_copy_on_continuation_line(tmp_path: Path) -> None:
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        "\n".join((
+            "FROM scratch",
+            "ARG IGC_DATASET_CONTRACT_SHA",
+            "ARG IGC_DATASET_TRANSFORM_VERSION",
+            f"LABEL {gate.CONTRACT_LABEL}=x",
+            f"LABEL {gate.TRANSFORM_LABEL}=x",
+            "COPY igc \\",
+            "     datasets /workspace",
+            "",
+        )),
+        encoding="utf-8",
+    )
+
+    result = gate.check_dockerfile(dockerfile)
+
+    assert result["status"] == "failed"
+    assert result["violations"] == ["line 6: COPY/ADD references datasets"]
+
+
+def test_dockerfile_gate_accepts_contract_labelled_image(tmp_path: Path) -> None:
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        "\n".join((
+            "FROM scratch",
+            "ARG IGC_DATASET_CONTRACT_SHA",
+            "ARG IGC_DATASET_TRANSFORM_VERSION",
+            f"LABEL {gate.CONTRACT_LABEL}=x",
+            f"LABEL {gate.TRANSFORM_LABEL}=x",
+            "COPY igc /workspace/igc",
+            "COPY copy.internal.conf /workspace/copy.internal.conf",
+            "",
+        )),
+        encoding="utf-8",
+    )
+
+    result = gate.check_dockerfile(dockerfile)
+
+    assert result["status"] == "passed"
+    assert result["violations"] == []
+
+
+def test_text_loader_blocks_non_utf8_input(tmp_path: Path) -> None:
+    path = tmp_path / "invalid.json"
+    path.write_bytes(b"\xff")
+
+    with pytest.raises(gate.GateError, match="expected UTF-8 text"):
+        gate._load_json(path)
+
+
+def test_cli_usage_error_is_machine_readable(capsys: pytest.CaptureFixture[str]) -> None:
+    rc = gate.main(["unknown-command"])
+
+    assert rc == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert "argument error" in payload["error"]
+
+
 def test_sha_parser_requires_algorithm_prefix() -> None:
     with pytest.raises(gate.GateError, match="sha256"):
         gate._sha_value("1" * 64, "artifact")
+
+
+def test_sha_parser_accepts_prefixed_digest() -> None:
+    value = "sha256:" + "a" * 64
+
+    assert gate._sha_value(value, "artifact") == value
