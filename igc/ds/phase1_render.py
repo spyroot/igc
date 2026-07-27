@@ -290,7 +290,6 @@ def phase1_json_with_spans(value: Any) -> tuple[str, tuple[Phase1JSONSpan, ...]]
                     append(json.dumps(key))
                     key_end = length
                     append(": ")
-                    value_start = length
                     render(child, level + 1, path + (key,))
                     value_end = length
                     spans.append(
