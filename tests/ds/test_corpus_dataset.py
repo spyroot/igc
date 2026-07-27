@@ -542,6 +542,8 @@ def test_shared_sft_dataset_surface(tmp_path: Path):
         "source_manifest_sha": "",
         "source_registry_sha": "",
         "source_artifact_manifest_shas": {},
+        "phase1_structural_loss_profile": ds.phase1_structural_loss_profile,
+        "phase1_structural_loss_spec_sha": ds.phase1_structural_loss_spec_sha,
     }
 
 
@@ -568,6 +570,8 @@ def test_run_manifest_fields_round_trip_exact_file_lineage(tmp_path: Path):
         "source_manifest_sha": train_manifest_sha,
         "source_registry_sha": "",
         "source_artifact_manifest_shas": {},
+        "phase1_structural_loss_profile": ds.phase1_structural_loss_profile,
+        "phase1_structural_loss_spec_sha": ds.phase1_structural_loss_spec_sha,
     }
 
     ds.set_eval_split_sha256(heldout.data_sha256)
@@ -581,6 +585,8 @@ def test_run_manifest_fields_round_trip_exact_file_lineage(tmp_path: Path):
         "source_manifest_sha": train_manifest_sha,
         "source_registry_sha": "",
         "source_artifact_manifest_shas": {},
+        "phase1_structural_loss_profile": ds.phase1_structural_loss_profile,
+        "phase1_structural_loss_spec_sha": ds.phase1_structural_loss_spec_sha,
     }
     assert fields["data_manifest"].startswith("sha256:")
     assert fields["train_data_sha"].startswith("sha256:")

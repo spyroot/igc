@@ -205,6 +205,7 @@ def test_build_outputs_preserves_full_evidence_by_corpus_for_promotion(
     promotion = evaluate_phase1_promotion(
         thresholds={
             "min_model_json_parse_rate": 1.0,
+            "min_model_json_exact_match_rate": 1.0,
             "min_model_resource_identity_match_rate": 1.0,
             "min_exact_match_delta_vs_foundation": 0.0,
             "max_instruction_judge_accept_rate_drop": 0.0,
