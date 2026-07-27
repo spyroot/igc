@@ -1,0 +1,50 @@
+version: 1
+authority: post_phase3_goal_latent_boundary
+
+inputs:
+  calls:
+    semantics: unordered_unique_call_set
+    max_operations: 3
+
+outputs:
+  z_rest:
+    source_role: goal_extractor
+    source_phase: 2
+    shape: [batch, max_operations, d_rest]
+    consumes:
+      - rest_api
+      - associated_resource_context
+      - resource_structure
+    excludes:
+      - literal_argument_values
+
+  z_method:
+    source_role: argument_extractor
+    source_phase: 3
+    shape: [batch, max_operations, d_method]
+    consumes:
+      - http_method
+      - operation_name
+      - argument_field_names
+      - argument_schema
+    excludes:
+      - literal_argument_values
+
+  operation_mask:
+    shape: [batch, max_operations]
+
+literal_argument_values:
+  retained_outside_latents: true
+  available_to_executor: true
+  available_to_success_verifier: true
+
+rl:
+  goal_encoders_frozen: true
+  execution_order_not_encoded_by_phase2_or_phase3: true
+  prerequisite_actions_may_be_absent_from_calls: true
+
+not_claimed:
+  - unified_goal_latent
+  - shared_state_goal_latent_distribution
+  - proven_oem_equivalence
+  - universal_zero_shot_rest

@@ -4,11 +4,11 @@ profile:
   task: text_and_rest_api_list_to_calls
   base_weights_role: goal_extractor
   weights_role: argument_extractor
-  renderer: render_ordered_call_example
+  renderer: render_call_example
 
 smoke:
   fixtures:
-    - read_only_ordered_get
+    - read_only_get_set
     - patch_with_arguments
   provider_modes:
     - mock
@@ -17,12 +17,11 @@ smoke:
 wandb:
   namespace: phase3_argument_extraction
   metric_keys:
-    - phase3_argument_extraction/eval/call_ordered_exact_match_rate
-    - phase3_argument_extraction/eval/call_order_correct_rate
-    - phase3_argument_extraction/eval/rest_api_exact_match_rate
-    - phase3_argument_extraction/eval/allowed_methods_exact_match_rate
-    - phase3_argument_extraction/eval/method_exact_match_rate
-    - phase3_argument_extraction/eval/arguments_json_parse_rate
+    - phase3_argument_extraction/eval/call_set_exact_match_rate
+    - phase3_argument_extraction/eval/rest_api_set_match_rate
+    - phase3_argument_extraction/eval/http_method_exact_match_rate
+    - phase3_argument_extraction/eval/operation_name_exact_match_rate
+    - phase3_argument_extraction/eval/json_parse_rate
     - phase3_argument_extraction/eval/arguments_exact_match_rate
     - phase3_argument_extraction/eval/invalid_method_rate
     - phase3_argument_extraction/eval/readonly_empty_arguments_rate
@@ -33,10 +32,11 @@ wandb:
     - phase3_argument_extraction/smoke/weights_role
 
 acceptance:
-  min_call_ordered_exact_match_rate: 1.0
-  min_call_order_correct_rate: 1.0
-  min_method_exact_match_rate: 1.0
-  min_arguments_json_parse_rate: 1.0
+  min_call_set_exact_match_rate: 1.0
+  min_rest_api_set_match_rate: 1.0
+  min_http_method_exact_match_rate: 1.0
+  min_operation_name_exact_match_rate: 1.0
+  min_json_parse_rate: 1.0
   min_arguments_exact_match_rate: 1.0
   min_readonly_empty_arguments_rate: 1.0
   max_invalid_method_rate: 0.0

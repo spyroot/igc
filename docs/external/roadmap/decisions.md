@@ -1,486 +1,54 @@
-# Design decisions
+# Design Decisions
 
-Durable record of architecture decisions: what was decided, the alternatives considered, why,
-the risks accepted, and the experiment that validates (or falsifies) each decision. Newest first.
-Deeper design context lives in [architecture overview](../architecture/overview.md). Private training
-mechanics live in `docs/internal/training.md` when the operator context is present.
+This file keeps active architecture decisions only. The current phase and checkpoint architecture is
+defined by the [architecture overview](../architecture/overview.md) and machine-readable contracts;
+superseded experiments remain available in Git history.
 
----
+## D-004: Stateful Mutation Simulator (2026-07-11)
 
-## D-004 — Mutation simulator: stateful sim in igc, mutation semantics as data from redfish_ctl (2026-07-11)
-
-**Status: ACCEPTED** (architecture + the redfish_ctl data contract; implementation phased).
-**Method:** four-perspective design review (architect, adversarial skeptic, ML researcher, pragmatic
-operator), grounded by a code + capability audit of `igc/envs/**` and redfish_ctl's mock.
+**Status:** Accepted architecture; implementation is phased.
 
 ### Problem
 
-The RL agent must learn multi-step, order-dependent **mutation** plans (stage BIOS -> reset -> verify;
-set boot=PXE once -> power on): each write must **evolve the resource tree** so the next observation
-reflects it, or the agent learns a degenerate read-only policy. Today the shipped RL env returns 404
-for every POST/PATCH/DELETE — the stateful mechanism exists (`register_callback`/`new_state`/
-`callback_dispatcher` in `igc/envs/rest_mock_server.py`) but is wired only in tests, and there is no
-ordered mutation trace. Separately, `rest_mock_server.py` is a 769-line **home-grown Redfish client +
-mock** built when the capture tool was only a data collector: it re-implements Redfish HTTP transport,
-auth, captured-response serving, error modelling, and a **live-BMC proxy** — duplicating what the
-renamed, full multi-vendor **redfish_ctl** now provides, and putting a live-write path in the RL
-codebase that the safety contract says must go through redfish_ctl.
+The RL agent must learn multi-step, order-dependent mutation strategies. Each write must evolve the
+resource tree so the next observation reflects it. A read-only or stateless simulator cannot teach
+prerequisite actions, waits, retries, verification, or recovery.
 
 ### Decision
 
-1. **The stateful multi-step mutation simulator lives in igc.** RL is the only consumer and it needs
-   RL-specific reset / determinism / batching / journal that do not belong in a hardware CLI.
-2. **Mutation semantics live in redfish_ctl as DATA**: an **order-independent "mutation rules"**
-   sidecar that extends redfish_ctl's existing `write_traces` `state_transitions` vocabulary but matches
-   on `(method, path-pattern, precondition over current state)` instead of trace position. igc consumes
-   the rules; no vendor semantics are duplicated in igc.
-3. **Consolidate to redfish_ctl.** Retire igc's home-grown Redfish transport + captured-response
-   serving + error/fault modelling + live-BMC proxy. `rest_mock_server.py` shrinks to a thin
-   **RuleEngine adapter** over the existing `callback_dispatcher`/`new_state` plus a mutation journal;
-   the gym env / goal / reward / interfaces are untouched. This also removes a live-BMC write path from
-   the RL codebase (a safety cleanup, not just dedup).
-4. **The contract stays DATA, not code.** igc consumes redfish_ctl's corpus + `rest_api_map.npy` +
-   `mutation_rules` — the `.npy` format is unchanged (binding) and there is no runtime code dependency
-   on redfish_ctl.
-
-### Rock-solid requirements (from the review)
-
-- **Declarative rules, not hardcoded callbacks.**
-- **Faithful semantics**: pending-vs-current (apply-on-reset), async Task lifecycle **advanced by
-  polling** (the agent must learn to wait/check, not fire back-to-back), boot-once revert, collection
-  create/delete, power-state transitions.
-- **Snapshot-level mutation journal**: the full resource tree **before and after** each step (not just
-  the changed field), tied to the gym step index — required for HER / offline RL goal relabeling.
-- **Determinism + a seed-controlled STOCHASTIC layer** — not just latency noise but **failure
-  injection**: per action, sample success vs a realistic failure (BMC rejects `4xx`/`5xx`, `Task`
-  resolves `Exception`, or a silent no-op where state does not change despite a `2xx` — the reboot
-  "didn't take"). This is what makes the MDP genuinely stochastic and the reason a *learned* policy
-  is needed over a deterministic planner: the agent sees the symptom, not the cause (partial
-  observability), and must learn recovery (retry / wait / graceful-vs-forced / alternate path) — as a
-  human operator would. Deterministic *given a seed* (reproducible for offline RL/tests), random
-  across seeds; curriculum knob to ramp failure over training. Failure *shapes* come from
-  redfish_ctl (optional `failure` variant per rule); the injection *probabilities* are igc's RL config.
-  A failed action costs a step but does not end the episode; the evaluator still checks the goal state.
-- **mock / sim / real parity** behind one env interface; a **live-BMC canary** for validation; start
-  with two vendors (Supermicro GB300 + HPE iLO ~= 80% of mutation patterns), Dell third.
-
-### Related decisions folded in
-
-- **PPA is optional, off the critical path.** The parallel RoPE research (Phase-Amplitude Attention)
-  is not required. Use current state-of-the-art long-context RoPE models now — the backbone is already
-  decoupled (`--model_type` + `--seq_len`, see D-003). PPA plugs in later via a per-layer
-  attention-adapter seam (eager path, native rotary disabled).
-- **Profiling gap**: private `docs/internal/profiling.md` covers CPU hot-paths only; add a
-  CUDA-profiling section
-  (`torch.profiler` CUDA activities / Nsight Systems / memory) for the GPU training path.
-
-### Risks accepted
-
-- Semantics duplication if igc skips the exported rules (mitigated: the rules ARE the contract).
-- Async Task oversimplified -> agent never learns to wait (mitigated: poll-to-advance Task model).
-- Shallow (per-field) journal breaks HER (mitigated: snapshot-level before/after).
-- Sim/real drift teaches a wrong policy (mitigated: canary + before/after corpus tests; 2-3 vendors).
-
-### Build order
-
-1. **redfish_ctl** — order-independent mutation rules + boot-once revert, Supermicro GB300 first
-   (task specced and handed off).
-2. **igc** — RuleEngine adapter over the existing `MockServer` + the mutation journal; retire the
-   home-grown Redfish transport/mock.
-3. **RL env** — `mock`/`sim`/`real` backends, `reset(seed)`, batching.
-4. **Live canary + parity**; expand vendor coverage.
-
----
-
-## D-003 — Backbone migration: retire GPT-2 as the state-encoder default (2026-07-11)
-
-**Status: ACCEPTED** for the Phase 0 decoupling below; the *target default* and the
-decoder-vs-encoder choice are the one open sub-decision, tracked in "The open fork".
-**Method:** four-perspective design review (architect, adversarial skeptic, ML researcher,
-pragmatic operator, run independently with full reasoning, then synthesized), grounded by a
-usage census over the code.
-
-### Problem
-
-GPT-2 (2019) is the default `--model_type` backbone: the model that encodes each Redfish response
-into the latent the M6 policy scores from. It is dated for this domain — a 1024-token window,
-learned *absolute* position embeddings, and a BPE tokenizer that splits JSON braces and URLs into
-many subtokens. The loader is *already* backbone-agnostic in its seams
-(`AutoModelForCausalLM`/`AutoTokenizer` keyed on `--model_type`, Conv1D-vs-Linear LoRA handling in
-`igc/modules/shared/llm_shared.py`, a Qwen fast-tokenizer path in `igc/ds/redfish_dataset.py`), but a
-handful of GPT-2 assumptions are still hard-wired into the core encode path and would break — or
-silently degrade — any modern backbone.
-
-### Grounding census — where GPT-2 is welded in (grep-verified)
-
-| Assumption (site) | What it does | Why it breaks a modern backbone | How it manifests |
-|---|---|---|---|
-| `wpe` positional indexing — `igc/modules/encoders/base_encoder.py`, `igc/envs/rest_encoder.py` (comment: "GPT-2 wpe positional table. Subtract 1…") | reaches into GPT-2's learned absolute-position table | RoPE models (Qwen, Llama, ModernBERT) have **no** `wpe` | `AttributeError` the moment a non-GPT-2 model loads |
-| Hard-coded `1024` — `redfish_dataset.py` (`max_len` default and `"max_length": 1024`), `shared_arg_parser.py` (default 1024) | caps sequence length at GPT-2's window | modern models allow 8k–128k tokens | a long-context model is throttled to 1024; the chunking workaround stays alive for no reason |
-| `GPT2Tokenizer.from_pretrained("gpt2")` — `redfish_dataset.py` (three fallbacks) | forces GPT-2's slow tokenizer | any other model needs its own tokenizer | **silent** quality collapse — the model receives token ids that are not its own (no crash) |
-| Decoder-only load — `AutoModelForCausalLM` in `llm_shared.py` | assumes a causal LM | a true encoder (BERT-family) needs `AutoModel` + an MLM objective | blocks the encoder option without a wider change |
-| `"gpt-2"` id — `igc/ds/ds_pairs.py` (untracked WIP) | invalid HF repo id (hyphen; the real id is `gpt2`) | — | load/download failure the first time that path runs |
-
-(`igc/rl.py`, also an untracked WIP file, hard-codes `GPT2LMHeadModel`/`GPT2Tokenizer` and belongs in
-the same sweep.)
-
-### Verified state on `main` (2026-07-11) — most of Phase 0 was already done
-
-A re-audit against the actual code (not the comments the census above was drawn from) found the
-decoupling **largely complete**, and corrects two overstatements in the census:
-
-- **`wpe` — already fixed.** `igc/modules/encoders/backbone_utils.py` (`backbone_module`,
-  `max_positions`, `emb_shape`) derives module + shapes from `config`; both encoders
-  (`base_encoder.py`, `rest_encoder.py`) use it and handle RoPE models with no positional table. The
-  census matched a *comment* that referenced the legacy behavior, not live `.wpe` access.
-- **The 1024 window and the tokenizer — already flags.** `igc_main.py` builds the dataset with
-  `default_tokenize=--model_type` (→ `AutoTokenizer`) and `max_len=--seq_len`; `_load_tokenizer`
-  rebuilds the cache on a backbone switch. So a modern long-context run is already
-  `--model_type <model> --seq_len <N> --recreate_dataset` — no refactor required.
-- **`AutoModelForCausalLM`** is the intended causal-LM track, already keyed on `--model_type`; not a
-  defect.
-
-**What genuinely remained (fixed in the follow-up PR):** the `JSONDataset.load_tokenizer` *classmethod*
-hard-coded `GPT2Tokenizer` on the saved-tokenizer reload path (wrong class for a non-GPT-2 saved
-tokenizer), one minor live fallback, and stale docstring examples — all moved to `AutoTokenizer`, with
-an offline regression test. The remaining GPT-2 literals are the untracked WIP files above and a
-standalone `chat_with_gpt2` demo helper. Net: Phase 0 is effectively closed; the open item is the
-Phase-1/2 model choice below.
-
-### The open fork (the one decision still to make)
-
-| Track | Move | Cost |
-|---|---|---|
-| **Decoder-as-encoder (keep the objective)** | swap GPT-2 for a modern *decoder* — e.g. SmolLM2-135M (Apache-2.0, RoPE, 8k context, code-aware tokenizer) | low: same causal-LM training; near drop-in once Phase 0 is done |
-| **True encoder** | move to ModernBERT-base (encoder, RoPE, 8192 context) | higher: changes the M1 objective from next-token (causal) to masked-LM |
-
-For *structured, passive* JSON a bidirectional encoder is the better representation, but it is not a
-drop-in — it recasts the M1 objective. **Recommendation: take the decoder track for the default
-(Phase 1), and evaluate the encoder as the GPU backbone (Phase 2) where the gain justifies the
-objective change.** This fork is recorded, not yet closed.
-
-### Decision — phased
-
-- **Phase 0 — decouple, do not dethrone (ACCEPTED; do first).** Remove the five GPT-2-isms above:
-  load via `AutoModel` and read `last_hidden_state`; drop the `wpe` access (guard it to
-  absolute-position models only); read the length cap from `config.max_position_embeddings`; replace
-  the hard-coded `GPT2Tokenizer` fallbacks with `AutoTokenizer`; fix the `"gpt-2"` id. **GPT-2 stays
-  the default**, so the offline CPU gate stays green. This is the prerequisite for any swap, and it
-  ships with a `scripts/bench_hot_paths.py` number plus a perf-budget update per the hot-path rule
-  (the encode path is a hot path).
-- **Phase 1 — a modern small default, opt-in first.** Add SmolLM2-135M as a benchmarked option; flip
-  the default only once it (a) beats GPT-2 on the zero-shot ranking harness
-  (`igc/modules/eval/zero_shot_ranking.py`) and (b) keeps the offline gate download-free and fast.
-  Keep `--model_type gpt2` as the pinned, reproducible baseline forever.
-- **Phase 2 — the real win.** ModernBERT-base (8192 context) as the GPU fine-tune backbone → removes
-  the chunking workaround; optionally distil a large on-cluster teacher into it (feature-level, on
-  last hidden states). Accepts the causal→MLM objective change.
-
-### Surfaced disagreement (kept, not averaged)
-
-The adversarial-skeptic perspective argued **not to move the default at all**: GPT-2 is frozen,
-permissively licensed, CPU-fast, and already cached; swapping it invalidates the tokenized dataset
-cache and the `@odata` special-token setup, and risks the `wpe`/Conv1D alignment. This is reconciled
-by phasing — Phase 0 *is* the skeptic's position (decouple, keep GPT-2 as the default); the default
-only moves in Phase 1, and only behind a measured gate.
-
-### Risks accepted
-
-- **Cache invalidation.** A new tokenizer changes every token id, so cached tokenized datasets and
-  the `@odata` special-token setup must be rebuilt. Keep GPT-2 pinned for regression.
-- **Conv temporal view.** Changing sequence length alters the 1D-conv over `last_hidden_state`;
-  re-validate the encode path (perf budget + an output-equivalence check on GPT-2 before/after
-  decoupling).
-- **Offline gate.** The default must stay download-free on CPU; a model that needs a download stays
-  opt-in, not the default.
-- **Objective change.** The encoder track (Phase 2) is *not* a drop-in — it recasts M1 training.
-
-### Validation / go-no-go
-
-- **Phase 0:** offline gate green with GPT-2 unchanged, and `bench_hot_paths` shows the decoupled
-  encode path is output-equivalent to the current one and within budget.
-- **Phase 1:** SmolLM2-135M ≥ GPT-2 top-5 on `zero_shot_ranking.py`, with the gate still fast and
-  download-free, before the default flips.
-- **Phase 2:** ModernBERT clears the D-001/D-002 held-out-vendor bar with the chunking workaround
-  removed.
-
----
-
-## D-002 — Action-candidate representation: text + graph features, v1 scoped (2026-07-11)
-
-**Status: ACCEPTED** (v1 scope; extends D-001).
-**Method:** owner proposal, refined through the same multi-perspective design review as D-001,
-grounded by a feature-derivability census over the real capture corpora.
-
-### Proposal under review
-
-Represent each (endpoint, method) candidate for the D-001 pointer as both **text** and **graph
-context** derived from the walked Redfish resource tree (nodes = resources, edges = containment /
-links / action targets), rather than URL text alone. The original field list also included a
-current-resource state summary and goal-relevance features.
-
-### Grounding census (what the captured corpora actually support)
-
-Measured over the real Supermicro (1,499 resources) and HPE iLO (167) fixture corpora:
-
-| Feature source | Availability | Consequence |
-|---|---|---|
-| `@odata.type` (resource type + schema version) | 92–100% | `resource_type` is derivable nearly everywhere |
-| Parent by URL-prefix containment | 90–98% | containment edges + `child_relation_name` nearly free |
-| Explicit `Links` sections | **10–14%** | link edges are SPARSE — the graph builder must harvest `@odata.id` references from anywhere in the body, not just `Links` |
-| `Actions` with a `target` | 5–17% | `has_action_target` is sparse and therefore discriminative |
-| `Oem` sections / OEM-namespaced types | 16–26% | OEM markers exist but are vendor-specific |
-
-### Decision — v1 candidate schema
-
-```
-candidate_v1 = {
-  endpoint_path_tokens,   # URL path segments, ids normalized
-  http_method,
-  resource_type,          # from @odata.type (standard schema; namespace stays inside the string)
-  child_relation_name,    # the link/containment name that makes this endpoint reachable
-  has_action_target,      # boolean: body carries Actions[*].target
-}
-candidate_emb = concat(f_text(path, method), f_feats(type, relation, action_flag))  # NOT additive
-score = state_latent^T · W · candidate_emb                                          # bilinear, v1
-```
-
-- **Fusion is concatenation, not addition.** Zero is not a neutral element in an additive
-  scheme; under a partial crawl, missing graph features as zero vectors would systematically
-  shift candidate embeddings. Concatenation with zero-padding lets the scorer learn to ignore
-  missing dimensions. Gated fusion is deferred (added parameters that can overfit to the
-  training vendors' crawl-completeness patterns).
-- **Scorer is a bilinear dot product for v1**, not `MLP([s, c, s*c])`: smoother Q-surface
-  (less overestimation with noisy TD targets), and one matrix multiply scores the whole
-  candidate set — which matters because HER relabeling re-scores every candidate for each
-  relabeled goal. Upgrade path if v1 underperforms: 2-layer MLP over `[s, c]` (the MLP can
-  learn interactions; the explicit `s*c` term is not needed).
-
-### Cut from the proposal (with reasons)
-
-- **`current_resource_state_summary` — removed.** Duplicates what the state latent already
-  encodes, and it is the one field that would make candidate embeddings state-dependent —
-  breaking per-host precompute and creating staleness inconsistency under HER relabeling.
-- **`goal_relevance_features` — removed.** A leakage vector: any precomputed relevance
-  heuristic short-circuits the DQN's need to learn goal-action interaction, must be recomputed
-  per relabeled goal, and collapses on unseen vendors/goal phrasings. Goal information reaches
-  the score only through the goal-conditioned state latent.
-- **`schema_or_oem_namespace` as a separate field — removed.** The namespace already lives
-  inside `resource_type`; surfacing it separately invites the model to key on vendor tokens,
-  directly hurting held-out-vendor transfer. Revisit later at most as a binary `is_oem` flag.
-- **`depth_in_tree` — dropped** (duplicates path length; low information density).
-  **`parent_resource_type`, `allowed_methods` — deferred to v2** (partial-crawl sensitive /
-  largely redundant with the candidate's own method + `has_action_target`); add only if the
-  v1 go/no-go fails, as controlled ablations.
-- **Learned graph-neighborhood embeddings (GNN over the local tree) — deferred to v2.** The
-  census shows explicit link coverage is too sparse for reliable neighborhoods on a partial
-  crawl; v1 uses only the cheap, near-universal structural fields above.
-
-### The payoff: caching
-
-With the dynamic fields removed, **every candidate embedding is fully static per host** —
-computed once from the walked tree, cached, and only *filtered* by the per-state legal catalog.
-HER relabeling then re-scores cached embeddings against the new goal-conditioned state latent
-(one matmul) instead of re-encoding candidates. This resolves D-001 binding requirement #2 by
-construction.
-
-**Measured throughput consequence (2026-07-11, `scripts/bench_hot_paths.py --section rl`).** The
-pointer forward's ONLY expensive step is the candidate projection: projecting `[B, N, H]`
-embeddings through the `ActionProjector` MLP (GELU + two Linears over 76.8M elements at B=256,
-N=300, H=768) is 0.193s/step on CPU, while every other RL critical section — DQN target, HER
-relabel loop, replay data feed, done-stacking, the scoring einsum — is under 6ms. Because the
-projector weights are fixed within an optimizer step and a host's candidates are static, the
-correct pattern is to **project the host's UNIQUE candidate set once per step and score with
-`score_candidates` (einsum over cached keys)**, NOT call the full `Igc_PointerQNetwork.forward`
-per state (which re-projects duplicated candidates). Measured: **0.193s → 0.0038s, ~51x**. The
-key cache is not just a HER-relabel convenience — it is the per-step throughput lever for M6
-training, guarded by a machine-independent ratio tripwire in `tests/perf/`.
-
-### Risks accepted
-
-- Text + shallow structural features may under-discriminate sibling endpoints that differ only
-  deep in their bodies (no neighborhood embedding in v1) — measured by the same zero-shot
-  ranking go/no-go as D-001 (≥ 80% top-5 on a held-out vendor); v2 features are the planned
-  response, not a redesign.
-- ID normalization in `endpoint_path_tokens` (collection members like `/Systems/1` vs
-  `/Systems/Node0`) must not erase member identity where the goal targets a specific member —
-  keep the raw id as a trailing token rather than deleting it.
-
-### Experiment result (2026-07-11) — NO-GO for the untrained encoder; learned projection required
-
-The go/no-go was run with the weakest instantiation first: a completely frozen character-trigram
-encoder and NO learned projection (pure cosine between state body text and candidate text), over
-the full walked trees, ground truth = each state's true graph neighbors
-(`igc/modules/eval/zero_shot_ranking.py` + `igc/ds/sources/resource_graph.py`):
-
-| Corpus | k=1 | k=5 | Bar (≥0.80 top-5) |
-|---|---|---|---|
-| Supermicro, in-domain, 1,499 nodes | 0.185 | **0.293** | NO-GO |
-| HPE iLO, held-out vendor, 167 nodes | 0.323 | **0.754** | NO-GO (near) |
-
-Interpretation: ~30× over the random baseline, but far under the bar on the large host — with
-hundreds of near-identical sensor leaves, global text similarity fills the top-5 with lookalike
-*siblings* rather than true transitions. Host size dominates difficulty (167-node HPE nearly
-passes; 1,499-node Supermicro fails hard). **Consequence: the learned bilinear projection
-`s^T W c` is load-bearing, not optional — representation similarity alone cannot rank
-transitions.** Next step (before any M6 training spend): behavioral-cloning-train `W` on
-in-domain graph transitions (Supermicro), then re-run this same harness zero-shot on the
-held-out vendor (HPE) for the real go/no-go.
-
-### Experiment result 2 (2026-07-11) — GO: a mildly-anchored, multi-vendor bilinear projection transfers
-
-Running that next step (`scripts/exp_d002_bc_ranking.py`; frozen trigram encoder, D-002 v1 features,
-top-5, HPE held out of training):
-
-| Ranker | Supermicro (in-domain) | HPE (held-out) | verdict |
-|---|---|---|---|
-| baseline `W=I` (cosine) | 0.293 | 0.754 | NO-GO (reproduces result 1 exactly) |
-| free-form `W`, single-vendor | 0.536 | 0.383 | NO-GO — **overfits**, transfers worse than cosine |
-| `W` anchored by `‖W−I‖²` (l2i 0.1), single-vendor | 0.554 | 0.832 | GO |
-| `W` anchored (l2i 0.1), multi-vendor (Supermicro+Dell+generic) | 0.456 | **0.862** | **GO** (seed-stable, seeds 0/1/2) |
-
-Findings: (a) a *free-form* bilinear `W` memorizes the training vendor and **destroys** zero-shot
-transfer — it must be a small perturbation of cosine (a mild `‖W−I‖²` anchor). (b) **multi-vendor
-training beats single-vendor** for held-out transfer (0.862 vs 0.832), as expected. (c) with both,
-held-out top-5 clears the 0.80 bar with margin and is seed-stable.
-
-Caveats — this is a conservative lower bound: the encoder is the frozen character-trigram stand-in,
-not the learned M1 backbone, and the features are D-002 v1 (shallow), so the learned encoder should do
-at least as well. The held-out vendor (HPE, 167 nodes) is small; a *large* held-out host is not
-covered (the only large corpus, Supermicro, is in training) and remains a follow-up. In-domain
-large-host ranking (Supermicro 0.456) is still the hard part, but the go/no-go bar is on the held-out
-vendor, which passes.
-
-**Consequence: GO.** The learned bilinear projection is confirmed both load-bearing *and* transferable
-— unblocking M6 training spend — *provided* `W` is anchored to cosine and trained multi-vendor (a
-free-form single-vendor `W` is a trap). Reproduce: `python scripts/exp_d002_bc_ranking.py`.
-
-### Experiment result 3 (2026-07-11) — a LARGE held-out host is NOT cleared by v1 features
-
-Result 2's GO used a *small* held-out vendor (HPE, 167 nodes). Re-running with the operator's real
-full **Dell walk** (the largest host directory under `datasets/orig/`, 2352 nodes — the project's largest single-host
-corpus, ~50x the `idrac_fixtures` overlay) held out of training exposes the host-size effect the
-original NO-GO warned about:
-
-| held-out host | baseline (cosine) | anchored multi-vendor `W` | verdict |
-|---|---|---|---|
-| HPE (167 nodes, small) | 0.754 | 0.862 | GO |
-| Dell (2352 nodes, LARGE) | 0.145 | 0.409 | **NO-GO** |
-
-The anchored multi-vendor recipe still helps massively on the large host (0.145 -> 0.409, ~3x), but
-v1 text + shallow structural features cannot discriminate the hundreds of near-identical sibling
-leaves (e.g. the Dell walk's ~326 IML log entries) that fill a large host's top-5 with lookalikes —
-exactly the risk this decision recorded ("text + shallow structural features may under-discriminate
-sibling endpoints ... v2 features are the planned response").
-
-**Consequence (corrects result 2's framing): GO on small held-out vendors, NO-GO on a large one with
-v1 alone.** The anchored-`W` + multi-vendor recipe is confirmed (large lift everywhere), but a large
-held-out host must be earned by the planned responses before M6 scaling: the D-002 **v2
-graph-neighborhood features**, the learned **M1 encoder** (vs the frozen trigram floor used here), and
-the trained **TD/HER pointer** (vs pure representation similarity). Reproduce:
-`python scripts/exp_d002_bc_ranking.py --holdout datasets/orig/<dell-host>`.
-
-**Data-hygiene correction (same day).** The Dell walk is a full "entire dump": **~73% of its 2352
-nodes are the Redfish schema/metric registry** (`JsonSchemaFile`, `/Schemas`, `MetricDefinition`) —
-metadata an agent never navigates to. Re-running on the OPERATIONAL graph only (`--filter`, 625 nodes)
-lifts the large-host held-out score from **0.324 to 0.680** (baseline 0.145 -> 0.389). So the raw NO-GO
-was largely a **data artifact of the unsanitized dump**, not a fundamental ranking failure. It remains
-NO-GO (0.680 < 0.80) at the frozen-trigram + v1 floor, but the residual gap is now concentrated in
-genuine near-identical siblings — dozens of firmware-inventory, sensor, and slot resources — exactly
-the case the v2 graph-neighborhood features target. **Data-pipeline implication:** the schema/metric
-registry should be filtered from the action space upstream (it is not operational). Reproduce:
-`... --holdout datasets/orig/<dell-host> --filter`.
-
----
-
-## D-001 — M6 action-selection objective: hybrid pointer + argument decoder (2026-07-11)
-
-**Status: ACCEPTED** (pending the de-risk experiment below).
-**Method:** four-perspective design review (architect, adversarial skeptic, ML researcher,
-pragmatic operator viewpoints run independently with full reasoning, then synthesized).
-
-### Problem
-
-At each state the environment exposes a *dynamic* catalog of legal actions — an endpoint URL
-from the walked Redfish resource tree, an HTTP method from that endpoint's `allowed_methods`
-(both produced by the discovery crawl described in private `docs/internal/training.md` §2), and
-optional argument
-slots. Catalog size varies per state (tens to hundreds); the endpoint vocabulary is open —
-new hosts and vendors introduce URLs never seen in training. The RL stack already has a replay
-buffer with HER relabeling, DQN-style targets with terminal masking, and a per-slot enum
-argument decoder. The M1 state encoder produces a latent per observation.
-
-### Options considered
-
-| | Option | Verdict |
-|---|---|---|
-| A | Pointer network scoring every legal action candidate | Good, but scores full argument combinations — candidate set balloons |
-| B | Fixed-width Q-network, padded + `-inf`-masked (legacy) | **Dead end**: open endpoint vocabulary cannot be padded; a new vendor's URLs have no output head; capacity wasted on padding |
-| C | LLM-native action decoding (backbone generates the action, constrained to the catalog) | **Breaks TD/HER**: the target max requires scoring every legal candidate — hundreds of LLM forward passes per target; forces a switch to policy-gradient, discarding the offline TD investment |
-| D | **Pointer for (endpoint, method) + existing per-slot argument decoder** | **Adopted** — see below |
-
-### Decision
-
-Commit to **D**: a pointer network attends from the M1 state latent over *encoded
-(endpoint, method) candidates* and is trained with DQN/TD targets; the existing argument
-decoder fills slots. All four review perspectives independently converged on D.
-
-Why it wins on the axes that matter:
-
-- **Open vocabulary / unseen vendors** — candidates are scored by a *text* encoding of the
-  endpoint + method, so structurally similar unseen URLs land near seen ones; nothing is keyed
-  by a fixed action id.
-- **Offline sample efficiency + HER/TD compatibility** — Q(s, a) over legal candidates keeps
-  the standard target max (over the *next state's* legal set); HER relabeling works unchanged.
-- **Catalog-size variance** — attention over a variable candidate set; no padding, no
-  truncation, no dead output heads.
-- **Inference cost** — the state is encoded once; candidates use a lightweight action encoder
-  (not the full backbone); attention over ~200 candidates is sub-millisecond on the training
-  GPUs.
-- **Migration** — only the endpoint head of the legacy Q-network is replaced; the argument
-  decoder (already tested) is untouched, allowing A/B against legacy during rollout.
-
-### Binding implementation requirements (from the adversarial review)
-
-1. **Compositional text action-encoder.** Encode URL path segments + method as text
-   (seeded from the M1 backbone's token embeddings), never an id lookup — out-of-distribution
-   vendor URL patterns are the #1 failure mode.
-2. **HER relabeling changes the next state's legal catalog.** Action encodings for relabeled
-   transitions must be recomputed or cached explicitly, or replay sampling cost silently
-   explodes.
-3. **Credit assignment through the argument decoder.** The pointer's Q reflects the return
-   *after* the (initially frozen) argument decoder acts — train with a stop-gradient on the
-   decoder first; joint training only once both are stable, else co-adaptation collapses when
-   either is updated.
-4. **Overestimation control.** With 100+ candidates the target max amplifies overestimation:
-   use Double DQN and pretrain the pointer with behavioral cloning on the offline corpus
-   before TD updates.
-5. **URL granularity.** Endpoints differing only in query parameters must be split into base
-   path + parameters in the encoding, or the pointer cannot generalize across them.
-
-### Risks accepted
-
-- **Embedding collapse on radically novel URL schemes** (an alien vendor hierarchy maps to an
-  undifferentiated region of embedding space → near-random ranking). Mitigated by requirement 1
-  and measured by the experiment below.
-- **Decomposition bias** (independently maximizing endpoint then arguments can miss a jointly
-  optimal action in the rare case where argument values determine which endpoint is best).
-  Accepted as rare for Redfish semantics; monitored by comparing hybrid argmax against the
-  legacy joint Q-network on logged data.
-
-### De-risk experiment (go/no-go, inference-only)
-
-Zero-shot endpoint ranking on a **held-out vendor**: run the prototype pointer with a frozen
-text action-encoder over states from a vendor corpus excluded from training (the repo's
-multi-vendor fixture corpora make this possible offline), rank each state's legal endpoints,
-and score against the walked tree's true transitions.
-**Go**: correct endpoint in top-5 for ≥ 80% of states. **No-go**: revisit the action encoder
-(pretrained subword encoder) before any M6 training spend.
-
-### Notes
-
-One reviewer perspective, if unconstrained by the existing stack, would have preferred a
-goal-conditioned planner over a learned world model instead of model-free RL for a
-deterministic, schema-driven API — recorded here as a future alternative should model-free
-training underperform. The adversarial review's final risk list was truncated by an output
-limit in the raw transcript; the surviving content is reflected in the requirements above.
+1. The stateful multi-step mutation simulator lives in `igc`. RL-specific reset, determinism,
+   batching, transition journals, and reward evidence remain owned by this project.
+2. Vendor mutation semantics are data supplied by `redfish_ctl`: order-independent rules matched on
+   method, path pattern, and preconditions over current state.
+3. `igc` consumes the Redfish corpus, `rest_api_map.npy`, and mutation rules. It does not duplicate
+   live Redfish transport or vendor-specific mutation code.
+4. Simulator actions emit Redfish-shaped status, JSON, task, and error evidence through the same
+   observation contract used by the RL `StateEncoder`.
+
+### Required Behavior
+
+- Declarative rules, not hardcoded vendor callbacks.
+- Pending versus current state, including apply-on-reset behavior.
+- Async task lifecycle advanced by polling.
+- Boot-once reversion, collection create/delete, and power-state transitions.
+- Full resource-tree snapshots before and after every step for HER and offline RL relabeling.
+- Seed-controlled failure injection for realistic `4xx`/`5xx`, task failure, transient transport
+  failure, and successful-status no-op behavior.
+- Failures consume a step but do not automatically end the episode; the evaluator verifies final
+  state against the goal.
+- Deterministic replay for a fixed seed and parity checks across mock, simulator, and approved real
+  validation surfaces.
+
+### Risks And Gates
+
+- Semantics duplication is prevented by treating exported mutation rules as the vendor authority.
+- Async oversimplification is checked by poll-to-advance task tests.
+- Shallow journals are rejected by before/after snapshot gates.
+- Simulator drift is measured with fixture parity and separately approved live canaries.
+
+### Build Order
+
+1. Export order-independent mutation rules from `redfish_ctl`.
+2. Implement the `igc` rule engine, state store, deterministic faults, and transition journal.
+3. Bind simulator transitions to the Gym environment and RL observation/action contracts.
+4. Gate fixture parity, recovery behavior, and approved live canaries before RL promotion.

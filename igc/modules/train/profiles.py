@@ -1,7 +1,7 @@
-"""Named Phase 1 Redfish JSON pretraining profiles + adapter specs.
+"""Named Phase 1/2/3 supervised-fine-tuning profiles and adapter specs.
 
 ``configs/training/profiles.yaml`` is the executable source of truth; this module loads the
-Phase 1 profile/adapter matrix so every run resolves to an explicit, logged config instead
+shared SFT profile/adapter matrix so every run resolves to an explicit, logged config instead
 of carrying over GPT-2 / small-GPU defaults. A
 :class:`TrainingProfile` fully determines a run (phase, objective, model, precision, batch,
 weight role, accumulation, lr, scheduler, warmup, sharding, sequence length, and the
@@ -68,19 +68,23 @@ class AdapterSpec:
 
 @dataclass(frozen=True)
 class TrainingProfile:
-    """A fully-resolved Phase 1 run: model + precision + optimization + adapter.
+    """A fully resolved SFT run: lineage + model + optimization + adapter.
 
     ``use_peft=False`` marks a full fine-tune (``adapter`` is ignored); large full FTs set
-    ``sharding`` to ``zero3``/``fsdp``. ``llm_stage`` is the internal trainer route; Phase 1
-    currently uses the latent/state-encoder trainer path while the profile/objective name
-    records that the data task is Redfish JSON reconstruction.
+    ``sharding`` to ``zero3``/``fsdp``. ``llm_stage`` is always ``sft`` for
+    Phase 1/2/3; the task spec selects the phase renderer and lineage.
     """
 
     name: str
     model: str
+    task: str = "redfish_json_reconstruction"
+    parent_adapter: str = ""
+    parent_artifact_sha: str = ""
+    foundation_model_sha: str = ""
+    tokenizer_sha: str = ""
     phase: str = "phase1_finetune"
     weights_role: str = "model_x"
-    llm_stage: str = "latent"
+    llm_stage: str = "sft"
     corpus_objective: str = "phase1_pretrain"
     use_peft: bool = True
     adapter: Optional[AdapterSpec] = field(default_factory=AdapterSpec)
@@ -89,30 +93,56 @@ class TrainingProfile:
     batch_size: int = 8              # per-device train batch
     grad_accum: int = 1
     lr: float = 1e-4
+    optimizer: str = "AdamW"
+    weight_decay: float = 0.01
+    max_grad_norm: float = 1.0
+    gradient_checkpointing: bool = True
     scheduler: str = "OneCycleLR"
+    max_lr: float = 1e-4
     warmup_ratio: float = 0.03
+    div_factor: float = 25.0
+    final_div_factor: float = 10000.0
+    cycle_momentum: bool = True
+    anneal_strategy: str = "cos"
     epochs: int = 3                  # used when max_steps is None
     max_steps: Optional[int] = None  # hard step cap (overrides epochs when set)
+    eval_steps: int = 100            # optimizer-step cadence; 0 means final only
+    save_steps: int = 100            # optimizer-step cadence; best always saves
     early_stopping_patience: int = 3
     early_stopping_min_delta: float = 0.005
     sharding: str = "none"           # none | zero3 | fsdp
     seq_len: int = 1024
     num_workers: int = 8
+    seed: int = 42
 
     def describe(self) -> dict:
         """Flat, log-safe dict of the resolved config (for stdout + W&B config)."""
         d = {
             "profile": self.name, "model": self.model, "use_peft": self.use_peft,
+            "task": self.task,
+            "parent_adapter": self.parent_adapter,
+            "parent_artifact_sha": self.parent_artifact_sha,
+            "foundation_model_sha": self.foundation_model_sha,
+            "tokenizer_sha": self.tokenizer_sha,
             "phase": self.phase, "weights_role": self.weights_role, "llm_stage": self.llm_stage,
             "corpus_objective": self.corpus_objective,
             "precision": self.precision, "torch_dtype": self.torch_dtype,
             "batch_size": self.batch_size, "grad_accum": self.grad_accum, "lr": self.lr,
-            "scheduler": self.scheduler, "warmup_ratio": self.warmup_ratio,
+            "optimizer": self.optimizer, "weight_decay": self.weight_decay,
+            "max_grad_norm": self.max_grad_norm,
+            "gradient_checkpointing": self.gradient_checkpointing,
+            "scheduler": self.scheduler, "max_lr": self.max_lr,
+            "warmup_ratio": self.warmup_ratio, "div_factor": self.div_factor,
+            "final_div_factor": self.final_div_factor,
+            "cycle_momentum": self.cycle_momentum,
+            "anneal_strategy": self.anneal_strategy,
             "epochs": self.epochs, "max_steps": self.max_steps,
+            "eval_steps": self.eval_steps, "save_steps": self.save_steps,
             "early_stopping_patience": self.early_stopping_patience,
             "early_stopping_min_delta": self.early_stopping_min_delta,
             "sharding": self.sharding,
             "seq_len": self.seq_len, "num_workers": self.num_workers,
+            "seed": self.seed,
         }
         if self.use_peft and self.adapter is not None:
             d["adapter"] = self.adapter.to_dict()
@@ -121,7 +151,12 @@ class TrainingProfile:
         return d
 
 
-_PROFILE_FIELDS = set(TrainingProfile.__dataclass_fields__) - {"name", "adapter"}
+_OPTIONAL_PROFILE_FIELDS = {"foundation_model_sha", "tokenizer_sha"}
+_PROFILE_FIELDS = (
+    set(TrainingProfile.__dataclass_fields__)
+    - {"name", "adapter"}
+    - _OPTIONAL_PROFILE_FIELDS
+)
 _ADAPTER_FIELDS = set(AdapterSpec.__dataclass_fields__)
 
 
@@ -171,7 +206,9 @@ def _profile_from_raw(name: str, raw: dict) -> TrainingProfile:
     if not isinstance(raw, dict):
         raise ValueError(f"profile {name!r} must be a mapping")
     missing = sorted(_PROFILE_FIELDS - set(raw))
-    unknown = sorted(set(raw) - (_PROFILE_FIELDS | {"adapter"}))
+    unknown = sorted(
+        set(raw) - (_PROFILE_FIELDS | _OPTIONAL_PROFILE_FIELDS | {"adapter"})
+    )
     if missing:
         raise ValueError(f"profile {name!r} missing keys: {missing}")
     if unknown:
@@ -184,9 +221,45 @@ def _profile_from_raw(name: str, raw: dict) -> TrainingProfile:
     if not use_peft and adapter is not None:
         raise ValueError(f"profile {name!r} has use_peft=false but adapter is set")
 
+    from igc.modules.train.sft_tasks import resolve_sft_task
+
+    task = resolve_sft_task(str(raw["task"]))
+    if str(raw["weights_role"]) != task.output_role:
+        raise ValueError(
+            f"profile {name!r} weights_role must be {task.output_role!r}"
+        )
+    if str(raw["phase"]) != task.metric_namespace:
+        raise ValueError(
+            f"profile {name!r} phase must be {task.metric_namespace!r}"
+        )
+    if str(raw["llm_stage"]) != "sft":
+        raise ValueError(f"profile {name!r} llm_stage must be 'sft'")
+    if task.phase == 1 and str(raw["parent_adapter"]):
+        raise ValueError(f"profile {name!r} Phase 1 parent_adapter must be empty")
+    if task.phase > 1 and not str(raw["parent_adapter"]):
+        raise ValueError(f"profile {name!r} requires parent_adapter")
+    warmup_ratio = float(raw["warmup_ratio"])
+    if not 0.0 < warmup_ratio < 1.0:
+        raise ValueError(f"profile {name!r} warmup_ratio must be between 0 and 1")
+    if float(raw["lr"]) <= 0.0 or float(raw["max_lr"]) <= 0.0:
+        raise ValueError(f"profile {name!r} lr and max_lr must be positive")
+    if float(raw["weight_decay"]) < 0.0:
+        raise ValueError(f"profile {name!r} weight_decay must be non-negative")
+    if float(raw["max_grad_norm"]) <= 0.0:
+        raise ValueError(f"profile {name!r} max_grad_norm must be positive")
+    if float(raw["div_factor"]) <= 0.0 or float(raw["final_div_factor"]) <= 0.0:
+        raise ValueError(f"profile {name!r} scheduler division factors must be positive")
+    if str(raw["anneal_strategy"]) not in {"cos", "linear"}:
+        raise ValueError(f"profile {name!r} anneal_strategy must be 'cos' or 'linear'")
+
     return TrainingProfile(
         name=name,
         model=str(raw["model"]),
+        task=task.name,
+        parent_adapter=str(raw["parent_adapter"]),
+        parent_artifact_sha=str(raw["parent_artifact_sha"]),
+        foundation_model_sha=str(raw.get("foundation_model_sha", "")),
+        tokenizer_sha=str(raw.get("tokenizer_sha", "")),
         phase=str(raw["phase"]),
         weights_role=str(raw["weights_role"]),
         llm_stage=str(raw["llm_stage"]),
@@ -198,15 +271,27 @@ def _profile_from_raw(name: str, raw: dict) -> TrainingProfile:
         batch_size=int(raw["batch_size"]),
         grad_accum=int(raw["grad_accum"]),
         lr=float(raw["lr"]),
+        optimizer=str(raw["optimizer"]),
+        weight_decay=float(raw["weight_decay"]),
+        max_grad_norm=float(raw["max_grad_norm"]),
+        gradient_checkpointing=bool(raw["gradient_checkpointing"]),
         scheduler=str(raw["scheduler"]),
-        warmup_ratio=float(raw["warmup_ratio"]),
+        max_lr=float(raw["max_lr"]),
+        warmup_ratio=warmup_ratio,
+        div_factor=float(raw["div_factor"]),
+        final_div_factor=float(raw["final_div_factor"]),
+        cycle_momentum=bool(raw["cycle_momentum"]),
+        anneal_strategy=str(raw["anneal_strategy"]),
         epochs=int(raw["epochs"]),
         max_steps=None if raw["max_steps"] is None else int(raw["max_steps"]),
+        eval_steps=int(raw["eval_steps"]),
+        save_steps=int(raw["save_steps"]),
         early_stopping_patience=int(raw["early_stopping_patience"]),
         early_stopping_min_delta=float(raw["early_stopping_min_delta"]),
         sharding=str(raw["sharding"]),
         seq_len=int(raw["seq_len"]),
         num_workers=int(raw["num_workers"]),
+        seed=int(raw["seed"]),
     )
 
 
@@ -248,15 +333,37 @@ def resolve_profile(name: str, **overrides) -> TrainingProfile:
         if bad:
             raise ValueError(f"unknown profile override(s) {sorted(bad)}; valid: {sorted(valid)}")
         base = replace(base, **overrides)
-    # expand $ENV_VAR model references (e.g. phase1_local's $IGC_MODEL_DIR) at resolve
-    # time so the env decides the weights dir, never committed code.
-    if "$" in base.model:
-        expanded = os.path.expandvars(base.model)
+    expanded_values = {}
+    for field_name in (
+        "model",
+        "parent_adapter",
+        "parent_artifact_sha",
+        "foundation_model_sha",
+        "tokenizer_sha",
+    ):
+        value = getattr(base, field_name)
+        if "$" not in value:
+            continue
+        expanded = os.path.expandvars(value)
         if "$" in expanded:
             raise ValueError(
-                f"profile {name!r} model {base.model!r} references an unset "
-                f"environment variable; export it or override model=...")
-        base = replace(base, model=expanded)
+                f"profile {name!r} {field_name} {value!r} references an unset "
+                "environment variable; export it or override the field")
+        expanded_values[field_name] = expanded
+    if expanded_values:
+        base = replace(base, **expanded_values)
+    from igc.modules.train.promotion_evidence import is_sha256
+
+    for field_name in (
+        "parent_artifact_sha",
+        "foundation_model_sha",
+        "tokenizer_sha",
+    ):
+        value = getattr(base, field_name)
+        if value and not is_sha256(value):
+            raise ValueError(
+                f"profile {name!r} {field_name} must be sha256:<64 hex>"
+            )
     return base
 
 

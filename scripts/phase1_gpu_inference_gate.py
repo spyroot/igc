@@ -51,6 +51,7 @@ class GateSpec:
     output_json: Path | None
     prompts: list[dict[str, Any]]
     max_new_tokens: int
+    target_token_margin: int
     seed: int
     torch_dtype: str
     device: str
@@ -186,6 +187,9 @@ def load_gate_spec(path: Path) -> GateSpec:
     seed = _optional_int(generation, "seed", 0)
     if seed is None:
         raise GateError("generation.seed must be a non-negative integer")
+    target_token_margin = _optional_int(generation, "target_token_margin", 0)
+    if target_token_margin is None:
+        raise GateError("generation.target_token_margin must be non-negative")
 
     torch_dtype = _optional_string(runtime, "torch_dtype", "bfloat16")
     if torch_dtype not in {"auto", "bfloat16", "float16", "float32"}:
@@ -202,6 +206,7 @@ def load_gate_spec(path: Path) -> GateSpec:
         output_json=Path(output["json"]) if isinstance(output.get("json"), str) else None,
         prompts=normalize_prompt_cases(prompts),
         max_new_tokens=max_new_tokens,
+        target_token_margin=target_token_margin,
         seed=seed,
         torch_dtype=torch_dtype,
         device=_optional_string(runtime, "device", "cuda:0"),
@@ -433,8 +438,12 @@ def _dtype_from_name(name: str):
     return mapping[name]
 
 
-def load_model_and_tokenizer(args: argparse.Namespace):
-    """Load the base causal LM, tokenizer, and PEFT adapter from local files only.
+def load_model_and_tokenizer(
+    args: argparse.Namespace,
+    *,
+    load_adapter: bool = True,
+):
+    """Load the base causal LM and optional PEFT adapter from local files only.
 
     Inputs come from ``args.spec``. The returned tokenizer maps prompt text to
     ``input_ids``/``attention_mask`` tensors of shape ``[1, prompt_tokens]`` in
@@ -443,7 +452,6 @@ def load_model_and_tokenizer(args: argparse.Namespace):
     """
 
     import torch
-    from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     load_kwargs: dict[str, Any] = {
@@ -467,12 +475,15 @@ def load_model_and_tokenizer(args: argparse.Namespace):
         ensure_generation_tokenizer_specials(tokenizer)
 
     model = AutoModelForCausalLM.from_pretrained(args.spec.base_model, **load_kwargs)
-    model = PeftModel.from_pretrained(
-        model,
-        args.spec.adapter_dir,
-        local_files_only=True,
-        is_trainable=False,
-    )
+    if load_adapter:
+        from peft import PeftModel
+
+        model = PeftModel.from_pretrained(
+            model,
+            args.spec.adapter_dir,
+            local_files_only=True,
+            is_trainable=False,
+        )
 
     device = None
     if args.spec.device_map == "none":
@@ -594,6 +605,10 @@ def build_payload(
     return {
         "schema": "igc.phase1_inference_gate.v1",
         "status": "pass" if not errors else "fail",
+        "role": "model_x",
+        "artifact_sha": (
+            f"sha256:{adapter_sha256}" if adapter_sha256 is not None else None
+        ),
         "spec": str(args.spec.path),
         "name": args.spec.name,
         "phase": args.spec.phase,
@@ -602,6 +617,7 @@ def build_payload(
         "cache_dir": str(paths.cache_dir),
         "torch_dtype": args.spec.torch_dtype,
         "max_new_tokens": args.spec.max_new_tokens,
+        "target_token_margin": args.spec.target_token_margin,
         "seed": args.spec.seed,
         "device": args.spec.device if args.spec.device_map == "none" else f"device_map:{args.spec.device_map}",
         "local_files_only": True,

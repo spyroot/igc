@@ -127,7 +127,6 @@ jobs:
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r docker/requirements-test.txt
-          pip install ruff
       - name: Agent-leak guard
         shell: bash
         env:

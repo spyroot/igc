@@ -27,7 +27,19 @@ from typing import Dict, List, Optional
 
 # The manifest fields that MUST match for a comparison to be apples-to-apples
 # (docs/TRAINING_OPTIMIZATION_PLAN.md: same backbone/tokenizer/split/steps/seq-len).
-_FAIRNESS_KEYS = ("model", "tokenizer", "data_manifest", "eval_split", "max_steps", "seq_len")
+_FAIRNESS_KEYS = (
+    "model",
+    "tokenizer",
+    "data_manifest",
+    "train_data_sha",
+    "eval_data_sha",
+    "eval_manifest_sha",
+    "source_manifest_sha",
+    "source_registry_sha",
+    "eval_split",
+    "max_steps",
+    "seq_len",
+)
 
 
 def capture_environment() -> dict:
@@ -68,12 +80,31 @@ class RunManifest:
     run_id: str
     profile: str
     model: str
+    phase: str = ""
+    task: str = ""
+    parent_role: str = ""
+    parent_artifact_sha: str = ""
+    output_role: str = ""
+    task_spec_sha: str = ""
+    foundation_model_sha: str = ""
+    tokenizer_sha: str = ""
+    promotion_source: str = ""
+    promoted_artifact_path: str = ""
     tokenizer: str = ""
     adapter_method: str = "lora"
     adapter_rank: Optional[int] = None
     adapter_init: str = "default"
+    warmup_ratio: Optional[float] = None
+    lora_init: str = "default"
+    lora_target_modules: List[str] = field(default_factory=list)
     data_manifest: str = ""          # id/hash of the exact dataset + source mix
     eval_split: str = ""             # id of the held-out split (source-separated)
+    train_data_sha: str = ""          # exact training JSONL bytes
+    eval_data_sha: str = ""           # exact held-out JSONL bytes
+    eval_manifest_sha: str = ""       # exact held-out release-manifest bytes
+    source_manifest_sha: str = ""     # exact source-manifest bytes
+    source_registry_sha: str = ""     # exact source-registry spec bytes
+    source_artifact_manifest_shas: dict = field(default_factory=dict)
     max_steps: Optional[int] = None
     seq_len: Optional[int] = None
     tokens_per_sec: Optional[float] = None

@@ -8,7 +8,7 @@ This module compacts the resource representation for the state graph, constructs
 
 Consumers live inside ``igc.ds.sources``, not the model code: ``corpus_io.write_corpus``
 serializes each ``TrainingExample.to_dict()`` to ``examples.jsonl``, and
-``redfish_enum_space.normalize_enriched`` calls ``normalize_record``. That corpus reaches M1
+``redfish_enum_space.normalize_enriched`` calls ``normalize_record``. That corpus reaches Phase 1
 training one hop downstream via ``CorpusJSONLDataset`` (the ``--corpus_dir`` path).
 
 Author:
@@ -56,7 +56,7 @@ class TrainingExample:
     # topology graph — it has no parent/subordinate edges (those live only in RedfishResourceGraph).
     resource_graph_before: Dict[str, Dict[str, Any]]
     request_or_action: Dict[str, Any]  # the action taken: {"method", "url", "body"} (the REST call)
-    response: Dict[str, Any]  # raw Redfish response body returned — what the M1 encoder actually reads today
+    response: Dict[str, Any]  # raw Redfish response body consumed by the Phase 1 objective
     resource_graph_after: Dict[str, Dict[str, Any]]  # STATE *after* the action; == before for a GET (a read never mutates)
     allowed_methods: List[str]  # HTTP methods the API permits on this URL (GET/POST/PATCH/DELETE...) -> the legal action set
     expected_semantics: Dict[str, Any]  # derived facts about the call: mutating? idempotent? expected status (see normalize_record)

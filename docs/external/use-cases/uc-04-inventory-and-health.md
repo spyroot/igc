@@ -133,7 +133,9 @@ Risk level: **none**. Every mutation count in this scenario is zero. The guardra
 The read-only crawl is where IGC learns the **shape of a machine** cheaply and safely, and that knowledge is exactly what mutation scenarios reuse. Two angles:
 
 - **HER.** Even a "failed" crawl is a labelled success for the state it *did* reach. If the agent stops early having read only the compute subtree, HER relabels that trajectory as "achieve inventory-of-Systems" — a goal it did satisfy — so partial walks still yield gradient. Over episodes the policy learns the **shortest safe traversal** that drains the reachable graph without redundant re-reads, guided by the completeness reward rather than a hand-tuned crawl order.
-- **Cross-vendor generalization.** Because candidates are built from `@odata.type`, containment relation, and the presence of an action target — never from vendor-specific URL tokens (see `docs/external/roadmap/decisions.md`, D-002) — a policy trained to walk Dell iDRAC trees transfers to Supermicro, HPE iLO, and generic DMTF stacks. Every conformant implementation exposes `Chassis`/`Systems`/`Managers` and `Status.State`/`Status.Health`; the standard schema *is* the transfer surface. The inventory learned here becomes the walked tree that later, riskier use cases draw their legal action catalog from — read first, mutate never before you have.
+- **Cross-vendor generalization.** A candidate representation experiment may use `@odata.type`,
+  containment relation, and the presence of an action target without making vendor-specific URL
+  tokens part of its public contract. Transfer remains an empirical gate, not an assumed property.
 
 
 # Author: Mus mbayramo@stanford.edu

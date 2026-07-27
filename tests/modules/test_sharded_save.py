@@ -21,7 +21,7 @@ import loguru
 import torch
 
 from igc.modules.base.igc_base_module import IgcModule
-from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
+from igc.modules.train.sft import SFTTrainer
 from igc.shared.shared_accelerator import broadcast_flag
 
 
@@ -136,7 +136,7 @@ class _MockShardedAccelerator:
 
 
 def _trainer(tmp_path, rank, accelerator):
-    trainer = LlmEmbeddingsTrainer.__new__(LlmEmbeddingsTrainer)
+    trainer = SFTTrainer.__new__(SFTTrainer)
     trainer.rank = rank
     trainer.module_name = "state_encoder"
     trainer.logger = loguru.logger

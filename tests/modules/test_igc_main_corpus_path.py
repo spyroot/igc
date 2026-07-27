@@ -26,13 +26,29 @@ class _FakeCorpusDataset:
 
     constructed = []
 
-    def __init__(self, corpus_dir, default_tokenize=None, max_len=None, objective="legacy"):
+    def __init__(
+        self,
+        corpus_dir,
+        default_tokenize=None,
+        max_len=None,
+        tokenizer=None,
+        objective="legacy",
+    ):
         self.corpus_dir = corpus_dir
         self.default_tokenize = default_tokenize
         self.max_len = max_len
+        self.input_tokenizer = tokenizer
         self.objective = objective
-        self.tokenizer = object()
+        self.tokenizer = tokenizer or object()
+        suffix = "b" if tokenizer is not None else "a"
+        self.data_sha256 = "sha256:" + suffix * 64
+        self.eval_split_sha256 = ""
+        self.eval_data_sha = ""
         _FakeCorpusDataset.constructed.append(self)
+
+    def set_eval_split_sha256(self, value):
+        self.eval_split_sha256 = value
+        self.eval_data_sha = value
 
 
 def _spec(tmp_path):
@@ -42,6 +58,7 @@ def _spec(tmp_path):
         json_data_dir=str(tmp_path / "json"),
         dataset_dir=str(tmp_path / "legacy_dataset"),
         corpus_dir=str(tmp_path / "written_corpus"),
+        corpus_eval_dir=str(tmp_path / "heldout_corpus"),
         corpus_objective="phase1_pretrain",
         model_type="gpt2",
         seq_len=128,
@@ -73,10 +90,16 @@ def test_run_with_corpus_dir_does_not_build_legacy_masked_dataset(monkeypatch, t
     main.run()
 
     assert trained["dataset"] is _FakeCorpusDataset.constructed[0]
+    assert main.eval_dataset is _FakeCorpusDataset.constructed[1]
     assert trained["dataset"].corpus_dir == str(tmp_path / "written_corpus")
     assert trained["dataset"].default_tokenize == "gpt2"
     assert trained["dataset"].max_len == 128
     assert trained["dataset"].objective == "phase1_pretrain"
+    assert main.eval_dataset.corpus_dir == str(tmp_path / "heldout_corpus")
+    assert main.eval_dataset.input_tokenizer is trained["dataset"].tokenizer
+    assert main.eval_dataset.objective == "phase1_pretrain"
+    assert trained["dataset"].eval_split_sha256 == main.eval_dataset.data_sha256
+    assert trained["dataset"].eval_data_sha == main.eval_dataset.data_sha256
 
 
 # Author: Mus mbayramo@stanford.edu

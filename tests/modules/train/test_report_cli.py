@@ -22,7 +22,7 @@ def _write_report(path, arm_method, rank, loss):
     """Write a minimal report.json for one arm."""
     bundle = ResultBundle(
         manifest=RunManifest(
-            run_id=f"run-{arm_method}", profile="m1", model="gpt2",
+            run_id=f"run-{arm_method}", profile="profile-a", model="gpt2",
             adapter_method=arm_method, adapter_rank=rank,
         ),
         metrics={"eval_loss": loss, "accuracy": 90.0},

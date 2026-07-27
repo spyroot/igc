@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Build offline ``phase2_labelled_requests`` JSONL rows from fixture records.
+"""Build ``phase2_labelled_requests`` JSONL rows from Redfish records.
 
-The script is deliberately provider-injected: it loads the YAML spec, reads a
-tiny JSONL record fixture, and uses either deterministic mock providers or
-local draft/judge fixture files. It never opens W&B, downloads a model, calls a
-Redfish host, or reaches the network.
+The provider path is selected explicitly: deterministic mocks and local files
+support contract checks, while the OpenAI-compatible adapter serves real model_x
+and private judge runs. The script never calls a Redfish host.
 
 Author:
 Mus mbayramo@stanford.edu
@@ -12,6 +11,7 @@ Mus mbayramo@stanford.edu
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 import os
 import random
@@ -27,6 +27,7 @@ from typing import Any, Callable, Iterable, Mapping
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from igc.ds.phase2_labelled_requests import (
+    D1SamplingBudget,
     PHASE2_LABELLED_REQUESTS,
     Phase2LabelledRequestBuilder,
     Phase2LabelledRequestCounters,
@@ -36,6 +37,8 @@ from igc.ds.phase2_labelled_requests import (
     load_phase2_labelled_requests_spec,
     phase2_acceptance_thresholds_pass,
 )
+from igc.ds.d1_release import release_d1_jsonl
+from igc.modules.train.promotion_evidence import is_sha256
 
 DraftProvider = Callable[[dict[str, Any]], str]
 JudgeProvider = Callable[[dict[str, Any]], str]
@@ -53,12 +56,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--records-jsonl",
         required=True,
-        help="Input JSONL with rest_api, allowed_methods, json, vendor, and source_corpus.",
+        help="Input JSONL with REST context, methods, operation names, argument schema, "
+             "vendor, and source corpus.",
     )
     parser.add_argument(
-        "--output-jsonl",
+        "--output-release-dir",
         required=True,
-        help=f"Destination JSONL for accepted {PHASE2_LABELLED_REQUESTS} rows.",
+        help=(
+            f"Immutable release directory for accepted {PHASE2_LABELLED_REQUESTS} "
+            "rows; contains data.jsonl and manifest.json."
+        ),
     )
     parser.add_argument(
         "--metrics-out",
@@ -66,10 +73,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Destination JSON file for aggregate offline builder metrics.",
     )
     parser.add_argument(
+        "--metric-report",
+        choices=("none", "wandb"),
+        default="none",
+        help="Optional remote metric sink. Use wandb only in the approved lab runtime.",
+    )
+    width_group = parser.add_mutually_exclusive_group(required=True)
+    width_group.add_argument(
         "--sample-width",
         type=int,
-        required=True,
-        help="Number of REST API records sampled per candidate; must be 1, 2, or 3.",
+        help="Target API count per candidate; 0 is the judged empty-set case.",
+    )
+    width_group.add_argument(
+        "--all-sample-widths",
+        action="store_true",
+        help=(
+            "Build one canonical D1 release across k=1/2/3 plus the separately "
+            "bounded judged k=0 cases."
+        ),
     )
     parser.add_argument(
         "--count",
@@ -161,19 +182,30 @@ def build_phase2_labelled_requests(
     seed: int,
     draft_provider: DraftProvider,
     judge_provider: JudgeProvider,
+    sampling_budget: D1SamplingBudget | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build accepted rows plus aggregate metrics using injected providers."""
-    if sample_width not in spec.sample_widths:
+    if sample_width not in spec.sample_widths and sample_width != 0:
         raise SystemExit("sample-width must be present in the YAML sampling.sample_widths")
     if count < 1:
         raise SystemExit("count must be positive")
-    if len(records) < sample_width:
-        raise SystemExit("not enough records for requested sample-width")
+    required_records = (
+        spec.context_distractors
+        if sample_width == 0
+        else sample_width + spec.context_distractors
+    )
+    if len(records) < required_records:
+        raise ValueError(
+            "not enough REST API records for targets plus distractors: "
+            f"targets={sample_width}, distractors={spec.context_distractors}"
+        )
 
+    budget = sampling_budget or D1SamplingBudget.from_spec(spec)
     builder = Phase2LabelledRequestBuilder(
         spec,
         draft_provider=draft_provider,
         judge_provider=judge_provider,
+        sampling_budget=budget,
     )
     rng = random.Random(seed)
     accepted_rows: list[dict[str, Any]] = []
@@ -201,21 +233,10 @@ def build_phase2_labelled_requests(
         "records_in": len(records),
         "requested_candidates": count,
         "accepted_rows": len(accepted_rows),
+        "sampling_budget": budget.summary(),
         "thresholds_pass": phase2_acceptance_thresholds_pass(spec, summary),
     })
     return accepted_rows, summary
-
-
-def write_jsonl(path: Path, rows: Iterable[Mapping[str, Any]]) -> int:
-    """Write JSONL rows and return the number written."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    count = 0
-    with path.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, sort_keys=True))
-            handle.write("\n")
-            count += 1
-    return count
 
 
 def write_metrics(path: Path, summary: Mapping[str, Any]) -> None:
@@ -232,12 +253,31 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     spec = load_phase2_labelled_requests_spec(args.spec)
     records = load_rest_api_records(Path(args.records_jsonl))
+    if args.all_sample_widths:
+        build_plan = [(width, args.count) for width in spec.sample_widths]
+        build_plan.append((0, spec.empty_set_candidates))
+    else:
+        build_plan = [(args.sample_width, args.count)]
+    widths = tuple(width for width, _ in build_plan)
+    requested_candidates = sum(count for _, count in build_plan)
+    if requested_candidates > spec.max_candidates:
+        raise SystemExit(
+            "requested candidates exceed sampling.max_candidates: "
+            f"requested={requested_candidates} limit={spec.max_candidates}"
+        )
     draft_adapter, judge_adapter = _selected_adapters(args, spec)
+    spec = _resolve_live_identities(
+        spec,
+        draft_adapter=draft_adapter,
+        judge_adapter=judge_adapter,
+        env=os.environ,
+    )
     _enforce_live_provider_gate(
         args,
         spec=spec,
         draft_adapter=draft_adapter,
         judge_adapter=judge_adapter,
+        candidate_count=requested_candidates,
     )
     draft_provider, judge_provider = _providers(
         args,
@@ -245,28 +285,187 @@ def main(argv: list[str] | None = None) -> int:
         draft_adapter=draft_adapter,
         judge_adapter=judge_adapter,
     )
-    rows, metrics = build_phase2_labelled_requests(
-        spec=spec,
-        records=records,
-        sample_width=args.sample_width,
-        count=args.count,
-        seed=args.seed,
-        draft_provider=draft_provider,
-        judge_provider=judge_provider,
+    rows_by_width: dict[int, list[dict[str, Any]]] = {}
+    summaries: dict[str, dict[str, Any]] = {}
+    sampling_budget = D1SamplingBudget.from_spec(spec)
+    for width, candidate_count in build_plan:
+        width_rows, width_metrics = build_phase2_labelled_requests(
+            spec=spec,
+            records=records,
+            sample_width=width,
+            count=candidate_count,
+            seed=args.seed if len(widths) == 1 else args.seed + width,
+            draft_provider=draft_provider,
+            judge_provider=judge_provider,
+            sampling_budget=sampling_budget,
+        )
+        rows_by_width[width] = width_rows
+        summaries[str(width)] = width_metrics
+    rows = (
+        _balanced_release_rows(rows_by_width, spec.sample_widths)
+        if args.all_sample_widths
+        else list(rows_by_width[widths[0]])
     )
-    rows_written = write_jsonl(Path(args.output_jsonl), rows)
+    thresholds_pass = all(
+        bool(summary["thresholds_pass"])
+        for summary in summaries.values()
+    )
+    if len(widths) == 1:
+        metrics = next(iter(summaries.values()))
+    else:
+        metrics = {
+            "dataset": spec.dataset_name,
+            "sample_widths": list(widths),
+            "requested_candidates": requested_candidates,
+            "accepted_rows": len(rows),
+            "accepted_rows_before_balance": sum(
+                len(width_rows) for width_rows in rows_by_width.values()
+            ),
+            "thresholds_pass": thresholds_pass,
+            "by_sample_width": summaries,
+            "sampling_budget": sampling_budget.summary(),
+        }
     write_metrics(Path(args.metrics_out), metrics)
+    if args.metric_report == "wandb":
+        _log_wandb_metrics(
+            spec=spec,
+            summaries=summaries,
+            aggregate=metrics,
+            seed=args.seed,
+        )
+    rows_written = 0
+    if thresholds_pass:
+        release_d1_jsonl(
+            output_dir=args.output_release_dir,
+            rows=rows,
+            expected_widths=widths,
+            release_metadata={
+                "prompt_spec_version": spec.prompt_spec_version,
+                "model_x_artifact_sha": spec.model_x.artifact_sha,
+                "judge_route": spec.judge.route,
+                "judge_model": spec.judge.model_id,
+                "judge_profile": spec.judge.profile,
+                "draft_provider_adapter": draft_adapter,
+                "judge_provider_adapter": judge_adapter,
+                "sampling_budget": sampling_budget.summary(),
+            },
+        )
+        rows_written = len(rows)
     print(
         f"wrote dataset={metrics['dataset']} "
         f"attempted={metrics['requested_candidates']} "
         f"accepted={rows_written} "
-        f"thresholds_pass={metrics['thresholds_pass']} "
-        f"output_jsonl={args.output_jsonl} "
+        f"thresholds_pass={thresholds_pass} "
+        f"released={thresholds_pass} "
+        f"output_release_dir={args.output_release_dir} "
         f"metrics_out={args.metrics_out}"
     )
-    if not metrics["thresholds_pass"] and not args.allow_threshold_failure:
+    if not thresholds_pass and not args.allow_threshold_failure:
         return 2
     return 0
+
+
+def _balanced_release_rows(
+    rows_by_width: Mapping[int, list[dict[str, Any]]],
+    positive_widths: tuple[int, ...],
+) -> list[dict[str, Any]]:
+    """Return deterministic balanced k=1/2/3 rows plus all accepted k=0 rows.
+
+    Provider acceptance rates differ by width, so equal candidate counts do not
+    imply equal accepted counts.  The release contract balances accepted positive
+    rows; deterministic prefix selection preserves the seeded provider order and
+    keeps empty-set negatives on their independent bound.
+    """
+    missing = [width for width in positive_widths if not rows_by_width.get(width)]
+    if missing:
+        raise SystemExit(
+            "cannot balance D1 release because accepted positive widths are missing: "
+            f"{missing}"
+        )
+    accepted_per_width = min(
+        len(rows_by_width[width]) for width in positive_widths
+    )
+    balanced: list[dict[str, Any]] = []
+    for width in positive_widths:
+        balanced.extend(rows_by_width[width][:accepted_per_width])
+    balanced.extend(rows_by_width.get(0, []))
+    return balanced
+
+
+def _log_wandb_metrics(
+    *,
+    spec: Phase2LabelledRequestsSpec,
+    summaries: Mapping[str, Mapping[str, Any]],
+    aggregate: Mapping[str, Any],
+    seed: int,
+) -> None:
+    """Log D1 quality metrics without placing secret provider values in config.
+
+    :param spec: resolved D1 builder specification with immutable identities.
+    :param summaries: one aggregate metric mapping per sample width.
+    :param aggregate: complete build summary written to the metrics artifact.
+    :param seed: deterministic sampler seed.
+    :raises RuntimeError: when W&B cannot initialize or record the required metrics.
+    """
+    run = None
+    try:
+        import wandb
+
+        run = wandb.init(
+            project=os.environ.get("WANDB_PROJECT"),
+            entity=os.environ.get("WANDB_ENTITY"),
+            name=f"d1-build-{spec.model_x.artifact_sha.removeprefix('sha256:')[:12]}",
+            group=spec.wandb_namespace,
+            job_type="dataset-build",
+            config={
+                "dataset": spec.dataset_name,
+                "prompt_spec_version": spec.prompt_spec_version,
+                "model_x_model": spec.model_x.model_id,
+                "model_x_artifact_sha": spec.model_x.artifact_sha,
+                "judge_model": spec.judge.model_id,
+                "judge_profile": spec.judge.profile,
+                "sample_widths": sorted(int(width) for width in summaries),
+                "seed": seed,
+                "sampling_limits": {
+                    "max_accepted_rows": spec.max_accepted_rows,
+                    "max_candidates": spec.max_candidates,
+                    "max_accepted_per_combination": (
+                        spec.max_accepted_per_combination
+                    ),
+                    "max_attempts_per_combination": (
+                        spec.max_attempts_per_combination
+                    ),
+                    "max_accepted_per_api": spec.max_accepted_per_api,
+                    "max_empty_set_candidates": spec.empty_set_candidates,
+                },
+            },
+        )
+        if run is None:
+            raise RuntimeError("wandb.init returned no run")
+        for width, summary in sorted(summaries.items(), key=lambda item: int(item[0])):
+            payload = {
+                key: float(value)
+                for key, value in summary.items()
+                if key in spec.metric_keys
+                and isinstance(value, (int, float))
+                and not isinstance(value, bool)
+            }
+            payload[f"{spec.wandb_namespace}/sample_width/k"] = int(width)
+            run.log(payload, step=int(width))
+        run.summary["requested_candidates"] = int(aggregate["requested_candidates"])
+        run.summary["accepted_rows"] = int(aggregate["accepted_rows"])
+        run.summary["thresholds_pass"] = bool(aggregate["thresholds_pass"])
+        run.finish()
+    except Exception as exc:
+        cleanup_error = None
+        if run is not None:
+            try:
+                run.finish(exit_code=1)
+            except Exception as finish_exc:
+                cleanup_error = finish_exc
+        if cleanup_error is not None:
+            raise RuntimeError("D1 W&B logging and cleanup both failed") from cleanup_error
+        raise RuntimeError("required D1 W&B metric logging failed") from exc
 
 
 def _record_from_mapping(row: Mapping[str, Any], *, path: Path, line_number: int) -> RestApiRecord:
@@ -284,10 +483,21 @@ def _record_from_mapping(row: Mapping[str, Any], *, path: Path, line_number: int
     if not isinstance(json_body, Mapping):
         raise SystemExit(f"{path}:{line_number}: json must be an object")
 
+    raw_operations = source.get("operation_names", [])
+    if not isinstance(raw_operations, list) or not all(
+        isinstance(item, str) and item.strip() for item in raw_operations
+    ):
+        raise SystemExit(f"{path}:{line_number}: operation_names must be a list of strings")
+    argument_schema = source.get("argument_schema", {})
+    if not isinstance(argument_schema, Mapping):
+        raise SystemExit(f"{path}:{line_number}: argument_schema must be an object")
+
     return RestApiRecord(
         rest_api=rest_api,
         allowed_methods=tuple(method.upper() for method in raw_methods),
         json_body=dict(json_body),
+        operation_names=tuple(raw_operations),
+        argument_schema=dict(argument_schema),
         vendor=str(row.get("vendor") or source.get("vendor") or ""),
         source_corpus=str(row.get("source_corpus") or source.get("source_corpus") or ""),
     )
@@ -311,18 +521,57 @@ def _selected_adapters(
     return draft_adapter, judge_adapter
 
 
+def _resolve_live_identities(
+    spec: Phase2LabelledRequestsSpec,
+    *,
+    draft_adapter: str,
+    judge_adapter: str,
+    env: Mapping[str, str],
+) -> Phase2LabelledRequestsSpec:
+    """Resolve identities before a live run so metrics and release evidence agree.
+
+    Mock and file providers retain literal placeholders for deterministic contract
+    checks. A live provider must resolve every identity it owns before the first
+    request; otherwise its HTTP payload and release manifest could name different
+    artifacts.
+    """
+    model_x = spec.model_x
+    judge = spec.judge
+    if draft_adapter == "openai-compatible":
+        model_x = replace(
+            model_x,
+            model_id=_resolve_env_value(model_x.model_id, env, "model_x.model_id"),
+            artifact_sha=_resolve_env_value(
+                model_x.artifact_sha,
+                env,
+                "model_x.artifact_sha",
+            ),
+        )
+        if not is_sha256(model_x.artifact_sha):
+            raise SystemExit("model_x.artifact_sha must resolve to sha256:<64 hex>")
+    if judge_adapter == "openai-compatible":
+        judge = replace(
+            judge,
+            route=_resolve_env_value(judge.route, env, "judge.route"),
+            model_id=_resolve_env_value(judge.model_id, env, "judge.model_id"),
+            profile=_resolve_env_value(judge.profile, env, "judge.profile"),
+        )
+    return replace(spec, model_x=model_x, judge=judge)
+
+
 def _enforce_live_provider_gate(
     args: argparse.Namespace,
     *,
     spec: Phase2LabelledRequestsSpec,
     draft_adapter: str,
     judge_adapter: str,
+    candidate_count: int,
 ) -> None:
     """Block dataset-scale live provider runs until an explicit gate flag is passed."""
     uses_live_adapter = "openai-compatible" in {draft_adapter, judge_adapter}
     if not uses_live_adapter or args.live_provider_gate_passed:
         return
-    if args.count > spec.live_without_gate_max_candidates:
+    if candidate_count > spec.live_without_gate_max_candidates:
         raise SystemExit(
             "live provider runs above safety.live_without_gate_max_candidates "
             "require --live-provider-gate-passed",
@@ -384,10 +633,14 @@ def _mock_judge_provider(request: dict[str, Any]) -> str:
     """Return a deterministic accepting judge response for offline smoke tests."""
     return json.dumps({
         "accepted": True,
-        "rest_api_list": request["expected_rest_api_list"],
+        "natural": True,
         "nonsense": False,
-        "reason": "fixture",
-        "order_evidence": "none",
+        "ambiguous": False,
+        "duplicate_intent": False,
+        "extra_intents": False,
+        "method_semantics_valid": True,
+        "covered_api_set": request["expected_rest_api_list"],
+        "reason": "mock exact-set match",
     })
 
 
@@ -616,6 +869,11 @@ def _merge_counters(
     aggregate.nonsense_total += candidate.nonsense_total
     aggregate.invalid_json_total += candidate.invalid_json_total
     aggregate.rest_api_set_match_total += candidate.rest_api_set_match_total
+    aggregate.natural_total += candidate.natural_total
+    aggregate.ambiguous_total += candidate.ambiguous_total
+    aggregate.duplicate_intent_total += candidate.duplicate_intent_total
+    aggregate.extra_intent_total += candidate.extra_intent_total
+    aggregate.method_semantics_valid_total += candidate.method_semantics_valid_total
     aggregate.empty_set_expected_total += candidate.empty_set_expected_total
     aggregate.empty_set_match_total += candidate.empty_set_match_total
 

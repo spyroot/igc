@@ -12,7 +12,7 @@ import pytest
 import torch
 
 from igc.modules.igc_train_auto_state_encoder import AutoencoderTrainer
-from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
+from igc.modules.train.sft import SFTTrainer
 
 
 def _sample(i: int, *, extra: bool = False) -> dict[str, torch.Tensor]:
@@ -29,7 +29,7 @@ def _sample(i: int, *, extra: bool = False) -> dict[str, torch.Tensor]:
 @pytest.mark.parametrize(
     "collate",
     [
-        LlmEmbeddingsTrainer.custom_collate_fn,
+        SFTTrainer.custom_collate_fn,
         AutoencoderTrainer.custom_collate_fn,
     ],
 )
@@ -46,7 +46,7 @@ def test_collate_stacks_only_model_inputs(collate):
 @pytest.mark.parametrize(
     "collate",
     [
-        LlmEmbeddingsTrainer.custom_collate_fn,
+        SFTTrainer.custom_collate_fn,
         AutoencoderTrainer.custom_collate_fn,
     ],
 )
@@ -62,7 +62,7 @@ def test_collate_rejects_missing_attention_mask(collate):
 @pytest.mark.parametrize(
     "collate",
     [
-        LlmEmbeddingsTrainer.custom_collate_fn,
+        SFTTrainer.custom_collate_fn,
         AutoencoderTrainer.custom_collate_fn,
     ],
 )

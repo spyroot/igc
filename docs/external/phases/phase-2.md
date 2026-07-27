@@ -1,311 +1,178 @@
 # Phase 2: Labelled REST Request Extraction
 
-Legacy notes and old branches may call the Phase 2 text-labelled artifact `D1`.
-New code, configs, metrics, and docs use the canonical dataset name
-`phase2_labelled_requests`. `model_x` must already have completed Phase 1
-Redfish JSON pretraining before real generation runs; offline plumbing may use
-tiny fixtures and injected providers only.
+Phase 2 creates and learns from `D1`, the dataset that adds the human text absent from `D0`.
+`model_x`, the promoted Phase 1 checkpoint, drafts a natural operator request from one, two, or
+three selected Redfish APIs. The private Pro judge accepts the draft only when it expresses all and
+only that unordered API set. Phase 2 then trains `goal_extractor` in the reverse direction:
 
-`model_x`, produced by Phase 1 Redfish JSON pretraining, drafts the missing
-operator text. The private Pro judge, selected by the `judge` section in
-`configs/phase2_labelled_requests.yaml`, decides whether that text maps back to
-the same unordered REST API set. Empty set equals empty set. Order is recorded
-only as secondary evidence when the text explicitly says things like "then",
-"before", "after", or uses numbered steps.
-
-- `D0`: Phase 1 JSON reconstruction data.
-- `phase2_labelled_requests`: Phase 2 text-to-REST-API-set data.
-- `model_x`: the Phase 1 Redfish-tuned LLM.
-- `goal_extractor`: the separate Phase 2 fine-tuned weight role.
-- `profile`: a planned `phase2_goal_extractor_*` training profile.
-- `base_weights_role`: `model_x`, when Phase 2 initializes from the Phase 1 checkpoint.
-- `weights_role`: `goal_extractor`; Phase 2 must not overwrite the Phase 1 checkpoint.
-- `x`: the input context shown to the model.
-- `y_true`: the exact target label stored in the dataset.
-- `y_pred`: the model output during inference or evaluation.
-- `rest_api`: one concrete Redfish URI.
-- `rest_api_list`: canonical list of concrete Redfish URIs; correctness is the
-  unordered API set unless `order_evidence` is explicit.
-- `allowed_methods`: methods from the same discovery run's `rest_api_map.npy`.
-- `json`: full Redfish JSON resource body.
-
-Phase 2 output is a REST API set extraction target. If the operator sentence
-says "check tasks, then check systems", the row records explicit order evidence
-for auxiliary order metrics. If the sentence has no explicit order, evaluation
-treats `[A, B]` and `[B, A]` as the same target. Empty set equals empty set for
-hard-negative or no-action rows.
-
-## Builder Spec
-
-Checkpoint rule: Phase 2 writes only `goal_extractor` artifacts. A run config must record the input
-checkpoint path for `model_x`, the output path for `goal_extractor`, the `phase2_goal_extraction/*`
-W&B namespace, and the exact `phase2_labelled_requests` dataset manifest used for training. Older
-coordination notes may call that manifest `D1`; new runtime code, configs, metrics, and docs use the
-canonical `phase2_labelled_requests` name.
-
-The offline builder spec lives in `configs/phase2_labelled_requests.yaml`.
-That spec owns prompt text, `model_x` identifiers, provider adapter metadata,
-judge route/profile fields, generation settings, sample widths, W&B
-namespace/key lists, safety caps, and acceptance thresholds. Runtime Python
-must load those values rather than hardcoding prompt or model literals.
-
-The offline fixture CLI is `scripts/build_phase2_labelled_requests.py`. It
-loads the YAML spec, reads tiny JSONL records with `rest_api`,
-`allowed_methods`, `json`, `vendor`, and `source_corpus`, then writes accepted
-`phase2_labelled_requests` JSONL plus an aggregate metrics JSON. Its provider
-modes are YAML-selected config, local-only mock, local file fixtures, and an
-OpenAI-compatible live adapter. The checked-in config keeps both draft and
-judge adapters on `mock`; operators must explicitly select the live adapter by
-YAML or CLI and provide the environment variables named by the spec before any
-live `model_x` or private Pro judge call is possible.
-
-The live adapter is only a provider surface. It resolves the model and route
-placeholders from environment variables, reads base URLs from the spec's
-`base_url_env` fields, extracts text from the configured response JSON path,
-and sends no W&B, Redfish, GPU, or dataset-scale work on its own. A live run
-whose `--count` exceeds `safety.live_without_gate_max_candidates` must pass
-`--live-provider-gate-passed`; otherwise the CLI exits before opening a live
-provider connection.
-
-The P2-LABELS-002 live launch uses the `providers:` block in
-`configs/phase2_labelled_requests.yaml`; `igc/ds/phase2_labelled_requests.py`
-resolves each provider's `base_url_env` and `api_key_env` value before it builds
-the OpenAI-compatible provider clients. The concrete environment variables are:
-
-- `PHASE2_MODEL_X_BASE_URL`: the draft provider base URL named by
-  `providers.draft.base_url_env` in `configs/phase2_labelled_requests.yaml`.
-- `PHASE2_MODEL_X_API_KEY`: the draft provider API key named by
-  `providers.draft.api_key_env` in `configs/phase2_labelled_requests.yaml`.
-- `PHASE2_JUDGE_BASE_URL`: the judge provider base URL named by
-  `providers.judge.base_url_env` in `configs/phase2_labelled_requests.yaml`.
-- `PHASE2_JUDGE_API_KEY`: the judge provider API key named by
-  `providers.judge.api_key_env` in `configs/phase2_labelled_requests.yaml`.
-
-If any required live-provider variable is unset, the builder fails closed before
-generation instead of silently falling back to mock providers or hardcoded
-endpoints; `scripts/build_phase2_labelled_requests.py` enforces that check when
-it constructs the live OpenAI-compatible provider.
-
-## Build Input
-
-To build one `phase2_labelled_requests` row, sample one, two, or three Redfish
-records from Phase 1 rows or the same captured corpus. Each sampled record must
-carry its `rest_api`, full `json`, and `allowed_methods`.
-The following block is an intermediate synthetic-text generation request, not the final stored row:
-`x` is the sampled Redfish context, and `y_pred.text` is the draft operator sentence.
-
-```json
-{
-  "x": {
-    "task": "produce_human_text_for_rest_api_set",
-    "json": [
-      {
-        "@odata.context": "/redfish/v1/$metadata#TaskCollection.TaskCollection",
-        "@odata.id": "/redfish/v1/TaskService/Tasks",
-        "@odata.type": "#TaskCollection.TaskCollection",
-        "Description": "Collection of Tasks",
-        "Members": [],
-        "Members@odata.count": 0,
-        "Name": "Task Collection"
-      },
-      {
-        "@odata.context": "/redfish/v1/$metadata#ComputerSystemCollection.ComputerSystemCollection",
-        "@odata.id": "/redfish/v1/Systems",
-        "@odata.type": "#ComputerSystemCollection.ComputerSystemCollection",
-        "Description": "Collection of Computer Systems",
-        "Members": [
-          {
-            "@odata.id": "/redfish/v1/Systems/System.Embedded.1"
-          }
-        ],
-        "Members@odata.count": 1,
-        "Name": "Computer System Collection"
-      }
-    ],
-    "allowed_methods": {
-      "/redfish/v1/TaskService/Tasks": [
-        "GET",
-        "HEAD"
-      ],
-      "/redfish/v1/Systems": [
-        "GET",
-        "HEAD"
-      ]
-    },
-    "rest_api_list": [
-      "/redfish/v1/TaskService/Tasks",
-      "/redfish/v1/Systems"
-    ]
-  },
-  "vendor": "fixture",
-  "source_corpus": "unit_fixture"
-}
+```text
+x = accepted text + API context containing targets and realistic distractors
+y_true = {"rest_api_list": [...]}
 ```
 
-`y_pred.text` is only a draft. If `model_x` emits junk text, that text must not
-enter `phase2_labelled_requests`. It must be cleaned or rejected.
+`D1` is the dataset identity. `phase2_labelled_requests` is the builder/W&B metric namespace, not a
+second dataset name. API order has no meaning. Separately bounded `k=0` hard negatives use natural
+unsupported requests over realistic distractor contexts and preserve `[] == []`; they are judged
+and released in D1 but excluded from the positive `k=1/2/3` balance calculation.
 
-## Draft And Judge
+## Concrete Bindings
 
-The generated text should be passed through a review/judge step with the same `json`,
-`allowed_methods`, and canonical `rest_api_list`. The reviewer has two jobs:
+| Role | Binding |
+| --- | --- |
+| Dataset builder | `igc.ds.phase2_labelled_requests.Phase2LabelledRequestBuilder` |
+| Dataset release | `igc.ds.d1_release.release_d1_jsonl` |
+| Stable row identity | `igc.ds.rest_goal_contract.d1_row_id` |
+| Stored training dataset | `igc.ds.sft_dataset.PromptCompletionJSONLDataset` |
+| Renderer | `igc.ds.rest_goal_contract.render_phase2_sft` |
+| Trainer | `igc.modules.train.sft.SFTTrainer` |
+| Parent checkpoint | promoted Phase 1 `model_x` |
+| Output checkpoint | `goal_extractor` |
+| Training profile | `phase2_7b_rslora_r32` in `configs/training/profiles.yaml` |
+| Task/prompt spec | `text_to_rest_api_list` in `configs/training/sft_tasks.yaml` |
+| D1 builder spec | `configs/phase2_labelled_requests.yaml` |
+| Machine contract | `configs/contracts/d1_contract.yaml` and `configs/contracts/rest_goal.yaml` |
+| Promotion gate | `configs/inference/phase2_goal_extractor_promotion.yaml` |
 
-1. rewrite the text into a natural operator sentence if needed;
-2. judge whether the sentence asks for all and only the sampled REST API set,
-   considering order only when the sentence contains ordering language.
+`model_x`, its artifact SHA, the judge route/model/profile, generation settings, prompts, sampling
+widths, distractor count, metrics, and thresholds come from the YAML specs or their named runtime
+environment values. A live run resolves those identities before its first request and records the
+resolved values in the release manifest.
 
-Accepted output becomes the final `phase2_labelled_requests` row. Rejected
-output is not used for fine-tuning.
+The YAML also owns finite build ceilings: total candidates, total accepted rows, accepted variants
+per API combination, attempts per API combination, and accepted rows per API. The builder checks
+these limits before a model or judge request. A D1 build is therefore bounded; it never enumerates
+all combinations or permutations.
 
-The offline parser accepts a row only when the judge JSON parses, the judge did
-not mark the draft as nonsense, and the judged REST API set equals the expected
-set after ignoring order. If the expected and judged sets are both empty, the
-row counts as an empty-set match.
+## Starting Evidence
 
-## Final Row
+`D0` contains only:
 
-An accepted row stores the text label with the sampled REST API evidence:
+```text
+rest_api + allowed_methods + Redfish JSON
+```
+
+It does not contain labels such as "mount an ISO and boot the server." Hand-writing roughly 100,000
+requests is not practical. Instead, the builder samples `k=1`, `k=2`, and `k=3` API combinations,
+uses `model_x` to draft the missing text, and uses Pro as the independent quality opinion. This is
+label creation, not Phase 2 model evaluation: the selected API set is already known because it was
+the input to generation.
+
+The draft and judge see only the selected records. After acceptance, the stored Phase 2 input adds
+at least four unselected contexts. It never exposes `rest_api_list`, `selected`, target indices, or
+any hidden membership field in `x`.
+
+## Accepted Row
 
 ```json
 {
   "phase": 2,
-  "dataset": "phase2_labelled_requests",
+  "dataset": "D1",
+  "source_dataset": "D0",
   "task": "text_to_rest_api_list",
+  "contract_version": "phase2-rest-api-set/v1",
   "x": {
     "text": "check the available computer systems",
-    "json": [
+    "api_context": [
       {
-        "@odata.id": "/redfish/v1/Systems",
-        "@odata.type": "#ComputerSystemCollection.ComputerSystemCollection",
-        "Members": [],
-        "Members@odata.count": 0,
-        "Name": "Computer System Collection"
+        "rest_api": "/redfish/v1/Systems",
+        "allowed_methods": ["GET", "HEAD"],
+        "operation_names": [],
+        "argument_schema": {},
+        "json": {"@odata.id": "/redfish/v1/Systems"}
+      },
+      {
+        "rest_api": "/redfish/v1/Managers",
+        "allowed_methods": ["GET", "HEAD"],
+        "operation_names": [],
+        "argument_schema": {},
+        "json": {"@odata.id": "/redfish/v1/Managers"}
+      },
+      {
+        "rest_api": "/redfish/v1/Chassis",
+        "allowed_methods": ["GET", "HEAD"],
+        "operation_names": [],
+        "argument_schema": {},
+        "json": {"@odata.id": "/redfish/v1/Chassis"}
+      },
+      {
+        "rest_api": "/redfish/v1/TaskService/Tasks",
+        "allowed_methods": ["GET", "HEAD"],
+        "operation_names": [],
+        "argument_schema": {},
+        "json": {"@odata.id": "/redfish/v1/TaskService/Tasks"}
+      },
+      {
+        "rest_api": "/redfish/v1/UpdateService",
+        "allowed_methods": ["GET", "HEAD"],
+        "operation_names": [],
+        "argument_schema": {},
+        "json": {"@odata.id": "/redfish/v1/UpdateService"}
       }
-    ],
-    "allowed_methods": {
-      "/redfish/v1/Systems": ["GET", "HEAD"]
-    },
-    "rest_api_list": ["/redfish/v1/Systems"]
+    ]
   },
   "y_true": {
-    "rest_api_list": ["/redfish/v1/Systems"],
-    "order_evidence": "none"
+    "rest_api_list": ["/redfish/v1/Systems"]
   },
   "validation": {
-    "text_source": "model_x_then_private_judge",
-    "review_judged": true,
-    "set_coverage_preserved": true,
-    "nonsense": false
+    "valid_json": true,
+    "accepted": true,
+    "natural": true,
+    "nonsense": false,
+    "ambiguous": false,
+    "duplicate_intent": false,
+    "extra_intents": false,
+    "method_semantics_valid": true,
+    "covered_api_set": ["/redfish/v1/Systems"]
   },
   "metadata": {
+    "row_id": "sha256:28689285115f451588c30d92729415f6d3d8f9936fd49537ab5203259fbcc735",
     "prompt_spec_version": "phase2-labelled-requests-v1",
-    "vendor": ["fixture_vendor"],
-    "source_corpus": ["fixture_corpus"]
+    "sample_width_k": 1,
+    "vendor": ["example", "example", "example", "example", "example"],
+    "source_corpus": ["example", "example", "example", "example", "example"],
+    "heldout_vendor_or_model": ["example"]
   }
 }
 ```
 
-The row may preserve a deterministic list order for storage, but Phase 2
-acceptance is set-based unless the text itself carries explicit ordering
-language. Phase 3 argument extraction remains a separate phase and consumes
-accepted request labels only after a downstream contract chooses how to preserve
-or infer call order.
+## Judge And Release Gates
 
-## Metrics
+A draft is accepted only when the verdict is valid JSON, accepted, natural, non-nonsense,
+unambiguous, non-duplicated, free of extra intent, method-semantics-valid, and its
+`covered_api_set` equals the sampled API set. Judge calibration requires both human-accepted and
+human-rejected examples and gates precision, recall, and false-accept rate.
 
-`PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS`, defined in
-`igc/modules/base/metric_keys.py`, records the metric keys used by the offline
-builder seam. The canonical namespace comes from `wandb.namespace` in
-`configs/phase2_labelled_requests.yaml` and is `phase2_labelled_requests`.
+The release path builds a `.pending` directory, validates every JSONL row, judge evidence, and
+balanced positive `k=1/2/3` counts, validates the separately bounded `k=0` negatives, computes the
+artifact SHA, and writes `data.jsonl` plus `manifest.json`. One directory rename publishes the
+complete immutable release, so a failed batch cannot expose a canonical D1 path. Mock or
+file-provider output may exercise the contract but cannot pass real D1 promotion.
+Promotion requires resolved live model/judge identities, the promoted `model_x` parent SHA, real
+held-out evidence, checkpoint reload, and inference smoke evidence.
 
-Cross-entropy is computed on the target JSON tokens. Evaluation parses `y_pred`,
-reads `y_pred.rest_api_list`, and treats unordered set match as the primary
-correctness metric. Ordered exact match is auxiliary and applies only when
-`order_evidence` is explicit.
+Every released row has a content-derived `metadata.row_id`. Phase 2/3 training requires explicit
+immutable train and held-out manifests whose artifact SHA and row count match the exact JSONL bytes.
+One deterministic `d1_phase23_split_release.v1` manifest proves that Phase 2 and Phase 3 views use
+aligned source row IDs and that train and held-out source row IDs are disjoint. The run report records
+the split release, data, and manifest identities; a path alone is not lineage evidence.
 
-## Labelled-Request W&B Metrics
+## Goal-Extractor Promotion
 
-The labelled-request generation builder records these keys under the
-`phase2_labelled_requests/*` namespace:
+The model output is exactly:
 
-- `phase2_labelled_requests/draft_total`
-- `phase2_labelled_requests/accepted_total`
-- `phase2_labelled_requests/rejected_total`
-- `phase2_labelled_requests/nonsense_rate`
-- `phase2_labelled_requests/invalid_json_rate`
-- `phase2_labelled_requests/pro_accept_rate`
-- `phase2_labelled_requests/rest_api_set_match_rate`
-- `phase2_labelled_requests/empty_set_match_rate`
-- `phase2_labelled_requests/empty_set_expected_total`
-- `phase2_labelled_requests/sample_width/k`
-- `phase2_labelled_requests/vendor/source_corpus`
-- `phase2_labelled_requests/prompt_spec_version`
-- `phase2_labelled_requests/model_x/artifact_sha`
-- `phase2_labelled_requests/judge/model`
-- `phase2_labelled_requests/judge/profile`
+```json
+{"rest_api_list": ["/redfish/v1/Systems", "/redfish/v1/TaskService/Tasks"]}
+```
 
-`accepted_total` counts rows that pass JSON parsing, Pro acceptance, nonsense
-rejection, and unordered REST API set matching. `pro_accept_rate` is narrower:
-it tracks valid judge responses whose own `accepted` flag is true, even if the
-row later fails the set-match gate.
+The strict parser rejects extra keys, scalar output, duplicates, and APIs absent from
+`x.api_context`. Evaluation reports JSON parse rate, unordered set exact match, precision, recall,
+F1, cardinality accuracy, invalid/duplicate rates, empty-set exact match, and `k=1/2/3` plus
+vendor/model slices. The same semantic case must remain correct when context order and JSON key
+order change, target serialization is reversed, or irrelevant distractors are added.
 
-## Goal-Extractor Training W&B Metrics
-
-After accepted labelled-request rows exist, the later `goal_extractor` training
-path may emit these legacy trainer metrics. They are separate from
-`phase2_labelled_requests/*` generation metrics above.
-
-- `phase2_goal_extraction/train/loss`
-- `phase2_goal_extraction/train/perplexity`
-- `phase2_goal_extraction/train/optimizer_step`
-- `phase2_goal_extraction/eval/loss`
-- `phase2_goal_extraction/eval/perplexity`
-- `phase2_goal_extraction/eval/token_accuracy`
-- `phase2_goal_extraction/eval/ordered_exact_match_rate`
-- `phase2_goal_extraction/eval/set_match_rate`
-- `phase2_goal_extraction/eval/precision`
-- `phase2_goal_extraction/eval/recall`
-- `phase2_goal_extraction/eval/f1`
-- `phase2_goal_extraction/eval/top_k_api_accuracy`
-- `phase2_goal_extraction/eval/invalid_api_rate`
-- `phase2_goal_extraction/eval/missing_required_api_rate`
-- `phase2_goal_extraction/eval/missing_allowed_methods_rate`
-- `phase2_goal_extraction/eval/order_violation_rate`
-- `phase2_goal_extraction/order/kendall_tau`
-- `phase2_goal_extraction/order/edit_distance`
-- `phase2_goal_extraction/throughput/train_tokens_per_sec`
-- `phase2_goal_extraction/throughput/train_samples_per_sec`
-- `phase2_goal_extraction/throughput/eval_tokens_per_sec`
-- `phase2_goal_extraction/throughput/eval_samples_per_sec`
-- `phase2_goal_extraction/data/avg_num_apis`
-- `phase2_goal_extraction/data/max_num_apis`
-- `phase2_goal_extraction/data/mean_sequence_length`
-- `phase2_goal_extraction/data/padding_ratio`
-- `phase2_goal_extraction/calibration/log_prob_per_sequence`
-- `phase2_goal_extraction/calibration/ece`
-- `phase2_goal_extraction/test/latency_sec_p50`
-- `phase2_goal_extraction/test/latency_sec_p95`
-- `phase2_goal_extraction/test/memory_peak_mb`
-
-## Acceptance Gate
-
-The offline plumbing is accepted when focused pytest coverage proves:
-
-- sample widths `k=1`, `k=2`, and `k=3` are supported;
-- prompt specs load from YAML and render sampled record payloads;
-- REST API set comparison is unordered;
-- empty set equals empty set;
-- Pro judge JSON parsing handles accepted, rejected, nonsense, and invalid JSON
-  outcomes;
-- nonsense, invalid JSON, Pro accept, REST API set match, and empty-set match
-  counters emit the required keys;
-- Phase 3 argument extraction remains outside this builder.
-
-A later approved run can point the YAML provider metadata at the restored
-`model_x` artifact and private Pro judge. That run is outside the local CPU
-plumbing gate and must not be simulated with live GPU inference, live W&B, live
-Redfish crawls, model downloads, cluster jobs, or dataset-scale generation
-until the provider and launch gates have passed.
+Phase 2 writes only `goal_extractor`; it never overwrites `model_x`. Its parent artifact SHA,
+foundation model SHA, tokenizer SHA, task-spec SHA, data/eval identities, optimizer steps, and best
+checkpoint are recorded in the run report.
 
 Author:
 Mus mbayramo@stanford.edu

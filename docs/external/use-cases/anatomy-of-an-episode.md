@@ -67,8 +67,8 @@ from [`why-rl-not-an-llm.md`](why-rl-not-an-llm.md), made literal.
 
 ## Step 2 — Score and choose (the learned decision)
 
-The goal-conditioned state latent scores every candidate (a pointer over the encoded candidates, D-001
-/ D-002). The goal wants the boot override *set first*, then power on — and the learned value function
+The goal-conditioned state latent scores every legal candidate. The goal wants the boot override
+*set first*, then power on — and the learned value function
 has seen that powering on before staging the boot override wastes the "at most one reset" budget. So
 it ranks the `PATCH` to stage the boot override above the `Reset`:
 

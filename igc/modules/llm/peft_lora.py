@@ -11,6 +11,7 @@ Mus mbayramo@stanford.edu
 """
 from __future__ import annotations
 
+import math
 from typing import Any, List, Optional, Tuple
 
 _GPT2_TARGETS = ["c_attn", "c_fc", "c_proj"]
@@ -19,7 +20,7 @@ _DECODER_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_pro
 # The input-embedding module name per backbone. igc extends the tokenizer with the
 # @odata/Redfish special tokens and resizes the embedding, so these rows are NEW and
 # must be trainable — otherwise LoRA (which freezes the base) leaves them at their
-# random init and M1's whole point (learn a latent for the new tokens) is a no-op.
+# random init and Phase 1's new-token objective would otherwise be a no-op.
 _GPT2_EMB = ["wte"]
 _DECODER_EMB = ["embed_tokens"]
 
@@ -134,6 +135,78 @@ def apply_lora(
         # can diverge on a tied-embedding backbone — pass new_token_ids when possible.
         kwargs["modules_to_save"] = default_save_modules(model, model_type)
     return get_peft_model(model, LoraConfig(**kwargs))
+
+
+def validate_loaded_adapter_profile(
+    model: Any,
+    *,
+    r: int,
+    alpha: int,
+    dropout: float,
+    target_modules: List[str],
+    adapter_method: str,
+) -> None:
+    """Require a loaded parent adapter to match its training profile.
+
+    Phase 2 and Phase 3 initialize from promoted parent adapters. PEFT reads the
+    persisted adapter configuration from the artifact, so the run must compare that
+    configuration with the resolved YAML profile before optimization starts.
+
+    :param model: loaded PEFT model exposing ``peft_config``.
+    :param r: profile LoRA rank.
+    :param alpha: profile LoRA alpha.
+    :param dropout: profile LoRA dropout.
+    :param target_modules: profile module names; order is not semantic.
+    :param adapter_method: profile adapter family (``lora``, ``rslora``, or ``dora``).
+    :raises RuntimeError: when the active adapter is ambiguous or any setting differs.
+    """
+    configs = getattr(model, "peft_config", None)
+    if not isinstance(configs, dict) or not configs:
+        raise RuntimeError("loaded parent does not expose a PEFT adapter configuration")
+
+    active = getattr(model, "active_adapter", None)
+    if isinstance(active, str) and active in configs:
+        name = active
+    elif len(configs) == 1:
+        name = next(iter(configs))
+    else:
+        raise RuntimeError("loaded parent PEFT adapter is ambiguous")
+    config = configs[name]
+
+    actual_method = "lora"
+    if bool(getattr(config, "use_rslora", False)):
+        actual_method = "rslora"
+    if bool(getattr(config, "use_dora", False)):
+        if actual_method != "lora":
+            raise RuntimeError("loaded parent PEFT adapter enables incompatible methods")
+        actual_method = "dora"
+
+    if not target_modules:
+        raise RuntimeError("resolved parent-adapter profile requires target_modules")
+    expected_targets = {str(value) for value in target_modules}
+    actual_targets = {str(value) for value in (getattr(config, "target_modules", None) or [])}
+    mismatches = []
+    if int(getattr(config, "r", -1)) != int(r):
+        mismatches.append(f"r={getattr(config, 'r', None)!r} (expected {r!r})")
+    if int(getattr(config, "lora_alpha", -1)) != int(alpha):
+        mismatches.append(
+            f"lora_alpha={getattr(config, 'lora_alpha', None)!r} (expected {alpha!r})"
+        )
+    actual_dropout = float(getattr(config, "lora_dropout", -1.0))
+    if not math.isclose(actual_dropout, float(dropout), rel_tol=0.0, abs_tol=1e-12):
+        mismatches.append(f"lora_dropout={actual_dropout!r} (expected {dropout!r})")
+    if actual_targets != expected_targets:
+        mismatches.append(
+            f"target_modules={sorted(actual_targets)!r} "
+            f"(expected {sorted(expected_targets)!r})"
+        )
+    if actual_method != adapter_method:
+        mismatches.append(f"adapter_method={actual_method!r} (expected {adapter_method!r})")
+    if mismatches:
+        raise RuntimeError(
+            "loaded parent adapter does not match the resolved profile: "
+            + "; ".join(mismatches)
+        )
 
 
 def trainable_parameter_summary(model: Any) -> Tuple[int, int]:

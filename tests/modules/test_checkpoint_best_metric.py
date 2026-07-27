@@ -20,7 +20,7 @@ import torch
 from torch.utils.data import TensorDataset
 
 from igc.modules.base.igc_base_module import CheckpointState, IgcModule
-from igc.modules.llm_train_state_encoder import (
+from igc.modules.train.sft import (
     resolve_early_stopping,
     restored_best_metric,
 )

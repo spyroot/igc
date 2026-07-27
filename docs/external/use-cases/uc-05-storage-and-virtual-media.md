@@ -70,7 +70,7 @@ invented action names.
 
 **1 — Observe (virtual media slot).** GET the slot; check the precondition, not just try-and-catch.
 
-```json
+```text
 GET /redfish/v1/Managers/1/VirtualMedia/CD
 { "Inserted": false, "Image": null, "MediaTypes": ["CD", "DVD"],
   "ConnectedVia": "NotConnected", "WriteProtected": true }
@@ -93,7 +93,7 @@ then issues the real POST. Response `204 No Content` (or a `Task` reference to p
 **4 — Observe (storage preconditions) — and adapt when one fails.** Before any volume POST, GET the
 drive members:
 
-```json
+```text
 GET /redfish/v1/Systems/System.Embedded.1/Storage/RAID.0/Drives/Disk.0
 { "CapacityBytes": 960197124096, "MediaType": "SSD",
   "Links": { "Volumes": [] } }               // unconfigured, ~960 GB  → eligible

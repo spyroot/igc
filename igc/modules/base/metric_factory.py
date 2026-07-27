@@ -86,12 +86,12 @@ class WandbLogger(BaseLogger):
         is what lets the logger build when the parsed spec carries no project/entity — the
         prior required-arg signature fell through to a None logger, so nothing was tracked.
         ``name``/``group``/``job_type``/``tags``/``config`` (built by
-        :func:`_wandb_run_meta` from the spec) make the training STAGE (e.g. m1 state
-        encoder), model, batch, and epochs legible in the W&B UI instead of a random name.
+        :func:`_wandb_run_meta` from the spec) make the training phase, model, batch,
+        and epochs legible in the W&B UI instead of a random name.
 
         :param project: W&B project (default: ``$WANDB_PROJECT``).
         :param entity: W&B entity/team (default: ``$WANDB_ENTITY``).
-        :param name: human-readable run name (e.g. ``m1-state-encoder-qwen2.5-0.5b-e5-bs8``).
+        :param name: human-readable run name (for example, a Phase 1 profile label).
         :param group: run group (the stage), so all runs of a stage cluster together.
         :param job_type: ``train`` / ``eval``.
         :param tags: filterable tags (stage, model, bs, epochs, lora, sharding).
@@ -144,27 +144,32 @@ class ClearMLLogger(BaseLogger):
 def _wandb_run_meta(kw: dict) -> dict:
     """Build W&B run metadata (name/group/job_type/tags/config) from the spec kwargs.
 
-    Maps the ``--train``/``--llm``/``--rl`` selection to a readable curriculum label so
-    a W&B run reads as e.g. ``m1-state-encoder`` grouped, tagged, and configured — not a
-    random name. The old goal/parameter selections are labelled as legacy.
+    Maps the configured phase/role and ``--train``/``--llm``/``--rl`` selection to a
+    readable curriculum label. Retired curriculum aliases are not emitted.
 
     :param kw: the flattened spec (``vars(specs)``).
     :return: a dict of ``name``, ``group``, ``job_type``, ``tags``, ``config``.
     """
     train, llm = kw.get("train"), kw.get("llm")
     profile = str(kw.get("profile") or "")
+    phase = str(kw.get("phase") or "")
+    weights_role = str(kw.get("weights_role") or "")
     corpus_objective = str(kw.get("corpus_objective") or "")
     stage_map = {
-        ("llm", "latent"): "m1-state-encoder",
-        ("llm", "all"): "m1m2-encoder",
+        ("llm", "latent"): "legacy-state-encoder",
+        ("llm", "all"): "legacy-state-autoencoder",
         ("llm", "goal"): "goal-extractor-legacy",
         ("llm", "parameter"): "param-extractor-legacy",
     }
     rl_stage = str(kw.get("rl") or "").lower()
-    if profile.startswith("phase1_") or corpus_objective == "phase1_pretrain":
+    if phase == "phase1_finetune" or profile.startswith("phase1_") or corpus_objective == "phase1_pretrain":
         stage = "phase1-finetune"
+    elif phase == "phase2_goal_extraction" or weights_role == "goal_extractor":
+        stage = "phase2-goal-extractor"
+    elif phase == "phase3_argument_extraction" or weights_role == "argument_extractor":
+        stage = "phase3-argument-extractor"
     elif train in ("agent",) or rl_stage not in ("", "none"):
-        stage = "m6-rl-agent"
+        stage = "rl-agent"
     else:
         stage = stage_map.get((train, llm), f"{train or 'run'}-{llm}" if llm else (train or "run"))
 

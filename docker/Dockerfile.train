@@ -8,8 +8,8 @@
 # (`-v <checkout>:/workspace/igc`), so a code fix is `git pull` + re-run with NO image
 # rebuild. This is what scripts/gb300_launch.sh does.
 #
-# Build (on a node; the base is cached, so this is just the pip layer, ~1-2 min):
-#   docker build -f docker/Dockerfile.train -t igc-train:ngc26.03 .
+# Build through the Makefile so dataset-contract labels are always populated:
+#   make train-image-arm64
 #
 # Run (via the launcher, which mounts code+data and guards the node):
 #   IGC_IMAGE=igc-train:ngc26.03 IGC_GPUS=4 IGC_MODEL=gpt2 scripts/gb300_launch.sh
@@ -22,9 +22,16 @@ FROM nvcr.io/nvidia/pytorch:${NGC_TAG}
 
 WORKDIR /workspace/igc
 
+ARG IGC_DATASET_CONTRACT_SHA
+ARG IGC_DATASET_TRANSFORM_VERSION
+RUN test -n "${IGC_DATASET_CONTRACT_SHA}" \
+    && test -n "${IGC_DATASET_TRANSFORM_VERSION}"
+LABEL ai.spyroot.igc.dataset-contract-sha="${IGC_DATASET_CONTRACT_SHA}" \
+      ai.spyroot.igc.dataset-transform-version="${IGC_DATASET_TRANSFORM_VERSION}"
+
 # OS tools on top of the NGC base. Already in the base: git, curl, wget, jq, numactl,
 # vim, less, ssh, ps. We add:
-#   git-lfs  — REQUIRED: the idrac_ctl submodule ships its Redfish walk maps
+#   git-lfs  — REQUIRED: the redfish_ctl submodule ships its Redfish walk maps
 #              (rest_api_map.npy) as git-LFS objects, so `git pull` / `git lfs pull`
 #              inside the container needs it (the pull-inside-container iteration loop).
 #   nvtop    — live per-GPU utilisation/memory view while a run trains.

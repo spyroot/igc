@@ -1,0 +1,2 @@
+# Keep public and private CI on the same accepted lint semantics.
+ruff==0.15.22

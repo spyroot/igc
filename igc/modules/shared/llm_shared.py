@@ -4,8 +4,10 @@ All default llm model creation and loading is done here.
 Author:Mus mbayramo@stanford.edu
 """
 import argparse
+import hashlib
 import os
 import pkgutil
+from pathlib import Path
 from typing import Any, Optional, Union, Dict, Tuple
 
 from transformers import (
@@ -154,6 +156,26 @@ def from_pretrained_default(
         if torch_dtype is not None:
             load_kwargs["dtype"] = torch_dtype
         model = _from_pretrained_best_attention(model_id, load_kwargs)
+        parent_adapter = str(_spec_flag(args, "parent_adapter_dir", "") or "")
+        if parent_adapter:
+            from peft import PeftModel
+
+            _verify_parent_adapter(
+                parent_adapter,
+                str(_spec_flag(args, "parent_artifact_sha", "") or ""),
+            )
+            model = PeftModel.from_pretrained(
+                model,
+                parent_adapter,
+                is_trainable=True,
+            )
+        if bool(_spec_flag(args, "gradient_checkpointing", False)):
+            enable_checkpointing = getattr(model, "gradient_checkpointing_enable", None)
+            if not callable(enable_checkpointing):
+                raise ValueError("model does not support requested gradient checkpointing")
+            enable_checkpointing()
+            if hasattr(model, "config") and hasattr(model.config, "use_cache"):
+                model.config.use_cache = False
 
     if not only_model:
         tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=trust_remote_code)
@@ -166,6 +188,33 @@ def from_pretrained_default(
         model.config.pad_token = tokenizer.pad_token
 
     return model, tokenizer
+
+
+def _verify_parent_adapter(adapter_dir: str, expected_sha: str) -> None:
+    """Require the configured parent SHA to match exact safetensors bytes."""
+    if (
+        not expected_sha.startswith("sha256:")
+        or len(expected_sha) != 71
+        or any(
+            character not in "0123456789abcdef"
+            for character in expected_sha.removeprefix("sha256:").lower()
+        )
+    ):
+        raise ValueError(
+            "parent_artifact_sha must be a canonical sha256 digest"
+        )
+    weight = Path(adapter_dir).expanduser() / "adapter_model.safetensors"
+    if not weight.is_file():
+        raise FileNotFoundError(
+            f"parent adapter weight does not exist: {weight}"
+        )
+    digest = hashlib.sha256()
+    with weight.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    observed = f"sha256:{digest.hexdigest()}"
+    if observed != expected_sha.lower():
+        raise ValueError("parent adapter SHA does not match parent_artifact_sha")
 
 
 def safe_resize_token_embeddings(

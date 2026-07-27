@@ -2,9 +2,12 @@ version: 1
 profiles:
   phase1_gpt2_smoke:
     model: gpt2
+    task: redfish_json_reconstruction
+    parent_adapter: ""
+    parent_artifact_sha: ""
     phase: phase1_finetune
     weights_role: model_x
-    llm_stage: latent
+    llm_stage: sft
     corpus_objective: phase1_pretrain
     use_peft: false
     adapter: null
@@ -13,21 +16,36 @@ profiles:
     batch_size: 8
     grad_accum: 1
     lr: 0.00005
+    optimizer: AdamW
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    gradient_checkpointing: false
     scheduler: OneCycleLR
+    max_lr: 0.00005
     warmup_ratio: 0.03
+    div_factor: 25.0
+    final_div_factor: 10000.0
+    cycle_momentum: true
+    anneal_strategy: cos
     epochs: 3
     max_steps: 50
+    eval_steps: 10
+    save_steps: 10
     early_stopping_patience: 3
     early_stopping_min_delta: 0.005
     sharding: none
     seq_len: 256
     num_workers: 8
+    seed: 42
 
   phase1_3b_lora:
     model: Qwen/Qwen2.5-3B-Instruct
+    task: redfish_json_reconstruction
+    parent_adapter: ""
+    parent_artifact_sha: ""
     phase: phase1_finetune
     weights_role: model_x
-    llm_stage: latent
+    llm_stage: sft
     corpus_objective: phase1_pretrain
     use_peft: true
     adapter:
@@ -42,21 +60,36 @@ profiles:
     batch_size: 8
     grad_accum: 2
     lr: 0.0001
+    optimizer: AdamW
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    gradient_checkpointing: true
     scheduler: OneCycleLR
+    max_lr: 0.0001
     warmup_ratio: 0.03
+    div_factor: 25.0
+    final_div_factor: 10000.0
+    cycle_momentum: true
+    anneal_strategy: cos
     epochs: 3
     max_steps: null
+    eval_steps: 100
+    save_steps: 100
     early_stopping_patience: 3
     early_stopping_min_delta: 0.005
     sharding: none
     seq_len: 1024
     num_workers: 8
+    seed: 42
 
   phase1_7b_lora:
     model: Qwen/Qwen2.5-7B-Instruct
+    task: redfish_json_reconstruction
+    parent_adapter: ""
+    parent_artifact_sha: ""
     phase: phase1_finetune
     weights_role: model_x
-    llm_stage: latent
+    llm_stage: sft
     corpus_objective: phase1_pretrain
     use_peft: true
     adapter:
@@ -71,21 +104,38 @@ profiles:
     batch_size: 8
     grad_accum: 4
     lr: 0.0001
+    optimizer: AdamW
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    gradient_checkpointing: true
     scheduler: OneCycleLR
+    max_lr: 0.0001
     warmup_ratio: 0.03
+    div_factor: 25.0
+    final_div_factor: 10000.0
+    cycle_momentum: true
+    anneal_strategy: cos
     epochs: 3
     max_steps: null
+    eval_steps: 100
+    save_steps: 100
     early_stopping_patience: 3
     early_stopping_min_delta: 0.005
     sharding: none
-    seq_len: 1024
+    seq_len: 2048
     num_workers: 8
+    seed: 42
 
   phase1_7b_rslora_r32:
     model: Qwen/Qwen2.5-7B-Instruct
+    foundation_model_sha: ${IGC_FOUNDATION_MODEL_SHA}
+    tokenizer_sha: ${IGC_TOKENIZER_SHA}
+    task: redfish_json_reconstruction
+    parent_adapter: ""
+    parent_artifact_sha: ""
     phase: phase1_finetune
     weights_role: model_x
-    llm_stage: latent
+    llm_stage: sft
     corpus_objective: phase1_pretrain
     use_peft: true
     adapter:
@@ -100,21 +150,36 @@ profiles:
     batch_size: 8
     grad_accum: 4
     lr: 0.0001
+    optimizer: AdamW
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    gradient_checkpointing: true
     scheduler: OneCycleLR
+    max_lr: 0.0001
     warmup_ratio: 0.03
+    div_factor: 25.0
+    final_div_factor: 10000.0
+    cycle_momentum: true
+    anneal_strategy: cos
     epochs: 3
     max_steps: null
+    eval_steps: 100
+    save_steps: 100
     early_stopping_patience: 3
     early_stopping_min_delta: 0.005
     sharding: none
-    seq_len: 1024
+    seq_len: 2048
     num_workers: 8
+    seed: 42
 
   phase1_local:
     model: ${IGC_MODEL_DIR}
+    task: redfish_json_reconstruction
+    parent_adapter: ""
+    parent_artifact_sha: ""
     phase: phase1_finetune
     weights_role: model_x
-    llm_stage: latent
+    llm_stage: sft
     corpus_objective: phase1_pretrain
     use_peft: true
     adapter:
@@ -129,21 +194,36 @@ profiles:
     batch_size: 8
     grad_accum: 4
     lr: 0.0001
+    optimizer: AdamW
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    gradient_checkpointing: true
     scheduler: OneCycleLR
+    max_lr: 0.0001
     warmup_ratio: 0.03
+    div_factor: 25.0
+    final_div_factor: 10000.0
+    cycle_momentum: true
+    anneal_strategy: cos
     epochs: 3
     max_steps: null
+    eval_steps: 100
+    save_steps: 100
     early_stopping_patience: 3
     early_stopping_min_delta: 0.005
     sharding: none
     seq_len: 1024
     num_workers: 8
+    seed: 42
 
   phase1_3b_full:
     model: Qwen/Qwen2.5-3B-Instruct
+    task: redfish_json_reconstruction
+    parent_adapter: ""
+    parent_artifact_sha: ""
     phase: phase1_finetune
     weights_role: model_x
-    llm_stage: latent
+    llm_stage: sft
     corpus_objective: phase1_pretrain
     use_peft: false
     adapter: null
@@ -152,21 +232,36 @@ profiles:
     batch_size: 4
     grad_accum: 8
     lr: 0.00002
+    optimizer: AdamW
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    gradient_checkpointing: true
     scheduler: OneCycleLR
+    max_lr: 0.00002
     warmup_ratio: 0.03
+    div_factor: 25.0
+    final_div_factor: 10000.0
+    cycle_momentum: true
+    anneal_strategy: cos
     epochs: 3
     max_steps: null
+    eval_steps: 100
+    save_steps: 100
     early_stopping_patience: 3
     early_stopping_min_delta: 0.005
     sharding: zero3
     seq_len: 1024
     num_workers: 8
+    seed: 42
 
   phase1_7b_full_zero3:
     model: Qwen/Qwen2.5-7B-Instruct
+    task: redfish_json_reconstruction
+    parent_adapter: ""
+    parent_artifact_sha: ""
     phase: phase1_finetune
     weights_role: model_x
-    llm_stage: latent
+    llm_stage: sft
     corpus_objective: phase1_pretrain
     use_peft: false
     adapter: null
@@ -175,12 +270,116 @@ profiles:
     batch_size: 2
     grad_accum: 16
     lr: 0.00001
+    optimizer: AdamW
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    gradient_checkpointing: true
     scheduler: OneCycleLR
+    max_lr: 0.00001
     warmup_ratio: 0.03
+    div_factor: 25.0
+    final_div_factor: 10000.0
+    cycle_momentum: true
+    anneal_strategy: cos
     epochs: 3
     max_steps: null
+    eval_steps: 100
+    save_steps: 100
     early_stopping_patience: 3
     early_stopping_min_delta: 0.005
     sharding: zero3
+    seq_len: 2048
+    num_workers: 8
+    seed: 42
+
+  phase2_7b_rslora_r32:
+    model: Qwen/Qwen2.5-7B-Instruct
+    foundation_model_sha: ${IGC_FOUNDATION_MODEL_SHA}
+    tokenizer_sha: ${IGC_TOKENIZER_SHA}
+    task: text_to_rest_api_list
+    parent_adapter: ${IGC_MODEL_X_ADAPTER_DIR}
+    parent_artifact_sha: ${IGC_MODEL_X_SHA}
+    phase: phase2_goal_extraction
+    weights_role: goal_extractor
+    llm_stage: sft
+    corpus_objective: labelled_requests
+    use_peft: true
+    adapter:
+      method: rslora
+      r: 32
+      alpha: 64
+      dropout: 0.05
+      init: default
+      target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+    precision: bf16
+    torch_dtype: bfloat16
+    batch_size: 8
+    grad_accum: 4
+    lr: 0.0001
+    optimizer: AdamW
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    gradient_checkpointing: true
+    scheduler: OneCycleLR
+    max_lr: 0.0001
+    warmup_ratio: 0.03
+    div_factor: 25.0
+    final_div_factor: 10000.0
+    cycle_momentum: true
+    anneal_strategy: cos
+    epochs: 3
+    max_steps: null
+    eval_steps: 100
+    save_steps: 100
+    early_stopping_patience: 3
+    early_stopping_min_delta: 0.005
+    sharding: none
     seq_len: 1024
     num_workers: 8
+    seed: 42
+
+  phase3_7b_rslora_r32:
+    model: Qwen/Qwen2.5-7B-Instruct
+    foundation_model_sha: ${IGC_FOUNDATION_MODEL_SHA}
+    tokenizer_sha: ${IGC_TOKENIZER_SHA}
+    task: text_and_rest_api_list_to_calls
+    parent_adapter: ${IGC_GOAL_EXTRACTOR_ADAPTER_DIR}
+    parent_artifact_sha: ${IGC_GOAL_EXTRACTOR_SHA}
+    phase: phase3_argument_extraction
+    weights_role: argument_extractor
+    llm_stage: sft
+    corpus_objective: labelled_calls
+    use_peft: true
+    adapter:
+      method: rslora
+      r: 32
+      alpha: 64
+      dropout: 0.05
+      init: default
+      target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+    precision: bf16
+    torch_dtype: bfloat16
+    batch_size: 8
+    grad_accum: 4
+    lr: 0.0001
+    optimizer: AdamW
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    gradient_checkpointing: true
+    scheduler: OneCycleLR
+    max_lr: 0.0001
+    warmup_ratio: 0.03
+    div_factor: 25.0
+    final_div_factor: 10000.0
+    cycle_momentum: true
+    anneal_strategy: cos
+    epochs: 3
+    max_steps: null
+    eval_steps: 100
+    save_steps: 100
+    early_stopping_patience: 3
+    early_stopping_min_delta: 0.005
+    sharding: none
+    seq_len: 1536
+    num_workers: 8
+    seed: 42

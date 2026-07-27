@@ -7,6 +7,8 @@ fraction of parameters trainable. Needs peft + transformers (igc-dev).
 Author:
 Mus mbayramo@stanford.edu
 """
+from types import SimpleNamespace
+
 import pytest
 
 from igc.modules.llm.peft_lora import (
@@ -14,6 +16,7 @@ from igc.modules.llm.peft_lora import (
     default_save_modules,
     default_target_modules,
     trainable_parameter_summary,
+    validate_loaded_adapter_profile,
 )
 
 
@@ -120,6 +123,101 @@ def test_adapter_method_rslora_and_bad_method():
     assert pm.peft_config["default"].use_rslora is True
     with pytest.raises(ValueError):
         apply_lora(_tiny_gpt2(), model_type="gpt2", adapter_method="bogus")
+
+
+def _loaded_adapter(
+    *,
+    r=32,
+    alpha=64,
+    dropout=0.05,
+    target_modules=("q_proj", "v_proj", "o_proj"),
+    use_rslora=False,
+    use_dora=False,
+    active_adapter="default",
+):
+    """Build a loaded PEFT-model double with one adapter config."""
+    config = SimpleNamespace(
+        r=r,
+        lora_alpha=alpha,
+        lora_dropout=dropout,
+        target_modules=set(target_modules),
+        use_rslora=use_rslora,
+        use_dora=use_dora,
+    )
+    return SimpleNamespace(
+        active_adapter=active_adapter,
+        peft_config={"default": config},
+    )
+
+
+@pytest.mark.parametrize(
+    ("adapter_method", "flags"),
+    [
+        ("lora", {}),
+        ("rslora", {"use_rslora": True}),
+        ("dora", {"use_dora": True}),
+    ],
+)
+def test_validate_loaded_adapter_profile_accepts_exact_profile_match(
+    adapter_method,
+    flags,
+):
+    """Loaded parent adapter config must match the resolved profile exactly."""
+    validate_loaded_adapter_profile(
+        _loaded_adapter(**flags),
+        r=32,
+        alpha=64,
+        dropout=0.05,
+        target_modules=["o_proj", "q_proj", "v_proj"],
+        adapter_method=adapter_method,
+    )
+
+
+@pytest.mark.parametrize(
+    ("adapter_overrides", "profile_overrides", "message"),
+    [
+        ({"r": 16}, {}, "r=16"),
+        ({"alpha": 32}, {}, "lora_alpha=32"),
+        ({"dropout": 0.1}, {}, "lora_dropout=0.1"),
+        ({"target_modules": ("q_proj", "k_proj")}, {}, "target_modules"),
+        ({}, {"target_modules": ["q_proj", "v_proj", "gate_proj"]}, "target_modules"),
+        ({"use_rslora": True}, {"adapter_method": "lora"}, "adapter_method='rslora'"),
+        ({"use_dora": True}, {"adapter_method": "rslora"}, "adapter_method='dora'"),
+    ],
+)
+def test_validate_loaded_adapter_profile_rejects_parent_profile_mismatches(
+    adapter_overrides,
+    profile_overrides,
+    message,
+):
+    """Parent PEFT config drift in rank, alpha, dropout, targets, or method is fatal."""
+    profile = {
+        "r": 32,
+        "alpha": 64,
+        "dropout": 0.05,
+        "target_modules": ["q_proj", "v_proj", "o_proj"],
+        "adapter_method": "lora",
+    }
+    profile.update(profile_overrides)
+
+    with pytest.raises(RuntimeError, match=message):
+        validate_loaded_adapter_profile(
+            _loaded_adapter(**adapter_overrides),
+            **profile,
+        )
+
+
+def test_validate_loaded_adapter_profile_rejects_incompatible_method_flags():
+    """A persisted adapter cannot claim both rsLoRA and DoRA at once."""
+    with pytest.raises(RuntimeError, match="incompatible methods"):
+        validate_loaded_adapter_profile(
+            _loaded_adapter(use_rslora=True, use_dora=True),
+            r=32,
+            alpha=64,
+            dropout=0.05,
+            target_modules=["q_proj", "v_proj", "o_proj"],
+            adapter_method="rslora",
+        )
 
 
 def test_apply_lora_explicit_modules_to_save_override_default_embedding():

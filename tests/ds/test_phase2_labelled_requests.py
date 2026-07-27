@@ -20,13 +20,19 @@ from typing import Any
 import pytest
 
 from igc.ds.phase2_labelled_requests import (
+    D1SamplingBudget,
+    D1_DATASET,
     PHASE2_LABELLED_REQUESTS,
     Phase2LabelledRequestBuilder,
     Phase2LabelledRequestCounters,
+    Phase2LabelledRequestRow,
     Phase2LabelledRequestsSpecError,
     RestApiRecord,
     compare_rest_api_sets,
     empty_set_matches,
+    evaluate_judge_calibration,
+    judge_calibration_passes,
+    judge_result_is_accepted,
     load_phase2_labelled_requests_spec,
     parse_pro_judge_result,
     phase2_acceptance_thresholds_pass,
@@ -56,15 +62,41 @@ def _record(index: int, methods: tuple[str, ...] = ("GET", "HEAD")) -> RestApiRe
     )
 
 
+def _action_record(index: int) -> RestApiRecord:
+    """Build a REST API record with operation and argument metadata."""
+    return RestApiRecord(
+        rest_api=f"/redfish/v1/Systems/{index}/Actions/ComputerSystem.Reset",
+        allowed_methods=("POST",),
+        operation_names=("Reset",),
+        argument_schema={
+            "properties": {"ResetType": {"type": "string"}},
+            "required": ["ResetType"],
+        },
+        json_body={
+            "@odata.id": f"/redfish/v1/Systems/{index}/Actions/ComputerSystem.Reset",
+            "target": f"/redfish/v1/Systems/{index}/Actions/ComputerSystem.Reset",
+        },
+        vendor="fixture_vendor",
+        source_corpus="fixture_corpus",
+    )
+
+
 def _write_spec(path: Path) -> Path:
     """Write a complete test YAML spec with distinctive literal values."""
     path.write_text(
         """
 dataset:
-  name: phase2_labelled_requests
+  name: D1
   prompt_spec_version: phase2-labelled-requests-test-v1
 sampling:
   sample_widths: [1, 2, 3]
+  context_distractors: 4
+  empty_set_candidates: 3
+  max_accepted_rows: 7
+  max_candidates: 11
+  max_accepted_per_combination: 2
+  max_attempts_per_combination: 3
+  max_accepted_per_api: 5
 model_x:
   model_id: ${PHASE1_MODEL_X_MODEL_ID}
   artifact_sha: ${PHASE1_MODEL_X_ARTIFACT_SHA}
@@ -102,10 +134,23 @@ prompts:
     template: |
       Draft one operator request for these records:
       {records_json}
+  model_x_empty_set_draft:
+    system: phase2 test model-x empty-set system prompt from YAML
+    template: |
+      Draft one operator request that matches none of these records:
+      {records_json}
   pro_judge:
     system: phase2 test pro judge system prompt from YAML
     template: |
       Judge whether this request maps to the same unordered REST API set.
+      Records:
+      {records_json}
+      Draft:
+      {draft_text}
+  pro_judge_empty_set:
+    system: phase2 test pro judge empty-set system prompt from YAML
+    template: |
+      Judge whether this request correctly matches none of these records.
       Records:
       {records_json}
       Draft:
@@ -120,6 +165,11 @@ wandb:
     - phase2_labelled_requests/invalid_json_rate
     - phase2_labelled_requests/pro_accept_rate
     - phase2_labelled_requests/rest_api_set_match_rate
+    - phase2_labelled_requests/natural_command_rate
+    - phase2_labelled_requests/ambiguous_rate
+    - phase2_labelled_requests/duplicate_intent_rate
+    - phase2_labelled_requests/extra_intent_rate
+    - phase2_labelled_requests/method_semantics_valid_rate
     - phase2_labelled_requests/empty_set_match_rate
     - phase2_labelled_requests/empty_set_expected_total
     - phase2_labelled_requests/sample_width/k
@@ -133,6 +183,10 @@ acceptance:
   min_rest_api_set_match_rate: 0.98
   max_nonsense_rate: 0.01
   max_invalid_json_rate: 0.01
+judge_calibration:
+  min_precision: 0.99
+  min_recall: 0.90
+  max_false_accept_rate: 0.01
 """,
         encoding="utf-8",
     )
@@ -143,17 +197,27 @@ def _judge_json(
     *,
     accepted: bool = True,
     rest_api_list: list[str] | None = None,
+    natural: bool = True,
     nonsense: bool = False,
+    ambiguous: bool = False,
+    duplicate_intent: bool = False,
+    extra_intents: bool = False,
+    method_semantics_valid: bool = True,
     order_evidence: str = "none",
 ) -> str:
     """Return a compact fake Pro judge JSON response."""
+    _ = order_evidence
     return json.dumps(
         {
             "accepted": accepted,
-            "rest_api_list": [] if rest_api_list is None else rest_api_list,
+            "natural": natural,
             "nonsense": nonsense,
+            "ambiguous": ambiguous,
+            "duplicate_intent": duplicate_intent,
+            "extra_intents": extra_intents,
+            "method_semantics_valid": method_semantics_valid,
+            "covered_api_set": [] if rest_api_list is None else rest_api_list,
             "reason": "fixture",
-            "order_evidence": order_evidence,
         },
     )
 
@@ -167,11 +231,22 @@ def test_loads_prompt_model_judge_generation_and_thresholds_from_yaml(tmp_path: 
     """The Phase 2 spec loader keeps every runtime knob in YAML."""
     spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
 
-    assert spec.dataset_name == PHASE2_LABELLED_REQUESTS
+    assert spec.dataset_name == D1_DATASET
     assert spec.prompt_spec_version == "phase2-labelled-requests-test-v1"
     assert spec.sample_widths == (1, 2, 3)
+    assert spec.context_distractors == 4
+    assert spec.empty_set_candidates == 3
+    assert spec.max_accepted_rows == 7
+    assert spec.max_candidates == 11
+    assert spec.max_accepted_per_combination == 2
+    assert spec.max_attempts_per_combination == 3
+    assert spec.max_accepted_per_api == 5
     assert spec.model_x.model_id == "${PHASE1_MODEL_X_MODEL_ID}"
     assert spec.model_x.artifact_sha == "${PHASE1_MODEL_X_ARTIFACT_SHA}"
+    assert spec.empty_set_model_x_system == (
+        "phase2 test model-x empty-set system prompt from YAML"
+    )
+    assert "matches none" in spec.empty_set_model_x_template
     assert spec.judge.route == "private_pro"
     assert spec.judge.model_id == "${PHASE2_JUDGE_MODEL_ID}"
     assert spec.judge.profile == "${PHASE2_JUDGE_PROFILE}"
@@ -186,19 +261,24 @@ def test_loads_prompt_model_judge_generation_and_thresholds_from_yaml(tmp_path: 
     assert spec.wandb_namespace == PHASE2_LABELLED_REQUESTS
     assert spec.metric_keys == PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS
     assert spec.acceptance_thresholds["min_pro_accept_rate"] == 0.9
+    assert spec.judge_calibration_thresholds == {
+        "min_precision": 0.99,
+        "min_recall": 0.90,
+        "max_false_accept_rate": 0.01,
+    }
 
 
 def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     """Spec validation fails closed for bad YAML shape and contract drift."""
     not_mapping = tmp_path / "not-mapping.yaml"
-    not_mapping.write_text("- phase2_labelled_requests\n", encoding="utf-8")
+    not_mapping.write_text("- D1\n", encoding="utf-8")
     with pytest.raises(Phase2LabelledRequestsSpecError, match="must be a mapping"):
         load_phase2_labelled_requests_spec(not_mapping)
 
     wrong_dataset = _write_spec(tmp_path / "wrong-dataset.yaml")
     wrong_dataset.write_text(
         wrong_dataset.read_text(encoding="utf-8").replace(
-            "name: phase2_labelled_requests",
+            "name: D1",
             "name: legacy_dataset",
         ),
         encoding="utf-8",
@@ -238,6 +318,50 @@ def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     )
     with pytest.raises(Phase2LabelledRequestsSpecError, match="sample_widths"):
         load_phase2_labelled_requests_spec(non_integer_widths)
+
+    too_few_distractors = _write_spec(tmp_path / "too-few-distractors.yaml")
+    too_few_distractors.write_text(
+        too_few_distractors.read_text(encoding="utf-8").replace(
+            "  context_distractors: 4",
+            "  context_distractors: 3",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="context_distractors"):
+        load_phase2_labelled_requests_spec(too_few_distractors)
+
+    missing_finite_control = _write_spec(tmp_path / "missing-finite-control.yaml")
+    missing_finite_control.write_text(
+        missing_finite_control.read_text(encoding="utf-8").replace(
+            "  max_candidates: 11\n",
+            "",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="max_candidates"):
+        load_phase2_labelled_requests_spec(missing_finite_control)
+
+    zero_finite_control = _write_spec(tmp_path / "zero-finite-control.yaml")
+    zero_finite_control.write_text(
+        zero_finite_control.read_text(encoding="utf-8").replace(
+            "  max_accepted_per_api: 5",
+            "  max_accepted_per_api: 0",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="max_accepted_per_api"):
+        load_phase2_labelled_requests_spec(zero_finite_control)
+
+    invalid_budget_relationship = _write_spec(tmp_path / "invalid-budget.yaml")
+    invalid_budget_relationship.write_text(
+        invalid_budget_relationship.read_text(encoding="utf-8").replace(
+            "  max_accepted_per_combination: 2",
+            "  max_accepted_per_combination: 4",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="cannot exceed"):
+        load_phase2_labelled_requests_spec(invalid_budget_relationship)
 
     wrong_namespace = _write_spec(tmp_path / "wrong-namespace.yaml")
     wrong_namespace.write_text(
@@ -423,14 +547,31 @@ def test_spec_loader_rejects_malformed_phase2_specs(tmp_path: Path) -> None:
     with pytest.raises(Phase2LabelledRequestsSpecError, match="must be numeric"):
         load_phase2_labelled_requests_spec(malformed_threshold)
 
+    missing_calibration = _write_spec(tmp_path / "missing-calibration.yaml")
+    missing_calibration.write_text(
+        missing_calibration.read_text(encoding="utf-8").replace(
+            "  max_false_accept_rate: 0.01\n",
+            "",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase2LabelledRequestsSpecError, match="judge_calibration missing"):
+        load_phase2_labelled_requests_spec(missing_calibration)
+
 
 def test_committed_phase2_labelled_requests_config_loads() -> None:
     """The checked-in builder spec stays aligned with the metric registry."""
     spec = load_phase2_labelled_requests_spec("configs/phase2_labelled_requests.yaml")
 
-    assert spec.dataset_name == PHASE2_LABELLED_REQUESTS
+    assert spec.dataset_name == D1_DATASET
     assert spec.metric_keys == PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS
     assert spec.sample_widths == (1, 2, 3)
+    assert spec.context_distractors == 4
+    assert spec.max_accepted_rows == 100000
+    assert spec.max_candidates == 300000
+    assert spec.max_accepted_per_combination == 8
+    assert spec.max_attempts_per_combination == 24
+    assert spec.max_accepted_per_api == 200
     assert spec.model_x.model_id == "${PHASE1_MODEL_X_MODEL_ID}"
     assert spec.model_x.artifact_sha == "${PHASE1_MODEL_X_ARTIFACT_SHA}"
     assert spec.judge.route == "${PHASE2_JUDGE_ROUTE}"
@@ -442,6 +583,11 @@ def test_committed_phase2_labelled_requests_config_loads() -> None:
     assert spec.judge_provider.adapter == "mock"
     assert spec.judge_provider.base_url_env == "PHASE2_JUDGE_BASE_URL"
     assert spec.judge_provider.payload_request_fields == ("route", "profile")
+    assert spec.judge_calibration_thresholds == {
+        "min_precision": 0.99,
+        "min_recall": 0.90,
+        "max_false_accept_rate": 0.01,
+    }
 
 
 def test_committed_phase2_labelled_requests_prompts_render_from_yaml() -> None:
@@ -504,6 +650,51 @@ def test_prompt_rendering_uses_yaml_templates_not_runtime_literals(tmp_path: Pat
         assert literal not in lowercase_runtime_sources
 
 
+def test_rest_api_record_preserves_operation_metadata_in_prompt_and_context() -> None:
+    """Operation names and argument schemas survive prompt and stored D1 context paths."""
+    record = _action_record(1)
+
+    prompt_dict = record.to_prompt_dict()
+    phase2_row = Phase2LabelledRequestRow(
+        text="reset the selected system",
+        records=(record, *tuple(_record(index) for index in range(2, 6))),
+        rest_api_list=(record.rest_api,),
+        prompt_spec_version="phase2-labelled-requests-test-v1",
+        sample_width_k=1,
+        validation={
+            "valid_json": True,
+            "accepted": True,
+            "natural": True,
+            "nonsense": False,
+            "ambiguous": False,
+            "duplicate_intent": False,
+            "extra_intents": False,
+            "method_semantics_valid": True,
+            "covered_api_set": [record.rest_api],
+        },
+    )
+    row = phase2_row.to_dict()
+    context = next(
+        item for item in row["x"]["api_context"]
+        if item["rest_api"] == record.rest_api
+    )
+    phase3_input = to_minimal_phase3_input(phase2_row)
+    phase3_context = next(
+        item for item in phase3_input["api_context"]
+        if item["rest_api"] == record.rest_api
+    )
+
+    assert prompt_dict["operation_names"] == ["Reset"]
+    assert prompt_dict["argument_schema"] == {
+        "properties": {"ResetType": {"type": "string"}},
+        "required": ["ResetType"],
+    }
+    assert context["operation_names"] == ["Reset"]
+    assert context["argument_schema"] == prompt_dict["argument_schema"]
+    assert phase3_context["operation_names"] == ["Reset"]
+    assert phase3_context["argument_schema"] == prompt_dict["argument_schema"]
+
+
 def test_sampling_accepts_only_k_1_2_3_and_preserves_record_payloads() -> None:
     """The builder samples one, two, or three REST records with deterministic RNG."""
     records = tuple(_record(index) for index in range(5))
@@ -527,6 +718,174 @@ def test_sampling_accepts_only_k_1_2_3_and_preserves_record_payloads() -> None:
         sample_phase2_contexts(records[:1], k=2, rng=random.Random(1))
 
 
+@pytest.mark.parametrize(
+    "ceiling",
+    [
+        "max_candidates",
+        "max_attempts_per_combination",
+        "max_accepted_per_combination",
+        "max_accepted_per_api",
+        "max_accepted_rows",
+    ],
+)
+def test_d1_sampling_budget_stops_provider_calls_before_exhausted_ceilings(
+    tmp_path: Path,
+    ceiling: str,
+) -> None:
+    """No draft or judge provider call is made after any finite D1 budget is hit."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    records = tuple(_record(index) for index in range(1, 6))
+    combinations = [(record.rest_api,) for record in records]
+    budget = D1SamplingBudget(
+        max_accepted_rows=1,
+        max_candidates=1,
+        max_accepted_per_combination=1,
+        max_attempts_per_combination=1,
+        max_accepted_per_api=1,
+    )
+    if ceiling == "max_candidates":
+        budget.attempts_total = 1
+    elif ceiling == "max_attempts_per_combination":
+        for combination in combinations:
+            budget.attempts_by_combination[combination] = 1
+    elif ceiling == "max_accepted_per_combination":
+        for combination in combinations:
+            budget.accepted_by_combination[combination] = 1
+    elif ceiling == "max_accepted_per_api":
+        for record in records:
+            budget.accepted_by_api[record.rest_api] = 1
+    elif ceiling == "max_accepted_rows":
+        budget.accepted_total = 1
+    calls = {"draft": 0, "judge": 0}
+    builder = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=lambda _request: calls.__setitem__("draft", calls["draft"] + 1)
+        or "read the system",
+        judge_provider=lambda request: calls.__setitem__("judge", calls["judge"] + 1)
+        or _judge_json(rest_api_list=request["expected_rest_api_list"]),
+        sampling_budget=budget,
+    )
+
+    row, counters = builder.build_one(records, k=1, rng=random.Random(1))
+
+    assert row is None
+    assert calls == {"draft": 0, "judge": 0}
+    assert counters.summary()[_phase2_metric("draft_total")] == 0
+
+
+def test_builder_rejects_insufficient_unique_source_pool_before_budget_or_providers(
+    tmp_path: Path,
+) -> None:
+    """Positive k requires k plus configured distractors before generation starts."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    budget = D1SamplingBudget.from_spec(spec)
+    calls = {"draft": 0, "judge": 0}
+
+    def fail_draft(_request):
+        calls["draft"] += 1
+        raise AssertionError("draft provider must not be called")
+
+    def fail_judge(_request):
+        calls["judge"] += 1
+        raise AssertionError("judge provider must not be called")
+
+    builder = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=fail_draft,
+        judge_provider=fail_judge,
+        sampling_budget=budget,
+    )
+
+    with pytest.raises(ValueError, match="targets plus distractors"):
+        builder.build_one(
+            tuple(_record(index) for index in range(spec.context_distractors)),
+            k=1,
+            rng=random.Random(1),
+        )
+
+    assert calls == {"draft": 0, "judge": 0}
+    assert budget.summary()["observed"] == {
+        "attempts_total": 0,
+        "accepted_total": 0,
+        "empty_set_attempts_total": 0,
+        "empty_set_accepted_total": 0,
+        "unique_combinations_attempted": 0,
+    }
+
+
+def test_builder_rejects_duplicate_rest_api_source_pool_before_budget_or_providers(
+    tmp_path: Path,
+) -> None:
+    """Duplicate source records fail closed before draft/judge calls or budget use."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    duplicate = _record(1)
+    records = (duplicate, duplicate, *tuple(_record(index) for index in range(2, 7)))
+    budget = D1SamplingBudget.from_spec(spec)
+    calls = {"draft": 0, "judge": 0}
+
+    builder = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=lambda _request: calls.__setitem__("draft", calls["draft"] + 1)
+        or "must not draft",
+        judge_provider=lambda _request: calls.__setitem__("judge", calls["judge"] + 1)
+        or _judge_json(rest_api_list=[]),
+        sampling_budget=budget,
+    )
+
+    with pytest.raises(ValueError, match="unique rest_api"):
+        builder.build_one(records, k=1, rng=random.Random(1))
+
+    assert calls == {"draft": 0, "judge": 0}
+    assert budget.summary()["observed"] == {
+        "attempts_total": 0,
+        "accepted_total": 0,
+        "empty_set_attempts_total": 0,
+        "empty_set_accepted_total": 0,
+        "unique_combinations_attempted": 0,
+    }
+
+
+def test_d1_sampling_budget_summary_exposes_limits_and_observed_counts(
+    tmp_path: Path,
+) -> None:
+    """Budget summaries are bounded counters only: limits and observed counts."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    budget = D1SamplingBudget.from_spec(spec)
+    builder = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=lambda _request: "read the selected system",
+        judge_provider=lambda request: _judge_json(
+            rest_api_list=request["expected_rest_api_list"],
+        ),
+        sampling_budget=budget,
+    )
+
+    row, _counters = builder.build_one(
+        tuple(_record(index) for index in range(8)),
+        k=1,
+        rng=random.Random(1),
+    )
+
+    assert row is not None
+    assert budget.summary() == {
+        "limits": {
+            "max_accepted_rows": 7,
+            "max_candidates": 11,
+            "max_accepted_per_combination": 2,
+            "max_attempts_per_combination": 3,
+            "max_accepted_per_api": 5,
+            "max_empty_set_candidates": 3,
+        },
+        "observed": {
+            "attempts_total": 1,
+            "accepted_total": 1,
+            "empty_set_attempts_total": 0,
+            "empty_set_accepted_total": 0,
+            "unique_combinations_attempted": 1,
+        },
+    }
+
+
 def test_unordered_set_comparison_and_empty_set_equality() -> None:
     """API-set correctness ignores order unless a separate order signal says otherwise."""
     expected = ["/redfish/v1/A", "/redfish/v1/B"]
@@ -547,19 +906,22 @@ def test_pro_judge_result_parsing_accepts_plain_and_wrapped_json() -> None:
     plain = parse_pro_judge_result(
         _judge_json(
             rest_api_list=["/redfish/v1/B", "/redfish/v1/A"],
-            order_evidence="explicit_then",
         ),
     )
     assert plain.accepted is True
-    assert plain.rest_api_list == ("/redfish/v1/B", "/redfish/v1/A")
-    assert plain.order_evidence == "explicit_then"
+    assert plain.covered_api_set == ("/redfish/v1/B", "/redfish/v1/A")
+    assert plain.natural is True
+    assert plain.ambiguous is False
+    assert plain.duplicate_intent is False
+    assert plain.extra_intents is False
+    assert plain.method_semantics_valid is True
     assert plain.invalid_json is False
 
     wrapped = parse_pro_judge_result(json.dumps({"y_pred": json.loads(_judge_json())}))
     assert wrapped.accepted is True
     assert wrapped.invalid_json is False
     assert wrapped.nonsense is False
-    assert wrapped.order_evidence == "none"
+    assert wrapped.covered_api_set == ()
 
     rejected = parse_pro_judge_result(
         _judge_json(
@@ -570,18 +932,18 @@ def test_pro_judge_result_parsing_accepts_plain_and_wrapped_json() -> None:
     )
     assert rejected.accepted is False
     assert rejected.invalid_json is False
-    assert rejected.rest_api_list == ("/redfish/v1/A",)
+    assert rejected.covered_api_set == ("/redfish/v1/A",)
     assert rejected.nonsense is False
 
     invalid = parse_pro_judge_result("{not json")
     assert invalid.accepted is False
     assert invalid.invalid_json is True
-    assert invalid.rest_api_list == ()
+    assert invalid.covered_api_set == ()
 
     non_object = parse_pro_judge_result(json.dumps(["not", "a", "mapping"]))
     assert non_object.accepted is False
     assert non_object.invalid_json is True
-    assert non_object.rest_api_list == ()
+    assert non_object.covered_api_set == ()
     assert "not a mapping" in non_object.reason
 
 
@@ -590,7 +952,13 @@ def test_pro_judge_result_parsing_requires_nonsense_boolean() -> None:
     missing = parse_pro_judge_result(
         json.dumps({
             "accepted": True,
-            "rest_api_list": ["/redfish/v1/Systems/1"],
+            "natural": True,
+            "ambiguous": False,
+            "duplicate_intent": False,
+            "extra_intents": False,
+            "method_semantics_valid": True,
+            "covered_api_set": ["/redfish/v1/Systems/1"],
+            "reason": "fixture",
         }),
     )
     assert missing.accepted is False
@@ -602,86 +970,87 @@ def test_pro_judge_result_parsing_requires_accepted_boolean() -> None:
     """Judge output must carry an explicit accepted verdict."""
     missing = parse_pro_judge_result(
         json.dumps({
-            "rest_api_list": ["/redfish/v1/Systems/1"],
+            "natural": True,
             "nonsense": False,
+            "ambiguous": False,
+            "duplicate_intent": False,
+            "extra_intents": False,
+            "method_semantics_valid": True,
+            "covered_api_set": ["/redfish/v1/Systems/1"],
+            "reason": "fixture",
         }),
     )
     assert missing.accepted is False
     assert missing.invalid_json is True
-    assert "accepted or accept" in missing.reason
+    assert "accepted" in missing.reason
 
-    malformed = parse_pro_judge_result(
-        json.dumps({
-            "accepted": "yes",
-            "rest_api_list": ["/redfish/v1/Systems/1"],
-            "nonsense": False,
-        }),
-    )
+    payload = json.loads(_judge_json(rest_api_list=["/redfish/v1/Systems/1"]))
+    payload["accepted"] = "yes"
+    malformed = parse_pro_judge_result(json.dumps(payload))
     assert malformed.accepted is False
     assert malformed.invalid_json is True
     assert "accepted" in malformed.reason
     assert "boolean" in malformed.reason
 
 
-def test_pro_judge_result_parsing_rejects_unknown_order_evidence() -> None:
-    """Order evidence is a controlled enum, not arbitrary judge text."""
-    result = parse_pro_judge_result(
-        json.dumps({
-            "accepted": True,
-            "rest_api_list": ["/redfish/v1/Systems/1"],
-            "nonsense": False,
-            "order_evidence": "maybe_later",
-        }),
-    )
+def test_pro_judge_result_parsing_rejects_extra_order_evidence_field() -> None:
+    """Order evidence is not part of the strict Phase 2 judge verdict."""
+    payload = json.loads(_judge_json(rest_api_list=["/redfish/v1/Systems/1"]))
+    payload["order_evidence"] = "explicit_then"
+    result = parse_pro_judge_result(json.dumps(payload))
     assert result.accepted is False
     assert result.invalid_json is True
-    assert "order_evidence" in result.reason
+    assert "exactly" in result.reason
 
 
-def test_pro_judge_result_parsing_accepts_rest_api_set_alias() -> None:
-    """The parser accepts the judge's legacy rest_api_set alias."""
+def test_pro_judge_result_parsing_rejects_rest_api_set_alias() -> None:
+    """The strict judge parser rejects legacy REST API aliases."""
     result = parse_pro_judge_result(
         json.dumps({
             "accepted": True,
             "rest_api_set": ["/redfish/v1/Systems/2", "/redfish/v1/Systems/1"],
+            "natural": True,
             "nonsense": False,
+            "ambiguous": False,
+            "duplicate_intent": False,
+            "extra_intents": False,
+            "method_semantics_valid": True,
             "reason": "fixture",
         }),
     )
 
-    assert result.accepted is True
-    assert result.invalid_json is False
-    assert result.rest_api_list == (
-        "/redfish/v1/Systems/2",
-        "/redfish/v1/Systems/1",
-    )
+    assert result.accepted is False
+    assert result.invalid_json is True
+    assert result.covered_api_set == ()
 
 
-def test_pro_judge_result_parsing_accepts_accept_boolean_alias() -> None:
-    """The parser accepts the judge's legacy accept boolean alias."""
+def test_pro_judge_result_parsing_rejects_accept_boolean_alias() -> None:
+    """The strict judge parser rejects the legacy accept boolean alias."""
     result = parse_pro_judge_result(
         json.dumps({
             "accept": True,
-            "rest_api_list": ["/redfish/v1/Systems/1"],
+            "natural": True,
             "nonsense": False,
+            "ambiguous": False,
+            "duplicate_intent": False,
+            "extra_intents": False,
+            "method_semantics_valid": True,
+            "covered_api_set": ["/redfish/v1/Systems/1"],
             "reason": "fixture",
         }),
     )
 
-    assert result.accepted is True
-    assert result.invalid_json is False
-    assert result.rest_api_list == ("/redfish/v1/Systems/1",)
+    assert result.accepted is False
+    assert result.invalid_json is True
+    assert result.covered_api_set == ()
 
 
 @pytest.mark.parametrize(
     ("field_name", "field_value"),
     (
-        ("rest_api_list", "/redfish/v1/Systems"),
-        ("rest_api_list", ["/redfish/v1/Systems", 7]),
-        ("rest_api_list", None),
-        ("rest_api_set", "/redfish/v1/Systems"),
-        ("rest_api_set", ["/redfish/v1/Systems", 7]),
-        ("rest_api_set", None),
+        ("covered_api_set", "/redfish/v1/Systems"),
+        ("covered_api_set", ["/redfish/v1/Systems", 7]),
+        ("covered_api_set", None),
     ),
 )
 def test_pro_judge_result_parsing_counts_malformed_rest_api_fields_as_invalid(
@@ -692,41 +1061,62 @@ def test_pro_judge_result_parsing_counts_malformed_rest_api_fields_as_invalid(
     result = parse_pro_judge_result(
         json.dumps({
             "accepted": True,
+            "natural": True,
             field_name: field_value,
             "nonsense": False,
+            "ambiguous": False,
+            "duplicate_intent": False,
+            "extra_intents": False,
+            "method_semantics_valid": True,
             "reason": "fixture",
         }),
     )
 
     assert result.accepted is False
     assert result.invalid_json is True
-    assert result.rest_api_list == ()
+    assert result.covered_api_set == ()
     assert field_name in result.reason
 
 
 def test_pro_judge_result_parsing_requires_rest_api_field() -> None:
     """A bare accepted judge result is malformed, not an accepted empty set."""
-    result = parse_pro_judge_result(json.dumps({"accepted": True, "nonsense": False}))
+    result = parse_pro_judge_result(
+        json.dumps({
+            "accepted": True,
+            "natural": True,
+            "nonsense": False,
+            "ambiguous": False,
+            "duplicate_intent": False,
+            "extra_intents": False,
+            "method_semantics_valid": True,
+            "reason": "fixture",
+        }),
+    )
 
     assert result.accepted is False
     assert result.invalid_json is True
-    assert result.rest_api_list == ()
-    assert "rest_api_list" in result.reason
+    assert result.covered_api_set == ()
+    assert "covered_api_set" in result.reason
 
 
 def test_pro_judge_result_parsing_requires_acceptance_boolean() -> None:
     """A judge result without accepted or accept is malformed output."""
     result = parse_pro_judge_result(
         json.dumps({
-            "rest_api_list": ["/redfish/v1/Systems"],
+            "natural": True,
             "nonsense": False,
+            "ambiguous": False,
+            "duplicate_intent": False,
+            "extra_intents": False,
+            "method_semantics_valid": True,
+            "covered_api_set": ["/redfish/v1/Systems"],
             "reason": "fixture",
         }),
     )
 
     assert result.accepted is False
     assert result.invalid_json is True
-    assert result.rest_api_list == ()
+    assert result.covered_api_set == ()
     assert "accepted" in result.reason
 
 
@@ -736,12 +1126,20 @@ def test_pro_judge_result_parsing_requires_acceptance_boolean() -> None:
         ("accepted", "true"),
         ("accepted", 1),
         ("accepted", None),
-        ("accept", "true"),
-        ("accept", 1),
-        ("accept", None),
+        ("natural", "true"),
+        ("natural", 1),
+        ("natural", None),
         ("nonsense", "false"),
         ("nonsense", 0),
         ("nonsense", None),
+        ("ambiguous", "false"),
+        ("ambiguous", 0),
+        ("duplicate_intent", "false"),
+        ("duplicate_intent", 0),
+        ("extra_intents", "false"),
+        ("extra_intents", 0),
+        ("method_semantics_valid", "true"),
+        ("method_semantics_valid", 1),
     ),
 )
 def test_pro_judge_result_parsing_counts_malformed_booleans_as_invalid(
@@ -749,13 +1147,10 @@ def test_pro_judge_result_parsing_counts_malformed_booleans_as_invalid(
     field_value: Any,
 ) -> None:
     """Malformed judge booleans are invalid output, not truthy/falsy coercions."""
-    payload: dict[str, Any] = {
-        "rest_api_list": ["/redfish/v1/Systems"],
-        "nonsense": False,
-        field_name: field_value,
-    }
-    if field_name not in {"accept", "accepted"}:
-        payload["accepted"] = True
+    payload: dict[str, Any] = json.loads(
+        _judge_json(rest_api_list=["/redfish/v1/Systems"]),
+    )
+    payload[field_name] = field_value
 
     result = parse_pro_judge_result(
         json.dumps(payload),
@@ -763,14 +1158,99 @@ def test_pro_judge_result_parsing_counts_malformed_booleans_as_invalid(
 
     assert result.accepted is False
     assert result.invalid_json is True
-    assert result.rest_api_list == ()
+    assert result.covered_api_set == ()
     assert field_name in result.reason
+
+
+def test_strict_judge_acceptance_requires_every_semantic_flag() -> None:
+    """A row is accepted only when every judge flag and the API set match."""
+    selected = ("/redfish/v1/Systems/1", "/redfish/v1/Managers/1")
+    accepted = parse_pro_judge_result(_judge_json(rest_api_list=list(reversed(selected))))
+
+    assert judge_result_is_accepted(accepted, selected_api_set=selected)
+
+    cases = {
+        "valid_json": "not-json",
+        "accepted": _judge_json(accepted=False, rest_api_list=list(selected)),
+        "natural": _judge_json(natural=False, rest_api_list=list(selected)),
+        "nonsense": _judge_json(nonsense=True, rest_api_list=list(selected)),
+        "ambiguous": _judge_json(ambiguous=True, rest_api_list=list(selected)),
+        "duplicate_intent": _judge_json(duplicate_intent=True, rest_api_list=list(selected)),
+        "extra_intents": _judge_json(extra_intents=True, rest_api_list=list(selected)),
+        "method_semantics_valid": _judge_json(
+            method_semantics_valid=False,
+            rest_api_list=list(selected),
+        ),
+        "covered_api_set_missing": _judge_json(rest_api_list=[selected[0]]),
+        "covered_api_set_extra": _judge_json(rest_api_list=[*selected, "/redfish/v1/Chassis/1"]),
+    }
+
+    for label, raw in cases.items():
+        verdict = parse_pro_judge_result(raw)
+        assert not judge_result_is_accepted(verdict, selected_api_set=selected), label
+
+
+def test_judge_calibration_floors_require_precision_recall_and_false_accept_rate(
+    tmp_path: Path,
+) -> None:
+    """Calibration must pass all YAML floors: .99 precision, .90 recall, .01 false accept."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    target = ("/redfish/v1/Systems/1",)
+    strict_accept = parse_pro_judge_result(_judge_json(rest_api_list=list(target)))
+    strict_reject = parse_pro_judge_result(_judge_json(accepted=False, rest_api_list=list(target)))
+
+    passing = evaluate_judge_calibration([
+        (strict_accept, target, True),
+        (strict_accept, target, True),
+        (strict_reject, target, False),
+        (strict_reject, target, False),
+    ])
+    low_precision = evaluate_judge_calibration([
+        (strict_accept, target, True),
+        (strict_accept, target, False),
+    ])
+    low_recall = evaluate_judge_calibration([
+        (strict_accept, target, True),
+        (strict_reject, target, True),
+        (strict_reject, target, False),
+    ])
+    false_accept = evaluate_judge_calibration([
+        (strict_accept, target, True),
+        (strict_accept, target, False),
+        (strict_reject, target, False),
+    ])
+
+    assert passing["precision"] == 1.0
+    assert passing["recall"] == 1.0
+    assert passing["false_accept_rate"] == 0.0
+    assert passing["positive_examples"] == 2
+    assert passing["negative_examples"] == 2
+    assert passing["examples"] == 4
+    assert judge_calibration_passes(spec, passing)
+    assert not judge_calibration_passes(spec, low_precision)
+    assert not judge_calibration_passes(spec, low_recall)
+    assert not judge_calibration_passes(spec, false_accept)
+
+
+@pytest.mark.parametrize("human_accept", [True, False])
+def test_judge_calibration_requires_positive_and_negative_human_examples(
+    human_accept: bool,
+) -> None:
+    """Calibration evidence must include both human-accepted and human-rejected rows."""
+    target = ("/redfish/v1/Systems/1",)
+    verdict = parse_pro_judge_result(_judge_json(rest_api_list=list(target)))
+
+    with pytest.raises(ValueError, match="human-accepted and human-rejected"):
+        evaluate_judge_calibration([
+            (verdict, target, human_accept),
+            (verdict, target, human_accept),
+        ])
 
 
 def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -> None:
     """Offline build plumbing calls injected providers and summarizes draft quality."""
     spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
-    records = tuple(_record(index) for index in range(4))
+    records = tuple(_record(index) for index in range(8))
     seen: dict[str, dict] = {}
 
     def draft_provider(request: dict) -> str:
@@ -782,7 +1262,7 @@ def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -
         """Accept exactly the sampled REST API set in a different order."""
         seen["judge"] = request
         expected = list(reversed(request["expected_rest_api_list"]))
-        return _judge_json(rest_api_list=expected, order_evidence="explicit_then")
+        return _judge_json(rest_api_list=expected)
 
     builder = Phase2LabelledRequestBuilder(
         spec,
@@ -794,20 +1274,30 @@ def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -
 
     assert row is not None
     data = row.to_dict()
-    assert data["dataset"] == PHASE2_LABELLED_REQUESTS
+    assert data["phase"] == 2
+    assert data["dataset"] == "D1"
+    assert data["source_dataset"] == "D0"
     assert data["task"] == "text_to_rest_api_list"
     assert data["x"]["text"] == "show both sampled systems"
     assert "records" not in data["x"]
-    assert len(data["x"]["json"]) == 2
-    assert data["x"]["rest_api_list"] == data["y_true"]["rest_api_list"]
-    assert set(data["x"]["allowed_methods"]) == set(data["y_true"]["rest_api_list"])
-    assert data["y_true"]["order_evidence"] == "explicit_then"
+    assert "rest_api_list" not in data["x"]
+    assert len(data["x"]["api_context"]) == 6
+    context_apis = {context["rest_api"] for context in data["x"]["api_context"]}
+    assert set(data["y_true"]["rest_api_list"]) <= context_apis
+    assert len(context_apis - set(data["y_true"]["rest_api_list"])) >= 4
+    assert all("selected" not in context for context in data["x"]["api_context"])
     assert data["validation"]["set_coverage_preserved"] is True
     assert data["validation"]["review_judged"] is True
+    assert data["validation"]["covered_api_set"] == data["y_true"]["rest_api_list"]
     assert set(summary) == set(PHASE2_LABELLED_REQUESTS_WANDB_METRIC_KEYS)
     assert summary[_phase2_metric("draft_total")] == 1
     assert summary[_phase2_metric("accepted_total")] == 1
     assert summary[_phase2_metric("rest_api_set_match_rate")] == 1.0
+    assert summary[_phase2_metric("natural_command_rate")] == 1.0
+    assert summary[_phase2_metric("ambiguous_rate")] == 0.0
+    assert summary[_phase2_metric("duplicate_intent_rate")] == 0.0
+    assert summary[_phase2_metric("extra_intent_rate")] == 0.0
+    assert summary[_phase2_metric("method_semantics_valid_rate")] == 1.0
     assert summary[_phase2_metric("sample_width", "k")] == 2
     assert summary[_phase2_metric("vendor", "source_corpus")] == "fixture_vendor:fixture_corpus"
     assert summary[_phase2_metric("prompt_spec_version")] == "phase2-labelled-requests-test-v1"
@@ -819,6 +1309,133 @@ def test_builder_uses_injected_providers_and_counts_rejections(tmp_path: Path) -
     assert seen["judge"]["model_id"] == "${PHASE2_JUDGE_MODEL_ID}"
     assert seen["judge"]["profile"] == "${PHASE2_JUDGE_PROFILE}"
     assert seen["judge"]["route"] == "private_pro"
+
+
+def test_builder_k0_produces_judged_empty_set_negative_row(tmp_path: Path) -> None:
+    """k=0 is a real judged negative row with context but no selected target set."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    records = tuple(_record(index) for index in range(8))
+    seen: dict[str, dict] = {}
+
+    def draft_provider(request: dict) -> str:
+        seen["draft"] = request
+        return "show a Redfish request that intentionally matches no listed resource"
+
+    def judge_provider(request: dict) -> str:
+        seen["judge"] = request
+        return _judge_json(rest_api_list=request["expected_rest_api_list"])
+
+    row, counters = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=draft_provider,
+        judge_provider=judge_provider,
+    ).build_one(records, k=0, rng=random.Random(17))
+
+    assert row is not None
+    data = row.to_dict()
+    assert data["x"]["text"] == (
+        "show a Redfish request that intentionally matches no listed resource"
+    )
+    assert data["y_true"]["rest_api_list"] == []
+    assert data["metadata"]["sample_width_k"] == 0
+    assert len(data["x"]["api_context"]) == spec.context_distractors
+    assert {context["rest_api"] for context in data["x"]["api_context"]}
+    assert seen["draft"]["sample_width"] == 0
+    assert spec.empty_set_model_x_system in seen["draft"]["prompt"]
+    assert "matches none" in seen["draft"]["prompt"]
+    assert seen["judge"]["expected_rest_api_list"] == []
+    summary = counters.summary()
+    assert summary[_phase2_metric("draft_total")] == 1
+    assert summary[_phase2_metric("accepted_total")] == 1
+    assert summary[_phase2_metric("empty_set_expected_total")] == 1
+    assert summary[_phase2_metric("empty_set_match_rate")] == 1.0
+    assert summary[_phase2_metric("sample_width", "k")] == 0
+
+
+def test_builder_k0_uses_separate_budget_from_positive_api_limits(tmp_path: Path) -> None:
+    """Repeated k=0 contexts consume only the separately bounded negative budget."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    records = tuple(_record(index) for index in range(8))
+    budget = D1SamplingBudget(
+        max_accepted_rows=10,
+        max_candidates=10,
+        max_accepted_per_combination=1,
+        max_attempts_per_combination=1,
+        max_accepted_per_api=1,
+        max_empty_set_candidates=2,
+    )
+    calls = {"draft": 0, "judge": 0}
+
+    def draft_provider(_request: dict) -> str:
+        calls["draft"] += 1
+        return "request an operation that matches none of the listed resources"
+
+    def judge_provider(request: dict) -> str:
+        calls["judge"] += 1
+        return _judge_json(rest_api_list=request["expected_rest_api_list"])
+
+    builder = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=draft_provider,
+        judge_provider=judge_provider,
+        sampling_budget=budget,
+    )
+
+    first, _ = builder.build_one(records, k=0, rng=random.Random(17))
+    second, _ = builder.build_one(records, k=0, rng=random.Random(17))
+    exhausted, _ = builder.build_one(records, k=0, rng=random.Random(17))
+    positive, _ = builder.build_one(records, k=1, rng=random.Random(17))
+
+    assert first is not None
+    assert second is not None
+    assert exhausted is None
+    assert positive is not None
+    assert calls == {"draft": 3, "judge": 3}
+    assert budget.empty_set_attempts_total == 2
+    assert budget.empty_set_accepted_total == 2
+    assert budget.accepted_by_combination.total() == 1
+    assert budget.accepted_by_api.total() == 1
+
+
+@pytest.mark.parametrize("width", [1, 2, 3])
+def test_builder_positive_widths_keep_exact_selected_cardinality(
+    tmp_path: Path,
+    width: int,
+) -> None:
+    """k=1/2/3 still produce exact positive API sets plus configured distractors."""
+    spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
+    records = tuple(_record(index) for index in range(10))
+    seen: dict[str, dict] = {}
+
+    def draft_provider(request: dict) -> str:
+        seen["draft"] = request
+        return f"show {width} selected Redfish resources"
+
+    def judge_provider(request: dict) -> str:
+        seen["judge"] = request
+        return _judge_json(rest_api_list=request["expected_rest_api_list"])
+
+    row, counters = Phase2LabelledRequestBuilder(
+        spec,
+        draft_provider=draft_provider,
+        judge_provider=judge_provider,
+    ).build_one(records, k=width, rng=random.Random(width))
+
+    assert row is not None
+    data = row.to_dict()
+    assert len(data["y_true"]["rest_api_list"]) == width
+    assert data["metadata"]["sample_width_k"] == width
+    assert len(data["x"]["api_context"]) == width + spec.context_distractors
+    context_apis = {context["rest_api"] for context in data["x"]["api_context"]}
+    assert set(data["y_true"]["rest_api_list"]) <= context_apis
+    assert len(context_apis - set(data["y_true"]["rest_api_list"])) >= 4
+    assert seen["draft"]["sample_width"] == width
+    assert spec.model_x_system in seen["draft"]["prompt"]
+    assert set(seen["judge"]["expected_rest_api_list"]) == set(
+        data["y_true"]["rest_api_list"],
+    )
+    assert len(seen["judge"]["expected_rest_api_list"]) == width
+    assert counters.summary()[_phase2_metric("sample_width", "k")] == width
 
 
 def test_builder_returns_none_and_counts_rejection_on_set_mismatch(tmp_path: Path) -> None:
@@ -833,14 +1450,15 @@ def test_builder_returns_none_and_counts_rejection_on_set_mismatch(tmp_path: Pat
         ),
     )
 
-    row, counters = builder.build_one((_record(1),), k=1, rng=random.Random(1))
+    records = tuple(_record(index) for index in range(1, 6))
+    row, counters = builder.build_one(records, k=1, rng=random.Random(1))
     summary = counters.summary()
 
     assert row is None
     assert summary[_phase2_metric("draft_total")] == 1
     assert summary[_phase2_metric("accepted_total")] == 0
     assert summary[_phase2_metric("rejected_total")] == 1
-    assert summary[_phase2_metric("pro_accept_rate")] == 1.0
+    assert summary[_phase2_metric("pro_accept_rate")] == 0.0
     assert summary[_phase2_metric("rest_api_set_match_rate")] == 0.0
 
 
@@ -857,7 +1475,8 @@ def test_builder_rejects_accepted_nonsense_even_when_set_matches(tmp_path: Path)
         ),
     )
 
-    row, counters = builder.build_one((_record(1),), k=1, rng=random.Random(1))
+    records = tuple(_record(index) for index in range(1, 6))
+    row, counters = builder.build_one(records, k=1, rng=random.Random(1))
     summary = counters.summary()
 
     assert row is None
@@ -865,7 +1484,7 @@ def test_builder_rejects_accepted_nonsense_even_when_set_matches(tmp_path: Path)
     assert summary[_phase2_metric("accepted_total")] == 0
     assert summary[_phase2_metric("rejected_total")] == 1
     assert summary[_phase2_metric("nonsense_rate")] == 1.0
-    assert summary[_phase2_metric("pro_accept_rate")] == 1.0
+    assert summary[_phase2_metric("pro_accept_rate")] == 0.0
     assert summary[_phase2_metric("rest_api_set_match_rate")] == 1.0
 
 
@@ -894,6 +1513,11 @@ def test_counters_track_nonsense_invalid_json_and_empty_set_matches() -> None:
     assert summary[_phase2_metric("invalid_json_rate")] == pytest.approx(1 / 3)
     assert summary[_phase2_metric("pro_accept_rate")] == pytest.approx(1 / 3)
     assert summary[_phase2_metric("rest_api_set_match_rate")] == pytest.approx(1 / 3)
+    assert summary[_phase2_metric("natural_command_rate")] == pytest.approx(1 / 3)
+    assert summary[_phase2_metric("ambiguous_rate")] == 0.0
+    assert summary[_phase2_metric("duplicate_intent_rate")] == 0.0
+    assert summary[_phase2_metric("extra_intent_rate")] == 0.0
+    assert summary[_phase2_metric("method_semantics_valid_rate")] == pytest.approx(2 / 3)
     assert summary[_phase2_metric("empty_set_match_rate")] == 1.0
     assert summary[_phase2_metric("empty_set_expected_total")] == 1
 
@@ -908,6 +1532,11 @@ def test_counter_summary_binds_semantic_metric_names() -> None:
         nonsense_total=1,
         invalid_json_total=2,
         rest_api_set_match_total=4,
+        natural_total=5,
+        ambiguous_total=1,
+        duplicate_intent_total=2,
+        extra_intent_total=3,
+        method_semantics_valid_total=4,
         empty_set_expected_total=3,
         empty_set_match_total=2,
         sample_width_k=3,
@@ -927,6 +1556,11 @@ def test_counter_summary_binds_semantic_metric_names() -> None:
     assert summary[_phase2_metric("invalid_json_rate")] == pytest.approx(2 / 7)
     assert summary[_phase2_metric("pro_accept_rate")] == pytest.approx(6 / 7)
     assert summary[_phase2_metric("rest_api_set_match_rate")] == pytest.approx(4 / 7)
+    assert summary[_phase2_metric("natural_command_rate")] == pytest.approx(5 / 7)
+    assert summary[_phase2_metric("ambiguous_rate")] == pytest.approx(1 / 7)
+    assert summary[_phase2_metric("duplicate_intent_rate")] == pytest.approx(2 / 7)
+    assert summary[_phase2_metric("extra_intent_rate")] == pytest.approx(3 / 7)
+    assert summary[_phase2_metric("method_semantics_valid_rate")] == pytest.approx(4 / 7)
     assert summary[_phase2_metric("empty_set_match_rate")] == pytest.approx(2 / 3)
     assert summary[_phase2_metric("empty_set_expected_total")] == 3
     assert summary[_phase2_metric("sample_width", "k")] == 3
@@ -968,6 +1602,11 @@ def test_phase2_labelled_request_wandb_keys_have_required_namespace_shape() -> N
         phase_metric(PHASE2_LABELLED_REQUESTS, "invalid_json_rate"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "pro_accept_rate"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "rest_api_set_match_rate"),
+        phase_metric(PHASE2_LABELLED_REQUESTS, "natural_command_rate"),
+        phase_metric(PHASE2_LABELLED_REQUESTS, "ambiguous_rate"),
+        phase_metric(PHASE2_LABELLED_REQUESTS, "duplicate_intent_rate"),
+        phase_metric(PHASE2_LABELLED_REQUESTS, "extra_intent_rate"),
+        phase_metric(PHASE2_LABELLED_REQUESTS, "method_semantics_valid_rate"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_match_rate"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "empty_set_expected_total"),
         phase_metric(PHASE2_LABELLED_REQUESTS, "sample_width", "k"),
@@ -985,19 +1624,26 @@ def test_phase2_labelled_request_wandb_keys_have_required_namespace_shape() -> N
 def test_minimal_phase3_fixture_keeps_phase3_arguments_separate(tmp_path: Path) -> None:
     """Phase 2 can hand text and APIs to Phase 3 without inventing call labels."""
     spec = load_phase2_labelled_requests_spec(_write_spec(tmp_path / "phase2.yaml"))
-    records = (_record(1),)
+    records = tuple(_record(index) for index in range(5))
     builder = Phase2LabelledRequestBuilder(
         spec,
         draft_provider=lambda request: "show system one",
-        judge_provider=lambda request: _judge_json(rest_api_list=request["expected_rest_api_list"]),
+        judge_provider=lambda request: _judge_json(
+            rest_api_list=request["expected_rest_api_list"],
+        ),
     )
     row, _ = builder.build_one(records, k=1, rng=random.Random(1))
 
     phase3_input = to_minimal_phase3_input(row)
 
     assert phase3_input["text"] == "show system one"
-    assert phase3_input["rest_api_list"] == ["/redfish/v1/Systems/1"]
-    assert phase3_input["allowed_methods"]["/redfish/v1/Systems/1"] == ["GET", "HEAD"]
+    assert row is not None
+    assert phase3_input["rest_api_list"] == sorted(row.rest_api_list)
+    assert "api_context" in phase3_input
+    assert {
+        context["rest_api"]
+        for context in phase3_input["api_context"]
+    } >= set(row.rest_api_list)
     assert "calls" not in phase3_input
     encoded = json.dumps(phase3_input)
     assert '"method":' not in encoded
@@ -1014,19 +1660,15 @@ def test_phase2_module_does_not_import_phase3_argument_runtime() -> None:
     """The labelled-request builder stays independent from Phase 3 call logic."""
     source = Path("igc/ds/phase2_labelled_requests.py").read_text(encoding="utf-8")
     module = ast.parse(source)
-    imported_modules: set[str] = set()
     imported_names: set[str] = set()
     for node in ast.walk(module):
-        if isinstance(node, ast.Import):
-            imported_modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                imported_modules.add(node.module)
+        if isinstance(node, ast.ImportFrom):
             imported_names.update(alias.name for alias in node.names)
 
-    assert "igc.ds.rest_goal_contract" not in imported_modules
     assert "build_ordered_call_row" not in imported_names
     assert "parse_ordered_calls_y_pred" not in imported_names
+    assert "build_call_row" not in imported_names
+    assert "parse_calls_y_pred" not in imported_names
 
 
 # Author: Mus mbayramo@stanford.edu

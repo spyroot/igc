@@ -1,0 +1,60 @@
+schema_version: phase3_argument_extractor_promotion.v1
+phase: 3
+source_dataset: D1
+task: text_and_rest_api_list_to_calls
+target_semantics: unordered_unique_call_set
+thresholds:
+  min_json_parse_rate: 0.995
+  min_call_set_exact_match_rate: 0.90
+  min_rest_api_coverage_exact: 0.99
+  min_method_exact_match_rate: 0.98
+  min_operation_name_exact_match_rate: 0.98
+  min_argument_schema_valid_rate: 0.995
+  min_argument_value_grounding_rate: 0.99
+  min_arguments_exact_match_rate: 0.90
+  min_readonly_empty_arguments_rate: 1.0
+  max_invalid_method_rate: 0.0
+  max_duplicate_call_rate: 0.0
+  max_missing_call_rate: 0.01
+  max_extra_call_rate: 0.01
+hard_checks:
+  - immutable_full_manifest
+  - full_manifest_sha_matches_file
+  - immutable_train_manifest
+  - disjoint_train_heldout_release
+  - real_promoted_parent_checkpoint
+  - real_heldout_data
+  - artifact_sha
+  - checkpoint_reload_succeeded
+  - inference_smoke_succeeded
+  - run_report_exists
+  - run_role_and_task_lineage
+  - run_train_manifest_matches_file
+  - run_source_full_manifest_matches_file
+  - run_train_data_matches_file
+  - run_eval_manifest_matches_file
+  - run_eval_data_matches_file
+  - foundation_model_sha_exists
+  - tokenizer_sha_exists
+  - task_spec_sha_exists
+  - training_code_commit_exists
+  - optimizer_steps_positive
+  - finite_run_metrics
+  - finite_promotion_metrics
+  - best_checkpoint_promoted
+  - d1_phase2_phase3_view_consistency
+  - heldout_width_k1_present
+  - heldout_width_k2_present
+  - heldout_width_k3_present
+  - argument_class_read_only_empty_present
+  - argument_class_patch_scalar_present
+  - argument_class_patch_nested_present
+  - argument_class_post_no_arguments_present
+  - argument_class_post_one_argument_present
+  - argument_class_post_multiple_arguments_present
+  - argument_class_delete_no_body_present
+  - http_method_get_present
+  - http_method_head_present
+  - http_method_patch_present
+  - http_method_post_present
+  - http_method_delete_present

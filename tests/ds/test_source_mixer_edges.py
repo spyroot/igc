@@ -59,7 +59,7 @@ def test_eval_threshold_is_strictly_less_than_fraction(monkeypatch):
     monkeypatch.setattr(
         mixer_module,
         "unit_hash",
-        lambda key, seed: hash_by_url[key],
+        lambda key, seed: hash_by_url[key.split("\0", 1)[-1]],
     )
     mix = SourceMix(
         [_source("real", TrustLevel.REAL, list(hash_by_url))],
@@ -88,7 +88,7 @@ def test_all_same_trust_tier_split_preserves_source_order(monkeypatch):
     monkeypatch.setattr(
         mixer_module,
         "unit_hash",
-        lambda key, seed: hash_by_url[key],
+        lambda key, seed: hash_by_url[key.split("\0", 1)[-1]],
     )
     mix = SourceMix(
         [_source("replay", TrustLevel.REPLAY, urls)],
@@ -102,8 +102,8 @@ def test_all_same_trust_tier_split_preserves_source_order(monkeypatch):
     assert [record.url for record in held_out] == ["/redfish/v1/a", "/redfish/v1/c"]
 
 
-def test_equal_trust_dedup_keeps_first_seen_record():
-    """Equal-trust duplicate URLs keep the adapter-order winner."""
+def test_equal_trust_dedup_preserves_same_url_from_distinct_sources():
+    """Source-qualified identities preserve independent vendor observations."""
     first = _Source(
         "real_a",
         TrustLevel.REAL,
@@ -117,5 +117,20 @@ def test_equal_trust_dedup_keeps_first_seen_record():
 
     records = SourceMix([first, second], dedup=True).records()
 
+    assert [record.source for record in records] == ["real_a", "real_b"]
+
+
+def test_equal_trust_dedup_keeps_first_same_source_record():
+    """A repeated URL inside one source keeps the first observation."""
+    source = _Source(
+        "real_a",
+        TrustLevel.REAL,
+        [
+            _record("/redfish/v1/shared", "real_a", TrustLevel.REAL),
+            _record("/redfish/v1/shared", "real_a", TrustLevel.REAL),
+        ],
+    )
+
+    records = SourceMix([source], dedup=True).records()
+
     assert len(records) == 1
-    assert records[0].source == "real_a"

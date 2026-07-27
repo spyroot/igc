@@ -1,0 +1,14 @@
+schema_version: phase1_instruction_retention.v1
+task: d1_human_text_generation
+required_k:
+  - 1
+  - 2
+  - 3
+metrics:
+  - natural_command_rate
+  - judge_acceptance_rate
+  - missing_intent_rate
+  - extra_intent_rate
+  - nonsense_rate
+promotion:
+  max_judge_accept_rate_drop: 0.03

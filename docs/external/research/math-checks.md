@@ -10,7 +10,7 @@ and invalid objectives early.
 Current status: **REVISE**.
 
 The direction is sound: move from raw JSON text embeddings and one-hot URL/method actions toward a
-structured Redfish state, legal `ToolAction` candidates, evaluator rewards, and replay-ready
+structured Redfish state, legal action candidates, evaluator rewards, and replay-ready
 transitions. The current DQN/HER path is not yet a trustworthy learning baseline.
 
 Do not report the legacy RL trainer as solving a workload until the checks below are green.
@@ -24,7 +24,7 @@ Do not report the legacy RL trainer as solving a workload until the checks below
 | HER relabeling | Relabeling uses the final pre-action state, not a future achieved next state. | Relabeled goals must come from future achieved observations or an evaluator-produced `achieved_goal`. |
 | Done semantics | Success, timeout, 4xx, and 5xx currently mix `done`, `terminated`, and `truncated`. | Define a single terminal/truncated table and test every branch. |
 | Goal reward | Current checks use tensor equality or `allclose` over embeddings. | `Evaluator.verify(goal, obs)` must compute success and dense reward over structured state. |
-| Legal actions | Current envs expose continuous one-hot `Box(num_urls + methods)`. | `ToolCatalog.available_actions(obs)` must mask illegal actions before selection. |
+| Legal actions | Current envs expose continuous one-hot `Box(num_urls + methods)`. | The environment action catalog must mask illegal actions before selection. |
 | Argument values | `igc/core/action_render.py` intentionally renders action templates without concrete values. | A second-stage argument/effect path must distinguish value choices before mutating actions are trusted. |
 
 ## Math contract
@@ -81,13 +81,13 @@ k_i = f_action(candidate_i)
 Q(obs, candidate_i) = q dot k_i
 ```
 
-The candidate list must come from `ToolCatalog.available_actions(obs)`. Padding is masked to
+The candidate list must come from the environment's legal action catalog. Padding is masked to
 `-inf`. The score chooses an action template; concrete argument values require a separate checked
 stage before execution.
 
 ### State compression
 
-The first compact state target is `RedfishStateV0`, a JSON-serializable structured payload under
+The first compact state target is a JSON-serializable structured payload under
 `Observation.structured`. Learned graph pooling, bottlenecks, or latent compression wait until
 these invariants are fixture-tested:
 
@@ -125,34 +125,17 @@ flowchart LR
 | Stage | Objective | Required math checkout |
 | --- | --- | --- |
 | RedfishBackbone / `model_x` | language-model loss over Redfish text | tokenization mask, loss finite, small batch overfit, no hidden-size assumptions. |
-| StateEncoder / StatePooler | pooled state reconstruction or auxiliary prediction | shape contract, no `seq_len * hidden_size` decoder blowup, finite gradients. |
-| GoalExtractor / GoalEncoder | instruction to atomic goal refs and latent sub-goals | atomic-goal exact match, dependency-edge F1, hard-negative retrieval, collapse checks. |
+| StateEncoder | compact state reconstruction or auxiliary prediction | shape contract, no `seq_len * hidden_size` decoder blowup, finite gradients. |
+| Goal encoders | Phase 3 calls to separate `z_rest` and `z_method` views | call-set coverage, value-retention boundary, hard negatives, collapse checks. |
 | RewardVerifier | structured success and dense reward | reward table for success/failure/progress/no-op; no embedding equality as final verifier. |
 | WorldModel | next state/status/task phase | one-step prediction target, terminal-state handling, rollout drift metric. |
 | RLPolicy | candidate-action Q-learning with HER | terminal mask, legal-action mask, HER achieved-goal relabel, target sanity. |
 
-## Local tool policy
+## Validation surface
 
-Default math checks must run offline in the CPU `igc-dev` environment from `environment-dev.yaml`.
-Use:
-
-```bash
-KMP_DUPLICATE_LIB_OK=TRUE \
-OMP_NUM_THREADS=1 \
-TRANSFORMERS_OFFLINE=1 \
-HF_DATASETS_OFFLINE=1 \
-conda run -n igc-dev python -m pytest -q <math/test node ids>
-```
-
-Allowed local tools:
-
-- Python standard library for exact fixtures and shape checks.
-- NumPy, SciPy, SymPy, scikit-learn, and PyTorch in `igc-dev`.
-- MATLAB, Octave, or Wolfram tools only when installed and activated locally; they are optional and
-  must not be required by the default gate.
-
-Network, GPU, live Redfish hosts, private endpoints, and captured payloads are not required for this
-math gate.
+Default math checks are offline CPU jobs dispatched through the project CI gate. They use the
+project environment and deterministic fixtures, require no network, GPU, live Redfish host, private
+endpoint, or captured payload, and publish evidence for the exact commit under test.
 
 ## Next math tests to queue
 
@@ -160,8 +143,8 @@ math gate.
 2. Bellman terminal-success target remains positive and does not bootstrap.
 3. HER relabeling uses future `achieved_goal` and recomputes evaluator reward.
 4. Vector env keeps per-env terminal/truncated state without shrinking batch observations.
-5. `ToolCatalog.available_actions(obs)` masks illegal methods before selection.
-6. `RedfishStateV0` extractor distinguishes pending settings/task phase from already-applied state.
+5. The environment action catalog masks illegal methods before selection.
+6. The observation encoder distinguishes pending settings/task phase from already-applied state.
 7. Candidate scoring handles empty, one, and padded candidate sets.
 8. One-step optimizer smoke verifies finite loss and gradients on the smallest deterministic batch.
 

@@ -12,7 +12,7 @@ from transformers import GPT2LMHeadModel
 from igc.ds.redfish_masked_dataset import MaskedJSONDataset
 from igc.modules.base.igc_metric_logger import MetricLogger
 from igc.modules.igc_rl_module import IgcRlModule
-from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
+from igc.modules.train.sft import SFTTrainer
 from igc.shared.shared_main import shared_main
 
 
@@ -33,7 +33,7 @@ def main(cmd):
     model = model.to(cpu_device)
     model.resize_token_embeddings(len(dataset.tokenizer))
 
-    latent_module = LlmEmbeddingsTrainer(
+    latent_module = SFTTrainer(
         "test_mod", cmd, model, dataset.tokenizer, dataset=dataset,
         metric_logger=metric_logger, is_inference=False, device=cpu_device)
     latent_module.load_checkpoint("experiments/gpt2_4_AdamW2_StepLR_lr_1e-05/state_encoder",

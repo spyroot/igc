@@ -87,9 +87,11 @@ def test_phase1_gate_dry_run_reads_all_model_inputs_from_yaml(tmp_path):
     payload = gate.run_gate(args)
 
     assert payload["status"] == "pass"
+    assert payload["role"] == "model_x"
     assert payload["base_model"] == "local/tiny-model"
     assert payload["max_new_tokens"] == 4
     assert payload["seed"] == 0
+    assert payload["artifact_sha"] == f"sha256:{payload['adapter_model_sha256']}"
     assert payload["adapter_rank"] == 32
     assert payload["results"][0]["dry_run"] is True
     assert payload["results"][0]["max_new_tokens"] == 4

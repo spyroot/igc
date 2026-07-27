@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from igc.ds.sources.base import SourceRecord, TrustLevel
+from igc.ds.sources.mixer import DataManifest
 from igc.modules.igc_main import IgcMain
 
 
@@ -30,13 +32,84 @@ class _FakeCorpusDataset:
 
     instances = []
 
-    def __init__(self, corpus_dir, default_tokenize=None, max_len=None, objective=None):
+    def __init__(
+        self,
+        corpus_dir,
+        default_tokenize=None,
+        max_len=None,
+        tokenizer=None,
+        objective=None,
+    ):
         self.corpus_dir = Path(corpus_dir)
         self.default_tokenize = default_tokenize
         self.max_len = max_len
+        self.input_tokenizer = tokenizer
         self.objective = objective
-        self.tokenizer = object()
+        self.tokenizer = tokenizer or object()
+        suffix = "b" if tokenizer is not None else "a"
+        self.data_sha256 = "sha256:" + suffix * 64
+        self.eval_split_sha256 = ""
         _FakeCorpusDataset.instances.append(self)
+
+    def set_eval_split_sha256(self, value):
+        self.eval_split_sha256 = value
+
+
+class _FakeSourceMix:
+    """Deterministic train/heldout split for materialization tests."""
+
+    def __init__(self, _sources):
+        self.train_records = [
+            SourceRecord(
+                url="/redfish/v1/Systems/Train",
+                response={
+                    "@odata.id": "/redfish/v1/Systems/Train",
+                    "@odata.type": "#ComputerSystem.v1_20_0.ComputerSystem",
+                    "Id": "Train",
+                },
+                source="real_dell",
+                trust_level=TrustLevel.REAL,
+                allowed_methods=["GET", "HEAD", "PATCH"],
+                vendor="dell",
+                provenance={"corpus_id": "dell-xr8620t"},
+            )
+        ]
+        self.heldout_records = [
+            SourceRecord(
+                url="/redfish/v1/Systems/Heldout",
+                response={
+                    "@odata.id": "/redfish/v1/Systems/Heldout",
+                    "@odata.type": "#ComputerSystem.v1_20_0.ComputerSystem",
+                    "Id": "Heldout",
+                },
+                source="real_dell",
+                trust_level=TrustLevel.REAL,
+                allowed_methods=["GET", "HEAD"],
+                vendor="dell",
+                provenance={"corpus_id": "dell-xr8620t"},
+            )
+        ]
+
+    def split(self):
+        return self.train_records, self.heldout_records
+
+    def manifest(self):
+        return DataManifest(
+            total=2,
+            train_count=1,
+            eval_count=1,
+            by_source={"real_dell": 2},
+            by_trust={"REAL": 2},
+            by_vendor={"dell": 2},
+            eval_trust_floor="REAL",
+            eval_fraction=0.15,
+            seed=0,
+            sources=["real_dell"],
+            required_heldout_sources=["real_dell"],
+            heldout_by_source={"real_dell": 1},
+            train_row_ids=["sha256:" + "1" * 64],
+            heldout_row_ids=["sha256:" + "2" * 64],
+        )
 
 
 def _specs(tmp_path: Path, **overrides):
@@ -71,9 +144,14 @@ def _write_json(path: Path, body) -> None:
 
 
 def test_redfish_ctl_manifest_materializes_live_corpus(tmp_path, monkeypatch):
-    """--corpus_manifest/--corpus_root build examples.jsonl then load it."""
+    """--corpus_manifest/--corpus_root build train+heldout corpora then load both."""
     monkeypatch.setattr("igc.modules.igc_main.MetricLogger", _FakeMetricLogger)
     monkeypatch.setattr("igc.ds.corpus_dataset.CorpusJSONLDataset", _FakeCorpusDataset)
+    monkeypatch.setattr(
+        "igc.ds.sources.RedfishFixtureSource.from_redfish_ctl_manifest",
+        staticmethod(lambda *_args, **_kwargs: [object()]),
+    )
+    monkeypatch.setattr("igc.ds.sources.mixer.SourceMix", _FakeSourceMix)
     _FakeCorpusDataset.instances.clear()
 
     manifest = tmp_path / "manifest.v1.json"
@@ -122,23 +200,38 @@ def test_redfish_ctl_manifest_materializes_live_corpus(tmp_path, monkeypatch):
     dataset = IgcMain(specs).dataset
 
     assert dataset is _FakeCorpusDataset.instances[0]
+    eval_dataset = _FakeCorpusDataset.instances[1]
     assert dataset.default_tokenize == "gpt2"
     assert dataset.max_len == 32
     assert dataset.objective == "legacy"
+    assert eval_dataset.default_tokenize == "gpt2"
+    assert eval_dataset.max_len == 32
+    assert eval_dataset.input_tokenizer is dataset.tokenizer
+    assert eval_dataset.objective == "legacy"
+    assert dataset.eval_split_sha256 == eval_dataset.data_sha256
     examples_path = dataset.corpus_dir / "examples.jsonl"
+    heldout_examples_path = eval_dataset.corpus_dir / "examples.jsonl"
     manifest_path = dataset.corpus_dir / "manifest.json"
+    heldout_manifest_path = eval_dataset.corpus_dir / "manifest.json"
     assert examples_path.is_file()
+    assert heldout_examples_path.is_file()
     assert manifest_path.is_file()
+    assert heldout_manifest_path.is_file()
 
     row = json.loads(examples_path.read_text(encoding="utf-8").strip())
+    heldout_row = json.loads(heldout_examples_path.read_text(encoding="utf-8").strip())
     assert row["request_or_action"] == {
         "method": "GET",
-        "url": "/redfish/v1/Systems/1",
+        "url": "/redfish/v1/Systems/Train",
         "body": None,
     }
     assert row["allowed_methods"] == ["GET", "HEAD", "PATCH"]
     assert row["vendor"] == "dell"
     assert row["provenance"]["corpus_id"] == "dell-xr8620t"
+    assert heldout_row["request_or_action"]["url"] == "/redfish/v1/Systems/Heldout"
+    assert heldout_row["allowed_methods"] == ["GET", "HEAD"]
+    assert json.loads(manifest_path.read_text(encoding="utf-8"))["eval_count"] == 1
+    assert json.loads(heldout_manifest_path.read_text(encoding="utf-8"))["train_count"] == 1
 
 
 def test_manifest_requires_materialized_root(tmp_path, monkeypatch):
@@ -158,7 +251,13 @@ def test_run_keeps_existing_dataset(tmp_path, monkeypatch):
         raise AssertionError("MaskedJSONDataset should not be constructed by run()")
 
     monkeypatch.setattr("igc.modules.igc_main.MaskedJSONDataset", _raise_masked)
-    main = IgcMain(_specs(tmp_path, corpus_dir=str(tmp_path / "written-corpus")))
+    main = IgcMain(
+        _specs(
+            tmp_path,
+            corpus_dir=str(tmp_path / "written-corpus"),
+            corpus_eval_dir=str(tmp_path / "heldout-corpus"),
+        )
+    )
     sentinel = object()
     main._dataset = sentinel
 

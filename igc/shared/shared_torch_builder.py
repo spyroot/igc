@@ -234,6 +234,14 @@ class TorchBuilder:
         """
 
         shed_class = getattr(torch.optim.lr_scheduler, scheduler, None)
+        if shed_class is None:
+            raise ValueError(f"Scheduler '{scheduler}' not recognized")
+        if scheduler.lower() == 'OneCycleLR'.lower():
+            warmup_ratio = kwargs.pop("warmup_ratio", None)
+            if warmup_ratio is not None:
+                if not 0.0 < float(warmup_ratio) < 1.0:
+                    raise ValueError("OneCycleLR warmup_ratio must be between 0 and 1")
+                kwargs["pct_start"] = float(warmup_ratio)
         scheduler_args = TorchBuilder.get_param_for_func(shed_class.__init__, kwargs)
         scheduler_args = {k: v for k, v in scheduler_args.items() if v is not None}
 

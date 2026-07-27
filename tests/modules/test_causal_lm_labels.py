@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import torch
 
-from igc.modules.llm_train_state_encoder import (
-    LlmEmbeddingsTrainer,
+from igc.modules.train.sft import (
+    SFTTrainer,
     build_causal_lm_labels,
     causal_lm_labels_from_batch,
 )
@@ -82,7 +82,7 @@ def test_custom_collate_preserves_optional_labels() -> None:
         },
     ]
 
-    batch = LlmEmbeddingsTrainer.custom_collate_fn(samples)
+    batch = SFTTrainer.custom_collate_fn(samples)
 
     assert set(batch) == {"input_ids", "attention_mask", "labels"}
     assert batch["labels"].tolist() == [[-100, 2], [-100, 4]]
@@ -103,7 +103,7 @@ def test_custom_collate_ignores_unmasked_legacy_extra_labels() -> None:
         },
     ]
 
-    batch = LlmEmbeddingsTrainer.custom_collate_fn(samples)
+    batch = SFTTrainer.custom_collate_fn(samples)
 
     assert set(batch) == {"input_ids", "attention_mask"}
 
@@ -123,7 +123,7 @@ def test_custom_collate_ignores_all_ignored_extra_labels() -> None:
         },
     ]
 
-    batch = LlmEmbeddingsTrainer.custom_collate_fn(samples)
+    batch = SFTTrainer.custom_collate_fn(samples)
 
     assert set(batch) == {"input_ids", "attention_mask"}
 
@@ -140,7 +140,7 @@ def test_validate_returns_percent_for_legacy_metric_contract() -> None:
             logits[:, 1, 4] = 10.0
             return SimpleNamespace(logits=logits)
 
-    trainer = LlmEmbeddingsTrainer.__new__(LlmEmbeddingsTrainer)
+    trainer = SFTTrainer.__new__(SFTTrainer)
     trainer.model = TinyValidationModel()
     trainer._device = torch.device("cpu")
     trainer._accelerator = None
@@ -152,7 +152,7 @@ def test_validate_returns_percent_for_legacy_metric_contract() -> None:
         "labels": torch.tensor([[-100, 2, 3, -100]]),
     }
 
-    accuracy = LlmEmbeddingsTrainer.validate(trainer, [batch])
+    accuracy = SFTTrainer.validate(trainer, [batch])
 
     assert accuracy == 50.0
     assert accuracy / 100.0 == 0.5

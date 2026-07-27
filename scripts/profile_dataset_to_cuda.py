@@ -1,7 +1,7 @@
 """Profile the real Redfish corpus -> tokenizer -> DataLoader -> CUDA train step.
 
 This bounded profiler is intentionally separate from the trainer: it reuses the
-same ``CorpusJSONLDataset`` bridge and ``LlmEmbeddingsTrainer.custom_collate_fn``
+same ``CorpusJSONLDataset`` bridge and ``SFTTrainer.custom_collate_fn``
 that Phase 1 training uses, then times the host-to-device copy, forward,
 backward, and optimizer stages on a live CUDA device.
 """
@@ -28,7 +28,7 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from igc.ds.corpus_dataset import CorpusJSONLDataset
-from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
+from igc.modules.train.sft import SFTTrainer
 
 
 STAGES = ("dataloader_collate", "host_to_device", "forward", "backward", "optimizer")
@@ -321,7 +321,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         shuffle=False,
         drop_last=True,
         pin_memory=args.pin_memory,
-        collate_fn=LlmEmbeddingsTrainer.custom_collate_fn,
+        collate_fn=SFTTrainer.custom_collate_fn,
     )
 
     device = _resolve_device(args)

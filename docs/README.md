@@ -15,7 +15,6 @@ Public-safe docs live under [`external/`](external/):
 - [`external/research/`](external/research/) — math checks and paper material.
 - [`external/use-cases/`](external/use-cases/) — target Redfish operating
   scenarios and episode walkthroughs.
-- [`external/diagrams/`](external/diagrams/) — standalone SVG diagrams.
 
 ## Internal
 

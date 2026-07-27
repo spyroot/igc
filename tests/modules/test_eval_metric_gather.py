@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import inspect
 
-from igc.modules.llm_train_state_encoder import LlmEmbeddingsTrainer
+from igc.modules.base.metric_keys import PHASE1_FINETUNE
+from igc.modules.train.sft import SFTTrainer, ValidationMetrics
+from igc.modules.train.sft_tasks import resolve_sft_task
 
 
 def test_validate_all_reduces_the_metric():
     """validate() must all-reduce eval counts/loss so every rank sees one global metric."""
-    src = inspect.getsource(LlmEmbeddingsTrainer.validate)
+    src = inspect.getsource(SFTTrainer.validate)
     assert "accelerator.reduce" in src, (
         "validate() must reduce (correct, total, loss_sum, loss_tokens) across ranks so every "
         "rank computes the same global eval metric; rank-local best values deadlock the save."
@@ -34,7 +36,7 @@ def test_best_metric_tracked_on_all_ranks_not_only_rank_zero():
     If only rank 0 tracks the best, the non-zero ranks keep stale metrics, compute best-save state
     differently, and enter the save collective asymmetrically -> the _ALLGATHER_BASE hang.
     """
-    src = inspect.getsource(LlmEmbeddingsTrainer)
+    src = inspect.getsource(SFTTrainer)
     assert src.count("self._best_validation_metric = selection_metric") == 1, (
         "expected exactly one best-metric assignment (the rank-0-only one was removed)"
     )
@@ -48,11 +50,68 @@ def test_best_metric_tracked_on_all_ranks_not_only_rank_zero():
 
 def test_phase1_best_metric_is_eval_loss_minimize_with_min_delta():
     """Phase 1 must select checkpoints by lower eval loss, not higher token accuracy."""
-    src = inspect.getsource(LlmEmbeddingsTrainer._train)
-    assert "self._select_best_by_eval_loss" in src
-    assert "selection_metric = validation_eval_loss" in src
+    phase1_task = resolve_sft_task("redfish_json_reconstruction")
+    init_src = " ".join(inspect.getsource(SFTTrainer.__init__).split())
+    src = inspect.getsource(SFTTrainer._evaluate_and_checkpoint)
+    normalized = " ".join(src.split())
+
+    assert phase1_task.metric_namespace == PHASE1_FINETUNE
+    assert "self._select_best_by_eval_loss = bool(self._metric_namespace)" in init_src
+    assert (
+        "selection_metric = ( validation_eval_loss "
+        "if self._select_best_by_eval_loss else validation_acc )"
+    ) in normalized
     assert "self._early_stopping_min_delta" in src
     assert "< self._best_validation_metric" in src
+
+
+def test_phase1_runtime_keeps_lower_loss_when_accuracy_improves():
+    """Phase 1 checkpoint selection follows loss even when token accuracy rises."""
+    phase1_task = resolve_sft_task("redfish_json_reconstruction")
+    trainer = object.__new__(SFTTrainer)
+    trainer._metric_namespace = phase1_task.metric_namespace
+    trainer._select_best_by_eval_loss = bool(trainer._metric_namespace)
+    trainer._best_validation_metric = float("inf")
+    trainer._early_stopping_min_delta = 0.0
+    trainer._early_stopping_patience = 0
+    trainer._eval_steps = 1
+    trainer._save_steps = 0
+    trainer._module_checkpoint_dir = None
+    trainer.is_accelerator = False
+    trainer.is_rank_zero = lambda: False
+
+    validation_results = iter(
+        [
+            ValidationMetrics(loss=0.5, accuracy=90.0),
+            ValidationMetrics(loss=0.7, accuracy=99.0),
+        ]
+    )
+    trainer.validate = lambda _dataloader: next(validation_results)
+    initial = ValidationMetrics(loss=float("inf"), accuracy=0.0)
+
+    first, bad_evals, did_eval, should_stop = trainer._evaluate_and_checkpoint(
+        object(),
+        epoch=0,
+        optimizer_step=1,
+        validation_result=initial,
+        early_stop_bad_evals=0,
+        force_eval=True,
+    )
+    assert (first.loss, first.accuracy) == (0.5, 90.0)
+    assert trainer._best_validation_metric == 0.5
+    assert (bad_evals, did_eval, should_stop) == (0, True, False)
+
+    second, bad_evals, did_eval, should_stop = trainer._evaluate_and_checkpoint(
+        object(),
+        epoch=0,
+        optimizer_step=2,
+        validation_result=first,
+        early_stop_bad_evals=bad_evals,
+        force_eval=True,
+    )
+    assert (second.loss, second.accuracy) == (0.7, 99.0)
+    assert trainer._best_validation_metric == 0.5
+    assert (bad_evals, did_eval, should_stop) == (1, True, False)
 
 
 # Author: Mus mbayramo@stanford.edu

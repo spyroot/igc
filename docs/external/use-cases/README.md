@@ -15,8 +15,8 @@ never inventing a call that does not exist.**
 > plus the module-by-module plan to make it real. The *mechanism* every page relies on — legal
 > candidate actions, verified success, HER, multi-vendor transfer — is grounded in the current
 > architecture: see [`architecture overview`](../architecture/overview.md) for the current-vs-target map and
-> [`decisions`](../roadmap/decisions.md) for the accepted design decisions (D-001 action selection,
-> D-002 candidate representation). Where a page describes a surface that does not exist yet (a UI, a
+> [`decisions`](../roadmap/decisions.md) for active accepted decisions. Where a page describes a
+> surface that does not exist yet (a UI, a
 > daemon), it says so explicitly. Nothing here is a claim that a metric was hit — that is what the
 > offline gate and [`math checks`](../research/math-checks.md) are for.
 
@@ -80,7 +80,7 @@ mysterious:
 - **Legal action catalog** — the *dynamic* set of actions available from the current state: an
   endpoint from the walked resource tree paired with an HTTP method that endpoint actually allows
   (its `allowed_methods`), plus optional typed argument slots. The policy only ever chooses from
-  this set (D-001).
+  this set.
 - **Evaluator** — the component that checks the observation against the goal's `spec` and returns
   success / a reward. Success is *measured*, never self-reported.
 - **HER (Hindsight Experience Replay)** — the mechanism that turns a trajectory that missed its goal

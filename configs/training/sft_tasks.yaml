@@ -1,0 +1,84 @@
+version: 1
+tasks:
+  redfish_json_reconstruction:
+    phase: 1
+    contract_version: phase1-json/v1
+    parent_role: foundation_instruct
+    output_role: model_x
+    dataset_format: redfish_json_corpus
+    metric_namespace: phase1_finetune
+    renderer: redfish_json_reconstruction
+    order_sensitive: false
+    prompt_template: |
+      ### REST API
+      ${rest_api}
+
+      ### Allowed Methods
+      ${allowed_methods}
+
+      ### Redfish JSON Input
+      ${json_context}
+
+      ### Complete Redfish JSON
+    sources:
+      - redfish_ctl_full_corpus
+      - dsp2043_redfish_ctl_corpus
+    input_policy: {}
+
+  text_to_rest_api_list:
+    phase: 2
+    contract_version: phase2-rest-api-set/v1
+    parent_role: model_x
+    output_role: goal_extractor
+    dataset_format: labelled_requests_jsonl
+    metric_namespace: phase2_goal_extraction
+    renderer: phase2_rest_api_set
+    order_sensitive: false
+    prompt_template: |
+      ### Operator Text
+      ${text}
+
+      ### Candidate Redfish Contexts
+      ${api_context}
+
+      ### REST API Set
+    sources:
+      - accepted_labelled_requests
+    input_policy:
+      min_distractors_per_row: 4
+      all_target_apis_present: true
+      selected_membership_hidden: true
+      forbidden_input_fields:
+        - rest_api_list
+        - selected
+        - target_indices
+
+  text_and_rest_api_list_to_calls:
+    phase: 3
+    contract_version: phase3-call-set/v1
+    parent_role: goal_extractor
+    output_role: argument_extractor
+    dataset_format: labelled_calls_jsonl
+    metric_namespace: phase3_argument_extraction
+    renderer: phase3_call_set
+    order_sensitive: false
+    prompt_template: |
+      ### Operator Text
+      ${text}
+
+      ### REST API Set
+      ${rest_api_list}
+
+      ### Candidate Redfish Contexts
+      ${api_context}
+
+      ### Method and Argument Call Set
+    sources:
+      - accepted_labelled_requests
+    input_policy:
+      master_record_required: true
+      explicit_method_required: true
+      explicit_operation_name_required: true
+      explicit_arguments_required: true
+      argument_value_grounding_required: true
+      current_json_is_not_argument_grounding: true

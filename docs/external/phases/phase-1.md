@@ -27,6 +27,30 @@ The current serious Phase 1 profile family is the Qwen2.5 7B rsLoRA path:
 `phase1_7b_rslora_r32` in the executable profile registry, with run names that may use
 `phase1-finetune-qwen2_5-7b-rslora`. GPT-2 remains a path smoke only.
 
+## Concrete Bindings
+
+| Role | Binding |
+| --- | --- |
+| Source registry | `configs/data/redfish_sources.yaml` |
+| Corpus materializer | `igc.ds.source_registry.materialize_phase1_registry_corpus` |
+| Dataset | `igc.ds.corpus_dataset.CorpusJSONLDataset` |
+| Renderer | `igc.ds.phase1_render.render_phase1_prompt` |
+| Shared token dataset | `igc.ds.sft_dataset.tokenize_prompt_completion` |
+| Trainer | `igc.modules.train.sft.SFTTrainer` |
+| Model/profile | `phase1_7b_rslora_r32` in `configs/training/profiles.yaml` |
+| Task/prompt spec | `redfish_json_reconstruction` in `configs/training/sft_tasks.yaml` |
+| Machine contract | `configs/contracts/phase1.yaml` |
+| Output checkpoint | `model_x` |
+| Promotion gate | `configs/inference/phase1_golden_acceptance.yaml` |
+
+The required source registry combines the real `redfish_ctl` full corpora and the DSP2043
+reference-BMC corpus produced through the same discovery artifact contract. DSP2043 broadens
+training coverage; real captures remain the held-out acceptance anchor. The exact source registry,
+upstream manifests, train rows, held-out rows, and their SHAs are immutable run evidence.
+Every selected corpus must include a non-empty `rest_api_map.v1.json` or `rest_api_map.npy` with
+both `url_file_mapping` and `allowed_methods_mapping`; the canonical materializer fails closed when
+that method evidence is missing.
+
 Training is normal causal-LM next-token learning. The rendered prompt contains `x`; labels are
 `-100` over the prompt tokens and actual token IDs over the `y_true` completion tokens. In other
 words, this phase trains:
@@ -35,9 +59,9 @@ words, this phase trains:
 P(y_true.json | x.rest_api, x.allowed_methods, x.json)
 ```
 
-Checkpoint rule: Phase 1 writes `model_x` only. Later Phase 2/3 runs may initialize from that
-checkpoint, but they must write `goal_extractor` and `argument_extractor` checkpoints in distinct
-output directories and W&B groups.
+Checkpoint rule: Phase 1 writes `model_x` only. Phase 2 initializes `goal_extractor` from the
+promoted `model_x`; Phase 3 then initializes `argument_extractor` from the promoted Phase 2
+`goal_extractor`. Every phase writes to a distinct output directory and W&B group.
 
 ## Pro Usage
 
@@ -55,6 +79,7 @@ come from full Redfish corpora plus the same-run method map.
 ```json
 {
   "phase": 1,
+  "dataset": "D0",
   "task": "redfish_json_reconstruction",
   "x": {
     "rest_api": "/redfish/v1/Fabrics/PCIe/Switches",
@@ -118,7 +143,11 @@ GET, HEAD
 
 `x` is everything before `### Complete Redfish JSON`. `y_true` is the JSON after
 `### Complete Redfish JSON`. The shifted labels should mask the `x` tokens and compute
-cross-entropy only on the `y_true` JSON completion.
+cross-entropy only on the `y_true` JSON completion. A valid row has `phase == 1`, `dataset == D0`, task
+`redfish_json_reconstruction`, a non-empty string `x.rest_api`, unique uppercase
+`x.allowed_methods`, object-valued `x.json` and `y_true.json`, no committed `y_pred`, and no missing
+target. Prompt plus completion overflow fails closed; full-document labels are never silently
+truncated.
 
 ## Phase 1 W&B Metrics
 
@@ -167,21 +196,19 @@ metrics/evidence to caller-supplied paths. These keys are listed in
 
 ## Phase 1 Stopping Rule
 
-Full Phase 1 fine-tuning should select `model_x` by validation loss, not by the
-test split and not by token accuracy alone:
+Full Phase 1 fine-tuning selects `model_x` by validation loss, not by the test split and not by token
+accuracy alone:
 
 - primary metric: `phase1_finetune/eval/loss`
 - mode: minimize
 - patience: 3 evaluation calls
 - min delta: 0.005 to 0.01 validation loss
-- max epochs: 5 to 10 for small corpora unless the validation curve still improves
-- evaluation cadence: 4 evaluations per epoch as the starting point
-- save cadence: every evaluation call
+- maximum epochs or steps, evaluation cadence, and save cadence: resolved from the named YAML
+  profile and counted in optimizer steps
 
-For example, if one epoch has 100 optimizer steps, start with `eval_steps=25`
-and `save_steps=25`. Save a checkpoint at every evaluation, track the lowest
-validation loss, stop after three evaluations without a meaningful improvement,
-and restore the checkpoint with the lowest validation loss.
+Gradient accumulation must not silently alter evaluation or save frequency. Every evaluation may
+produce a checkpoint, the run tracks the lowest validation loss, and promotion uses that best
+checkpoint rather than merely the last checkpoint.
 
 Secondary and diagnostic metrics:
 
@@ -192,11 +219,26 @@ Secondary and diagnostic metrics:
 
 Phase 1 is accepted only after:
 
-- `model_x` trains on the approved full Redfish corpora, not only fixture data.
-- W&B shows clear Phase 1 loss, perplexity, throughput, reconstruction, and test-time plots.
-- The final checkpoint and evaluation report are in the approved shared model store.
+- `model_x` trains on the complete approved source manifest, not only fixture data.
+- baseline and `model_x` run against the same untouched held-out manifest with per-corpus results;
+  the source registry holds out at least 100 rows per real source, or every available row when the
+  complete source is smaller than 100. Replay and DSP2043-derived rows remain training-only.
+- checkpoint reload succeeds; no target or prediction row is missing; all promotion metrics are
+  finite; the report records dataset, foundation-model, tokenizer, and training-code identities.
+- W&B contains Phase 1 loss, perplexity, throughput, reconstruction, retention, calibration, and
+  test-time plots.
+- The best checkpoint and evaluation report are in the approved shared model store.
 - The repository stores only reviewed Git LFS artifact pointers or metadata for the checkpoint; raw
   weights are not copied into the source tree.
+
+Starting promotion floors are config-driven: JSON parse and resource-identity match at least
+`0.995`, exact-match improvement over the foundation model at least `0.02`, and instruction-judge
+acceptance drop at most `0.03`. A small deterministic golden set requires JSON parse and resource
+identity rates of exactly `1.0`.
+
+Because `model_x` drafts D1 text, instruction retention is checked before and after Phase 1 on fixed
+`k=1`, `k=2`, and `k=3` API combinations. It reports natural-command, judge-acceptance,
+missing-intent, extra-intent, and nonsense rates.
 
 ## Evaluation
 

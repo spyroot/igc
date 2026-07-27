@@ -7,14 +7,14 @@ epochs, and scheduler construction must receive positive ``epochs`` /
 ``steps_per_epoch`` anyway (OneCycleLR raises ``ValueError: Expected positive
 integer epochs, but got 0`` — the slot2 Phase 1 prebuild crash) while the
 zero-iteration epoch loop still falls through to end-of-train finalization
-(save/report — behavior pinned by tests/gpu/test_m1_train_step_live.py). Pure
+(save/report behavior pinned by tests/gpu/test_phase1_train_step_live.py). Pure
 logic — no torch models, no GPU, no network.
 
 Author:
 Mus mbayramo@stanford.edu
 """
 
-from igc.modules.llm_train_state_encoder import (
+from igc.modules.train.sft import (
     optimizer_steps_per_epoch,
     remaining_epochs,
     scheduler_epoch_args,

@@ -2,7 +2,7 @@
 
 Loads the built igc dataset, splits it across ranks with a DistributedSampler, iterates
 EVERY batch, and uploads each to the GPU — exactly what training does
-(``llm_train_state_encoder`` moves ``batch['input_ids']`` / ``['attention_mask']``
+(``sft`` moves ``batch['input_ids']`` / ``['attention_mask']``
 ``.to(device)`` each step). It confirms multi-GPU data feeding — load, split, concurrent
 read, GPU upload — works in ISOLATION on 1/4 GPU before a real fine-tune.
 

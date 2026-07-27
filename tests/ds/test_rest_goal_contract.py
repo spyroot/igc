@@ -1,1164 +1,587 @@
-"""Offline tests for the ordered REST-goal dataset contracts.
+"""Canonical Phase 2 REST-set and Phase 3 call-set contract tests."""
 
-These tests pin the Phase 2/3 mock-plumbing rows without training a model,
-running W&B, touching captured corpora, or inventing a regex extractor.
-
-Author:
-Mus mbayramo@stanford.edu
-"""
+from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
 from igc.ds.rest_goal_contract import (
-    D0,
-    D1,
-    MODEL_X,
-    PHASE2_GOAL_EXTRACT_METRIC_KEYS,
-    PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS,
+    CALL_FIELDS,
     RedfishContext,
+    build_call_row,
+    build_d1_master_record,
     build_d1_rest_api_list_row,
-    build_ordered_call_row,
-    evaluate_ordered_calls_y_pred,
-    inference_ordered_goals_json,
-    parse_ordered_calls_y_pred,
+    d1_row_id,
+    evaluate_calls_y_pred,
+    evaluate_rest_api_set,
+    inference_calls_json,
+    parse_calls_y_pred,
     parse_rest_api_list_y_pred,
-    render_ordered_call_example,
+    render_call_example,
+    render_d1_master_views,
     render_rest_api_list_example,
 )
-from igc.modules.base.metric_keys import (
-    PHASE2_WANDB_METRIC_KEYS,
-    PHASE3_WANDB_METRIC_KEYS,
-    PHASE23_WANDB_METRIC_KEYS,
-)
 
 
-def _context(rest_api: str, allowed_methods: tuple[str, ...], body: dict) -> RedfishContext:
-    """Build one tiny Redfish context row for contract tests."""
-    return RedfishContext(rest_api=rest_api, allowed_methods=allowed_methods, json=body)
+SYSTEM = "/redfish/v1/Systems/1"
+BIOS = f"{SYSTEM}/Bios/Settings"
 
 
-def test_phase23_locked_name_constants_use_literal_contract_values() -> None:
-    """Locked Phase 2/3 names stay literal, not only internally self-consistent."""
-    assert MODEL_X == "model_x"
-    assert D0 == "D0"
-    assert D1 == "D1"
-
-
-def test_d1_row_preserves_operator_order_independent_of_context_order() -> None:
-    """The label order follows the operator-stated order, not JSON context order."""
-    systems = _context(
-        "/redfish/v1/Systems",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/Systems", "Name": "Systems"},
-    )
-    tasks = _context(
-        "/redfish/v1/TaskService/Tasks",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/TaskService/Tasks", "Name": "Tasks"},
+def _context(
+    rest_api: str,
+    methods: tuple[str, ...] = ("GET",),
+    *,
+    operations: tuple[str, ...] = ("get_resource",),
+    argument_schema: dict | None = None,
+) -> RedfishContext:
+    return RedfishContext(
+        rest_api=rest_api,
+        allowed_methods=methods,
+        operation_names=operations,
+        argument_schema={} if argument_schema is None else argument_schema,
+        json={"@odata.id": rest_api, "Name": "fixture"},
     )
 
-    row = build_d1_rest_api_list_row(
-        text="check the task queue, then list the systems",
-        contexts=(systems, tasks),
-        rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems"),
+
+def _phase2_catalog(*targets: RedfishContext) -> tuple[RedfishContext, ...]:
+    distractors = tuple(
+        _context(f"/redfish/v1/Managers/{index}")
+        for index in range(4)
     )
-
-    assert row["phase"] == 2
-    assert row["dataset"] == D1
-    assert row["source_dataset"] == D0
-    assert row["model_x"] == MODEL_X
-    assert row["x"]["text"] == "check the task queue, then list the systems"
-    assert row["x"]["json"] == [systems.json, tasks.json]
-    assert row["y_true"]["rest_api_list"] == [
-        "/redfish/v1/TaskService/Tasks",
-        "/redfish/v1/Systems",
-    ]
-    assert row["x"]["allowed_methods"] == {
-        "/redfish/v1/Systems": ["GET", "HEAD"],
-        "/redfish/v1/TaskService/Tasks": ["GET", "HEAD"],
-    }
-    assert row["validation"] == {
-        "text_source": "mock_fixture",
-        "review_judged": False,
-        "all_rest_api_present": True,
-        "extra_rest_api_present": False,
-        "order_preserved": True,
-    }
+    return (*targets, *distractors)
 
 
-def test_d1_row_does_not_leak_extra_context_into_target_list() -> None:
-    """Extra current context stays in x and never becomes an unrequested target."""
-    systems = _context(
-        "/redfish/v1/Systems",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/Systems", "Name": "Systems"},
-    )
-    tasks = _context(
-        "/redfish/v1/TaskService/Tasks",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/TaskService/Tasks", "Name": "Tasks"},
-    )
-    chassis = _context(
-        "/redfish/v1/Chassis",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/Chassis", "Name": "Chassis"},
-    )
-
-    row = build_d1_rest_api_list_row(
-        text="check the task queue, then list systems",
-        contexts=(systems, tasks, chassis),
-        rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems"),
-    )
-
-    assert row["x"]["json"] == [systems.json, tasks.json, chassis.json]
-    assert row["y_true"]["rest_api_list"] == [
-        "/redfish/v1/TaskService/Tasks",
-        "/redfish/v1/Systems",
-    ]
-    assert "/redfish/v1/Chassis" not in row["y_true"]["rest_api_list"]
-
-
-def test_phase23_rows_pin_locked_field_names() -> None:
-    """Phase 2/3 rows expose only the locked contract field names."""
-    body = {"@odata.id": "/redfish/v1/Systems", "Name": "Systems"}
-    context = _context(
-        "/redfish/v1/Systems",
-        ("GET", "HEAD"),
-        body,
-    )
-
-    serialized = context.to_dict()
-
-    assert set(serialized) == {"rest_api", "allowed_methods", "json"}
-    assert serialized == {
-        "rest_api": "/redfish/v1/Systems",
-        "allowed_methods": ["GET", "HEAD"],
-        "json": {"@odata.id": "/redfish/v1/Systems", "Name": "Systems"},
-    }
-    assert serialized["allowed_methods"] is not context.allowed_methods
-    assert serialized["json"] is not body
-
-    phase2 = build_d1_rest_api_list_row(
-        text="list systems",
-        contexts=(context,),
-        rest_api_list=("/redfish/v1/Systems",),
-    )
-    phase3 = build_ordered_call_row(
-        text="list systems",
-        contexts=(context,),
-        rest_api_list=("/redfish/v1/Systems",),
-    )
-
-    assert set(phase2) == {
-        "phase",
-        "dataset",
-        "source_dataset",
-        "model_x",
-        "task",
-        "x",
-        "y_true",
-        "validation",
-    }
-    assert phase2["task"] == "text_to_rest_api_list"
-    assert set(phase2["x"]) == {"text", "json", "allowed_methods"}
-    assert set(phase2["y_true"]) == {"rest_api_list", "order_evidence"}
-    assert set(phase3) == {"phase", "source_dataset", "model_x", "task", "x", "y_true"}
-    assert phase3["task"] == "text_and_rest_api_list_to_calls"
-    assert set(phase3["x"]) == {"text", "rest_api_list", "json", "allowed_methods"}
-    assert set(phase3["y_true"]) == {"calls"}
-    assert set(phase3["y_true"]["calls"][0]) == {
-        "rest_api",
-        "allowed_methods",
-        "method",
-        "arguments",
-    }
-
-
-def test_phase3_get_calls_preserve_order_and_keep_arguments_empty() -> None:
-    """Read-only GET calls keep ordered rest_api rows and never copy scalar JSON values."""
-    row = build_ordered_call_row(
-        text="check task state, then inspect system power",
+def _phase3_row() -> dict:
+    return build_call_row(
+        text="read the system and set boot mode to Uefi",
         contexts=(
+            _context(SYSTEM),
             _context(
-                "/redfish/v1/Systems/1",
-                ("GET", "HEAD"),
-                {
-                    "@odata.id": "/redfish/v1/Systems/1",
-                    "PowerState": "On",
-                },
-            ),
-            _context(
-                "/redfish/v1/TaskService/Tasks",
-                ("GET", "HEAD"),
-                {
-                    "@odata.id": "/redfish/v1/TaskService/Tasks",
-                    "Members@odata.count": 0,
-                },
-            ),
-        ),
-        rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems/1"),
-    )
-
-    assert row["phase"] == 3
-    assert row["x"]["text"] == "check task state, then inspect system power"
-    assert row["x"]["json"] == [
-        {
-            "@odata.id": "/redfish/v1/Systems/1",
-            "PowerState": "On",
-        },
-        {
-            "@odata.id": "/redfish/v1/TaskService/Tasks",
-            "Members@odata.count": 0,
-        },
-    ]
-    assert row["x"]["allowed_methods"] == {
-        "/redfish/v1/Systems/1": ["GET", "HEAD"],
-        "/redfish/v1/TaskService/Tasks": ["GET", "HEAD"],
-    }
-    assert row["x"]["rest_api_list"] == [
-        "/redfish/v1/TaskService/Tasks",
-        "/redfish/v1/Systems/1",
-    ]
-    assert row["y_true"]["calls"] == [
-        {
-            "rest_api": "/redfish/v1/TaskService/Tasks",
-            "allowed_methods": ["GET", "HEAD"],
-            "method": "GET",
-            "arguments": {},
-        },
-        {
-            "rest_api": "/redfish/v1/Systems/1",
-            "allowed_methods": ["GET", "HEAD"],
-            "method": "GET",
-            "arguments": {},
-        },
-    ]
-
-
-def test_phase3_get_calls_discard_supplied_arguments() -> None:
-    """Read-only GET labels keep arguments empty even if caller supplies body-like data."""
-    row = build_ordered_call_row(
-        text="inspect system power",
-        contexts=(
-            _context(
-                "/redfish/v1/Systems/1",
+                BIOS,
                 ("GET", "PATCH"),
-                {
-                    "@odata.id": "/redfish/v1/Systems/1",
-                    "PowerState": "On",
-                },
+                operations=("set_bios_attributes",),
+                argument_schema={"Attributes": {"BootMode": "string"}},
             ),
         ),
-        rest_api_list=("/redfish/v1/Systems/1",),
-        method_by_api={"/redfish/v1/Systems/1": "GET"},
-        arguments_by_api={"/redfish/v1/Systems/1": {"PowerState": "On"}},
-    )
-
-    assert row["y_true"]["calls"][0] == {
-        "rest_api": "/redfish/v1/Systems/1",
-        "allowed_methods": ["GET", "PATCH"],
-        "method": "GET",
-        "arguments": {},
-    }
-
-
-def test_phase3_head_calls_discard_supplied_arguments() -> None:
-    """Read-only HEAD labels keep arguments empty like GET labels."""
-    row = build_ordered_call_row(
-        text="check system headers",
-        contexts=(
-            _context(
-                "/redfish/v1/Systems/1",
-                ("GET", "HEAD"),
-                {
-                    "@odata.id": "/redfish/v1/Systems/1",
-                    "PowerState": "On",
-                },
-            ),
-        ),
-        rest_api_list=("/redfish/v1/Systems/1",),
-        method_by_api={"/redfish/v1/Systems/1": "HEAD"},
-        arguments_by_api={"/redfish/v1/Systems/1": {"PowerState": "On"}},
-    )
-
-    assert row["y_true"]["calls"][0] == {
-        "rest_api": "/redfish/v1/Systems/1",
-        "allowed_methods": ["GET", "HEAD"],
-        "method": "HEAD",
-        "arguments": {},
-    }
-
-
-def test_phase3_mutation_arguments_must_be_supplied_explicitly() -> None:
-    """PATCH rows do not infer arguments from arbitrary scalar values in GET JSON."""
-    settings = _context(
-        "/redfish/v1/Systems/1/Bios/Settings",
-        ("GET", "PATCH"),
-        {
-            "@odata.id": "/redfish/v1/Systems/1/Bios/Settings",
-            "Attributes": {"BootMode": "Uefi"},
-        },
-    )
-
-    without_arguments = build_ordered_call_row(
-        text="set bios boot mode",
-        contexts=(settings,),
-        rest_api_list=("/redfish/v1/Systems/1/Bios/Settings",),
-        method_by_api={"/redfish/v1/Systems/1/Bios/Settings": "PATCH"},
-    )
-    with_arguments = build_ordered_call_row(
-        text="set bios boot mode to Uefi",
-        contexts=(settings,),
-        rest_api_list=("/redfish/v1/Systems/1/Bios/Settings",),
-        method_by_api={"/redfish/v1/Systems/1/Bios/Settings": "PATCH"},
-        arguments_by_api={
-            "/redfish/v1/Systems/1/Bios/Settings": {
-                "Attributes": {"BootMode": "Uefi"},
-            },
-        },
-    )
-
-    assert without_arguments["y_true"]["calls"][0]["arguments"] == {}
-    assert with_arguments["y_true"]["calls"][0]["arguments"] == {
-        "Attributes": {"BootMode": "Uefi"},
-    }
-
-
-def test_phase3_patch_does_not_infer_top_level_get_scalars() -> None:
-    """PATCH rows do not turn arbitrary top-level GET values into arguments."""
-    system = _context(
-        "/redfish/v1/Systems/1",
-        ("GET", "PATCH"),
-        {
-            "@odata.id": "/redfish/v1/Systems/1",
-            "PowerState": "On",
-            "Name": "System",
-        },
-    )
-
-    row = build_ordered_call_row(
-        text="set the system power state",
-        contexts=(system,),
-        rest_api_list=("/redfish/v1/Systems/1",),
-        method_by_api={"/redfish/v1/Systems/1": "PATCH"},
-    )
-
-    assert row["y_true"]["calls"][0] == {
-        "rest_api": "/redfish/v1/Systems/1",
-        "allowed_methods": ["GET", "PATCH"],
-        "method": "PATCH",
-        "arguments": {},
-    }
-
-
-def test_phase3_post_does_not_infer_action_arguments_from_get_scalars() -> None:
-    """POST rows do not turn observed action metadata into arguments."""
-    action_target = _context(
-        "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
-        ("POST",),
-        {
-            "@odata.id": "/redfish/v1/Systems/1",
-            "ResetType": "GracefulRestart",
-        },
-    )
-
-    row = build_ordered_call_row(
-        text="reset the system",
-        contexts=(action_target,),
-        rest_api_list=("/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",),
-        method_by_api={
-            "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset": "POST",
-        },
-    )
-
-    assert row["y_true"]["calls"][0] == {
-        "rest_api": "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
-        "allowed_methods": ["POST"],
-        "method": "POST",
-        "arguments": {},
-    }
-
-
-def test_phase3_ignores_unselected_method_and_argument_labels() -> None:
-    """Phase 3 emits exactly one call per ordered rest_api_list entry."""
-    system = _context(
-        "/redfish/v1/Systems/1",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/Systems/1"},
-    )
-    reset = _context(
-        "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
-        ("POST",),
-        {"@odata.id": "/redfish/v1/Systems/1"},
-    )
-
-    row = build_ordered_call_row(
-        text="inspect the system",
-        contexts=(system, reset),
-        rest_api_list=("/redfish/v1/Systems/1",),
-        method_by_api={
-            "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset": "POST",
+        rest_api_list=(BIOS, SYSTEM),
+        method_by_api={SYSTEM: "GET", BIOS: "PATCH"},
+        operation_name_by_api={
+            SYSTEM: "get_resource",
+            BIOS: "set_bios_attributes",
         },
         arguments_by_api={
-            "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset": {
-                "ResetType": "GracefulRestart",
-            },
+            SYSTEM: {},
+            BIOS: {"Attributes": {"BootMode": "Uefi"}},
         },
     )
 
-    assert row["x"]["rest_api_list"] == ["/redfish/v1/Systems/1"]
-    assert row["y_true"]["calls"] == [{
-        "rest_api": "/redfish/v1/Systems/1",
-        "allowed_methods": ["GET", "HEAD"],
-        "method": "GET",
-        "arguments": {},
-    }]
 
-
-def test_phase3_default_method_prefers_get_over_mutating_methods() -> None:
-    """Default Phase 3 labels prefer read-only GET even if PATCH appears first."""
-    system = _context(
-        "/redfish/v1/Systems/1",
-        ("PATCH", "GET"),
-        {
-            "@odata.id": "/redfish/v1/Systems/1",
-            "PowerState": "On",
-        },
+def test_phase2_row_is_unordered_and_target_free_in_x() -> None:
+    row = build_d1_rest_api_list_row(
+        text="read bios and system",
+        contexts=_phase2_catalog(_context(BIOS), _context(SYSTEM)),
+        rest_api_list=(SYSTEM, BIOS),
     )
-
-    row = build_ordered_call_row(
-        text="inspect system power",
-        contexts=(system,),
-        rest_api_list=("/redfish/v1/Systems/1",),
-        arguments_by_api={"/redfish/v1/Systems/1": {"PowerState": "On"}},
-    )
-
-    assert row["y_true"]["calls"][0] == {
-        "rest_api": "/redfish/v1/Systems/1",
-        "allowed_methods": ["PATCH", "GET"],
-        "method": "GET",
-        "arguments": {},
-    }
+    assert row["phase"] == 2
+    assert row["dataset"] == "D1"
+    assert row["source_dataset"] == "D0"
+    assert row["target_semantics"] == "unordered_unique_rest_api_set"
+    assert row["x"].keys() == {"text", "api_context"}
+    assert "rest_api_list" not in row["x"]
+    assert row["y_true"] == {"rest_api_list": sorted((SYSTEM, BIOS))}
+    context_apis = {context["rest_api"] for context in row["x"]["api_context"]}
+    assert {SYSTEM, BIOS} <= context_apis
+    assert len(context_apis - {SYSTEM, BIOS}) >= 4
+    assert all("selected" not in context for context in row["x"]["api_context"])
 
 
-def test_phase3_default_method_uses_first_non_get_method_when_needed() -> None:
-    """POST-only rows default to POST without synthesizing request arguments."""
-    reset = _context(
-        "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
-        ("POST",),
-        {"@odata.id": "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset"},
-    )
-
-    row = build_ordered_call_row(
-        text="reset the system",
-        contexts=(reset,),
-        rest_api_list=("/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",),
-    )
-
-    assert row["y_true"]["calls"][0] == {
-        "rest_api": "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
-        "allowed_methods": ["POST"],
-        "method": "POST",
-        "arguments": {},
-    }
-
-
-def test_phase3_mixed_calls_preserve_order_case_and_per_api_arguments() -> None:
-    """Mixed read/write calls keep order, normalize methods, and isolate arguments."""
-    virtual_media = _context(
-        "/redfish/v1/Managers/1/VirtualMedia/CD",
-        ("get", "head"),
-        {
-            "@odata.id": "/redfish/v1/Managers/1/VirtualMedia/CD",
-            "Image": "old.iso",
-        },
-    )
-    bios_settings = _context(
-        "/redfish/v1/Systems/1/Bios/Settings",
-        ("get", "patch"),
-        {
-            "@odata.id": "/redfish/v1/Systems/1/Bios/Settings",
-            "Attributes": {"BootMode": "LegacyBios"},
-        },
-    )
-
-    row = build_ordered_call_row(
-        text="inspect virtual media, then set bios boot mode to Uefi",
-        contexts=(bios_settings, virtual_media),
-        rest_api_list=(
-            "/redfish/v1/Managers/1/VirtualMedia/CD",
-            "/redfish/v1/Systems/1/Bios/Settings",
-        ),
-        method_by_api={"/redfish/v1/Systems/1/Bios/Settings": "patch"},
-        arguments_by_api={
-            "/redfish/v1/Systems/1/Bios/Settings": {
-                "Attributes": {"BootMode": "Uefi"},
-            },
-            "/redfish/v1/Managers/1/VirtualMedia/CD": {"Image": "old.iso"},
-        },
-    )
-
-    assert row["x"]["text"] == "inspect virtual media, then set bios boot mode to Uefi"
-    assert row["x"]["json"] == [bios_settings.json, virtual_media.json]
-    assert row["x"]["allowed_methods"] == {
-        "/redfish/v1/Systems/1/Bios/Settings": ["GET", "PATCH"],
-        "/redfish/v1/Managers/1/VirtualMedia/CD": ["GET", "HEAD"],
-    }
-    assert row["y_true"]["calls"] == [
-        {
-            "rest_api": "/redfish/v1/Managers/1/VirtualMedia/CD",
-            "allowed_methods": ["GET", "HEAD"],
-            "method": "GET",
-            "arguments": {},
-        },
-        {
-            "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
-            "allowed_methods": ["GET", "PATCH"],
-            "method": "PATCH",
-            "arguments": {"Attributes": {"BootMode": "Uefi"}},
-        },
-    ]
-
-
-def test_rows_reject_missing_and_duplicate_contexts() -> None:
-    """Rows fail fast when labels cannot be resolved to one current context."""
-    context = _context(
-        "/redfish/v1/Systems",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/Systems"},
-    )
-
-    with pytest.raises(ValueError, match="not present"):
+def test_phase2_context_policy_requires_all_targets_and_four_hidden_distractors() -> None:
+    """Training rows must include every target plus at least four unmarked distractors."""
+    target = _context(SYSTEM)
+    with pytest.raises(ValueError, match="present in current context"):
         build_d1_rest_api_list_row(
-            text="list chassis",
-            contexts=(context,),
-            rest_api_list=("/redfish/v1/Chassis",),
+            text="read the system",
+            contexts=_phase2_catalog(),
+            rest_api_list=(SYSTEM,),
         )
-    with pytest.raises(ValueError, match="duplicate rest_api"):
+
+    with pytest.raises(ValueError, match="at least 4 distractors"):
         build_d1_rest_api_list_row(
-            text="list systems",
-            contexts=(context, context),
-            rest_api_list=("/redfish/v1/Systems",),
+            text="read the system",
+            contexts=(target, _context("/redfish/v1/Managers/0")),
+            rest_api_list=(SYSTEM,),
         )
-    with pytest.raises(ValueError, match="not present"):
-        build_ordered_call_row(
-            text="list chassis",
+
+    row = build_d1_rest_api_list_row(
+        text="read the system",
+        contexts=_phase2_catalog(target),
+        rest_api_list=(SYSTEM,),
+    )
+    row["x"]["api_context"][0]["selected"] = True
+    with pytest.raises(ValueError, match="Redfish context"):
+        render_rest_api_list_example(row)
+
+    row = build_d1_rest_api_list_row(
+        text="read the system",
+        contexts=_phase2_catalog(target),
+        rest_api_list=(SYSTEM,),
+    )
+    row["x"]["target_indices"] = [0]
+    with pytest.raises(ValueError, match="Phase 2 x"):
+        render_rest_api_list_example(row)
+
+
+def test_phase2_renderer_rejects_target_leakage() -> None:
+    row = build_d1_rest_api_list_row(
+        text="read the system",
+        contexts=_phase2_catalog(_context(SYSTEM)),
+        rest_api_list=(SYSTEM,),
+    )
+    row["x"]["rest_api_list"] = [SYSTEM]
+    with pytest.raises(ValueError, match="Phase 2 x"):
+        render_rest_api_list_example(row)
+
+
+@pytest.mark.parametrize(
+    "prediction",
+    [
+        {"rest_api": SYSTEM},
+        {"rest_api_list": SYSTEM},
+        {"rest_api_list": [SYSTEM, SYSTEM]},
+        {"ordered_goals": [SYSTEM]},
+        {"rest_api_list": [SYSTEM], "extra": True},
+    ],
+)
+def test_phase2_parser_rejects_scalar_alias_duplicate_and_extra_shapes(prediction) -> None:
+    with pytest.raises(ValueError):
+        parse_rest_api_list_y_pred(prediction)
+
+
+def test_phase2_empty_set_equals_empty_set() -> None:
+    assert evaluate_rest_api_set([], []) == {
+        "set_exact_match": True,
+        "set_match_rate": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 0,
+        "predicted_count": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    "expected",
+    [
+        ["/redfish/v1/Systems/1"],
+        ["/redfish/v1/Systems/1", "/redfish/v1/Managers/1"],
+        ["/redfish/v1/Systems/1", "/redfish/v1/Managers/1", "/redfish/v1/Chassis/1"],
+    ],
+)
+def test_phase2_set_metrics_ignore_permutation_and_penalize_distractors(
+    expected: list[str],
+) -> None:
+    """Promotion metrics are object-shaped and set-based for k=1, k=2, and k=3."""
+    exact = evaluate_rest_api_set(expected, list(reversed(expected)))
+    with_distractor = evaluate_rest_api_set(
+        expected,
+        [*reversed(expected), "/redfish/v1/Unexpected"],
+    )
+    missing_target = evaluate_rest_api_set(expected, expected[:-1])
+
+    assert parse_rest_api_list_y_pred({"rest_api_list": list(reversed(expected))}) == sorted(
+        expected,
+    )
+    assert exact["set_exact_match"] is True
+    assert exact["set_match_rate"] == 1.0
+    assert exact["precision"] == 1.0
+    assert exact["recall"] == 1.0
+    assert with_distractor["set_exact_match"] is False
+    assert with_distractor["precision"] < 1.0
+    assert with_distractor["recall"] == 1.0
+    assert missing_target["set_exact_match"] is False
+    expected_precision = 1.0 if expected[:-1] else 0.0
+    assert missing_target["precision"] == expected_precision
+    assert missing_target["recall"] < 1.0
+
+
+def test_phase2_render_target_is_only_the_api_list() -> None:
+    row = build_d1_rest_api_list_row(
+        text="read the system",
+        contexts=_phase2_catalog(_context(SYSTEM)),
+        rest_api_list=(SYSTEM,),
+    )
+    rendered = render_rest_api_list_example(row)
+    assert json.loads(rendered.target_json) == {"rest_api_list": [SYSTEM]}
+    assert rendered.full_text == rendered.prompt + rendered.target_json
+    assert d1_row_id(row).startswith("sha256:")
+
+
+def test_phase3_requires_explicit_method_operation_and_argument_maps() -> None:
+    kwargs = {
+        "text": "read the system",
+        "contexts": (_context(SYSTEM),),
+        "rest_api_list": (SYSTEM,),
+        "method_by_api": {SYSTEM: "GET"},
+        "operation_name_by_api": {SYSTEM: "get_resource"},
+        "arguments_by_api": {SYSTEM: {}},
+    }
+    for missing in ("method_by_api", "operation_name_by_api", "arguments_by_api"):
+        candidate = dict(kwargs)
+        candidate[missing] = {}
+        with pytest.raises(ValueError, match="keys must exactly match"):
+            build_call_row(**candidate)
+
+
+def test_phase3_rejects_implicit_mutation_arguments_and_read_arguments() -> None:
+    context = _context(
+        BIOS,
+        ("GET", "PATCH"),
+        operations=("set_bios_attributes",),
+        argument_schema={"Attributes": {"BootMode": "string"}},
+    )
+    with pytest.raises(ValueError, match="keys must exactly match"):
+        build_call_row(
+            text="set boot mode",
             contexts=(context,),
-            rest_api_list=("/redfish/v1/Chassis",),
+            rest_api_list=(BIOS,),
+            method_by_api={BIOS: "PATCH"},
+            operation_name_by_api={BIOS: "set_bios_attributes"},
+            arguments_by_api={},
         )
-    with pytest.raises(ValueError, match="duplicate rest_api"):
-        build_ordered_call_row(
-            text="list systems twice",
-            contexts=(context, context),
-            rest_api_list=("/redfish/v1/Systems",),
-        )
-
-
-def test_empty_ordered_rows_are_supported_for_noop_context() -> None:
-    """Empty mock rows encode no selected REST goals without inventing context."""
-    phase2 = build_d1_rest_api_list_row(
-        text="nothing to do",
-        contexts=(),
-        rest_api_list=(),
-        order_evidence="empty_request",
-    )
-    phase3 = build_ordered_call_row(
-        text="nothing to do",
-        contexts=(),
-        rest_api_list=(),
-    )
-
-    assert phase2["x"]["json"] == []
-    assert phase2["x"]["allowed_methods"] == {}
-    assert phase2["y_true"]["rest_api_list"] == []
-    assert phase2["y_true"]["order_evidence"] == "empty_request"
-    assert phase3["x"]["rest_api_list"] == []
-    assert phase3["x"]["json"] == []
-    assert phase3["x"]["allowed_methods"] == {}
-    assert phase3["y_true"]["calls"] == []
-
-
-def test_phase3_rejects_methods_outside_allowed_methods() -> None:
-    """The selected method must be present in allowed_methods, including empty sets."""
-    read_only = _context(
-        "/redfish/v1/Systems",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/Systems"},
-    )
-    no_methods = _context(
-        "/redfish/v1/Managers",
-        (),
-        {"@odata.id": "/redfish/v1/Managers"},
-    )
-
-    with pytest.raises(ValueError, match="not in allowed_methods"):
-        build_ordered_call_row(
-            text="delete systems",
-            contexts=(read_only,),
-            rest_api_list=("/redfish/v1/Systems",),
-            method_by_api={"/redfish/v1/Systems": "DELETE"},
-        )
-    with pytest.raises(ValueError, match="not in allowed_methods"):
-        build_ordered_call_row(
-            text="list managers",
-            contexts=(no_methods,),
-            rest_api_list=("/redfish/v1/Managers",),
+    with pytest.raises(ValueError, match="GET call arguments must be empty"):
+        build_call_row(
+            text="read bios",
+            contexts=(context,),
+            rest_api_list=(BIOS,),
+            method_by_api={BIOS: "GET"},
+            operation_name_by_api={BIOS: None},
+            arguments_by_api={BIOS: {"unexpected": True}},
         )
 
 
-def test_rendered_examples_have_prompt_target_boundary_and_canonical_json() -> None:
-    """Rendered rows separate x prompt from the y_true JSON completion."""
+def test_phase3_build_call_row_rejects_operation_absent_from_context() -> None:
+    """Phase 3 labels cannot name operations outside the public API context."""
     context = _context(
-        "/redfish/v1/Systems",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/Systems"},
-    )
-    phase2 = build_d1_rest_api_list_row(
-        text="list systems",
-        contexts=(context,),
-        rest_api_list=("/redfish/v1/Systems",),
-    )
-    phase3 = build_ordered_call_row(
-        text="list systems",
-        contexts=(context,),
-        rest_api_list=("/redfish/v1/Systems",),
+        BIOS,
+        ("PATCH",),
+        operations=("set_bios_attributes",),
+        argument_schema={"Attributes": {"BootMode": "string"}},
     )
 
-    rendered2 = render_rest_api_list_example(phase2)
-    rendered3 = render_ordered_call_example(phase3)
-
-    assert rendered2.target_char_start == len(rendered2.prompt)
-    assert rendered2.target_json == (
-        "{\n"
-        '  "rest_api_list": [\n'
-        '    "/redfish/v1/Systems"\n'
-        "  ]\n"
-        "}"
-    )
-    assert json.loads(rendered2.target_json) == {"rest_api_list": ["/redfish/v1/Systems"]}
-    assert "### Ordered REST API List" in rendered2.prompt
-    assert rendered2.full_text == rendered2.prompt + rendered2.target_json
-    assert rendered3.target_json == (
-        "{\n"
-        '  "calls": [\n'
-        "    {\n"
-        '      "allowed_methods": [\n'
-        '        "GET",\n'
-        '        "HEAD"\n'
-        "      ],\n"
-        '      "arguments": {},\n'
-        '      "method": "GET",\n'
-        '      "rest_api": "/redfish/v1/Systems"\n'
-        "    }\n"
-        "  ]\n"
-        "}"
-    )
-    assert json.loads(rendered3.target_json) == {
-        "calls": phase3["y_true"]["calls"],
-    }
-    assert "### Ordered REST Calls" in rendered3.prompt
+    with pytest.raises(ValueError, match="is not declared"):
+        build_call_row(
+            text="set boot mode",
+            contexts=(context,),
+            rest_api_list=(BIOS,),
+            method_by_api={BIOS: "PATCH"},
+            operation_name_by_api={BIOS: "delete_bios"},
+            arguments_by_api={BIOS: {"Attributes": {"BootMode": "Uefi"}}},
+        )
 
 
-def test_rendered_phase3_patch_example_keeps_explicit_arguments() -> None:
-    """Rendered Phase 3 labels preserve explicit non-GET arguments."""
+def test_phase3_build_call_row_rejects_arguments_that_violate_context_schema() -> None:
+    """Phase 3 mutation arguments must satisfy the context argument schema."""
     context = _context(
-        "/redfish/v1/Systems/1/Bios/Settings",
-        ("GET", "PATCH"),
-        {
-            "@odata.id": "/redfish/v1/Systems/1/Bios/Settings",
-            "Attributes": {"BootMode": "Uefi"},
-        },
-    )
-    row = build_ordered_call_row(
-        text="set bios boot mode to Uefi",
-        contexts=(context,),
-        rest_api_list=("/redfish/v1/Systems/1/Bios/Settings",),
-        method_by_api={"/redfish/v1/Systems/1/Bios/Settings": "PATCH"},
-        arguments_by_api={
-            "/redfish/v1/Systems/1/Bios/Settings": {
-                "Attributes": {"BootMode": "Uefi"},
-            },
-        },
+        BIOS,
+        ("PATCH",),
+        operations=("set_bios_attributes",),
+        argument_schema={"Attributes": {"BootMode": "string"}},
     )
 
-    rendered = render_ordered_call_example(row)
-
-    assert rendered.target_char_start == len(rendered.prompt)
-    assert json.loads(rendered.target_json) == {
-        "calls": [{
-            "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
-            "allowed_methods": ["GET", "PATCH"],
-            "method": "PATCH",
-            "arguments": {"Attributes": {"BootMode": "Uefi"}},
-        }],
-    }
-    assert '"PATCH"' in rendered.target_json
-    assert '"Attributes": {' in rendered.target_json
-    assert "### Ordered REST Calls" in rendered.prompt
-    assert "/redfish/v1/Systems/1/Bios/Settings" in rendered.prompt
+    with pytest.raises(ValueError, match="arguments do not match schema"):
+        build_call_row(
+            text="set boot mode",
+            contexts=(context,),
+            rest_api_list=(BIOS,),
+            method_by_api={BIOS: "PATCH"},
+            operation_name_by_api={BIOS: "set_bios_attributes"},
+            arguments_by_api={BIOS: {"Attributes": {"BootMode": 7}}},
+        )
 
 
-def test_rendered_and_inference_outputs_preserve_multi_item_order() -> None:
-    """Model-facing targets keep multi-item Phase 2/3 order unchanged."""
-    systems = _context(
-        "/redfish/v1/Systems",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/Systems"},
-    )
-    tasks = _context(
-        "/redfish/v1/TaskService/Tasks",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/TaskService/Tasks"},
-    )
-
-    phase2 = build_d1_rest_api_list_row(
-        text="check tasks, then list systems",
-        contexts=(systems, tasks),
-        rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems"),
-    )
-    phase3 = build_ordered_call_row(
-        text="check tasks, then list systems",
-        contexts=(systems, tasks),
-        rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems"),
-    )
-
-    assert json.loads(render_rest_api_list_example(phase2).target_json) == {
-        "rest_api_list": [
-            "/redfish/v1/TaskService/Tasks",
-            "/redfish/v1/Systems",
-        ],
-    }
-    assert json.loads(render_ordered_call_example(phase3).target_json) == {
-        "calls": [
-            {
-                "rest_api": "/redfish/v1/TaskService/Tasks",
-                "allowed_methods": ["GET", "HEAD"],
-                "method": "GET",
-                "arguments": {},
-            },
-            {
-                "rest_api": "/redfish/v1/Systems",
-                "allowed_methods": ["GET", "HEAD"],
-                "method": "GET",
-                "arguments": {},
-            },
-        ],
-    }
-    assert [
-        call["rest_api"]
-        for call in inference_ordered_goals_json(phase3)["ordered_goals"]
-    ] == [
-        "/redfish/v1/TaskService/Tasks",
-        "/redfish/v1/Systems",
-    ]
+def test_phase3_call_set_has_exact_fields_and_preserves_values() -> None:
+    row = _phase3_row()
+    assert row["source_dataset"] == "D1"
+    assert row["target_semantics"] == "unordered_unique_call_set"
+    calls = row["y_true"]["calls"]
+    assert all(set(call) == CALL_FIELDS for call in calls)
+    bios = next(call for call in calls if call["rest_api"] == BIOS)
+    assert bios["http_method"] == "PATCH"
+    assert bios["operation_name"] == "set_bios_attributes"
+    assert bios["arguments"] == {"Attributes": {"BootMode": "Uefi"}}
 
 
-def test_inference_json_uses_ordered_goals_shape() -> None:
-    """The combined inference handoff uses documented ordered_goals call fields."""
-    context = _context(
-        "/redfish/v1/TaskService/Tasks",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/TaskService/Tasks"},
-    )
-    row = build_ordered_call_row(
-        text="check task queue",
-        contexts=(context,),
-        rest_api_list=("/redfish/v1/TaskService/Tasks",),
-    )
-
-    assert inference_ordered_goals_json(row) == {
-        "text": "check task queue",
-        "ordered_goals": row["y_true"]["calls"],
-    }
-
-
-def test_inference_ordered_goals_json_preserves_mutation_arguments() -> None:
-    """The inference handoff keeps explicit non-GET arguments unchanged."""
-    context = _context(
-        "/redfish/v1/Systems/1/Bios/Settings",
-        ("GET", "PATCH"),
-        {
-            "@odata.id": "/redfish/v1/Systems/1/Bios/Settings",
-            "Attributes": {"BootMode": "LegacyBios"},
-        },
-    )
-    row = build_ordered_call_row(
-        text="set bios boot mode to Uefi",
-        contexts=(context,),
-        rest_api_list=("/redfish/v1/Systems/1/Bios/Settings",),
-        method_by_api={"/redfish/v1/Systems/1/Bios/Settings": "patch"},
-        arguments_by_api={
-            "/redfish/v1/Systems/1/Bios/Settings": {
-                "Attributes": {"BootMode": "Uefi"},
-            },
-        },
-    )
-
-    assert inference_ordered_goals_json(row) == {
-        "text": "set bios boot mode to Uefi",
-        "ordered_goals": [{
-            "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
-            "allowed_methods": ["GET", "PATCH"],
-            "method": "PATCH",
-            "arguments": {"Attributes": {"BootMode": "Uefi"}},
-        }],
-    }
-
-
-def test_y_pred_parsers_preserve_order_and_report_bad_contracts() -> None:
-    """Parsed y_pred JSON preserves order and rejects malformed call objects clearly."""
-    assert parse_rest_api_list_y_pred({
-        "y_pred": {"rest_api_list": ["/redfish/v1/B", "/redfish/v1/A"]},
-    }) == ["/redfish/v1/B", "/redfish/v1/A"]
-    assert parse_rest_api_list_y_pred({
-        "rest_api_list": ["/redfish/v1/Systems", "/redfish/v1/Managers"],
-    }) == ["/redfish/v1/Systems", "/redfish/v1/Managers"]
-    calls = [{
-        "rest_api": "/redfish/v1/Systems",
-        "allowed_methods": ["get", "head"],
-        "method": "get",
-        "arguments": {},
-    }]
-
-    assert parse_ordered_calls_y_pred(json.dumps({"y_pred": {"calls": calls}})) == [{
-        "rest_api": "/redfish/v1/Systems",
-        "allowed_methods": ["GET", "HEAD"],
-        "method": "GET",
-        "arguments": {},
-    }]
-    with pytest.raises(ValueError, match="rest_api"):
-        parse_ordered_calls_y_pred({
-            "y_pred": {
-                "calls": [{
-                    "allowed_methods": ["GET"],
-                    "method": "GET",
-                    "arguments": {},
-                }],
-            },
-        })
-    with pytest.raises(ValueError, match="method"):
-        parse_ordered_calls_y_pred({
-            "calls": [{
-                "rest_api": "/redfish/v1/Systems",
-                "allowed_methods": ["GET"],
-                "arguments": {},
-            }],
-        })
-    with pytest.raises(ValueError, match="arguments"):
-        parse_ordered_calls_y_pred({
-            "calls": [{
-                "rest_api": "/redfish/v1/Systems",
-                "allowed_methods": ["GET"],
-                "method": "GET",
-            }],
-        })
-
-
-def test_ordered_calls_parser_preserves_mutation_arguments_and_normalizes_method() -> None:
-    """Phase 3 y_pred parsing keeps PATCH arguments and normalizes method case."""
-    calls = [{
-        "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
-        "allowed_methods": ["get", "patch"],
-        "method": "patch",
-        "arguments": {"Attributes": {"BootMode": "Uefi"}},
-    }]
-
-    assert parse_ordered_calls_y_pred({"y_pred": {"calls": calls}}) == [{
-        "rest_api": "/redfish/v1/Systems/1/Bios/Settings",
-        "allowed_methods": ["GET", "PATCH"],
-        "method": "PATCH",
-        "arguments": {"Attributes": {"BootMode": "Uefi"}},
-    }]
-
-
-def test_rest_api_list_parser_rejects_non_string_items() -> None:
-    """Phase 2 y_pred parsing rejects non-string REST API labels."""
-    with pytest.raises(ValueError, match="rest_api_list item"):
-        parse_rest_api_list_y_pred({
-            "y_pred": {"rest_api_list": ["/redfish/v1/Systems", 42]},
-        })
-
-
-def test_rest_api_list_parser_rejects_non_list_target() -> None:
-    """Phase 2 y_pred parsing rejects scalar REST API labels."""
-    with pytest.raises(ValueError, match="rest_api_list must be a list"):
-        parse_rest_api_list_y_pred({
-            "y_pred": {"rest_api_list": "/redfish/v1/Systems"},
-        })
-
-
-def test_rest_api_list_parser_rejects_non_object_top_level_json() -> None:
-    """Phase 2 y_pred parsing rejects JSON that is not an object."""
-    for y_pred in ('["/redfish/v1/Systems"]', '"not an object"'):
-        with pytest.raises(ValueError, match="y_pred must be an object"):
-            parse_rest_api_list_y_pred(y_pred)
-
-
-def test_rest_api_list_parser_rejects_non_object_y_pred_envelope() -> None:
-    """Phase 2 y_pred parsing rejects a malformed y_pred envelope value."""
-    for y_pred in ({"y_pred": ["/redfish/v1/Systems"]}, {"y_pred": "not an object"}):
-        with pytest.raises(ValueError, match="y_pred.y_pred must be an object"):
-            parse_rest_api_list_y_pred(y_pred)
-
-
-def test_ordered_calls_parser_preserves_multiple_call_order() -> None:
-    """Phase 3 y_pred parsing keeps the model-emitted call sequence intact."""
-    calls = [
-        {
-            "rest_api": "/redfish/v1/TaskService/Tasks",
-            "allowed_methods": ["GET", "HEAD"],
-            "method": "GET",
-            "arguments": {},
-        },
-        {
-            "rest_api": "/redfish/v1/Systems",
-            "allowed_methods": ["GET", "HEAD"],
-            "method": "GET",
-            "arguments": {},
-        },
-    ]
-
-    assert parse_ordered_calls_y_pred({"calls": calls}) == calls
-
-
-def test_ordered_calls_parser_rejects_non_string_contract_fields() -> None:
-    """Phase 3 y_pred parsing rejects non-string REST API, method, and allowed methods."""
-    with pytest.raises(ValueError, match="rest_api"):
-        parse_ordered_calls_y_pred({
-            "calls": [{
-                "rest_api": 42,
-                "allowed_methods": ["GET"],
-                "method": "GET",
-                "arguments": {},
-            }],
-        })
-    with pytest.raises(ValueError, match="allowed_methods"):
-        parse_ordered_calls_y_pred({
-            "calls": [{
-                "rest_api": "/redfish/v1/Systems",
-                "allowed_methods": ["GET", 42],
-                "method": "GET",
-                "arguments": {},
-            }],
-        })
-    with pytest.raises(ValueError, match="method"):
-        parse_ordered_calls_y_pred({
-            "calls": [{
-                "rest_api": "/redfish/v1/Systems",
-                "allowed_methods": ["GET"],
-                "method": 42,
-                "arguments": {},
-            }],
-        })
-
-
-def test_ordered_calls_parser_rejects_non_list_calls_and_items() -> None:
-    """Phase 3 y_pred parsing rejects malformed calls containers and items."""
-    with pytest.raises(ValueError, match="calls must be a list"):
-        parse_ordered_calls_y_pred({"calls": "not a list"})
-    with pytest.raises(ValueError, match="calls item must be an object"):
-        parse_ordered_calls_y_pred({"calls": ["not an object"]})
-
-
-def test_ordered_calls_parser_rejects_non_list_allowed_methods() -> None:
-    """Phase 3 y_pred parsing rejects scalar allowed_methods values."""
-    with pytest.raises(ValueError, match="allowed_methods must be a list"):
-        parse_ordered_calls_y_pred({
-            "calls": [{
-                "rest_api": "/redfish/v1/Systems",
-                "allowed_methods": "GET",
-                "method": "GET",
-                "arguments": {},
-            }],
-        })
-
-
-def test_ordered_calls_parser_rejects_non_object_top_level_json() -> None:
-    """Phase 3 y_pred parsing rejects JSON that is not an object."""
-    for y_pred in ("[]", "42"):
-        with pytest.raises(ValueError, match="y_pred must be an object"):
-            parse_ordered_calls_y_pred(y_pred)
-
-
-def test_ordered_calls_parser_rejects_non_object_y_pred_envelope() -> None:
-    """Phase 3 y_pred parsing rejects a malformed y_pred envelope value."""
-    for y_pred in ({"y_pred": []}, {"y_pred": 42}):
-        with pytest.raises(ValueError, match="y_pred.y_pred must be an object"):
-            parse_ordered_calls_y_pred(y_pred)
-
-
-def test_ordered_calls_parser_rejects_invalid_method_and_arguments_shape() -> None:
-    """Phase 3 y_pred parsing rejects invalid method and argument contracts."""
-    with pytest.raises(ValueError, match="not in allowed_methods"):
-        parse_ordered_calls_y_pred({
-            "calls": [{
-                "rest_api": "/redfish/v1/Systems",
-                "allowed_methods": ["GET", "HEAD"],
-                "method": "PATCH",
-                "arguments": {},
-            }],
-        })
-    with pytest.raises(ValueError, match="arguments"):
-        parse_ordered_calls_y_pred({
-            "calls": [{
-                "rest_api": "/redfish/v1/Systems",
-                "allowed_methods": ["GET", "HEAD"],
-                "method": "GET",
-                "arguments": ["PowerState", "On"],
-            }],
-        })
-
-
-def test_ordered_calls_parser_rejects_readonly_arguments() -> None:
-    """Phase 3 y_pred parsing rejects non-empty GET/HEAD argument objects."""
-    for method in ("GET", "HEAD"):
-        with pytest.raises(ValueError, match="read-only"):
-            parse_ordered_calls_y_pred({
-                "calls": [{
-                    "rest_api": "/redfish/v1/Systems",
-                    "allowed_methods": ["GET", "HEAD", "PATCH"],
-                    "method": method,
-                    "arguments": {"PowerState": "On"},
-                }],
-            })
-
-
-def test_ordered_call_evaluation_counts_extra_predictions_as_failures() -> None:
-    """Phase 3 evaluation must not hide extra predictions by zipping shorter lists."""
-    systems = _context(
-        "/redfish/v1/Systems",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/Systems"},
-    )
-    tasks = _context(
-        "/redfish/v1/TaskService/Tasks",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/TaskService/Tasks"},
-    )
-    row = build_ordered_call_row(
-        text="check tasks, then list systems",
-        contexts=(systems, tasks),
-        rest_api_list=("/redfish/v1/TaskService/Tasks", "/redfish/v1/Systems"),
-    )
-    predicted_calls = list(row["y_true"]["calls"]) + [row["y_true"]["calls"][0]]
-
-    evaluation = evaluate_ordered_calls_y_pred(row, {"calls": predicted_calls})
-
+def test_phase3_reordered_prediction_is_exact() -> None:
+    row = _phase3_row()
+    prediction = {"calls": list(reversed(row["y_true"]["calls"]))}
+    evaluation = evaluate_calls_y_pred(row, prediction)
     assert evaluation["parsed"] is True
-    assert evaluation["expected_call_count"] == 2
-    assert evaluation["predicted_call_count"] == 3
-    assert evaluation["call_count_match"] is False
-    assert evaluation["call_ordered_exact_match_rate"] == 0.0
-    assert evaluation["method_exact_match_rate"] == pytest.approx(2 / 3)
+    assert evaluation["accepted"] is True
+    assert evaluation["call_set_exact_match_rate"] == 1.0
+    assert evaluation["rest_api_set_match_rate"] == 1.0
 
 
-def test_ordered_call_evaluation_reports_invalid_method_parse_failure() -> None:
-    """Invalid predicted methods become explicit evaluation failures."""
+@pytest.mark.parametrize(
+    "prediction",
+    [
+        {"call": {}},
+        {"calls": {}},
+        {"ordered_goals": []},
+        {"calls": [{"rest_api": SYSTEM}]},
+        {"calls": [{
+            "rest_api": SYSTEM,
+            "http_method": "GET",
+            "operation_name": "get_resource",
+            "arguments": {},
+            "allowed_methods": ["GET"],
+        }]},
+    ],
+)
+def test_phase3_parser_rejects_scalar_alias_and_extra_shapes(prediction) -> None:
+    with pytest.raises(ValueError):
+        parse_calls_y_pred(prediction)
+
+
+def test_phase3_parser_rejects_method_not_allowed_by_context() -> None:
+    prediction = {"calls": [{
+        "rest_api": SYSTEM,
+        "http_method": "PATCH",
+        "operation_name": "set_asset_tag",
+        "arguments": {"AssetTag": "rack-7"},
+    }]}
+    with pytest.raises(ValueError, match="not allowed"):
+        parse_calls_y_pred(prediction, contexts=(_context(SYSTEM),))
+
+
+def test_phase3_parser_rejects_operation_absent_from_context() -> None:
+    """Context-aware prediction parsing rejects undeclared operation names."""
+    prediction = {"calls": [{
+        "rest_api": BIOS,
+        "http_method": "PATCH",
+        "operation_name": "delete_bios",
+        "arguments": {"Attributes": {"BootMode": "Uefi"}},
+    }]}
     context = _context(
-        "/redfish/v1/Systems",
-        ("GET", "HEAD"),
-        {"@odata.id": "/redfish/v1/Systems"},
-    )
-    row = build_ordered_call_row(
-        text="list systems",
-        contexts=(context,),
-        rest_api_list=("/redfish/v1/Systems",),
+        BIOS,
+        ("PATCH",),
+        operations=("set_bios_attributes",),
+        argument_schema={"Attributes": {"BootMode": "string"}},
     )
 
-    evaluation = evaluate_ordered_calls_y_pred(
-        row,
-        {
-            "calls": [{
-                "rest_api": "/redfish/v1/Systems",
-                "allowed_methods": ["GET", "HEAD"],
-                "method": "PATCH",
-                "arguments": {},
-            }],
+    with pytest.raises(ValueError, match="is not declared"):
+        parse_calls_y_pred(prediction, contexts=(context,))
+
+
+def test_phase3_parser_rejects_arguments_that_violate_context_schema() -> None:
+    """Context-aware prediction parsing rejects malformed mutation arguments."""
+    prediction = {"calls": [{
+        "rest_api": BIOS,
+        "http_method": "PATCH",
+        "operation_name": "set_bios_attributes",
+        "arguments": {"Attributes": {"BootMode": 7}},
+    }]}
+    context = _context(
+        BIOS,
+        ("PATCH",),
+        operations=("set_bios_attributes",),
+        argument_schema={"Attributes": {"BootMode": "string"}},
+    )
+
+    with pytest.raises(ValueError, match="arguments do not match schema"):
+        parse_calls_y_pred(prediction, contexts=(context,))
+
+
+def test_phase3_render_and_inference_use_calls_only() -> None:
+    row = _phase3_row()
+    rendered = render_call_example(row)
+    assert json.loads(rendered.target_json) == {"calls": row["y_true"]["calls"]}
+    assert inference_calls_json(row) == {"calls": row["y_true"]["calls"]}
+
+
+def _validation_for(targets: tuple[str, ...]) -> dict[str, object]:
+    """Strict accepted Phase 2 judge evidence for a target API set."""
+    return {
+        "valid_json": True,
+        "accepted": True,
+        "natural": True,
+        "nonsense": False,
+        "ambiguous": False,
+        "duplicate_intent": False,
+        "extra_intents": False,
+        "method_semantics_valid": True,
+        "covered_api_set": sorted(targets),
+    }
+
+
+def _master_contexts() -> tuple[RedfishContext, ...]:
+    """Phase 2 context catalog with selected APIs plus four hidden distractors."""
+    return _phase2_catalog(
+        _context(SYSTEM, ("GET",), operations=("get_resource",)),
+        _context(
+            BIOS,
+            ("GET", "PATCH"),
+            operations=("set_bios_attributes",),
+            argument_schema={
+                "properties": {
+                    "Attributes": {
+                        "type": "object",
+                        "properties": {"BootMode": {"type": "string"}},
+                        "required": ["BootMode"],
+                    },
+                },
+                "required": ["Attributes"],
+            },
+        ),
+    )
+
+
+def _master_metadata(*, text: str, contexts: tuple[RedfishContext, ...]) -> dict[str, object]:
+    """Metadata with row_id derived from the matching Phase 2 D1 view."""
+    phase2 = build_d1_rest_api_list_row(
+        text=text,
+        contexts=contexts,
+        rest_api_list=(SYSTEM, BIOS),
+        validation=_validation_for((SYSTEM, BIOS)),
+    )
+    return {
+        "row_id": d1_row_id(phase2),
+        "sample_width_k": 2,
+        "vendor": ["unit"],
+        "source_corpus": ["unit-fixture"],
+    }
+
+
+def _master_label_kwargs(
+    *,
+    grounding: dict[str, dict[str, object]] | None = None,
+) -> dict[str, object]:
+    """Return one fully grounded D1 master-label fixture."""
+    text = "read the system and set BIOS boot mode to Uefi"
+    contexts = _master_contexts()
+    return {
+        "text": text,
+        "contexts": contexts,
+        "method_by_api": {SYSTEM: "GET", BIOS: "PATCH"},
+        "operation_name_by_api": {
+            SYSTEM: "get_resource",
+            BIOS: "set_bios_attributes",
         },
+        "arguments_by_api": {
+            SYSTEM: {},
+            BIOS: {"Attributes": {"BootMode": "Uefi"}},
+        },
+        "argument_value_grounding_by_api": grounding
+        or {
+            SYSTEM: {"grounded": False, "sources": []},
+            BIOS: {"grounded": True, "sources": ["argument_schema", "operator_text"]},
+        },
+        "validation": _validation_for((SYSTEM, BIOS)),
+        "metadata": _master_metadata(text=text, contexts=contexts),
+    }
+
+
+def test_d1_master_record_renders_exact_phase2_phase3_views() -> None:
+    """One master record produces strict Phase 2/3 views over the same API set."""
+    master = build_d1_master_record(**_master_label_kwargs())
+
+    phase2, phase3 = render_d1_master_views(master)
+
+    assert master["schema_version"] == "d1_master.v1"
+    assert phase2["target_semantics"] == "unordered_unique_rest_api_set"
+    assert phase3["target_semantics"] == "unordered_unique_call_set"
+    assert phase2["metadata"]["row_id"] == d1_row_id(phase2)
+    assert phase3["metadata"]["row_id"] == phase2["metadata"]["row_id"]
+    phase2_apis = set(phase2["y_true"]["rest_api_list"])
+    phase3_apis = {call["rest_api"] for call in phase3["y_true"]["calls"]}
+    assert phase2_apis == {SYSTEM, BIOS}
+    assert phase3_apis == phase2_apis
+    bios_call = next(
+        call for call in phase3["y_true"]["calls"]
+        if call["rest_api"] == BIOS
+    )
+    assert bios_call["http_method"] == "PATCH"
+    assert bios_call["operation_name"] == "set_bios_attributes"
+    assert bios_call["arguments"] == {"Attributes": {"BootMode": "Uefi"}}
+    assert render_rest_api_list_example(phase2).target_json
+    assert render_call_example(phase3).target_json
+
+
+def test_d1_master_record_accepts_operation_definition_grounding_alternative() -> None:
+    """Mutation arguments may use operator text plus operation-definition evidence."""
+    master = build_d1_master_record(
+        **_master_label_kwargs(
+            grounding={
+                SYSTEM: {"grounded": False, "sources": []},
+                BIOS: {
+                    "grounded": True,
+                    "sources": ["operator_text", "operation_definition"],
+                },
+            },
+        ),
     )
 
-    assert evaluation["parsed"] is False
-    assert "not in allowed_methods" in evaluation["parse_error"]
-    assert evaluation["arguments_json_parse_rate"] == 0.0
-    assert evaluation["invalid_method_rate"] == 1.0
+    assert master["label_evidence"]["argument_value_grounding_by_api"][BIOS] == {
+        "grounded": True,
+        "sources": ["operation_definition", "operator_text"],
+    }
 
 
-def test_wandb_metric_keys_are_stage_scoped_and_not_m3_names() -> None:
-    """Phase 2/3 contract constants reuse the shared W&B metric registry."""
-    expected_phase2 = (
-        "phase2_goal_extraction/train/loss",
-        "phase2_goal_extraction/train/perplexity",
-        "phase2_goal_extraction/train/optimizer_step",
-        "phase2_goal_extraction/eval/ordered_exact_match_rate",
-        "phase2_goal_extraction/eval/set_match_rate",
-        "phase2_goal_extraction/eval/precision",
-        "phase2_goal_extraction/eval/recall",
-        "phase2_goal_extraction/eval/f1",
-        "phase2_goal_extraction/eval/missing_allowed_methods_rate",
-        "phase2_goal_extraction/order/kendall_tau",
-        "phase2_goal_extraction/order/edit_distance",
-    )
-    expected_phase3 = (
-        "phase3_argument_extraction/train/loss",
-        "phase3_argument_extraction/train/perplexity",
-        "phase3_argument_extraction/train/optimizer_step",
-        "phase3_argument_extraction/eval/call_ordered_exact_match_rate",
-        "phase3_argument_extraction/eval/method_exact_match_rate",
-        "phase3_argument_extraction/eval/arguments_exact_match_rate",
-        "phase3_argument_extraction/eval/readonly_empty_arguments_rate",
-        "phase3_argument_extraction/order/kendall_tau",
-        "phase3_argument_extraction/order/edit_distance",
-    )
+def test_d1_master_views_reject_api_set_drift() -> None:
+    """Phase 2/3 API sets cannot diverge under a reused D1 row identity."""
+    master = build_d1_master_record(**_master_label_kwargs())
+    master["calls"] = [
+        call for call in master["calls"]
+        if call["rest_api"] != BIOS
+    ]
 
-    assert PHASE2_GOAL_EXTRACT_METRIC_KEYS == PHASE2_WANDB_METRIC_KEYS
-    assert PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS == PHASE3_WANDB_METRIC_KEYS
-    assert PHASE2_GOAL_EXTRACT_METRIC_KEYS == expected_phase2
-    assert PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS == expected_phase3
-    assert (
-        PHASE2_GOAL_EXTRACT_METRIC_KEYS + PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS
-        == PHASE23_WANDB_METRIC_KEYS
-    )
-    assert len(PHASE2_GOAL_EXTRACT_METRIC_KEYS) == len(set(PHASE2_GOAL_EXTRACT_METRIC_KEYS))
-    assert len(PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS) == len(set(PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS))
-    assert (
-        "phase2_goal_extraction/eval/ordered_exact_match_rate"
-        in PHASE2_GOAL_EXTRACT_METRIC_KEYS
-    )
-    assert "phase2_goal_extraction/eval/set_match_rate" in PHASE2_GOAL_EXTRACT_METRIC_KEYS
-    assert (
-        "phase3_argument_extraction/eval/readonly_empty_arguments_rate"
-        in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS
-    )
-    assert (
-        "phase3_argument_extraction/eval/arguments_exact_match_rate"
-        in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS
-    )
-    assert all(k.startswith("phase2_goal_extraction/") for k in PHASE2_GOAL_EXTRACT_METRIC_KEYS)
-    assert all(k.startswith("phase3_argument_extraction/") for k in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS)
-    assert not any(k.startswith("m3_") for k in PHASE2_GOAL_EXTRACT_METRIC_KEYS)
-    assert not any(k.startswith("m3_") for k in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS)
+    with pytest.raises(ValueError, match="metadata.row_id"):
+        render_d1_master_views(master)
 
 
-def test_training_docs_pin_phase23_metric_constants() -> None:
-    """Training docs name the Phase 2/3 constants and representative key groups."""
-    docs_path = Path(__file__).resolve().parents[2] / "docs" / "TRAINING.md"
-    training_doc = docs_path.read_text(encoding="utf-8")
-
-    assert "PHASE2_GOAL_EXTRACT_METRIC_KEYS" in training_doc
-    assert "PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS" in training_doc
-    assert "PHASE2_WANDB_METRIC_KEYS" in training_doc
-    assert "PHASE3_WANDB_METRIC_KEYS" in training_doc
-    assert "phase2_goal_extraction/eval/{ordered_exact_match_rate,set_match_rate" in training_doc
-    assert "phase2_goal_extraction/order/{kendall_tau,edit_distance}" in training_doc
-    assert "phase3_argument_extraction/eval/{call_ordered_exact_match_rate" in training_doc
-    assert "phase3_argument_extraction/order/{kendall_tau,edit_distance}" in training_doc
-    for metric_key in PHASE2_GOAL_EXTRACT_METRIC_KEYS:
-        assert metric_key in training_doc
-    for metric_key in PHASE3_ARGUMENT_EXTRACT_METRIC_KEYS:
-        assert metric_key in training_doc
-
-
-# Author: Mus mbayramo@stanford.edu
+@pytest.mark.parametrize(
+    ("grounding", "message"),
+    [
+        (
+            {
+                SYSTEM: {"grounded": False, "sources": []},
+                BIOS: {"grounded": True, "sources": ["current_json"]},
+            },
+            "unsupported sources",
+        ),
+        (
+            {
+                SYSTEM: {"grounded": False, "sources": []},
+                BIOS: {"grounded": True, "sources": ["operator_text", "fixture"]},
+            },
+            "unsupported sources",
+        ),
+        (
+            {
+                SYSTEM: {"grounded": False, "sources": []},
+                BIOS: {"grounded": True, "sources": ["operator_text"]},
+            },
+            "operator_text plus argument_schema",
+        ),
+        (
+            {
+                SYSTEM: {"grounded": False, "sources": []},
+                BIOS: {"grounded": False, "sources": []},
+            },
+            "positive grounding",
+        ),
+        (
+            {
+                SYSTEM: {"grounded": False, "sources": []},
+            },
+            "grounding keys",
+        ),
+    ],
+)
+def test_d1_master_record_rejects_current_json_and_missing_grounding(
+    grounding: dict[str, dict[str, object]],
+    message: str,
+) -> None:
+    """Mutation values require text plus schema/action evidence from known sources."""
+    with pytest.raises(ValueError, match=message):
+        build_d1_master_record(**_master_label_kwargs(grounding=grounding))

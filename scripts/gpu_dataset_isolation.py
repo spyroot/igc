@@ -8,7 +8,7 @@ configuration and EXITS, so the orchestrator's `timeout` turns a hang into a cle
 "DEADLOCK" result instead of a mysterious training stall.
 
 It exercises the real code path — an accelerate-prepared DataLoader built the same way as
-``igc/modules/llm_train_state_encoder.py`` (custom sampler optional, drop_last configurable) —
+``igc/modules/sft.py`` (custom sampler optional, drop_last configurable) —
 then loops one epoch and hits an epoch-end collective. Pure enough that a failure points at the
 dataloader/parallelism wiring, not the model.
 

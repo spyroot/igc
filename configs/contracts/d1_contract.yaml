@@ -1,0 +1,125 @@
+version: 1
+authority:
+  dataset: D1
+  purpose: accepted_human_text_labels_for_phase2_and_phase3
+  source_dataset: D0
+
+row:
+  phase: 2
+  task: text_to_rest_api_list
+  target_semantics: unordered_unique_rest_api_set
+  input_fields:
+    - text
+    - api_context
+  target_field: rest_api_list
+  forbidden_input_fields:
+    - rest_api_list
+    - selected
+    - target_indices
+
+master_record:
+  schema_version: d1_master.v1
+  purpose: single_private_label_authority_for_phase2_and_phase3_views
+  required_fields:
+    - dataset
+    - source_dataset
+    - text
+    - api_context
+    - calls
+    - validation
+    - label_evidence
+    - metadata
+  selected_api_identity: calls[].rest_api
+  selected_api_identity_unique: true
+  phase2_view_excludes_calls: true
+  phase3_view_requires_explicit_calls: true
+  mutation_argument_grounding_required: true
+  current_json_is_not_argument_grounding: true
+  argument_grounding_sources:
+    allowed: [operator_text, argument_schema, operation_definition]
+    required_for_nonempty_arguments:
+      - operator_text
+      - argument_schema_or_operation_definition
+  view_consistency: >-
+    set(phase2.y_true.rest_api_list) ==
+    set(call.rest_api for call in phase3.y_true.calls)
+
+context:
+  min_distractors_per_row: 4
+  all_target_apis_present: true
+  selected_membership_hidden: true
+
+empty_set_negatives:
+  purpose: natural_no_match_requests_over_realistic_api_context
+  expected_rest_api_list: []
+  separately_bounded: true
+  excluded_from_positive_width_balance: true
+  judge_acceptance_required: true
+  realistic_distractors_required: true
+  empty_candidate_context_forbidden: true
+
+judge:
+  required_fields:
+    - accepted
+    - natural
+    - nonsense
+    - ambiguous
+    - duplicate_intent
+    - extra_intents
+    - method_semantics_valid
+    - covered_api_set
+    - reason
+  acceptance:
+    valid_json: true
+    accepted: true
+    natural: true
+    nonsense: false
+    ambiguous: false
+    duplicate_intent: false
+    extra_intents: false
+    method_semantics_valid: true
+    covered_api_set_equals_selected_api_set: true
+  calibration:
+    min_precision: 0.99
+    min_recall: 0.90
+    max_false_accept_rate: 0.01
+
+release:
+  canonical_unit: directory
+  data_member: data.jsonl
+  manifest_member: manifest.json
+  pending_suffix: .pending
+  validate_entire_jsonl: true
+  validate_balance: true
+  validate_judge_evidence: true
+  write_manifest: true
+  compute_sha256: true
+  single_atomic_directory_rename: true
+  canonical_path_must_not_exist_after_failure: true
+  manifest_immutable: true
+  manifest_complete: true
+  split_release:
+    schema: d1_phase23_split_release.v1
+    deterministic: true
+    phase2_phase3_source_row_ids_aligned: true
+    train_heldout_source_row_ids_disjoint: true
+    exact_manifest_and_artifact_sha_required: true
+
+promotion_evidence:
+  real_generation:
+    draft_provider_adapter: openai-compatible
+    judge_provider_adapter: openai-compatible
+    model_x_artifact_must_match_parent: true
+    judge_identity_must_be_resolved: true
+  immutable_full_manifest:
+    required_fields: [immutable, complete, rows, sha256, artifact_sha]
+  real_promoted_parent_checkpoint:
+    expected_role: model_x
+    required_fields: [role, artifact_sha, promotion_status]
+  real_heldout_data:
+    required_fields: [real, split, rows, manifest_sha, artifact_sha]
+  non_null_quality_thresholds: true
+  artifact_sha_format: sha256
+  reload_target: parent
+  checkpoint_reload_required_fields: [status, artifact_sha]
+  inference_smoke_required_fields: [status, artifact_sha]

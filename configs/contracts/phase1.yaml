@@ -1,0 +1,85 @@
+version: 1
+authority:
+  dataset: D0
+  phase: 1
+  task: redfish_json_reconstruction
+
+row:
+  required_top_level_fields:
+    - phase
+    - dataset
+    - task
+    - x
+    - y_true
+  optional_top_level_fields:
+    - metadata
+  forbidden_top_level_fields:
+    - y_pred
+  input:
+    rest_api: non_empty_string
+    allowed_methods: unique_uppercase_string_list
+    json: object
+  target:
+    json: object
+    required: true
+
+metadata:
+  purpose: source_lineage_and_heldout_grouping
+  required_when_materialized_from_registry: true
+  fields:
+    row_id: sha256
+    source_corpus: non_empty_string
+    trust_level: non_empty_string
+    vendor: nullable_string
+  optional_chunk:
+    purpose: lossless_reassembly_and_tokenizer_lineage
+    required_fields:
+      - version
+      - original_row_id
+      - original_json_sha256
+      - tokenizer_sha
+      - max_tokens
+      - index
+      - count
+      - json_path
+      - kind
+      - range_start
+      - range_stop
+      - container_length
+      - chunk_json_sha256
+
+objective:
+  family: causal_lm_completion
+  prompt_tokens_ignored: true
+  completion_tokens_supervised: true
+  overflow_policy: reject
+
+chunking:
+  transform: phase1.lossless-json-chunk.v1
+  required_for_registry_materialization: true
+  split_before_chunk: true
+  overflow_policy: lossless_json_chunk
+  padding: max_length
+  max_tokens_source: training_profile.seq_len
+  tokenizer_sha_source: training_profile.tokenizer_sha
+  telemetry_reporting:
+    classification_effect: report_only_never_drop
+    rest_api_markers:
+      - /TelemetryService
+      - /MetricReport
+      - /MetricDefinition
+      - /Sensor
+      - /Thermal
+      - /EnvironmentMetrics
+
+materialization:
+  canonical_unit: directory
+  members:
+    - train/examples.jsonl
+    - train/manifest.json
+    - heldout/examples.jsonl
+    - heldout/manifest.json
+  single_atomic_directory_rename: true
+  immutable: true
+  split_membership_unit: original_resource_before_chunking
+  exact_reassembly_required: true

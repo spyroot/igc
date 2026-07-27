@@ -2,15 +2,8 @@
 Torch dataset over a written training corpus (the tokenizer bridge).
 
 Feeds the provenance-tagged corpus produced by the ``igc.ds.sources`` pipeline
-(``write_corpus`` -> ``examples.jsonl`` + ``manifest.json``) into the existing M1
-state-encoder training loop. Each example is rendered as its request line plus the
-response JSON, tokenized once at construction to the same fixed-length
-``input_ids``/``attention_mask`` items the trainer's collate function stacks — so the
-trainer consumes a trust-tier-split corpus without any loop changes.
-
-The class duck-types the surface the trainer touches on ``MaskedJSONDataset``:
-``tokenizer``/``load_tokenizer`` plus the masking-method hooks, which are no-ops here
-because a written corpus trains the plain causal-LM (NO_MASK) objective.
+(``write_corpus`` -> ``examples.jsonl`` + ``manifest.json``) into the shared SFT
+engine. Phase 1 examples use the same completion-only label mask as Phases 2 and 3.
 
 Used by ``IgcMain.dataset`` (``igc/modules/igc_main.py``): when the ``--corpus_dir`` CLI flag
 is set, a run loads this class instead of rebuilding ``MaskedJSONDataset`` from
@@ -22,6 +15,7 @@ Mus mbayramo@stanford.edu
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Any, Dict, List, Mapping, Optional
@@ -30,6 +24,7 @@ import torch
 from torch.utils.data import Dataset
 
 from igc.ds.phase1_render import render_phase1_completion, render_phase1_prompt
+from igc.ds.sft_dataset import token_ids, tokenize_prompt_completion
 from igc.ds.sources.corpus_io import iter_examples, read_manifest
 from igc.ds.sources.mixer import DataManifest
 from igc.modules.base.metric_keys import PHASE1_FINETUNE, PHASE1_OBJECTIVE_PRETRAIN
@@ -74,6 +69,11 @@ class CorpusJSONLDataset(Dataset):
         manifest_path = os.path.join(self._corpus_dir, "manifest.json")
         self.manifest: Optional[Dict] = (
             read_manifest(manifest_path) if os.path.isfile(manifest_path) else None)
+        self._data_sha256 = _sha256_file(examples_path)
+        self._manifest_sha256 = (
+            _sha256_file(manifest_path) if os.path.isfile(manifest_path) else ""
+        )
+        self._eval_data_sha256 = ""
 
         self._data: List[Dict[str, torch.Tensor]] = []
         tok = self.tokenizer
@@ -123,111 +123,69 @@ class CorpusJSONLDataset(Dataset):
     def _tokenize_prompt_completion(
             self, tok: Any, prompt: str, completion: str) -> Dict[str, torch.Tensor]:
         """Tokenize prompt/completion and mask loss over prompt + padding."""
-        prompt_ids = self._token_ids(tok, prompt)
-        completion_ids = self._token_ids(tok, completion)
-        if completion_ids.numel() == 0:
-            raise ValueError("phase1_pretrain completion tokenized to zero tokens")
+        prompt_ids = token_ids(tok, prompt)
+        completion_ids = token_ids(tok, completion)
         max_len = int(self._max_len or (prompt_ids.numel() + completion_ids.numel()))
-
-        if max_len < 2:
-            raise ValueError("phase1_pretrain requires max_len >= 2")
-
-        # Keep at least one prompt token when there is prompt context, and at least
-        # one completion token. All-ignored rows can produce NaN CausalLM loss, and
-        # prompt-free truncation would turn the objective into unconditional JSON LM.
-        max_completion = max_len - 1 if prompt_ids.numel() > 0 else max_len
-        completion_budget = min(max(1, completion_ids.numel()), max_completion)
-        prompt_budget = max_len - completion_budget
-        # Preserve the prompt tail because it carries the "complete JSON" marker
-        # immediately before the completion. Keeping the head would leave the model
-        # with context but no clear generation boundary on long Redfish resources.
-        prompt_ids = prompt_ids[-prompt_budget:] if prompt_budget else prompt_ids[:0]
-        completion_ids = completion_ids[:completion_budget]
-
-        input_ids = torch.cat((prompt_ids, completion_ids)).long()
-        attention_mask = torch.ones_like(input_ids, dtype=torch.long)
-        labels = torch.full_like(input_ids, -100)
-        # Labels stay unshifted: Hugging Face CausalLM shifts logits/labels
-        # internally, so completion-token positions carry their own ids here.
-        labels[prompt_ids.numel():] = completion_ids
-
-        if input_ids.numel() < max_len:
-            pad_id = int(getattr(tok, "pad_token_id", 0) or 0)
-            pad_len = max_len - input_ids.numel()
-            input_ids = torch.cat((input_ids, torch.full((pad_len,), pad_id, dtype=torch.long)))
-            attention_mask = torch.cat((attention_mask, torch.zeros(pad_len, dtype=torch.long)))
-            labels = torch.cat((labels, torch.full((pad_len,), -100, dtype=torch.long)))
-
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "labels": labels,
-        }
+        return tokenize_prompt_completion(tok, prompt, completion, max_len)
 
     @staticmethod
     def _token_ids(tok: Any, text: str) -> torch.Tensor:
         """Return unpadded token ids for ``text``."""
-        try:
-            out = tok(text, padding=False, truncation=False, return_tensors="pt",
-                      add_special_tokens=False)
-        except TypeError:
-            encode = getattr(tok, "encode", None)
-            if callable(encode):
-                ids = encode(text, add_special_tokens=False)
-                ids_tensor = torch.as_tensor(ids, dtype=torch.long)
-                return ids_tensor.squeeze(0) if ids_tensor.dim() > 1 else ids_tensor
-            out = tok(text, padding=False, truncation=False, return_tensors="pt")
-        return out["input_ids"].squeeze(0).long()
+        return token_ids(tok, text)
 
     # --- provenance for run reports -----------------------------------------------
 
     def run_manifest_fields(self) -> Dict[str, str]:
-        """``{data_manifest, eval_split}`` for the run report, or empty strings.
+        """Return semantic and exact-byte corpus identities for the run report.
 
         Reconstructs the :class:`DataManifest` written next to the corpus so the run
         report carries the same content hash / split id the mixer computed.
 
-        :return: dict with ``data_manifest`` and ``eval_split`` keys.
+        :return: semantic manifest identity plus exact train/eval/manifest digests.
         """
         if not self.manifest:
-            return {"data_manifest": "", "eval_split": ""}
+            return {
+                "data_manifest": "",
+                "eval_split": self._eval_data_sha256,
+                "train_data_sha": self.data_sha256,
+                "eval_data_sha": self._eval_data_sha256,
+                "source_manifest_sha": "",
+                "source_registry_sha": "",
+                "source_artifact_manifest_shas": {},
+            }
         manifest = DataManifest(**self.manifest)
-        return manifest.to_run_manifest_fields()
+        fields = manifest.to_run_manifest_fields()
+        fields.update({
+            "eval_split": self._eval_data_sha256,
+            "train_data_sha": self.data_sha256,
+            "eval_data_sha": self._eval_data_sha256,
+            "source_manifest_sha": self.manifest_sha256,
+            "source_registry_sha": manifest.source_registry_sha,
+            "source_artifact_manifest_shas": dict(manifest.source_manifest_shas),
+        })
+        return fields
 
-    # --- masking surface the trainer may touch (NO_MASK corpus: all no-ops) --------
+    @property
+    def data_sha256(self) -> str:
+        """Return the SHA-256 identity of the exact ``examples.jsonl`` bytes."""
+        return f"sha256:{self._data_sha256}"
 
-    def disable_masking(self) -> None:
-        """No-op: a written corpus trains the plain causal-LM objective."""
+    @property
+    def manifest_sha256(self) -> str:
+        """Return the SHA-256 identity of the exact ``manifest.json`` bytes."""
+        return f"sha256:{self._manifest_sha256}" if self._manifest_sha256 else ""
 
-    def enable_masking(self, *args, **kwargs) -> None:
-        """No-op: span masking is not defined for the packed corpus."""
-
-    def mask_section(self, *args, **kwargs) -> None:
-        """No-op masking hook (see :meth:`enable_masking`)."""
-
-    def mask_new_tokens(self, *args, **kwargs) -> None:
-        """No-op masking hook (see :meth:`enable_masking`)."""
-
-    def mask_targets(self, *args, **kwargs) -> None:
-        """No-op masking hook (see :meth:`enable_masking`)."""
-
-    def mask_allowed_value(self, *args, **kwargs) -> None:
-        """No-op masking hook (see :meth:`enable_masking`)."""
-
-    def mask_odata_id(self, *args, **kwargs) -> None:
-        """No-op masking hook (see :meth:`enable_masking`)."""
-
-    def mask_targets_key(self, *args, **kwargs) -> None:
-        """No-op masking hook (see :meth:`enable_masking`)."""
-
-    def mask_objects(self, *args, **kwargs) -> None:
-        """No-op masking hook (see :meth:`enable_masking`)."""
-
-    def mask_arrays(self, *args, **kwargs) -> None:
-        """No-op masking hook (see :meth:`enable_masking`)."""
-
-    def mask_api_prefix(self, *args, **kwargs) -> None:
-        """No-op masking hook (see :meth:`enable_masking`)."""
+    def set_eval_split_sha256(self, value: str) -> None:
+        """Bind the exact held-out JSONL identity used by the trainer."""
+        digest = value.removeprefix("sha256:") if isinstance(value, str) else ""
+        if (
+            not isinstance(value, str)
+            or not value.startswith("sha256:")
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest.lower())
+        ):
+            raise ValueError("eval split identity must be a sha256 digest")
+        self._eval_data_sha256 = value
 
     # --- torch Dataset -------------------------------------------------------------
 
@@ -238,6 +196,15 @@ class CorpusJSONLDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """The fixed-length ``input_ids``/``attention_mask`` item at ``idx``."""
         return self._data[idx]
+
+
+def _sha256_file(path: str) -> str:
+    """Return the lowercase SHA-256 hex digest for one local file."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 # Author: Mus mbayramo@stanford.edu

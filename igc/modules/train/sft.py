@@ -1,0 +1,1627 @@
+"""Shared causal-language-model SFT engine for Phases 1, 2, and 3.
+
+The engine consumes fixed-shape tokenized batches containing ``input_ids``,
+``attention_mask``, and completion-only ``labels``. Dataset adapters own raw-row
+validation, prompt rendering, completion rendering, and any optional masking
+curriculum. The trainer owns optimization, distributed execution, checkpointing,
+and phase-namespaced metrics.
+
+Author:Mus mbayramo@stanford.edu
+"""
+import argparse
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Optional, Tuple, Union, List
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+from torch import Tensor
+from torch.quantization import convert
+from torch.utils.data import DataLoader, RandomSampler
+from transformers import PreTrainedModel, PreTrainedTokenizer
+
+from igc.modules.base.igc_llm_base_module import LlmModule
+from igc.modules.base.igc_metric_logger import MetricLogger
+from igc.modules.shared.llm_shared import safe_resize_token_embeddings
+from igc.modules.base.metric_keys import phase_metric
+from igc.shared.shared_accelerator import broadcast_flag
+from igc.shared.shared_torch_builder import TorchBuilder
+
+from igc.ds.redfish_masked_dataset import (
+    MaskingOption,
+    MaskingType
+)
+
+
+@dataclass(frozen=True)
+class ValidationMetrics:
+    """Aggregated validation metrics shared by every rank.
+
+    :param loss: Token-weighted validation cross-entropy loss.
+    :param accuracy: Shifted-token accuracy as a percentage for legacy logging.
+    """
+
+    loss: float
+    accuracy: float
+
+    def __float__(self) -> float:
+        """Return legacy accuracy percentage when used as a scalar."""
+        return float(self.accuracy)
+
+    def __eq__(self, other) -> bool:
+        """Preserve legacy tests/callers that compared ``validate()`` to a float."""
+        if isinstance(other, (int, float)):
+            return self.accuracy == float(other)
+        return super().__eq__(other)
+
+    def __truediv__(self, other):
+        """Preserve legacy ``validate(...) / 100`` accuracy normalization."""
+        return self.accuracy / other
+
+
+def build_causal_lm_labels(input_ids, attention_mask, pad_token_id=None):
+    """Build full-length next-token labels for a Hugging Face CausalLM.
+
+    A HF causal LM shifts internally when given ``labels`` — it computes the loss of
+    ``logits[:, :-1]`` against ``labels[:, 1:]`` — so labels must be the SAME length as
+    ``input_ids`` and NOT pre-shifted. Pre-shifting (the old ``target_ids = input_ids[:,
+    1:]`` with a truncated input) double-shifts and trains the model to predict two
+    tokens ahead. Attention-padding and pad-token positions are set to ``-100`` so they
+    are ignored in the loss; ``input_ids`` itself is never altered (``-100`` is not a
+    valid embedding index).
+
+    :param input_ids: ``[B, L]`` token ids.
+    :param attention_mask: ``[B, L]`` mask (1 = attended, 0 = padding).
+    :param pad_token_id: the tokenizer pad id to ignore, or ``None`` to skip that mask.
+    :return: ``[B, L]`` labels with ``-100`` on ignored positions.
+    """
+    labels = input_ids.clone()
+    labels = labels.masked_fill(~attention_mask.bool(), -100)
+    if pad_token_id is not None:
+        labels = labels.masked_fill(input_ids == pad_token_id, -100)
+    return labels
+
+
+def causal_lm_labels_from_batch(batch, input_ids, attention_mask, pad_token_id=None):
+    """Return dataset-provided labels or build whole-sequence causal-LM labels.
+
+    Phase 1 corpus rows provide prompt-masked ``labels``. Legacy datasets do not, so
+    the trainer falls back to full-sequence next-token labels.
+
+    :param batch: Collated batch dictionary.
+    :param input_ids: Device-local input ids.
+    :param attention_mask: Device-local attention mask.
+    :param pad_token_id: Tokenizer pad id for the legacy fallback.
+    :return: Labels on the same device as ``input_ids``.
+    """
+    labels = batch.get("labels")
+    if labels is not None:
+        return labels.to(input_ids.device, non_blocking=False)
+    return build_causal_lm_labels(input_ids, attention_mask, pad_token_id)
+
+
+def optimizer_steps_per_epoch(num_micro_batches: int, accum_steps: int) -> int:
+    """Optimizer steps one epoch will actually take under gradient accumulation.
+
+    Schedulers like OneCycleLR consume ``steps_per_epoch`` as OPTIMIZER steps;
+    feeding them micro-batch counts under accumulation leaves most of the
+    one-cycle schedule unexecuted.
+
+    :param num_micro_batches: dataloader length for the epoch.
+    :param accum_steps: gradient accumulation steps (coerced to >= 1).
+    :return: ``ceil(num_micro_batches / accum_steps)``.
+    """
+    accum_steps = max(1, accum_steps)
+    return -(-num_micro_batches // accum_steps)
+
+
+def remaining_epochs(num_epochs: int, last_epoch: int) -> int:
+    """Epochs a (possibly resumed) run still owes, floored at zero.
+
+    A relaunch can resume from a checkpoint already at/beyond the target epoch
+    count (the epoch loop then runs zero iterations); the raw subtraction goes
+    negative for checkpoints from a longer prior run.
+
+    :param num_epochs: configured target epoch count for the run.
+    :param last_epoch: epochs already completed per the loaded checkpoint.
+    :return: ``max(0, num_epochs - last_epoch)``.
+    """
+    return max(0, int(num_epochs) - int(last_epoch))
+
+
+def scheduler_epoch_args(
+        num_epochs: int,
+        last_epoch: int,
+        num_micro_batches: int,
+        accum_steps: int,
+) -> tuple:
+    """Positive ``(epochs, steps_per_epoch)`` for scheduler construction.
+
+    OneCycleLR rejects ``epochs=0`` and ``steps_per_epoch=0``, so a resume over
+    a completed checkpoint — or an empty per-rank dataloader under
+    ``drop_last=True`` — crashed scheduler creation before the (no-op) epoch
+    loop could reach end-of-train finalization (the slot2 Phase 1 prebuild hit
+    exactly this: ``ValueError: Expected positive integer epochs, but got 0``).
+    Nothing steps the scheduler in those degenerate runs, so clamping both
+    values to at least 1 yields a valid never-consumed schedule while the real
+    remaining-work values pass through unchanged.
+
+    :param num_epochs: configured target epoch count for the run.
+    :param last_epoch: epochs already completed per the loaded checkpoint.
+    :param num_micro_batches: train dataloader length for one epoch.
+    :param accum_steps: gradient accumulation steps (coerced to >= 1).
+    :return: ``(epochs, steps_per_epoch)``, each floored at 1.
+    """
+    return (
+        max(1, remaining_epochs(num_epochs, last_epoch)),
+        max(1, optimizer_steps_per_epoch(num_micro_batches, accum_steps)),
+    )
+
+
+def measure_grad_norm(model, max_norm: float = float("inf")) -> float:
+    """Measure and optionally clip the current global gradient norm.
+
+    Must run BEFORE ``optimizer.step()``/``zero_grad()`` — afterwards the
+    gradients are cleared and the measurement is 0.0 forever, which is exactly
+    the bug this helper exists to prevent regressing.
+
+    :param model: the module whose parameter gradients are measured.
+    :param max_norm: clipping threshold; infinity preserves measure-only behavior.
+    :return: the global grad norm as a float.
+    """
+    import torch as _torch
+    return _torch.nn.utils.clip_grad_norm_(
+        model.parameters(), max_norm=max_norm).item()
+
+
+def is_accum_boundary(micro_step_index: int, accum_steps: int, total_batches: int) -> bool:
+    """Whether a manually-accumulated optimizer step should fire on this micro-batch.
+
+    Used on the plain (non-accelerator) path, which has no accumulation wrapper: fire every
+    ``accum_steps`` micro-batches, and always on the final batch of the epoch so a trailing
+    partial accumulation window is flushed rather than silently dropped. Over one epoch this
+    yields ``ceil(total_batches / accum_steps)`` optimizer steps.
+
+    :param micro_step_index: zero-based index of the current micro-batch within the epoch.
+    :param accum_steps: gradient accumulation steps (coerced to ``>= 1``).
+    :param total_batches: number of micro-batches in the epoch.
+    :return: ``True`` to run optimizer.step()/scheduler.step()/zero_grad() now.
+    """
+    accum_steps = max(1, accum_steps)
+    reached_window = (micro_step_index + 1) % accum_steps == 0
+    is_last_batch = (micro_step_index + 1) == total_batches
+    return reached_window or is_last_batch
+
+
+def reached_max_steps(global_step: int, max_steps: Optional[int]) -> bool:
+    """Whether training should stop because the optimizer-step cap is reached.
+
+    ``--max_train_steps`` caps the number of OPTIMIZER updates (not micro-batches). A value of
+    ``None`` or ``<= 0`` means no cap. Without this check ``_train`` loops ``num_train_epochs``
+    (default 1000) and silently ignores the step cap.
+
+    :param global_step: optimizer steps taken so far this run.
+    :param max_steps: the configured cap, or ``None`` / ``<= 0`` for uncapped.
+    :return: ``True`` when ``max_steps`` is a positive int and ``global_step >= max_steps``.
+    """
+    return max_steps is not None and max_steps > 0 and global_step >= max_steps
+
+
+def cadence_due(optimizer_step: int, interval: int) -> bool:
+    """Return whether an optimizer-step cadence fires at this update."""
+    return optimizer_step > 0 and interval > 0 and optimizer_step % interval == 0
+
+
+def validation_accuracy(value: Union[ValidationMetrics, float]) -> float:
+    """Return percent token accuracy from either old or structured validation output."""
+    if isinstance(value, ValidationMetrics):
+        return value.accuracy
+    return float(value)
+
+
+def validation_loss(value: Union[ValidationMetrics, float]) -> float:
+    """Return validation loss, or ``inf`` when only legacy accuracy is available."""
+    if isinstance(value, ValidationMetrics):
+        return value.loss
+    return float("inf")
+
+
+def emit_final_run_report(
+        *,
+        trainer_args,
+        dataset,
+        final_epoch_loss,
+        epochs_done: int,
+        optimizer_steps: int,
+        best_eval: float,
+        validation_result: Union[ValidationMetrics, float],
+        started_at: str,
+        ended_at: str,
+        wall_clock_sec: float,
+        checkpoint_path: str,
+        output_dir: str) -> str:
+    """Build and write the final training ``report.json``.
+
+    Report emission is part of the Phase 1 acceptance evidence, so construction
+    or write failures propagate to the caller instead of being downgraded to a
+    warning.
+
+    :param trainer_args: Parsed training args used to populate the manifest.
+    :param dataset: Dataset object, optionally exposing ``run_manifest_fields``.
+    :param final_epoch_loss: Last epoch average loss, or ``None`` if no epoch ran.
+    :param epochs_done: Number of completed epochs.
+    :param optimizer_steps: Number of optimizer steps taken in this run.
+    :param best_eval: Best validation metric observed by the trainer.
+    :param validation_result: Last validation result used for report metrics.
+    :param started_at: ISO-like run start timestamp.
+    :param ended_at: ISO-like run end timestamp.
+    :param wall_clock_sec: Run duration in seconds.
+    :param checkpoint_path: Final checkpoint path recorded in the manifest.
+    :param output_dir: Directory where ``report.json`` is written.
+    :return: Path to the written report.
+    """
+    from igc.modules.train.emit import build_run_bundle, emit_run_report
+
+    manifest_fields = getattr(dataset, "run_manifest_fields", None)
+    bundle = build_run_bundle(
+        vars(trainer_args),
+        training={
+            "final_epoch_loss": final_epoch_loss,
+            "epochs_done": epochs_done,
+            "optimizer_steps": optimizer_steps,
+            "best_eval": best_eval,
+        },
+        metrics={
+            "eval/accuracy": validation_accuracy(validation_result),
+            "eval/loss": validation_loss(validation_result),
+        },
+        dataset_fields=manifest_fields() if callable(manifest_fields) else None,
+        started_at=started_at,
+        ended_at=ended_at,
+        wall_clock_sec=wall_clock_sec,
+        checkpoint_path=checkpoint_path,
+    )
+    return emit_run_report(bundle, output_dir)
+
+
+def resolve_early_stopping(spec) -> Tuple[int, float]:
+    """Resolve the early-stopping knobs from the run spec.
+
+    Missing/``None`` values fall back to the Phase 1 defaults; an explicit ``0`` is
+    honored — patience ``0`` (or negative) disables early stopping entirely, and
+    min_delta ``0.0`` means any improvement resets patience.
+
+    :param spec: argparse.Namespace-like run spec.
+    :return: ``(patience, min_delta)``.
+    """
+    patience = getattr(spec, "early_stopping_patience", None)
+    min_delta = getattr(spec, "early_stopping_min_delta", None)
+    return (
+        3 if patience is None else int(patience),
+        0.005 if min_delta is None else float(min_delta),
+    )
+
+
+def restored_best_metric(checkpoint_state, select_by_loss: bool) -> Optional[float]:
+    """Best-selection metric to resume best-checkpoint tracking from, or ``None``.
+
+    Only a checkpoint whose ``best_metric_mode`` matches the trainer's current
+    selection mode is trusted (a loss-mode best must never seed accuracy-mode
+    tracking, and vice versa). Accuracy mode additionally falls back to the legacy
+    ``best_accuracy`` channel that old checkpoints carry; loss mode has no legacy
+    channel and starts fresh at ``+inf``.
+
+    :param checkpoint_state: :class:`~igc.modules.base.igc_base_module.CheckpointState`.
+    :param select_by_loss: True when the trainer selects best by eval loss.
+    :return: the metric to seed ``_best_validation_metric`` with, or ``None``.
+    """
+    mode = "loss" if select_by_loss else "accuracy"
+    best_metric = getattr(checkpoint_state, "best_metric", None)
+    best_mode = getattr(checkpoint_state, "best_metric_mode", None)
+    if best_metric is not None and best_mode == mode and np.isfinite(best_metric):
+        return float(best_metric)
+    if not select_by_loss:
+        legacy = getattr(checkpoint_state, "best_accuracy", None)
+        if legacy is not None and np.isfinite(legacy):
+            return float(legacy)
+    return None
+
+
+def shifted_token_loss(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    """Return HF CausalLM-style shifted CE loss for full-length labels."""
+    shifted_logits = logits[..., :-1, :].contiguous()
+    shifted_labels = labels[..., 1:].contiguous()
+    return F.cross_entropy(
+        shifted_logits.view(-1, shifted_logits.size(-1)),
+        shifted_labels.view(-1).long(),
+        ignore_index=-100,
+    )
+
+
+def unwrap_accelerate(wrapped, inner_attr: str):
+    """Return the base optimizer/scheduler that accelerate wrapped, or ``wrapped``.
+
+    ``Accelerator.unwrap_model`` is for ``nn.Module``s only — in accelerate>=1.14 it
+    probes ``model._modules``, which an ``AcceleratedOptimizer`` / ``AcceleratedScheduler``
+    does not have, raising ``AttributeError('_modules')`` and killing the checkpoint
+    save on the multi-GPU (FSDP) path. accelerate exposes the inner object as
+    ``AcceleratedOptimizer.optimizer`` / ``AcceleratedScheduler.scheduler``, so read that.
+
+    :param wrapped: the (possibly accelerate-wrapped) optimizer or scheduler.
+    :param inner_attr: ``"optimizer"`` or ``"scheduler"`` — the wrapper's inner attribute.
+    :return: the unwrapped inner object, or ``wrapped`` if it is not wrapped.
+    """
+    return getattr(wrapped, inner_attr, wrapped)
+
+
+def validate_parent_output_isolation(
+        parent_adapter_dir: str,
+        output_adapter_dir: str,
+) -> None:
+    """Refuse an SFT run that would overwrite its immutable parent adapter.
+
+    Phase 2 continues training from ``model_x`` and Phase 3 continues from the
+    Phase 2 adapter, but each run must write a new artifact.  Path identity is
+    checked after expansion and resolution so aliases such as ``..`` cannot
+    bypass the guard.
+
+    :param parent_adapter_dir: Accepted parent adapter directory, or an empty
+        string for Phase 1.
+    :param output_adapter_dir: Directory where this run saves its adapter.
+    :raises ValueError: when parent and output resolve to the same directory.
+    """
+    if not parent_adapter_dir:
+        return
+    parent = Path(parent_adapter_dir).expanduser().resolve()
+    output = Path(output_adapter_dir).expanduser().resolve()
+    if parent == output:
+        raise ValueError(
+            "SFT output adapter directory must differ from immutable parent adapter"
+        )
+
+
+class SFTTrainer(LlmModule):
+    """Fine-tune a causal LM from task-adapter token batches."""
+
+    def __init__(self,
+                 module_name: str,
+                 spec: argparse.Namespace,
+                 llm_model: PreTrainedModel = None,
+                 llm_tokenizer: PreTrainedTokenizer = None,
+                 dataset: Any = None,
+                 eval_dataset: Any = None,
+                 metric_logger: Optional[MetricLogger] = None,
+                 is_inference=False,
+                 device=None):
+        """
+        Initialize model, optimizer, masking schedule, and training controls.
+
+        :param module_name: Stable module name used for logging and checkpoints.
+        :param spec: Training configuration namespace parsed by the shared CLI.
+        :param llm_model: Causal language model to fine-tune.
+        :param llm_tokenizer: Tokenizer paired with ``llm_model`` and the dataset.
+        :param dataset: Masked JSON dataset that owns masking callbacks.
+        :param eval_dataset: Immutable held-out dataset for shared SFT tasks.
+        :param metric_logger: Optional metric sink for training and evaluation metrics.
+        :param is_inference: Whether to skip training-only setup in the base module.
+        :param device: Torch device used for model and batch tensors.
+        """
+        super().__init__(
+            module_name,
+            spec,
+            llm_model,
+            llm_tokenizer,
+            ds=dataset,
+            metric_logger=metric_logger,
+            is_inference=is_inference,
+            device=device
+        )
+
+        validate_parent_output_isolation(
+            str(getattr(spec, "parent_adapter_dir", "") or ""),
+            self.finetuned_dir(),
+        )
+
+        self._is_quantize = False
+        self.num_epochs = spec.num_train_epochs
+        self.batch_size = spec.per_device_train_batch_size
+
+        self._batch_log = 10
+        # number of mask passes before we switch it off
+        self._num_mask_passed = 10
+        self._masked_freq = spec.llm_mask_freq
+
+        self._eval_steps = int(getattr(spec, "eval_steps", 0) or 0)
+        self._save_steps = int(getattr(spec, "save_steps", 0) or 0)
+        if self._eval_steps < 0 or self._save_steps < 0:
+            raise ValueError("eval_steps and save_steps must be non-negative")
+        self._best_checkpoint_path = ""
+
+        self._is_shuffle = True
+        # pin_memory enables overlapped host->device copies (helps only on GPU). The real
+        # flag is --dataloader_pin_memory; the old "pin_memory" key never existed on spec,
+        # so this was always False. Default it on when CUDA is present (the launcher does
+        # not emit the flag) and honor an explicit --dataloader_pin_memory.
+        self._pin_memory = bool(
+            getattr(spec, "dataloader_pin_memory", False)) or torch.cuda.is_available()
+        self._reset_lr = bool(getattr(spec, "reset_lr", False))
+        self._num_workers = spec.num_workers
+        self._lr = spec.llm_learning_rate
+        self._max_grad_norm = float(spec.max_grad_norm)
+        if self._max_grad_norm <= 0.0:
+            raise ValueError("max_grad_norm must be positive")
+
+        self.optimizer = TorchBuilder.create_optimizer(
+            spec.llm_optimizer,
+            self.model,
+            spec.llm_learning_rate,
+            spec.llm_weight_decay,
+            **vars(spec)
+        )
+
+        self._mask_probability = 1.0
+        self.dataset = dataset
+        self._eval_dataset = eval_dataset
+        self._metric_namespace = getattr(dataset, "metric_namespace", "")
+        self._select_best_by_eval_loss = bool(self._metric_namespace)
+        self._best_validation_metric = float('inf') if self._select_best_by_eval_loss else float('-inf')
+        # None-aware on purpose: an explicit 0 disables early stopping / zeroes the
+        # delta; a bare `or` default would silently swallow it.
+        self._early_stopping_patience, self._early_stopping_min_delta = (
+            resolve_early_stopping(spec))
+
+        self.logger.info(
+            f"Rank {self.rank} creating llm trainer, num epochs {self.num_epochs} "
+            f"batch_size {self.batch_size} "
+            f"dataset size {len(self.dataset)} "
+            f"is overfit {self._overfit} "
+        )
+
+        masking_type = getattr(spec, "masking_type", MaskingType.NO_MASK)
+        self.masking_methods: list[Union[MaskingOption, MaskingType]] = []
+        if masking_type == MaskingType.NO_MASK:
+            self.masking_methods = [
+                masking_type
+            ]
+
+        if masking_type in (MaskingType.MASK_SECTION, MaskingType.MASK_NEW_TOKENS):
+            self.masking_methods = [
+                masking_type
+            ]
+
+        if masking_type == MaskingType.MASK_JSON_KV:
+            self.masking_methods = [
+                spec.masking_option
+            ]
+
+        # what method we're using for masking. i.e. we can stack
+        self._current_mask_method_counter = 0
+        self._current_mask_method_idx = 0
+        self._masking_method_dispatcher = SFTTrainer.create_masking_method(dataset)
+        self.masking_methods = [
+            method
+            for method in self.masking_methods
+            if method in self._masking_method_dispatcher
+        ]
+
+    def get_model(self) -> PreTrainedModel:
+        """Return the underlying language model.
+
+        :return: The model managed by this trainer.
+        """
+        return self.model
+
+    def get_tokenizer(self) -> PreTrainedTokenizer:
+        """Return the dataset tokenizer, loading it on demand when needed.
+
+        :return: Tokenizer used for Redfish JSON training examples.
+        """
+        if self.dataset.tokenizer is None:
+            self.dataset.load_tokenizer()
+
+        return self.dataset.tokenizer
+
+    @staticmethod
+    def custom_collate_fn(samples):
+        """Stack tokenized samples into a model batch.
+
+        :param samples: Dataset rows containing ``input_ids`` and ``attention_mask``;
+            Phase 1 rows also carry prompt-masked ``labels``.
+        :return: Batch dictionary with tensor values stacked on the leading axis.
+        """
+        included_keys = ['input_ids', 'attention_mask']
+        if all(SFTTrainer._has_prompt_masked_labels(sample) for sample in samples):
+            included_keys.append("labels")
+        batch = {key: torch.stack([s[key] for s in samples]) for key in included_keys}
+
+        return batch
+
+    @staticmethod
+    def _has_prompt_masked_labels(sample) -> bool:
+        """Whether a sample carries Phase 1 prompt-masked CausalLM labels."""
+        labels = sample.get("labels")
+        if not torch.is_tensor(labels):
+            return False
+        active_positions = labels.reshape(-1).ne(-100).nonzero(as_tuple=False).flatten()
+        return active_positions.numel() > 0 and active_positions[0].item() > 0
+
+    @staticmethod
+    def generate_square_subsequent_mask(sz: int) -> Tensor:
+        """Generates an upper-triangular matrix of ``-inf``, with zeros on ``diag``."""
+        return torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
+
+    @staticmethod
+    def get_batch(src: Tensor, idx: int, chunk_size=35) -> Tuple[Tensor, Tensor]:
+        """
+        Slice a language-model training window and its shifted target.
+
+        :param src: [full_seq_len, batch_size]
+        :param idx: Starting index in ``src``.
+        :param chunk_size: Maximum sequence length for the returned window.
+        :return: tuple (data, target),  shape [seq_len, batch_size], [seq_len * batch_size]
+        """
+        seq_len = min(chunk_size, len(src) - 1 - idx)
+        data = src[idx:idx + seq_len]
+        target = src[idx + 1:idx + 1 + seq_len].reshape(-1)
+        return data, target
+
+    def dataset_sampler(self, dataset: Any = None):
+        """
+        Build the optional dataset sampler configured by trainer arguments.
+
+        :return: ``RandomSampler`` when random sampling is enabled, otherwise ``None``.
+        """
+        selected = self.dataset if dataset is None else dataset
+        random_sampler_enabled = getattr(
+            self._trainer_args,
+            "random_sampler_enabled",
+            None,
+        )
+        if random_sampler_enabled is not None:
+            sampler = RandomSampler(selected) if random_sampler_enabled else None
+            return sampler
+        return None
+
+    def split_dataset(self, ratio: float = 0.8):
+        """Return explicit train/held-out datasets for shared SFT tasks."""
+        if self._metric_namespace:
+            if self._eval_dataset is None:
+                raise ValueError(
+                    "shared SFT requires an explicit immutable held-out dataset"
+                )
+            if len(self.dataset) <= 0 or len(self._eval_dataset) <= 0:
+                raise ValueError("shared SFT train and held-out datasets must be non-empty")
+            return self.dataset, self._eval_dataset
+        return super().split_dataset(ratio)
+
+    @staticmethod
+    def compute_perplexity(logits, labels):
+        """
+
+        :param logits:
+        :param labels:
+        :return:
+        """
+        probabilities = F.softmax(logits, dim=-1)
+        log_probabilities = torch.log(probabilities)
+        loss = F.nll_loss(log_probabilities.view(-1, logits.size(-1)), labels.view(-1))
+        perplexity = torch.exp(loss)
+        return perplexity
+
+    def validate(self, validation_dataset):
+        """Perform validation on the embedding language model.
+
+        :param validation_dataset: Iterable validation dataloader of tokenized batches.
+        :return: Token-weighted loss and accuracy percentage on the validation dataset.
+        """
+
+        self.model.eval()
+        correct_predictions = 0
+        total_predictions = 0
+        loss_sum = 0.0
+        loss_tokens = 0
+
+        with torch.no_grad():
+            for i, batch in enumerate(validation_dataset):
+                input_ids = batch['input_ids'].to(self.device)
+                attention_mask = batch['attention_mask'].to(self.device)
+                labels = causal_lm_labels_from_batch(
+                    batch, input_ids, attention_mask, self.tokenizer.pad_token_id)
+
+                batch_inputs = {
+                    'input_ids': input_ids,
+                    'attention_mask': attention_mask,
+                    'labels': labels,
+                }
+
+                try:
+                    outputs = self.model(**batch_inputs)
+                except TypeError as exc:
+                    if "labels" not in str(exc):
+                        raise
+                    outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+                loss = getattr(outputs, "loss", None)
+                if loss is None:
+                    loss = shifted_token_loss(outputs.logits, labels)
+                predictions = torch.argmax(outputs.logits[:, :-1, :], dim=-1)
+                targets = labels[:, 1:]
+                valid = targets.ne(-100)
+                correct_predictions += ((predictions == targets) & valid).sum().item()
+                active = int(valid.sum().item())
+                total_predictions += active
+                if active and torch.isfinite(loss):
+                    loss_sum += float(loss.item()) * active
+                    loss_tokens += active
+
+        # Global metric: each rank validates only its own eval shard, so a rank-LOCAL accuracy makes
+        # ranks disagree on "best" and enter the epoch-boundary save collective asymmetrically — the
+        # observed epoch-8 _ALLGATHER_BASE NCCL watchdog hang. Reduce the counts so EVERY rank
+        # computes the SAME global accuracy (accelerate's reduce is an all-reduce: sum lands on all).
+        if getattr(self, "is_accelerator", False) and getattr(self, "accelerator", None) is not None:
+            stats = torch.tensor(
+                [
+                    float(correct_predictions),
+                    float(total_predictions),
+                    float(loss_sum),
+                    float(loss_tokens),
+                ],
+                dtype=torch.float64, device=self.device)
+            stats = self.accelerator.reduce(stats, reduction="sum")
+            correct_predictions = stats[0].item()
+            total_predictions = stats[1].item()
+            loss_sum = stats[2].item()
+            loss_tokens = stats[3].item()
+
+        # Guard: with drop_last + a small eval shard a rank can get 0 eval batches; a
+        # bare division would crash (and take the fleet down mid-epoch).
+        accuracy = (correct_predictions / total_predictions * 100.0) if total_predictions else 0.0
+        loss = (loss_sum / loss_tokens) if loss_tokens else float("inf")
+        return ValidationMetrics(loss=loss, accuracy=accuracy)
+
+    def is_distributed(self):
+        """
+        Check whether this trainer is running under distributed execution.
+
+        :return: ``True`` when the local rank indicates distributed training.
+        """
+        return self.rank != -1
+
+    def is_rank_zero(self):
+        """
+        Check whether the current process should emit rank-zero side effects.
+
+        :return: ``True`` for single-process execution or distributed rank zero.
+        """
+        return self.rank == -1 or self.rank == 0
+
+    @staticmethod
+    def create_masking_method(dataset: Any):
+        """Return masking callbacks exposed by an optional legacy adapter.
+
+        Phase 1/2/3 prompt-completion datasets provide labels directly and do
+        not need masking hooks. Keeping callback discovery here allows old
+        captured-data fixtures to remain readable without making masking part
+        of the shared SFT engine contract.
+        """
+        callback_names = {
+            MaskingType.MASK_SECTION: "mask_section",
+            MaskingType.MASK_NEW_TOKENS: "mask_new_tokens",
+            MaskingType.MASK_JSON_KV: "enable_masking",
+            MaskingType.NO_MASK: "disable_masking",
+            MaskingOption.TARGET: "mask_targets",
+            MaskingOption.ALLOWED_VALUE: "mask_allowed_value",
+            MaskingOption.ODATA_ID: "mask_odata_id",
+            MaskingOption.TARGET_KEY: "mask_targets_key",
+            MaskingOption.JSON_OBJECT: "mask_objects",
+            MaskingOption.JSON_ARRAY: "mask_arrays",
+            MaskingOption.MASK_API_PREFIX: "mask_api_prefix",
+        }
+        return {
+            key: callback
+            for key, name in callback_names.items()
+            if callable(callback := getattr(dataset, name, None))
+        }
+
+    def enable_masking_method(
+            self, mask_type: Union[MaskingOption, MaskingType]
+    ):
+        """
+        Receive mask enum and dispatch to its callback.
+
+        :param mask_type: Masking enum to activate for subsequent dataset samples.
+        """
+        # dispatch through the method DICT — the enum list only orders the
+        # curriculum; indexing it with an enum was a TypeError, so no masking
+        # pass ever activated.
+        if mask_type in self._masking_method_dispatcher:
+            self.logger.info(f"Enabling masking method {mask_type}")
+            callback = self._masking_method_dispatcher[mask_type]
+            callback()
+        else:
+            raise ValueError(f"Unknown masking type {mask_type}")
+
+    def swap_masking_method(
+            self, epoch: int,
+            mask_type: List[Union[MaskingOption, MaskingType]] = None
+    ):
+        """
+        Enable the next masking method at the configured epoch boundary.
+
+        A new method is activated only when ``(epoch + 1)`` is divisible by
+        ``self._masked_freq`` and the batch counter is reset. After
+        ``self._num_mask_passed`` batches, masking is disabled and the counter
+        is reset for the next cycle.
+
+        :param epoch: Zero-based epoch index used to decide when to swap masks.
+        :param mask_type: Ordered masking methods to cycle through.
+        """
+        if not mask_type:
+            return
+        if (epoch + 1) % self._masked_freq == 0:
+            # activate the next mask in the curriculum for the coming epoch. The old
+            # `and counter == 0` guard compared against a per-micro-batch counter that
+            # was never reset, so after epoch one no mask could ever activate.
+            _current_method = mask_type[self._current_mask_method_idx]
+            self.enable_masking_method(_current_method)
+            self._current_mask_method_idx = (self._current_mask_method_idx + 1) % len(mask_type)
+            self._current_mask_method_counter = 0
+        elif self._current_mask_method_counter >= self._num_mask_passed:
+            # enough masked batches seen since activation: back to plain batches.
+            # (>= — the counter advances per micro-batch, an exact == is skipped over.)
+            disable_masking = getattr(self.dataset, "disable_masking", None)
+            if callable(disable_masking):
+                disable_masking()
+            self._current_mask_method_counter = 0
+
+    def _evaluate_and_checkpoint(
+            self,
+            eval_dataloader,
+            *,
+            epoch: int,
+            optimizer_step: int,
+            validation_result: ValidationMetrics,
+            early_stop_bad_evals: int,
+            force_eval: bool = False,
+    ) -> tuple[ValidationMetrics, int, bool, bool]:
+        """Run due optimizer-step evaluation/checkpoint work on every rank."""
+        did_eval = force_eval or cadence_due(optimizer_step, self._eval_steps)
+        periodic_save = cadence_due(optimizer_step, self._save_steps)
+        is_best_checkpoint = False
+
+        if did_eval:
+            validation_result = self.validate(eval_dataloader)
+            validation_acc = validation_accuracy(validation_result)
+            validation_eval_loss = validation_loss(validation_result)
+            if self.is_rank_zero():
+                self.metric_logger.log_metric(
+                    "eval/accuracy", validation_acc, optimizer_step)
+                if self._metric_namespace:
+                    self.metric_logger.log_metric(
+                        phase_metric(self._metric_namespace, "eval", "token_accuracy"),
+                        validation_acc / 100.0,
+                        optimizer_step,
+                    )
+                    self.metric_logger.log_metric(
+                        phase_metric(self._metric_namespace, "eval", "loss"),
+                        validation_eval_loss,
+                        optimizer_step,
+                    )
+                    self.metric_logger.log_metric(
+                        phase_metric(self._metric_namespace, "eval", "perplexity"),
+                        float(np.exp(min(validation_eval_loss, 20.0))),
+                        optimizer_step,
+                    )
+
+            selection_metric = (
+                validation_eval_loss
+                if self._select_best_by_eval_loss
+                else validation_acc
+            )
+            improved = (
+                selection_metric
+                < self._best_validation_metric - self._early_stopping_min_delta
+                if self._select_best_by_eval_loss
+                else selection_metric > self._best_validation_metric
+            )
+            if improved:
+                self._best_validation_metric = selection_metric
+                early_stop_bad_evals = 0
+                is_best_checkpoint = True
+            else:
+                early_stop_bad_evals += 1
+
+        should_save = periodic_save or is_best_checkpoint
+        gathered_state = None
+        if self.is_accelerator and self._module_checkpoint_dir is not None:
+            should_save = broadcast_flag(self.accelerator, should_save)
+            if should_save:
+                gathered_state = self.accelerator.get_state_dict(self.model)
+
+        if should_save and self.is_rank_zero() and self._module_checkpoint_dir is not None:
+            model = self.accelerator.unwrap_model(self.model) if self.is_accelerator else self.model
+            opt = unwrap_accelerate(self.optimizer, "optimizer")
+            scheduler = unwrap_accelerate(self.scheduler, "scheduler")
+            common = {
+                "checkpoint_dir": self._module_checkpoint_dir,
+                "epoch": epoch,
+                "model": model,
+                "model_state_dict": gathered_state,
+                "optimizer": opt,
+                "scheduler": scheduler,
+                "last_accuracy": validation_accuracy(validation_result),
+                "initial_lr": self._lr,
+                "best_metric": self._best_validation_metric,
+                "best_metric_mode": (
+                    "loss" if self._select_best_by_eval_loss else "accuracy"
+                ),
+                "batch_idx": optimizer_step,
+            }
+            if periodic_save:
+                self.save_checkpoint(is_best_accuracy=False, **common)
+            if is_best_checkpoint:
+                self._best_checkpoint_path = self.save_checkpoint(
+                    is_best_accuracy=True,
+                    **common,
+                )
+                wrapped = self.model
+                self.model = model
+                try:
+                    self.save_finetuned(model_state_dict=gathered_state)
+                finally:
+                    self.model = wrapped
+
+        if self.is_accelerator and should_save:
+            self.accelerator.wait_for_everyone()
+
+        should_stop = (
+            did_eval
+            and self._select_best_by_eval_loss
+            and self._early_stopping_patience > 0
+            and early_stop_bad_evals >= self._early_stopping_patience
+        )
+        return validation_result, early_stop_bad_evals, did_eval, should_stop
+
+    def _save_final_checkpoint(self):
+        """Persist the trained model once at end-of-train, collective-safe.
+
+        Under ZeRO-3/FSDP the state-dict gather is a COLLECTIVE: every rank must
+        reach ``accelerator.get_state_dict`` together. The previous end-of-train
+        path called ``save_model`` -> ``state_dict()`` behind ``is_rank_zero``, so
+        rank 0 entered the gather alone and deadlocked while ranks 1..N ran ahead
+        through ``save_finetuned`` and returned — the 4-GPU end-of-train hang where
+        only 3 of 4 ranks print "training complete". Gather on ALL ranks first,
+        hand the pre-gathered weights to the rank-0 writers, then barrier so no
+        rank tears down its process group mid-write. Mirrors the per-epoch save.
+        """
+        final_state = None
+        if self.is_accelerator:
+            # Collective — must run on EVERY rank, before any is_rank_zero gate.
+            # Gather on the still-wrapped model, exactly as the per-epoch save does.
+            if self._module_checkpoint_dir is not None:
+                final_state = self.accelerator.get_state_dict(self.model)
+            self.model = self.accelerator.unwrap_model(self.model)
+
+        # Rank-0 writers consume the pre-gathered dict (no second rank-0-only
+        # state_dict() collective); the plain path passes None and saves locally.
+        self.save_model(self._module_checkpoint_dir, model_state_dict=final_state)
+        if not getattr(self, "_best_checkpoint_path", ""):
+            self.save_finetuned(model_state_dict=final_state)
+
+        if self.is_accelerator:
+            # No rank returns (and drops its NCCL group) until every rank is done.
+            self.accelerator.wait_for_everyone()
+
+    def _train(
+            self,
+            mask_type: List[Union[MaskingOption, MaskingType]] = None
+    ):
+        """Train the language model with shifted-token Redfish JSON targets.
+
+        :param mask_type: Masking methods active during the training schedule.
+        """
+
+        safe_resize_token_embeddings(self.model, self.dataset.tokenizer)
+
+        self.logger.info(
+            f"Rank {self.rank} starting train, device {self.device}")
+
+        torch.cuda.empty_cache()
+
+        if not self.is_accelerator:
+            self.model = self.model.to(self.device)
+
+        lr = self._lr if self._reset_lr else None
+        map_location = None if self.is_accelerator else self.device
+
+        checkpoint_state = self.load_checkpoint(
+            self._module_checkpoint_dir,
+            map_location=map_location,
+            lr=lr)
+
+        self.logger.info(f"Rank {self.rank}: "
+                         f"Uploading model from {self.model.device} "
+                         f"to device {self.device}, "
+                         f"using accelerate: {'yes' if self.is_accelerator else 'no'}, "
+                         f"current mem {torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
+
+        self.logger.info(f"Creating dataloader "
+                         f"batch size {self.batch_size} "
+                         f"num worker {self._num_workers}")
+
+        train_data, eval_data = self.split_dataset()
+        sampler = self.dataset_sampler(train_data)
+
+        train_dataloader = DataLoader(
+            train_data,
+            batch_size=self.batch_size,
+            sampler=sampler,
+            num_workers=self._num_workers,
+            shuffle=self._is_shuffle and sampler is None,
+            drop_last=True,  # equal batch count per rank -> no epoch-boundary save-collective deadlock
+            pin_memory=self._pin_memory,
+            collate_fn=SFTTrainer.custom_collate_fn
+        )
+
+        eval_dataloader = DataLoader(
+            eval_data,
+            batch_size=self.batch_size,
+            num_workers=self._num_workers,
+            shuffle=False,
+            drop_last=False,
+            pin_memory=self._pin_memory,
+            collate_fn=SFTTrainer.custom_collate_fn,
+        )
+
+        last_epoch = checkpoint_state.last_epoch
+        # A checkpoint at/beyond the target epoch count means the epoch loop
+        # below runs zero iterations: the run proceeds straight to end-of-train
+        # finalization (save/report), it must not crash in scheduler creation.
+        if remaining_epochs(self.num_epochs, last_epoch) == 0:
+            self.logger.info(
+                f"Rank {self.rank}: checkpoint already at epoch {last_epoch} "
+                f">= target {self.num_epochs}; no epochs left — finalizing only.")
+        # Legacy runs seed best tracking from the checkpoint's accuracy channel. Phase 1
+        # selects by validation loss, so a fresh run starts at +inf until the first eval.
+        validation_result = ValidationMetrics(
+            loss=float("inf"),
+            accuracy=checkpoint_state.best_accuracy,
+        )
+        # Resume best-checkpoint tracking from the persisted best (mode-matched):
+        # without this, a resumed loss-mode run stays at +inf and flags the FIRST
+        # post-resume eval as "best" — overwriting the true best checkpoint and
+        # resetting early-stop patience.
+        _restored_best = restored_best_metric(
+            checkpoint_state, self._select_best_by_eval_loss)
+        if _restored_best is not None:
+            self._best_validation_metric = _restored_best
+            restored_best_path = Path(
+                self._module_checkpoint_dir,
+                f"{self.module_name}_epoch_best.pt",
+            )
+            if restored_best_path.is_file():
+                self._best_checkpoint_path = str(restored_best_path)
+            self.logger.info(
+                f"Rank {self.rank} resumed best validation metric "
+                f"{self._best_validation_metric} "
+                f"({'loss' if self._select_best_by_eval_loss else 'accuracy'} mode).")
+        _accum = max(1, int(getattr(self._trainer_args, "gradient_accumulation_steps", 1)))
+        # Clamped to >= 1 so OneCycleLR construction survives degenerate runs
+        # (completed-checkpoint resume, empty per-rank dataloader) that step the
+        # scheduler zero times; real remaining work passes through unchanged.
+        self._trainer_args.epochs, self._trainer_args.steps_per_epoch = (
+            scheduler_epoch_args(
+                self.num_epochs, last_epoch, len(train_dataloader), _accum))
+
+        self.logger.info(
+            f"Rank {self.rank}: Data loader created: "
+            f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
+
+        # Under accelerate, let accelerator.prepare() place the model — a manual .to(device)
+        # here materializes the full (unsharded) model on one GPU before prepare, defeating
+        # DeepSpeed ZeRO-3 / FSDP and OOM-ing a large backbone. Only place it on the plain path.
+        if not self.is_accelerator:
+            self.model = self.model.to(self.device)
+
+        self.scheduler = TorchBuilder.create_scheduler(
+            self._trainer_args.llm_scheduler,
+            optimizer=self.optimizer,
+            **vars(self._trainer_args)
+        )
+
+        self.logger.info(f"Rank {self.rank}: "
+                         f"Memory utilization after we loaded model: "
+                         f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
+
+        # we update the scheduler state here.
+        if checkpoint_state.scheduler_state is not None:
+            self.scheduler.load_state_dict(checkpoint_state.scheduler_state)
+
+        if self.is_accelerator:
+            self.model, self.optimizer, train_dataloader, eval_dataloader, self.scheduler = self.accelerator.prepare(
+                self.model, self.optimizer, train_dataloader, eval_dataloader, self.scheduler
+            )
+
+        # opt-in torch.compile AFTER final placement/wrapping (FSDP wrapping must
+        # precede compile); a safe no-op off-CUDA or when --compile is absent.
+        self.model = TorchBuilder.maybe_compile(
+            self.model, bool(getattr(self._trainer_args, "compile", False)))
+
+        torch.cuda.empty_cache()
+        self.logger.info(
+            f"Rank {self.rank}: Memory utilization after we prepared : "
+            f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
+
+        if self._is_quantize:
+            self.model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+
+        total_batches = len(train_dataloader)
+        dataset_size = len(train_data)
+        calculated_total_batches = dataset_size // self.batch_size
+        batch_log_frequency = round(64 * 0.2)
+
+        # Gradient accumulation. On the plain path we step every `accum` micro-batches; under
+        # accelerate the prepared optimizer/scheduler gate themselves and accelerator.backward()
+        # scales the loss, so `accum` here only drives the manual (non-accelerator) path.
+        accum = max(1, int(getattr(self._trainer_args, "gradient_accumulation_steps", 1)))
+        last_grad_norm = 0.0
+        if self.is_rank_zero():
+            self.logger.info(f"Gradient accumulation steps: {accum}")
+
+        # Honor --max_train_steps: cap OPTIMIZER updates. Without this the loop runs
+        # num_train_epochs (default 1000) and ignores the cap entirely.
+        max_steps = getattr(self._trainer_args, "max_train_steps", None)
+        global_opt_steps = int(getattr(checkpoint_state, "batch_idx", 0) or 0)
+
+        # End-of-run report bookkeeping (emitted as report.json on rank zero).
+        run_started_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+        run_started_clock = time.time()
+        final_epoch_loss = None
+        epochs_done = last_epoch
+        tokens_processed = 0
+        samples_processed = 0
+        early_stop_bad_evals = 0
+        last_eval_step = -1
+        stop_training = False
+
+        if total_batches == calculated_total_batches:
+            print(f"Rank {self.rank}, Staring training, "
+                  f"total_batches: {total_batches} "
+                  f"train dataset size: {dataset_size} "
+                  f"batch_size {self.batch_size} "
+                  f"current lr {self._lr} "
+                  f"batch stats freq: {batch_log_frequency}.")
+
+        for epoch in range(last_epoch, self.num_epochs):
+            if reached_max_steps(global_opt_steps, max_steps):
+                break
+            self.model.train()
+
+            total_loss = 0.0
+            num_batches = 0
+            batch_losses = np.zeros(total_batches)
+
+            # swap mask and pass a batch
+            self.swap_masking_method(epoch, mask_type)
+
+            for _, batch in enumerate(train_dataloader):
+
+                input_ids = batch['input_ids'].to(self.device, non_blocking=self._pin_memory)
+                attention_mask = batch['attention_mask'].to(
+                    self.device, non_blocking=self._pin_memory)
+
+                # Full-length labels: a HF CausalLM shifts internally (loss over
+                # logits[:-1] vs labels[1:]). Pre-shifting the target here as well
+                # (the old target_ids = input_ids[:, 1:] + truncated input) double-shifts
+                # and trains the model to predict two tokens ahead. build_causal_lm_labels
+                # keeps the sequence full-length and only sets -100 on ignored positions.
+                labels = causal_lm_labels_from_batch(
+                    batch, input_ids, attention_mask, self.tokenizer.pad_token_id)
+                active_tokens = int(labels.ne(-100).sum().item())
+                tokens_processed += active_tokens
+                samples_processed += input_ids.size(0)
+
+                batch_inputs = {
+                    'input_ids': input_ids,
+                    'attention_mask': attention_mask,
+                    'labels': labels,
+                }
+
+                if self.is_accelerator:
+                    # Accelerate owns accumulation: accelerator.backward() scales the loss by
+                    # gradient_accumulation_steps (DeepSpeed scales internally), and the prepared
+                    # optimizer/scheduler no-op on non-boundary micro-batches, so stepping every
+                    # iteration inside accumulate() is correct.
+                    with self.accelerator.accumulate(self.model):
+                        outputs = self.model(**batch_inputs)
+                        loss = outputs.loss
+                        self.accelerator.backward(loss)
+                        if self.accelerator.sync_gradients:
+                            last_grad_norm = self.accelerator.clip_grad_norm_(
+                                self.model.parameters(),
+                                self._max_grad_norm,
+                            ).item()
+                        self.optimizer.step()
+                        self.scheduler.step()
+                        self.optimizer.zero_grad()
+                    is_step = self.accelerator.sync_gradients
+                else:
+                    # Plain path has no wrapper: accumulate by hand. Scale the loss by accum,
+                    # backward every micro-batch, and only step on the accumulation boundary so
+                    # --gradient_accumulation_steps is actually honored (it was ignored before).
+                    outputs = self.model(**batch_inputs)
+                    loss = outputs.loss
+                    (loss / accum).backward()
+                    is_step = is_accum_boundary(num_batches, accum, total_batches)
+                    if is_step:
+                        last_grad_norm = measure_grad_norm(
+                            self.model,
+                            self._max_grad_norm,
+                        )
+                        self.optimizer.step()
+                        self.scheduler.step()
+                        self.optimizer.zero_grad()
+
+                # Log once per real optimizer step so the curves track optimizer steps, not
+                # micro-batches. grad_norm is measured before configured clipping is applied.
+                if is_step and self.is_rank_zero():
+                    step = global_opt_steps + 1
+                    current_lr = self.optimizer.param_groups[0]['lr']
+                    self.metric_logger.log_metric("train/loss", loss.item(), step)
+                    self.metric_logger.log_metric("train/lr", current_lr, step)
+                    self.metric_logger.log_metric("train/grad_norm", last_grad_norm, step)
+                    if self._metric_namespace:
+                        elapsed = max(time.time() - run_started_clock, 1e-9)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "train", "loss"),
+                            loss.item(), step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "train", "perplexity"),
+                            float(np.exp(min(loss.item(), 20.0))), step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "train", "optimizer_step"),
+                            global_opt_steps + 1, step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "train", "tokens_processed"),
+                            tokens_processed, step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "throughput", "train_tokens_per_sec"),
+                            tokens_processed / elapsed, step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "throughput", "train_samples_per_sec"),
+                            samples_processed / elapsed, step)
+
+                if is_step:
+                    global_opt_steps += 1
+                    if (
+                            cadence_due(global_opt_steps, self._eval_steps)
+                            or cadence_due(global_opt_steps, self._save_steps)):
+                        (
+                            validation_result,
+                            early_stop_bad_evals,
+                            did_eval,
+                            stop_training,
+                        ) = self._evaluate_and_checkpoint(
+                            eval_dataloader,
+                            epoch=epoch + 1,
+                            optimizer_step=global_opt_steps,
+                            validation_result=validation_result,
+                            early_stop_bad_evals=early_stop_bad_evals,
+                        )
+                        if did_eval:
+                            last_eval_step = global_opt_steps
+                        if not stop_training:
+                            self.model.train()
+
+                batch_losses[num_batches] = loss.item()
+                total_loss += loss.item()
+
+                if self._is_quantize:
+                    self.model.apply(torch.quantization.propagate_qconfig_)
+                    self.model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+
+                # calculate the progress percentage
+                progress_percentage = int(round((num_batches + 1) / total_batches * 100))
+                if (num_batches % batch_log_frequency == 0) or (num_batches == total_batches - 1):
+                    lr = self.optimizer.param_groups[0]['lr']
+                    print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Batch "
+                          f"{num_batches + 1}/{total_batches} "
+                          f"- Progress: {progress_percentage:.2f}% - "
+                          f"Batch Loss mean: {batch_losses.mean():.4f} - lr: {lr:.5f}")
+
+                num_batches += 1
+                self._current_mask_method_counter += 1
+
+                if stop_training or reached_max_steps(global_opt_steps, max_steps):
+                    break
+
+            # one monotonic step at the epoch boundary for per-epoch metrics
+            epoch_step = (epoch + 1) * total_batches - 1
+
+            if num_batches > 0:
+                average_loss = total_loss / num_batches
+                final_epoch_loss = average_loss
+                if self.is_rank_zero():
+                    self.metric_logger.log_metric("train/epoch_loss", average_loss, epoch_step)
+                    if self._metric_namespace:
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "train", "epoch_loss"),
+                            average_loss,
+                            epoch_step)
+                        self.metric_logger.log_metric(
+                            phase_metric(self._metric_namespace, "train", "epoch_perplexity"),
+                            float(np.exp(min(average_loss, 20.0))),
+                            epoch_step)
+                print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
+            epochs_done = epoch + 1
+            if stop_training:
+                break
+
+        if last_eval_step != global_opt_steps:
+            (
+                validation_result,
+                early_stop_bad_evals,
+                _,
+                _,
+            ) = self._evaluate_and_checkpoint(
+                eval_dataloader,
+                epoch=max(epochs_done, 1),
+                optimizer_step=global_opt_steps,
+                validation_result=validation_result,
+                early_stop_bad_evals=early_stop_bad_evals,
+                force_eval=True,
+            )
+
+        if self._is_quantize:
+            self.model = convert(self.model)
+
+        self._save_final_checkpoint()
+
+        # Emit the self-describing run report (report.json) next to the checkpoint so
+        # every run is comparable through igc.modules.train.report.compare(). Report
+        # emission is a hard Phase 1 evidence gate: failures propagate.
+        if self.is_rank_zero():
+            self._trainer_args.promotion_source = (
+                "best_checkpoint" if self._best_checkpoint_path else "final_checkpoint"
+            )
+            self._trainer_args.promoted_artifact_path = self.finetuned_dir()
+            report_path = emit_final_run_report(
+                trainer_args=self._trainer_args,
+                dataset=self.dataset,
+                final_epoch_loss=final_epoch_loss,
+                epochs_done=epochs_done,
+                optimizer_steps=global_opt_steps,
+                best_eval=self._best_validation_metric,
+                validation_result=validation_result,
+                started_at=run_started_at,
+                ended_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                wall_clock_sec=round(time.time() - run_started_clock, 1),
+                checkpoint_path=(
+                    self._best_checkpoint_path
+                    or str(self._module_checkpoint_dir or "")
+                ),
+                output_dir=str(self._module_checkpoint_dir or "."),
+            )
+            self.logger.info(f"Run report written: {report_path}")
+
+        del train_dataloader
+        del eval_dataloader
+        del self.optimizer
+
+        print("Embedding extractor training complete.")
+
+    def cpu_train_pass(
+            self,
+            mask_type: List[Union[MaskingOption, MaskingType]] = None
+    ):
+        """Train LLM model to map high level goal to redfish actions.
+
+        :return:
+        """
+
+        safe_resize_token_embeddings(self.model, self.dataset.tokenizer)
+
+        self.logger.info(
+            f"Rank {self.rank} starting train, device {self.device}")
+
+        lr = self._lr if self._reset_lr else None
+        self.logger.info(f"Creating dataloader "
+                         f"batch size {self.batch_size} "
+                         f"num worker {self._num_workers}")
+
+        train_data, eval_data = self.split_dataset()
+        sampler = self.dataset_sampler(train_data)
+
+        train_dataloader = DataLoader(
+            train_data,
+            batch_size=self.batch_size,
+            sampler=sampler,
+            num_workers=self._num_workers,
+            shuffle=self._is_shuffle and sampler is None,
+            drop_last=True,  # equal batch count per rank -> no epoch-boundary save-collective deadlock
+            pin_memory=self._pin_memory,
+            collate_fn=SFTTrainer.custom_collate_fn
+        )
+
+        eval_dataloader = DataLoader(
+            eval_data,
+            batch_size=self.batch_size,
+            num_workers=self._num_workers,
+            shuffle=False,
+            drop_last=False,
+            pin_memory=self._pin_memory,
+            collate_fn=SFTTrainer.custom_collate_fn,
+        )
+
+        last_epoch = 0
+        self._trainer_args.epochs = self.num_epochs - last_epoch
+        self._trainer_args.steps_per_epoch = len(train_dataloader)
+
+        print(self._trainer_args.epochs)
+        print(self._trainer_args.steps_per_epoch)
+
+        self.scheduler = TorchBuilder.create_scheduler(
+            self._trainer_args.llm_scheduler,
+            optimizer=self.optimizer,
+            **vars(self._trainer_args)
+        )
+
+        self.logger.info(f"Rank {self.rank}: "
+                         f"Memory utilization after we loaded model: "
+                         f"{torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB")
+
+        if self._is_quantize:
+            self.model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+
+        total_batches = len(train_dataloader)
+        dataset_size = len(train_data)
+        calculated_total_batches = dataset_size // self.batch_size
+        batch_log_frequency = round(64 * 0.2)
+
+        if total_batches == calculated_total_batches:
+            print(f"Rank {self.rank}, Staring training, "
+                  f"total_batches: {total_batches} "
+                  f"train dataset size: {dataset_size} "
+                  f"batch_size {self.batch_size} "
+                  f"current lr {self._lr} "
+                  f"batch stats freq: {batch_log_frequency}.")
+
+        for epoch in range(last_epoch, self.num_epochs):
+            self.model.train()
+
+            total_loss = 0.0
+            num_batches = 0
+            batch_losses = np.zeros(total_batches)
+
+            # swap mask and pass a batch
+            self.swap_masking_method(epoch, mask_type)
+
+            for _, batch in enumerate(train_dataloader):
+
+                input_ids = batch['input_ids']
+                attention_mask = batch['attention_mask']
+
+                # Full-length labels; the HF CausalLM does the single internal shift.
+                # Pre-shifting here as well (the old target_ids = input_ids[:, 1:] +
+                # truncated input) double-shifts and trains for two-tokens-ahead — the
+                # same correction applied in _train via build_causal_lm_labels.
+                labels = causal_lm_labels_from_batch(
+                    batch, input_ids, attention_mask, self.tokenizer.pad_token_id)
+
+                batch_inputs = {
+                    'input_ids': input_ids,
+                    'attention_mask': attention_mask,
+                    'labels': labels,
+                }
+
+                outputs = self.model(**batch_inputs)
+                loss = outputs.loss
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+                self.scheduler.step()
+
+                current_lr = self.optimizer.param_groups[0]['lr']
+                self.metric_logger.log_metric("learning_rate", current_lr, epoch)
+
+                batch_losses[num_batches] = loss.item()
+                total_loss += loss.item()
+
+                # calculate the progress percentage
+                progress_percentage = int(round((num_batches + 1) / total_batches * 100))
+                if (num_batches % batch_log_frequency == 0) or (num_batches == total_batches - 1):
+                    lr = self.optimizer.param_groups[0]['lr']
+                    print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Batch "
+                          f"{num_batches + 1}/{total_batches} "
+                          f"- Progress: {progress_percentage:.2f}% - "
+                          f"Batch Loss mean: {batch_losses.mean():.4f} - lr: {lr:.5f}")
+                    self.metric_logger.log_metric("llm_emb_batch_loss", batch_losses.mean(), epoch)
+
+                num_batches += 1
+                self._current_mask_method_counter += 1
+
+            # validation on epoch or freq
+            if self.on_epoch_eval or ((epoch + 1) % self._eval_freq == 0):
+                validation_result = self.validate(eval_dataloader)
+                validation_acc = validation_accuracy(validation_result)
+                if self.is_rank_zero():
+                    self.metric_logger.log_metric("llm_emb_accuracy", validation_acc, epoch)
+                    # self.metric_logger.log_metric("llm_emb_perplexity", perplexity, epoch)
+
+                print(f"Rank {self.rank} Epoch {epoch + 1} - Validation Accuracy: "
+                      f"{validation_acc} Best: {self._best_validation_metric}")
+
+            if num_batches > 0:
+                average_loss = total_loss / num_batches
+                if self.is_rank_zero():
+                    self.metric_logger.log_metric("llm_emb_epoch_loss", average_loss, epoch)
+                print(f"Rank {self.rank} Epoch {epoch + 1}/{self.num_epochs} - Average Loss: {average_loss}")
+
+        del train_dataloader
+        del eval_dataloader
+        del self.optimizer
+
+    def train(self):
+        """Run the fine-tuning loop with the configured masking schedule.
+        """
+
+        self._train(
+            mask_type=self.masking_methods
+        )
+
+    def decode_masked_output(
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor
+    ):
+        """
+        Decode non-padding tokens for each sequence in a masked batch.
+
+        :param input_ids: Token id tensor shaped ``[batch, sequence]``.
+        :param attention_mask: Attention mask for the same batch, kept for API symmetry.
+        :return: List of decoded strings without padding tokens.
+        """
+        decoded_batch = []
+        for batch_idx in range(input_ids.shape[0]):
+            unmasked_tokens = []
+            for token in input_ids[batch_idx]:
+                if token.item() != self.tokenizer.pad_token_id:
+                    unmasked_tokens.append(token.item())
+
+            decoded_tokens = self.dataset.tokenizer.decode(unmasked_tokens)
+            decoded_batch.append(decoded_tokens)
+
+        return decoded_batch
+
+    @staticmethod
+    def custom_loss(
+            logits: torch.tensor, targets: torch.tensor) -> torch.tensor:
+        """
+        Compute cross-entropy for classification or shifted token generation.
+
+        :param logits: Model output logits.
+        :param targets: Target labels aligned with ``logits``.
+        :return: Cross-entropy loss with ignored padding labels.
+        """
+        if logits.dim() == 2:
+            return F.cross_entropy(logits, targets, ignore_index=-100)
+        elif logits.dim() == 3:
+            shifted_step_logits = logits[..., :-1, :].contiguous()
+            shift_step_labels = targets[..., 1:].contiguous()
+            loss = F.cross_entropy(
+                shifted_step_logits.view(-1, shifted_step_logits.size(-1)),
+                shift_step_labels.view(-1).long(), ignore_index=-100)
+            return loss
+        else:
+            raise ValueError("Invalid shape")
+
+    @staticmethod
+    def compute_accuracy(
+            logits: torch.Tensor,
+            targets: torch.Tensor,
+            original_mask: torch.Tensor
+    ):
+        """
+        Compute raw class or shifted-token accuracy.
+
+        The sequence path averages over all shifted positions produced by the
+        current implementation. ``original_mask`` is accepted for API
+        compatibility, but it is not applied inside this helper.
+
+        :param logits: Model output logits.
+        :param targets: Target ids or labels aligned with ``logits``.
+        :param original_mask: Original attention mask for the unshifted batch.
+        :return: Mean raw token or class accuracy.
+        """
+        if logits.dim() == 2:
+            y = torch.argmax(logits, dim=-1) == targets
+            y = y.type(torch.float)
+            return torch.mean(y).item()
+        elif logits.dim() == 3:
+            # callers (validate/test_inference) already shift inputs vs targets by one,
+            # so logits[t] predicts targets[t]; shifting again here measured a
+            # two-tokens-ahead objective. The old -100 mask was applied to LOGIT VALUES
+            # (a no-op), so pad positions counted as wrong — restrict to real labels.
+            predictions = torch.argmax(logits, dim=-1)
+            valid = targets.ne(-100)
+            if valid.sum() == 0:
+                return 0.0
+            correct = (predictions == targets) & valid
+            return (correct.sum().float() / valid.sum().float()).item()
+        else:
+            raise ValueError("Invalid shape")
+
+    def test_inference(self):
+        """
+        Run inference over the validation split and report aggregate metrics.
+
+        :return: Tuple of accuracy percentage and perplexity.
+        """
+        train_data, eval_data = self.split_dataset()
+
+        eval_dataloader = DataLoader(
+            eval_data,
+            batch_size=self.batch_size,
+            num_workers=self._num_workers,
+            shuffle=False,
+            collate_fn=SFTTrainer.custom_collate_fn)
+
+        self.model.eval()
+        total_loss = 0
+        correct_predictions = 0
+        total_predictions = 0
+        total_predictions_no_pad = 0
+
+        start_time = time.time()
+
+        with torch.no_grad():
+            for i, batch in enumerate(eval_dataloader):
+                target_ids = batch["input_ids"][:, 1:].clone().detach()
+                mask = (batch["input_ids"] == self.tokenizer.pad_token_id)
+                mask = mask.to(self.device)
+                target_ids = target_ids.to(self.device)
+
+                target_ids = target_ids.masked_fill(mask[:, 1:], -100)
+                original_mask = batch['attention_mask']
+                shifted_input = batch['input_ids'][:, :-1].to(self.device)
+                shifter_mask = batch['attention_mask'][:, :-1].to(self.device)
+                target_ids = target_ids.to(self.device)
+
+                batch_inputs = {
+                    'input_ids': shifted_input,
+                    'attention_mask': shifter_mask,
+                }
+
+                outputs = self.model(**batch_inputs)
+                compute_accuracy = self.compute_accuracy(
+                    outputs.logits, target_ids, original_mask
+                )
+                correct_predictions += compute_accuracy * batch_inputs['input_ids'].size(0)
+                total_predictions += batch_inputs['input_ids'].size(0)
+
+                non_pad_tokens = target_ids.numel() - target_ids.eq(-100).sum().item()
+                total_predictions_no_pad += non_pad_tokens
+
+                # perplexity
+                logits = outputs.logits
+                logits = logits.to(self.device)
+                loss = F.cross_entropy(logits.view(-1, logits.size(-1)),
+                                       target_ids.view(-1).to(self.device),
+                                       ignore_index=-100)
+                # cross_entropy averaged over NON-PAD tokens; weight by the same
+                # count so the final divide by total non-pad tokens is consistent.
+                total_loss += loss.item() * non_pad_tokens
+
+        end_time = time.time()
+        time_taken = end_time - start_time
+
+        accuracy = correct_predictions / total_predictions * 100.0
+        perplexity = torch.exp(total_loss / torch.tensor(total_predictions_no_pad)).item()
+
+        print(f"Accuracy: {accuracy:.2f}%")
+        print(f"Perplexity: {perplexity:.2f}")
+        print(f"Time taken: {time_taken:.2f} seconds")
+
+        return accuracy, perplexity

@@ -19,7 +19,7 @@ $$
 O_t = H\left(S_t\right)
 $$
 
-The graph encoder produces:
+The StateEncoder produces:
 
 $$
 z_t = E_{\text{state}}\left(O_t\right)
@@ -51,7 +51,7 @@ $$
 d^\pi\left(S_t, A_t\right)
 $$
 
-The GNN sees the observation projection:
+The state-representation learner sees the observation projection:
 
 $$
 P\left(O_{t+1} \mid O_t, A_t\right)
@@ -126,7 +126,7 @@ A named equivalence such as \texttt{ComputerSystem.power\_on} need not be declar
   \item the same reward condition.
 \end{itemize}
 
-\subsection*{Why the exploration phase is valuable}
+\subsection*{Why RL Phase 0 discovery pretraining is valuable}
 
 During graph exploration, every quantity is observable or computable: the known hidden simulator graph, the currently discovered graph, the selected GET target, whether it was already visited, the returned JSON, the newly exposed links, the next graph, the reward, and the maximum possible coverage reward.
 
@@ -146,13 +146,13 @@ r_t = \begin{cases}
 \end{cases}
 $$
 
-So the exploration task has exact labels, exact transition traces, an exact terminal condition, an exact maximum return, and an exact expert solution.
+So the exploration task has exact labels, exact transition traces, an exact terminal condition, an exact maximum return, and an exact expert solution. It runs after the Phase~1/2/3 supervised stack and before task-conditioned RL. It does not add a graph dependency to Phase~1/2/3.
 
-The GNN is trained on the same traces the policy uses. It is not learning an abstract representation disconnected from control.
+An optional graph encoder can be trained on the same discovery traces the policy uses, producing node embeddings and a graph-pooled state candidate. The non-graph StateEncoder remains the v1 baseline. The graph variant is admitted only if later state-sufficiency and RL gates outperform that baseline; neither JSON graph construction nor a GNN is a public dependency.
 
-\subsection*{Phase 2/3 attaches human intent to the same process}
+\subsection*{Phase 2/3 outputs attach human intent to the same process}
 
-Before Phase 2/3, the goal is to visit all reachable nodes. After Phase 2/3, the goal becomes a compiled operation:
+During RL Phase~0 discovery pretraining, the goal is to visit all reachable nodes. During subsequent task-conditioned RL, the already-promoted Phase~2/3 outputs provide the compiled operation goal:
 
 $$
 G = \left\{\left(r_i, m_i, b_i\right)\right\}_{i=1}^K
@@ -164,7 +164,7 @@ $$
 P\left(S_{t+1} \mid S_t, r_i, m_i, b_i\right)
 $$
 
-The same GNN represents the state. The same policy operates over the graph. The only change is the goal conditioning.
+The same version-pinned StateEncoder selected for an experiment represents the state. The same policy operates over discovered resources. The only change is the goal conditioning.
 
 Bootstrap:
 
