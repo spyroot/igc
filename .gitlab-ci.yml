@@ -16,22 +16,61 @@ stages:
   - gpu-evidence
 
 default:
-  image: python:3.12-slim
+  image:
+    name: harbor.rnd.embedings.ai:30443/spyroot/builder/torch-ml-toolbox:latest-amd64
+    pull_policy: always
+  tags: [homelab-k8s]
+  before_script:
+    - export HOMELAB_IN_CLUSTER=1
+
+workflow:
+  rules:
+    - if: '$CI_SERVER_HOST == "gitlab.rnd.embedings.ai" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $MERGE_PROFILE == "merge"'
+    - if: '$CI_SERVER_HOST == "gitlab.rnd.embedings.ai" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && ($MERGE_PROFILE == null || $MERGE_PROFILE == "")'
+      variables:
+        FOCUSED_GATE: unit.all
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - when: never
+
+.focused-dispatch-suppression: &focused-dispatch-suppression
+  if: '$CI_SERVER_HOST == "gitlab.rnd.embedings.ai" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $FOCUSED_GATE != null && $FOCUSED_GATE != ""'
+  when: never
 
 .cpu-base: &cpu-base
-  tags: [homelab-k8s]
   variables:
     IGC_SURFACE: cpu
   rules:
+    - *focused-dispatch-suppression
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_SERVER_HOST == "gitlab.rnd.embedings.ai" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $MERGE_PROFILE == "merge"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - when: never
+
+focused-gate:
+  stage: cpu-gate
+  variables:
+    IGC_SURFACE: cpu
+    FOCUSED_GATE: unit.all
+  tags: [homelab-k8s, homelab-k8s-validation]
+  rules:
+    - if: '$CI_SERVER_HOST == "gitlab.rnd.embedings.ai" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $FOCUSED_GATE != null && $FOCUSED_GATE != ""'
+    - when: never
+  script:
+    - ./scripts/check.sh --profile merge --gate "${FOCUSED_GATE:-unit.all}"
+  artifacts:
+    when: always
+    paths:
+      - reports/gates/unit.all.json
 
 lint:
   <<: *cpu-base
   stage: cpu-gate
   script:
-    - pip install --quiet -r docker/requirements-lint.txt
-    - ruff check igc tests
+    - conda run -n base python -m pip install --quiet -r docker/requirements-lint.txt
+    - conda run -n base ruff check igc tests
 
 offline-gate:
   <<: *cpu-base
@@ -44,19 +83,17 @@ offline-gate:
     HF_DATASETS_OFFLINE: "1"
     PIP_CACHE_DIR: .pip-cache
   cache:
-    key: pip-$CI_COMMIT_REF_SLUG
+    key: conda-pip-$CI_COMMIT_REF_SLUG
     paths: [.pip-cache]
   script:
-    - pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
-    - pip install --quiet -r docker/requirements-test.txt
-    - python -m pytest -q
+    - conda run -n base python -m pip install --quiet -r docker/requirements-test.txt
+    - conda run -n base python -m pytest -q
 
 surface-guard:
   <<: *cpu-base
   stage: cpu-gate
   script:
-    - pip install --quiet pyyaml
-    - python scripts/gates/ci_surface_guard.py
+    - conda run -n base python scripts/gates/ci_surface_guard.py
 
 # Outbound fence: no agent artifacts tracked, no agent attribution or
 # agent-file chatter in commit/MR messages, no internal endpoint literals.
@@ -73,7 +110,7 @@ agent-leak-guard:
         RANGE="${CI_MERGE_REQUEST_DIFF_BASE_SHA}..HEAD"
       fi
       printf '%s\n\n%s\n' "${CI_MERGE_REQUEST_TITLE:-}" "${CI_MERGE_REQUEST_DESCRIPTION:-}" > /tmp/mr_message.txt
-      python scripts/gates/agent_leak_guard.py ${RANGE:+--commit-range "$RANGE"} \
+      conda run -n base python scripts/gates/agent_leak_guard.py ${RANGE:+--commit-range "$RANGE"} \
         --message-file /tmp/mr_message.txt \
         --branch "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-$CI_COMMIT_REF_NAME}"
 
@@ -84,8 +121,7 @@ gpu-evidence-validate:
   <<: *cpu-base
   stage: gpu-evidence
   script:
-    - pip install --quiet pyyaml
-    - python scripts/gates/ci_surface_guard.py
+    - conda run -n base python scripts/gates/ci_surface_guard.py
 
 # Placeholder marking the GPU execution surface. Never runs in home-lab (the
 # gb300 tag has no runner there) and never in an MR pipeline; if a GB300 runner
