@@ -211,6 +211,7 @@ def test_build_outputs_preserves_full_evidence_by_corpus_for_promotion(
             "deterministic_golden_json_parse_rate": 1.0,
             "deterministic_golden_resource_identity_match_rate": 1.0,
             "min_heldout_rows_per_corpus": 1,
+            "small_corpus_policy": "require_all_available_rows",
             "generation_target_token_margin": 0,
         },
         full_metrics=metrics,
@@ -220,6 +221,10 @@ def test_build_outputs_preserves_full_evidence_by_corpus_for_promotion(
         retention_evidence={"comparison": {"delta": {"judge_acceptance_rate": 0.0}}},
         run_report={
             "manifest": {
+                "phase": "phase1_finetune",
+                "task": "redfish_json_reconstruction",
+                "parent_role": "foundation_instruct",
+                "output_role": "model_x",
                 "data_manifest": SHA_1,
                 "eval_split": SHA_2,
                 "train_data_sha": SHA_3,
@@ -233,11 +238,18 @@ def test_build_outputs_preserves_full_evidence_by_corpus_for_promotion(
                 "promotion_source": "best_checkpoint",
                 "checkpoint_path": "/checkpoints/model_x_epoch_best.pt",
                 "promoted_artifact_path": "/models/model_x",
-            }
+                "training": {
+                    "optimizer_steps": 1,
+                    "train_loss": 0.1,
+                },
+            },
+            "metrics": {"eval_loss": 0.1},
         },
         heldout_manifest={
             "approved_heldout_rows": 2,
             "required_corpora": ["corpus_a", "corpus_b"],
+            "rows_by_corpus": {"corpus_a": 1, "corpus_b": 1},
+            "full_rows_by_corpus": {"corpus_a": 1, "corpus_b": 1},
             "row_ids": [ROW_A, ROW_B],
             "artifact_sha256": SHA_2,
             "full_corpus_manifest_sha256": SHA_4,

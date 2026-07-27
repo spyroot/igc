@@ -108,7 +108,7 @@ def test_emit_writes_readable_report(tmp_path: Path):
     back = ResultBundle.read(path)
     assert back.manifest.model == "Qwen/Qwen2.5-7B-Instruct"
     assert back.manifest.training["final_epoch_loss"] == 3.1
-    assert back.arm == "rslora-r32"
+    assert back.arm == "rslora-r32-pissa"
 
 
 def test_bundle_feeds_compare_fairness():

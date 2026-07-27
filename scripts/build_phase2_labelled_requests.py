@@ -196,8 +196,8 @@ def build_phase2_labelled_requests(
     )
     if len(records) < required_records:
         raise ValueError(
-            "not enough REST API records for "
-            f"{sample_width} targets plus {spec.context_distractors} distractors"
+            "not enough REST API records for targets plus distractors: "
+            f"targets={sample_width}, distractors={spec.context_distractors}"
         )
 
     budget = sampling_budget or D1SamplingBudget.from_spec(spec)

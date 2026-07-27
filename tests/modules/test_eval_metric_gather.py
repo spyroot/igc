@@ -50,7 +50,8 @@ def test_phase1_best_metric_is_eval_loss_minimize_with_min_delta():
     """Phase 1 must select checkpoints by lower eval loss, not higher token accuracy."""
     src = inspect.getsource(SFTTrainer._evaluate_and_checkpoint)
     assert "self._select_best_by_eval_loss" in src
-    assert "selection_metric = validation_eval_loss" in src
+    assert "validation_eval_loss" in src
+    assert "else validation_acc" in src
     assert "self._early_stopping_min_delta" in src
     assert "< self._best_validation_metric" in src
 

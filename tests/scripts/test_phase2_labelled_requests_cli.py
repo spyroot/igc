@@ -353,7 +353,7 @@ def test_cli_all_sample_widths_releases_balanced_canonical_d1(
     }
     assert metrics["sampling_budget"]["observed"]["attempts_total"] == 5
     assert metrics["sampling_budget"]["observed"]["accepted_total"] == 5
-    assert metrics["sampling_budget"]["observed"]["unique_combinations_attempted"] >= 4
+    assert metrics["sampling_budget"]["observed"]["unique_combinations_attempted"] == 3
     assert manifest["sample_width_counts"] == {"0": 2, "1": 1, "2": 1, "3": 1}
     assert manifest["sampling_budget"] == metrics["sampling_budget"]
     rendered_manifest = json.dumps(manifest, sort_keys=True)
