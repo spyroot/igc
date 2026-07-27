@@ -1517,7 +1517,7 @@ def test_counters_track_nonsense_invalid_json_and_empty_set_matches() -> None:
     assert summary[_phase2_metric("ambiguous_rate")] == 0.0
     assert summary[_phase2_metric("duplicate_intent_rate")] == 0.0
     assert summary[_phase2_metric("extra_intent_rate")] == 0.0
-    assert summary[_phase2_metric("method_semantics_valid_rate")] == pytest.approx(1 / 3)
+    assert summary[_phase2_metric("method_semantics_valid_rate")] == pytest.approx(2 / 3)
     assert summary[_phase2_metric("empty_set_match_rate")] == 1.0
     assert summary[_phase2_metric("empty_set_expected_total")] == 1
 

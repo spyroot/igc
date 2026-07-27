@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -164,6 +165,26 @@ def test_contract_identity_changes_with_materializer_inputs(tmp_path: Path) -> N
     assert first[1] == "phase1.lossless-json-chunk.v1"
 
 
+def test_transform_gate_fails_closed_when_max_tokens_is_missing(tmp_path: Path) -> None:
+    """A malformed transform reports a GateError instead of leaking a KeyError."""
+    repo = _contract_repo(tmp_path)
+    transform = {
+        "transform": "phase1.lossless-json-chunk.v1",
+        "tokenizer_sha": TOKENIZER_SHA,
+        "overflow_policy": "lossless_json_chunk",
+        "split_before_chunk": True,
+        "exact_reassembly_verified": True,
+    }
+
+    with pytest.raises(gate.GateError, match="max_tokens"):
+        gate._validate_transform(
+            {"phase1_transform": transform},
+            transform,
+            profile=SimpleNamespace(tokenizer_sha=TOKENIZER_SHA, seq_len=2048),
+            repo_root=repo,
+        )
+
+
 def test_image_labels_report_compatible_or_update_required(tmp_path: Path) -> None:
     repo = _contract_repo(tmp_path)
     digest, transform, _ = gate.contract_identity(repo)
@@ -263,6 +284,29 @@ def test_dockerfile_gate_rejects_raw_copy_on_continuation_line(tmp_path: Path) -
 
     assert result["status"] == "failed"
     assert result["violations"] == ["line 6: COPY/ADD references datasets"]
+
+
+def test_dockerfile_gate_rejects_raw_dataset_stage_name(tmp_path: Path) -> None:
+    """COPY --from cannot smuggle a protected dataset marker past the gate."""
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        "\n".join((
+            "FROM scratch AS datasets",
+            "FROM scratch",
+            "ARG IGC_DATASET_CONTRACT_SHA",
+            "ARG IGC_DATASET_TRANSFORM_VERSION",
+            f"LABEL {gate.CONTRACT_LABEL}=x",
+            f"LABEL {gate.TRANSFORM_LABEL}=x",
+            "COPY --from=datasets / /data",
+            "",
+        )),
+        encoding="utf-8",
+    )
+
+    result = gate.check_dockerfile(dockerfile)
+
+    assert result["status"] == "failed"
+    assert result["violations"] == ["line 7: COPY/ADD references datasets"]
 
 
 def test_dockerfile_gate_accepts_contract_labelled_image(tmp_path: Path) -> None:

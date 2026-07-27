@@ -94,6 +94,9 @@ class RunManifest:
     adapter_method: str = "lora"
     adapter_rank: Optional[int] = None
     adapter_init: str = "default"
+    warmup_ratio: Optional[float] = None
+    lora_init: str = "default"
+    lora_target_modules: List[str] = field(default_factory=list)
     data_manifest: str = ""          # id/hash of the exact dataset + source mix
     eval_split: str = ""             # id of the held-out split (source-separated)
     train_data_sha: str = ""          # exact training JSONL bytes

@@ -40,6 +40,7 @@ workflow:
   when: never
 
 .cpu-base: &cpu-base
+  tags: [homelab-k8s]
   variables:
     IGC_SURFACE: cpu
   rules:
@@ -55,7 +56,7 @@ focused-gate:
   variables:
     IGC_SURFACE: cpu
     FOCUSED_GATE: unit.all
-  tags: [homelab-k8s, homelab-k8s-validation]
+  tags: [homelab-k8s]
   rules:
     - if: '$CI_SERVER_HOST != "gitlab.com" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $FOCUSED_GATE != null && $FOCUSED_GATE != ""'
     - when: never

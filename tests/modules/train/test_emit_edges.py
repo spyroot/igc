@@ -112,6 +112,8 @@ def test_settings_include_only_allowlisted_run_knobs():
         "corpus_objective": "phase1_pretrain",
         "use_peft": "True",
         "lora_r": "32",
+        "adapter_method": "rslora",
+        "lora_init": "pissa",
     }
 
 

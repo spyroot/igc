@@ -807,8 +807,9 @@ def _normalize_argument_grounding(
             or not has_shape_evidence
         ):
             raise ValueError(
-                "mutation arguments require operator_text plus argument_schema "
-                f"or operation_definition grounding for {rest_api!r}"
+                "mutation arguments require positive grounding from operator_text "
+                "plus argument_schema or operation_definition for "
+                f"{rest_api!r}"
             )
         normalized[rest_api] = {
             "grounded": grounded,

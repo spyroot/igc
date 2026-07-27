@@ -115,7 +115,7 @@ def test_train_builds_eval_dataloader_without_drop_last(monkeypatch):
     trainer._reset_lr = False
     trainer.rank = -1
     trainer.is_accelerator = False
-    trainer.device = "cpu"
+    trainer._device = "cpu"
     trainer.batch_size = 2
     trainer._num_workers = 0
     trainer._is_shuffle = True

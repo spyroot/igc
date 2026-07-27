@@ -81,9 +81,12 @@ def build_outputs(
         ece_bins=spec.ece_bins,
     )
     acceptance = evaluate_acceptance(metrics_payload, spec)
+    model_artifact = metrics_payload["evidence"]["model_x"]["artifact"]
     evidence = {
         "schema_version": "phase1_inference_gate_evidence.v1",
         "phase": 1,
+        "role": "model_x",
+        "artifact_sha": f"sha256:{model_artifact['sha256']}",
         "task": metrics_payload["task"],
         "metric_namespace": metrics_payload["metric_namespace"],
         "spec": {
@@ -94,7 +97,7 @@ def build_outputs(
         },
         "artifacts": {
             "baseline": metrics_payload["evidence"]["baseline"]["artifact"],
-            "model_x": metrics_payload["evidence"]["model_x"]["artifact"],
+            "model_x": model_artifact,
         },
         "baseline": metrics_payload["evidence"]["baseline"],
         "model_x": metrics_payload["evidence"]["model_x"],

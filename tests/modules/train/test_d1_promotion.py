@@ -71,6 +71,8 @@ def _release_manifest(**overrides: object) -> dict[str, object]:
         },
         "balance_valid": True,
         "judge_evidence_valid": True,
+        "immutable": True,
+        "complete": True,
         "draft_provider_adapter": "openai-compatible",
         "judge_provider_adapter": "openai-compatible",
         "judge_route": "private-pro-route",

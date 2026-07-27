@@ -158,6 +158,10 @@ class IgcLanguageModule:
                     adapter_method=getattr(self._spec, 'adapter_method'),
                 )
 
+            if getattr(self._spec, "gradient_checkpointing", False):
+                pretrained_model.gradient_checkpointing_enable()
+                pretrained_model.config.use_cache = False
+
             sft_trainer = SFTTrainer(
                 module_name=task.output_role,
                 spec=self._spec,

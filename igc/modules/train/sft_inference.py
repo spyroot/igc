@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -685,7 +686,19 @@ def _string(value: Any, label: str) -> str:
 def _resolved_string(value: Any, label: str) -> str:
     resolved = os.path.expandvars(_string(value, label))
     if "$" in resolved:
-        raise SFTInferenceError(f"{label} references an unset environment variable")
+        unresolved = sorted(
+            set(
+                re.findall(
+                    r"\$(?:\{([^}]+)\}|([A-Za-z_][A-Za-z0-9_]*))",
+                    resolved,
+                )
+            )
+        )
+        names = sorted({braced or plain for braced, plain in unresolved})
+        detail = f": {', '.join(names)}" if names else ""
+        raise SFTInferenceError(
+            f"{label} references an unset environment variable{detail}"
+        )
     return resolved
 
 

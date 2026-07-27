@@ -43,8 +43,10 @@ def test_3b_lora_has_adapter_flags_and_epochs():
     assert _val(argv, "--num_train_epochs") == "3" and "--max_train_steps" not in argv
 
 
-def test_7b_rslora_argv_matches_spec():
+def test_7b_rslora_argv_matches_spec(monkeypatch):
     """phase1_7b_rslora_r32 emits the plan's rsLoRA r32/alpha64 adapter flags."""
+    monkeypatch.setenv("IGC_FOUNDATION_MODEL_SHA", "sha256:" + "1" * 64)
+    monkeypatch.setenv("IGC_TOKENIZER_SHA", "sha256:" + "2" * 64)
     argv = profile_to_argv(resolve_profile("phase1_7b_rslora_r32"))
     assert _val(argv, "--model_type") == "Qwen/Qwen2.5-7B-Instruct"
     assert _val(argv, "--adapter_method") == "rslora"

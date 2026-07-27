@@ -89,7 +89,15 @@ def build_run_bundle(spec_vars: Dict, *,
     profile = str(spec_vars.get("profile", "") or "")
     phase = str(spec_vars.get("phase", "") or "")
     task = str(spec_vars.get("sft_task", "") or "")
-    family = phase or task or "sft"
+    profile_family = next(
+        (
+            candidate
+            for candidate in ("phase1", "phase2", "phase3")
+            if profile.startswith(f"{candidate}_")
+        ),
+        "",
+    )
+    family = phase or task or profile_family or "sft"
     manifest = RunManifest(
         run_id=f"{family}-{os.path.basename(model) or 'model'}-{started_tag}",
         profile=profile,
@@ -110,6 +118,9 @@ def build_run_bundle(spec_vars: Dict, *,
         adapter_method=str(spec_vars.get("adapter_method", "lora")) if use_peft else "none",
         adapter_rank=int(spec_vars["lora_r"]) if use_peft and "lora_r" in spec_vars else None,
         adapter_init=str(spec_vars.get("lora_init", "default") or "default"),
+        warmup_ratio=spec_vars.get("warmup_ratio"),
+        lora_init=str(spec_vars.get("lora_init", "default") or "default"),
+        lora_target_modules=list(spec_vars.get("lora_target_modules") or []),
         data_manifest=str(dataset_fields.get("data_manifest", "")),
         eval_split=str(dataset_fields.get("eval_split", "")),
         train_data_sha=str(dataset_fields.get("train_data_sha", "")),

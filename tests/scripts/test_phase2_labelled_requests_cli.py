@@ -349,6 +349,7 @@ def test_cli_all_sample_widths_releases_balanced_canonical_d1(
         "max_accepted_per_combination": 8,
         "max_attempts_per_combination": 24,
         "max_accepted_per_api": 200,
+        "max_empty_set_candidates": 2,
     }
     assert metrics["sampling_budget"]["observed"]["attempts_total"] == 5
     assert metrics["sampling_budget"]["observed"]["accepted_total"] == 5
@@ -424,6 +425,7 @@ def test_cli_metric_report_wandb_logs_registered_numeric_metrics_by_width(
         "max_accepted_per_combination": 8,
         "max_attempts_per_combination": 24,
         "max_accepted_per_api": 200,
+        "max_empty_set_candidates": 2,
     }
     rendered_config = json.dumps(config, sort_keys=True)
     assert "judge_route" not in config
@@ -518,6 +520,8 @@ def test_cli_rejects_requested_candidates_above_yaml_budget_before_release(
                 str(release_dir),
                 "--metrics-out",
                 str(metrics_path),
+                "--sample-width",
+                "1",
                 "--count",
                 "300001",
                 "--seed",

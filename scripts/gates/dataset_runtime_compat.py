@@ -220,8 +220,8 @@ def check_dockerfile(path: Path, *, repo_root: Path = REPO_ROOT) -> dict[str, An
         if line.upper().startswith(("COPY ", "ADD ")):
             for marker in RAW_COPY_MARKERS:
                 pattern = (
-                    rf"(?:^|[/\s\"'\[\],]){re.escape(marker)}"
-                    r"(?:$|[/\s\"'\[\],])"
+                    rf"(?<![A-Za-z0-9_.-]){re.escape(marker)}"
+                    r"(?![A-Za-z0-9_.-])"
                 )
                 if re.search(pattern, line, flags=re.IGNORECASE):
                     violations.append(f"line {number}: COPY/ADD references {marker}")
@@ -282,12 +282,17 @@ def _validate_transform(
     )
     if tokenizer_sha != profile_tokenizer_sha:
         raise GateError("release tokenizer SHA does not match training profile")
-    if not isinstance(manifest.get("max_tokens"), int) or manifest["max_tokens"] < 2:
+    max_tokens = manifest.get("max_tokens")
+    if (
+        not isinstance(max_tokens, int)
+        or isinstance(max_tokens, bool)
+        or max_tokens < 2
+    ):
         raise GateError("phase1_transform.max_tokens must be >= 2")
     profile_seq_len = getattr(profile, "seq_len", None)
     if not isinstance(profile_seq_len, int) or profile_seq_len < 2:
         raise GateError("training_profile.seq_len must be >= 2")
-    if manifest["max_tokens"] != profile_seq_len:
+    if max_tokens != profile_seq_len:
         raise GateError("release max_tokens does not match training profile seq_len")
 
 

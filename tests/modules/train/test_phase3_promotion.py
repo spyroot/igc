@@ -878,19 +878,22 @@ def test_phase3_promotion_records_and_passes_all_required_http_method_checks() -
 
 
 @pytest.mark.parametrize(
-    "missing_key",
+    ("missing_key", "failure_name"),
     [
-        "immutable_full_manifest",
-        "immutable_train_manifest",
-        "disjoint_split_release",
-        "real_promoted_parent_checkpoint",
-        "real_heldout_data",
-        "artifact_sha",
-        "checkpoint_reload_succeeded",
-        "inference_smoke_succeeded",
+        ("immutable_full_manifest", "immutable_full_manifest"),
+        ("immutable_train_manifest", "immutable_train_manifest"),
+        ("disjoint_split_release", "disjoint_train_heldout_release"),
+        ("real_promoted_parent_checkpoint", "real_promoted_parent_checkpoint"),
+        ("real_heldout_data", "real_heldout_data"),
+        ("artifact_sha", "artifact_sha"),
+        ("checkpoint_reload_succeeded", "checkpoint_reload_succeeded"),
+        ("inference_smoke_succeeded", "inference_smoke_succeeded"),
     ],
 )
-def test_phase3_promotion_requires_real_artifact_evidence(missing_key: str) -> None:
+def test_phase3_promotion_requires_real_artifact_evidence(
+    missing_key: str,
+    failure_name: str,
+) -> None:
     """Promotion remains hard-gated on manifest, parent, held-out, and smoke evidence."""
     rows = _rows_all_argument_classes()
 
@@ -907,7 +910,7 @@ def test_phase3_promotion_requires_real_artifact_evidence(missing_key: str) -> N
     )
 
     assert result["status"] == "fail"
-    assert any(failure["name"] == missing_key for failure in result["failures"])
+    assert any(failure["name"] == failure_name for failure in result["failures"])
 
 
 @pytest.mark.parametrize(

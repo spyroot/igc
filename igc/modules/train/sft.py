@@ -906,7 +906,7 @@ class SFTTrainer(LlmModule):
         # Rank-0 writers consume the pre-gathered dict (no second rank-0-only
         # state_dict() collective); the plain path passes None and saves locally.
         self.save_model(self._module_checkpoint_dir, model_state_dict=final_state)
-        if not self._best_checkpoint_path:
+        if not getattr(self, "_best_checkpoint_path", ""):
             self.save_finetuned(model_state_dict=final_state)
 
         if self.is_accelerator:

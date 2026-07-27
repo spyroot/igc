@@ -22,7 +22,8 @@ def _spec(**over):
     spec = {
         "model_type": "Qwen/Qwen2.5-7B-Instruct",
         "use_peft": True, "adapter_method": "rslora", "lora_r": 32,
-        "lora_alpha": 64, "lora_init": "default",
+        "lora_alpha": 64, "lora_init": "pissa",
+        "lora_target_modules": ["q_proj", "v_proj"], "warmup_ratio": 0.03,
         "max_train_steps": 200, "seq_len": 1024,
         "per_device_train_batch_size": 8, "gradient_accumulation_steps": 4,
         "num_train_epochs": 3, "llm_learning_rate": 5e-5,
@@ -63,6 +64,9 @@ def test_manifest_maps_spec_and_corpus_fields():
     m = b.manifest
     assert m.model == "Qwen/Qwen2.5-7B-Instruct"
     assert m.adapter_method == "rslora" and m.adapter_rank == 32
+    assert m.warmup_ratio == 0.03
+    assert m.lora_init == "pissa"
+    assert m.lora_target_modules == ["q_proj", "v_proj"]
     assert m.data_manifest == "sha256:" + "7" * 64
     assert m.train_data_sha == "sha256:" + "8" * 64
     assert m.eval_data_sha == "sha256:" + "9" * 64

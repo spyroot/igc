@@ -891,7 +891,7 @@ class Phase2LabelledRequestCounters:
     ambiguous_total: int = 0  # number of strict verdicts marking ambiguity.
     duplicate_intent_total: int = 0  # number of strict verdicts marking duplicate intent.
     extra_intent_total: int = 0  # number of strict verdicts marking extra intent.
-    method_semantics_valid_total: int = 0  # strict verdicts with legal method semantics.
+    method_semantics_valid_total: int = 0  # valid judge JSON with legal method semantics.
     empty_set_expected_total: int = 0  # number of valid judged no-action rows.
     empty_set_match_total: int = 0  # number of valid judged no-action matches.
     sample_width_k: int = 0  # sampled REST API count for this candidate.
@@ -944,7 +944,7 @@ class Phase2LabelledRequestCounters:
             self.duplicate_intent_total += 1
         if result.extra_intents and result.valid_json:
             self.extra_intent_total += 1
-        if result.method_semantics_valid and clean_quality_verdict:
+        if result.method_semantics_valid and result.valid_json:
             self.method_semantics_valid_total += 1
         if accepted:
             self.pro_accept_total += 1

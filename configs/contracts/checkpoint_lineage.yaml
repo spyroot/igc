@@ -4,8 +4,7 @@ authority: phase_checkpoint_and_encoder_lineage
 checkpoint_lineage:
   model_x:
     phase: 1
-    role: model_x
-    purpose: phase1_json_backbone
+    role: phase1_json_backbone
     parent_role: foundation_instruct
     immutable_after_promotion: true
     artifact_sha: ${MODEL_X_SHA}

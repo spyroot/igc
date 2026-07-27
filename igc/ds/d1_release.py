@@ -149,12 +149,15 @@ def validate_pending_d1_jsonl(
         raise D1ReleaseError("pending D1 is empty")
     missing_widths = sorted(set(expected) - set(counts))
     if missing_widths:
-        raise D1ReleaseError(f"pending D1 is missing sample widths {missing_widths}")
+        raise D1ReleaseError(
+            f"pending D1 is missing required sample widths {missing_widths}"
+        )
     positive_widths = [width for width in expected if width > 0]
     width_counts = [counts[width] for width in positive_widths]
     if width_counts and max(width_counts) - min(width_counts) > 1:
         raise D1ReleaseError(
-            f"pending D1 width balance differs by more than one row: {dict(counts)}"
+            "pending D1 sample width balance differs by more than one row: "
+            f"{dict(counts)}"
         )
     return {
         "rows": row_count,

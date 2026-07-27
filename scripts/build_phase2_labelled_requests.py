@@ -195,7 +195,10 @@ def build_phase2_labelled_requests(
         else sample_width + spec.context_distractors
     )
     if len(records) < required_records:
-        raise SystemExit("not enough records for requested sample-width")
+        raise ValueError(
+            "not enough REST API records for "
+            f"{sample_width} targets plus {spec.context_distractors} distractors"
+        )
 
     budget = sampling_budget or D1SamplingBudget.from_spec(spec)
     builder = Phase2LabelledRequestBuilder(
@@ -433,6 +436,7 @@ def _log_wandb_metrics(
                         spec.max_attempts_per_combination
                     ),
                     "max_accepted_per_api": spec.max_accepted_per_api,
+                    "max_empty_set_candidates": spec.empty_set_candidates,
                 },
             },
         )
