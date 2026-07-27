@@ -23,6 +23,9 @@ class _CharacterTokenizer:
     eos_token = "<eos>"
     pad_token_id = 0
 
+    def __init__(self) -> None:
+        self.characters_seen = 0
+
     def __call__(
         self,
         text,
@@ -33,6 +36,7 @@ class _CharacterTokenizer:
         add_special_tokens=False,
     ):
         del padding, truncation, return_tensors, add_special_tokens
+        self.characters_seen += len(text)
         ids = torch.arange(1, len(text) + 1, dtype=torch.long).unsqueeze(0)
         return {"input_ids": ids, "attention_mask": torch.ones_like(ids)}
 
@@ -137,3 +141,16 @@ def test_token_distribution_reports_telemetry_without_filtering() -> None:
     assert report["non_telemetry_resources"]["count"] == 1
     assert report["telemetry_resources"]["count"] == 1
     assert report["all_resources"]["mean"] is not None
+
+
+def test_long_string_partitioning_does_not_retokenize_the_whole_remainder() -> None:
+    """Chunk search work stays bounded by local windows for giant scalar values."""
+
+    tokenizer = _CharacterTokenizer()
+    body = {"Payload": "x" * 3000}
+
+    chunks = chunk_phase1_row(_row(body), tokenizer=tokenizer, policy=_policy())
+
+    assert len(chunks) > 20
+    assert reassemble_phase1_rows(chunks) == body
+    assert tokenizer.characters_seen < 500_000

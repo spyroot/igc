@@ -342,40 +342,43 @@ def _partition_value(
     if isinstance(value, Mapping):
         if not value:
             raise ValueError("empty Phase 1 object cannot fit the token budget")
-        current: dict[str, Any] = {}
-        for key in sorted(value):
-            if not isinstance(key, str):
-                raise ValueError("Phase 1 JSON object keys must be strings")
-            child = value[key]
-            trial = {**current, key: child}
-            if fits(_wrap_fragment(path, trial)):
-                current = trial
-                continue
-            if current:
-                yield _Fragment(path, "object_fields", current)
-                current = {}
-            single = {key: child}
-            if fits(_wrap_fragment(path, single)):
-                current = single
+        keys = sorted(value)
+        if not all(isinstance(key, str) for key in keys):
+            raise ValueError("Phase 1 JSON object keys must be strings")
+        start = 0
+        while start < len(keys):
+            best = _largest_fitting_stop(
+                start=start,
+                length=len(keys),
+                fits=lambda stop: fits(
+                    _wrap_fragment(
+                        path,
+                        {key: value[key] for key in keys[start:stop]},
+                    )
+                ),
+            )
+            if best == start:
+                key = keys[start]
+                yield from _partition_value((*path, key), value[key], fits)
+                start += 1
             else:
-                yield from _partition_value((*path, key), child, fits)
-        if current:
-            yield _Fragment(path, "object_fields", current)
+                yield _Fragment(
+                    path,
+                    "object_fields",
+                    {key: value[key] for key in keys[start:best]},
+                )
+                start = best
         return
     if isinstance(value, list):
         if not value:
             raise ValueError("empty Phase 1 array cannot fit the token budget")
         start = 0
         while start < len(value):
-            low, high = start + 1, len(value)
-            best = start
-            while low <= high:
-                middle = (low + high) // 2
-                if fits(_wrap_fragment(path, value[start:middle])):
-                    best = middle
-                    low = middle + 1
-                else:
-                    high = middle - 1
+            best = _largest_fitting_stop(
+                start=start,
+                length=len(value),
+                fits=lambda stop: fits(_wrap_fragment(path, value[start:stop])),
+            )
             if best == start:
                 yield from _partition_value((*path, start), value[start], fits)
                 start += 1
@@ -395,15 +398,11 @@ def _partition_value(
             raise ValueError("empty Phase 1 string cannot fit the token budget")
         start = 0
         while start < len(value):
-            low, high = start + 1, len(value)
-            best = start
-            while low <= high:
-                middle = (low + high) // 2
-                if fits(_wrap_fragment(path, value[start:middle])):
-                    best = middle
-                    low = middle + 1
-                else:
-                    high = middle - 1
+            best = _largest_fitting_stop(
+                start=start,
+                length=len(value),
+                fits=lambda stop: fits(_wrap_fragment(path, value[start:stop])),
+            )
             if best == start:
                 raise ValueError(
                     "Phase 1 token budget cannot fit one string code point with its JSON path"
@@ -422,6 +421,38 @@ def _partition_value(
         "Phase 1 token budget cannot fit one scalar with its JSON path; "
         "increase training_profile.seq_len"
     )
+
+
+def _largest_fitting_stop(*, start: int, length: int, fits: Any) -> int:
+    """Find a bounded fitting range without probing the whole remainder first."""
+
+    first = start + 1
+    if first > length or not fits(first):
+        return start
+    best = first
+    step = 2
+    failed_stop: int | None = None
+    while best < length:
+        candidate = min(length, start + step)
+        if fits(candidate):
+            best = candidate
+            if best == length:
+                return best
+            step *= 2
+        else:
+            failed_stop = candidate
+            break
+    if failed_stop is None:
+        return best
+    low, high = best + 1, failed_stop - 1
+    while low <= high:
+        middle = (low + high) // 2
+        if fits(middle):
+            best = middle
+            low = middle + 1
+        else:
+            high = middle - 1
+    return best
 
 
 def _whole_fragment(path: tuple[str | int, ...], value: Any) -> _Fragment:
