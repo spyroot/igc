@@ -51,6 +51,14 @@ workflow:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
     - when: never
 
+.igc-gate-before-script: &igc-gate-before-script
+  - export HOMELAB_IN_CLUSTER=1
+  - conda env create --file environment-ci.yaml
+
+.igc-test-before-script: &igc-test-before-script
+  - export HOMELAB_IN_CLUSTER=1
+  - conda env create --file environment-dev.yaml
+
 focused-gate:
   stage: cpu-gate
   variables:
@@ -70,13 +78,14 @@ focused-gate:
 lint:
   <<: *cpu-base
   stage: cpu-gate
+  before_script: *igc-gate-before-script
   script:
-    - conda run -n base python -m pip install --quiet -r docker/requirements-lint.txt
-    - conda run -n base ruff check igc tests
+    - conda run -n igc-ci-gates ruff check igc tests
 
 offline-gate:
   <<: *cpu-base
   stage: cpu-gate
+  before_script: *igc-test-before-script
   variables:
     IGC_SURFACE: cpu
     KMP_DUPLICATE_LIB_OK: "TRUE"
@@ -86,22 +95,24 @@ offline-gate:
     PIP_CACHE_DIR: .pip-cache
   cache:
     key: conda-pip-$CI_COMMIT_REF_SLUG
-    paths: [.pip-cache]
+    paths:
+      - .pip-cache
   script:
-    - conda run -n base python -m pip install --quiet -r docker/requirements-test.txt
-    - conda run -n base python -m pytest -q
+    - conda run -n igc-dev python -m pytest -q
 
 surface-guard:
   <<: *cpu-base
   stage: cpu-gate
+  before_script: *igc-gate-before-script
   script:
-    - conda run -n base python scripts/gates/ci_surface_guard.py
+    - conda run -n igc-ci-gates python scripts/gates/ci_surface_guard.py
 
 # Outbound fence: no agent artifacts tracked, no agent attribution or
 # agent-file chatter in commit/MR messages, no internal endpoint literals.
 agent-leak-guard:
   <<: *cpu-base
   stage: cpu-gate
+  before_script: *igc-gate-before-script
   variables:
     IGC_SURFACE: cpu
     GIT_DEPTH: "0"
@@ -112,7 +123,7 @@ agent-leak-guard:
         RANGE="${CI_MERGE_REQUEST_DIFF_BASE_SHA}..HEAD"
       fi
       printf '%s\n\n%s\n' "${CI_MERGE_REQUEST_TITLE:-}" "${CI_MERGE_REQUEST_DESCRIPTION:-}" > /tmp/mr_message.txt
-      conda run -n base python scripts/gates/agent_leak_guard.py ${RANGE:+--commit-range "$RANGE"} \
+      conda run -n igc-ci-gates python scripts/gates/agent_leak_guard.py ${RANGE:+--commit-range "$RANGE"} \
         --message-file /tmp/mr_message.txt \
         --branch "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-$CI_COMMIT_REF_NAME}"
 
@@ -122,8 +133,9 @@ agent-leak-guard:
 gpu-evidence-validate:
   <<: *cpu-base
   stage: gpu-evidence
+  before_script: *igc-gate-before-script
   script:
-    - conda run -n base python scripts/gates/ci_surface_guard.py
+    - conda run -n igc-ci-gates python scripts/gates/ci_surface_guard.py
 
 # Placeholder marking the GPU execution surface. Never runs in home-lab (the
 # gb300 tag has no runner there) and never in an MR pipeline; if a GB300 runner

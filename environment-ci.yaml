@@ -1,0 +1,10 @@
+# Lightweight Python environment for Internal GitLab policy and lint jobs.
+name: igc-ci-gates
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.10
+  - pyyaml
+  - ruff=0.15.22
