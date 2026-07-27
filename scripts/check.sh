@@ -45,7 +45,9 @@ done
 }
 if [ "${HOMELAB_IN_CLUSTER:-0}" != "1" ] \
     || [ -z "${KUBERNETES_SERVICE_HOST:-}" ] \
-    || [ -z "${CI_JOB_ID:-}" ]; then
+    || [ -z "${CI_JOB_ID:-}" ] \
+    || [ -z "${CI_SERVER_HOST:-}" ] \
+    || [ "${CI_SERVER_HOST}" = "gitlab.com" ]; then
     printf 'BLOCKER: unit.all requires Internal GitLab homelab-k8s execution\n' >&2
     exit 3
 fi
