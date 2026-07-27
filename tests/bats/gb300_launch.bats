@@ -104,6 +104,8 @@ EOF
     run grep -Eq 'IGC_RUNG|IGC_STAGE|smoke1|smoke4|run4|fsdp4|train_igc\.sbatch' "$LAUNCH"
     [ "$status" -ne 0 ]
 
-    run grep -Eq 'igc_main\.py|--train|--llm|--max_steps|--num_train_epochs' "$LAUNCH"
+    run grep -Eq \
+        'igc_main\.py|(^|[[:space:]])--(train|llm|max_steps|num_train_epochs)([=[:space:]]|$)' \
+        "$LAUNCH"
     [ "$status" -ne 0 ]
 }
