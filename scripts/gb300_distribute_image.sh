@@ -29,15 +29,23 @@ case "$COMPRESS" in
     *) echo "BLOCKER: COMPRESS must be zstd or gzip (got $COMPRESS)" >&2; exit 3 ;;
 esac
 TARBALL="${MODELS_IMAGES}/${IMAGE}-${TAG}.${EXT}"
+IMAGE_FINGERPRINT_FILE="${TARBALL}.fingerprint"
 # Node list comes from the environment (or a gitignored nodes file) — the fleet
 # addressing is internal and never hardcoded in the public repo.
 NODES_FILE="${GB300_NODES_FILE:-.internal/gb300_nodes}"
 # shellcheck disable=SC2206  # word-split the space-separated override on purpose
 NODES=(${DIST_NODES:-$(cat "$NODES_FILE" 2>/dev/null || true)})
 [ "${#NODES[@]}" -gt 0 ] || { echo "BLOCKER: set DIST_NODES=\"ip ip ...\" or provide $NODES_FILE (one line, space-separated node IPs)" >&2; exit 3; }
-SSH="ssh -o BatchMode=yes -o ConnectTimeout=8"
+SSH="ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new"
 
 log() { echo "=== [$(date -u '+%F %T')] $* ==="; }
+
+image_fingerprint() {
+    docker image inspect "$1" --format \
+        '{{.Architecture}}|{{.Os}}|{{.Created}}|{{json .RootFS.Layers}}|{{json .Config}}' \
+        | sha256sum \
+        | awk '{print "sha256:" $1}'
+}
 
 command -v "${COMPRESS}" >/dev/null || { echo "BLOCKER: $COMPRESS missing on $(hostname) — install it (safe-apt-install.sh $COMPRESS) or use COMPRESS=gzip" >&2; exit 3; }
 
@@ -46,24 +54,51 @@ if ! docker image inspect "$REF" >/dev/null 2>&1; then
     log "building $REF from docker/Dockerfile.train"
     docker build -f docker/Dockerfile.train -t "$REF" . || { echo "BLOCKER: build failed" >&2; exit 3; }
 fi
+SOURCE_FINGERPRINT="$(image_fingerprint "$REF")"
+[ -n "$SOURCE_FINGERPRINT" ] || {
+    echo "BLOCKER: cannot resolve source image fingerprint for $REF" >&2
+    exit 3
+}
 mkdir -p "$MODELS_IMAGES"
-if [ ! -f "$TARBALL" ] || [ "${FORCE_SAVE:-0}" = "1" ]; then
+ARCHIVE_FINGERPRINT="$(cat "$IMAGE_FINGERPRINT_FILE" 2>/dev/null || true)"
+if [ ! -f "$TARBALL" ] \
+    || [ "$ARCHIVE_FINGERPRINT" != "$SOURCE_FINGERPRINT" ] \
+    || [ "${FORCE_SAVE:-0}" = "1" ]; then
     log "docker save $REF -> $TARBALL ($COMPRESS)"
     # shellcheck disable=SC2086  # COMP must word-split into "zstd -T0 -q" / "gzip"
-    docker save "$REF" | $COMP > "$TARBALL" || { echo "BLOCKER: save failed" >&2; exit 3; }
+    pending="${TARBALL}.pending"
+    docker save "$REF" | $COMP > "$pending" \
+        || { rm -f "$pending"; echo "BLOCKER: save failed" >&2; exit 3; }
+    mv "$pending" "$TARBALL"
+    printf '%s\n' "$SOURCE_FINGERPRINT" > "$IMAGE_FINGERPRINT_FILE"
 fi
-log "tarball ready: $(du -h "$TARBALL" 2>/dev/null | cut -f1) at $TARBALL"
+log "tarball ready: $(du -h "$TARBALL" 2>/dev/null | cut -f1) at $TARBALL ($SOURCE_FINGERPRINT)"
 
 # 2. docker load on every node from the shared tarball
 ok=0; fail=0
 for ip in "${NODES[@]}"; do
-    if $SSH "nvidia@$ip" "docker image inspect $REF >/dev/null 2>&1"; then
-        echo "  $ip: already has $REF"; ok=$((ok + 1)); continue
+    remote_fingerprint="$($SSH "nvidia@$ip" \
+        "docker image inspect '$REF' --format '{{.Architecture}}|{{.Os}}|{{.Created}}|{{json .RootFS.Layers}}|{{json .Config}}' 2>/dev/null | sha256sum | awk '{print \"sha256:\" \$1}'" \
+        || true)"
+    if [ "$remote_fingerprint" = "$SOURCE_FINGERPRINT" ]; then
+        echo "  $ip: already has $REF ($SOURCE_FINGERPRINT)"
+        ok=$((ok + 1))
+        continue
     fi
-    if $SSH "nvidia@$ip" "test -f '$TARBALL' && $DECOMP '$TARBALL' | docker load >/dev/null 2>&1 && docker image inspect $REF >/dev/null 2>&1"; then
-        echo "  $ip: LOADED $REF"; ok=$((ok + 1))
+    if $SSH "nvidia@$ip" \
+        "test -f '$TARBALL' && $DECOMP '$TARBALL' | docker load >/dev/null 2>&1"; then
+        loaded_fingerprint="$($SSH "nvidia@$ip" \
+            "docker image inspect '$REF' --format '{{.Architecture}}|{{.Os}}|{{.Created}}|{{json .RootFS.Layers}}|{{json .Config}}' 2>/dev/null | sha256sum | awk '{print \"sha256:\" \$1}'" \
+            || true)"
     else
-        echo "  $ip: FAILED (unreachable? /models unmounted? zstd missing?)" >&2; fail=$((fail + 1))
+        loaded_fingerprint=""
+    fi
+    if [ "$loaded_fingerprint" = "$SOURCE_FINGERPRINT" ]; then
+        echo "  $ip: LOADED $REF ($SOURCE_FINGERPRINT)"
+        ok=$((ok + 1))
+    else
+        echo "  $ip: FAILED expected=$SOURCE_FINGERPRINT observed=${loaded_fingerprint:-missing}" >&2
+        fail=$((fail + 1))
     fi
 done
 
