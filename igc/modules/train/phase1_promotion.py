@@ -277,6 +277,7 @@ def evaluate_phase1_promotion(
     minimum_generation_budget = full_model.get(generation_budget_key)
     finite_values = (
         full_model.get(parse_key),
+        full_model.get(exact_key),
         full_model.get(identity_key),
         full_delta.get(exact_key),
         golden_model.get(parse_key),
@@ -309,6 +310,12 @@ def evaluate_phase1_promotion(
         "min_model_json_parse_rate",
         full_model.get(parse_key),
         thresholds.get("min_model_json_parse_rate"),
+    )
+    _minimum(
+        checks,
+        "min_model_json_exact_match_rate",
+        full_model.get(exact_key),
+        thresholds.get("min_model_json_exact_match_rate"),
     )
     _minimum(
         checks,
@@ -365,6 +372,12 @@ def evaluate_phase1_promotion(
             f"min_resource_identity_match_rate_{corpus}",
             model_corpus.get("resource_identity_match_rate"),
             thresholds.get("min_model_resource_identity_match_rate"),
+        )
+        _minimum_value(
+            checks,
+            f"min_json_exact_match_rate_{corpus}",
+            model_corpus.get("json_exact_match_rate"),
+            thresholds.get("min_model_json_exact_match_rate"),
         )
         baseline_exact = baseline_corpus.get("json_exact_match_rate")
         model_exact = model_corpus.get("json_exact_match_rate")

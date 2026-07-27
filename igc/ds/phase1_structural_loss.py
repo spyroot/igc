@@ -70,6 +70,15 @@ class Phase1StructuralLossResult:
     operations: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class Phase1Repair:
+    """One exact change required to restore a corrupted Phase 1 input."""
+
+    kind: str
+    path: tuple[str | int, ...]
+    value: Any = None
+
+
 def load_phase1_structural_loss_profile(
     name: str,
     path: str | Path = STRUCTURAL_LOSS_SPEC_PATH,
@@ -218,6 +227,77 @@ def build_phase1_structural_loss_view(
     )
 
 
+def detect_phase1_repairs(
+    observed: Any,
+    expected: Any,
+) -> tuple[Phase1Repair, ...]:
+    """Return the deterministic minimal repair plan from observed to expected."""
+
+    repairs: list[Phase1Repair] = []
+
+    def visit(current: Any, target: Any, path: tuple[str | int, ...]) -> None:
+        if isinstance(current, Mapping) and isinstance(target, Mapping):
+            current_keys = set(current)
+            target_keys = set(target)
+            for key in sorted(current_keys - target_keys, key=str):
+                repairs.append(Phase1Repair("delete", path + (key,)))
+            for key in sorted(target_keys - current_keys, key=str):
+                repairs.append(
+                    Phase1Repair("set", path + (key,), copy.deepcopy(target[key]))
+                )
+            for key in sorted(current_keys & target_keys, key=str):
+                visit(current[key], target[key], path + (key,))
+            return
+        if isinstance(current, list) and isinstance(target, list):
+            if current != target:
+                repairs.append(Phase1Repair("set", path, copy.deepcopy(target)))
+            return
+        if current != target:
+            repairs.append(Phase1Repair("set", path, copy.deepcopy(target)))
+
+    visit(observed, expected, ())
+    return tuple(repairs)
+
+
+def apply_phase1_repairs(
+    observed: Any,
+    repairs: Sequence[Phase1Repair],
+) -> Any:
+    """Apply a repair plan without mutating the observed Phase 1 input."""
+
+    repaired = copy.deepcopy(observed)
+    for repair in repairs:
+        if repair.kind not in {"set", "delete"}:
+            raise ValueError(f"unknown Phase 1 repair kind {repair.kind!r}")
+        if not repair.path:
+            if repair.kind == "delete":
+                raise ValueError("cannot delete the Phase 1 repair root")
+            repaired = copy.deepcopy(repair.value)
+            continue
+        parent, key = _resolve_parent(repaired, repair.path)
+        if repair.kind == "delete":
+            if isinstance(parent, MutableMapping):
+                if key not in parent:
+                    raise ValueError(
+                        f"Phase 1 repair path does not exist: {repair.path!r}"
+                    )
+                del parent[key]
+            elif isinstance(parent, list) and isinstance(key, int):
+                del parent[key]
+            else:
+                raise ValueError(
+                    f"Phase 1 repair path is not deletable: {repair.path!r}"
+                )
+            continue
+        if isinstance(parent, MutableMapping):
+            parent[key] = copy.deepcopy(repair.value)
+        elif isinstance(parent, list) and isinstance(key, int):
+            parent[key] = copy.deepcopy(repair.value)
+        else:
+            raise ValueError(f"Phase 1 repair path is not assignable: {repair.path!r}")
+    return repaired
+
+
 def _family_from_raw(
     profile_name: str,
     index: int,
@@ -282,8 +362,22 @@ def _family_spans(
             and span.key is not None
             and any(span.key.endswith(pattern) for pattern in family.patterns)
         ]
-    if family.selector in {"object", "array"}:
-        return [span for span in spans if span.kind == family.selector]
+    if family.selector == "object":
+        nested_objects = [
+            span for span in spans if span.kind == "object" and span.path
+        ]
+        if nested_objects:
+            return nested_objects
+        # A root object is never a valid mask target: replacing it would
+        # remove the entire observation and turn the task into URL memorization.
+        # Flat resources instead supervise one bounded root field.
+        return [
+            span
+            for span in spans
+            if span.kind == "key_value" and len(span.path) == 1
+        ]
+    if family.selector == "array":
+        return [span for span in spans if span.kind == "array"]
     matches: list[tuple[int, int]] = []
     for pattern in family.patterns:
         start = 0
@@ -409,7 +503,10 @@ __all__ = (
     "STRUCTURAL_LOSS_SPEC_PATH",
     "Phase1StructuralLossProfile",
     "Phase1StructuralLossResult",
+    "Phase1Repair",
     "StructuralLossFamily",
+    "apply_phase1_repairs",
     "build_phase1_structural_loss_view",
+    "detect_phase1_repairs",
     "load_phase1_structural_loss_profile",
 )
