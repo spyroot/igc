@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "build_phase1_registry_corpus.py"
@@ -43,6 +44,13 @@ def test_build_phase1_registry_corpus_writes_materializer_summary(
         return dict(summary)
 
     monkeypatch.setattr(script, "materialize_phase1_registry_corpus", fake_materialize)
+    tokenizer = object()
+    policy = object()
+    monkeypatch.setattr(
+        script,
+        "_load_materialization_runtime",
+        lambda name: (SimpleNamespace(name=name), tokenizer, policy),
+    )
     output_root = tmp_path / "corpus"
     summary_json = tmp_path / "reports" / "summary.json"
 
@@ -58,6 +66,8 @@ def test_build_phase1_registry_corpus_writes_materializer_summary(
             "0.25",
             "--seed",
             "19",
+            "--training-profile",
+            "phase1-test",
             "--summary-json",
             str(summary_json),
         ]
@@ -71,13 +81,19 @@ def test_build_phase1_registry_corpus_writes_materializer_summary(
             "corpus_kind": "golden",
             "eval_fraction": 0.25,
             "seed": 19,
+            "tokenizer": tokenizer,
+            "chunking_policy": policy,
         }
     ]
-    assert json.loads(summary_json.read_text(encoding="utf-8")) == summary
+    assert json.loads(summary_json.read_text(encoding="utf-8")) == {
+        **summary,
+        "training_profile": "phase1-test",
+    }
     assert json.loads(capsys.readouterr().out) == {
         "status": "pass",
         "train_rows": 7,
         "heldout_rows": 2,
+        "training_profile": "phase1-test",
         "summary": str(summary_json),
     }
 
@@ -94,11 +110,18 @@ def test_build_phase1_registry_corpus_reports_blocked_materializer_errors(
         "materialize_phase1_registry_corpus",
         lambda **_kwargs: (_ for _ in ()).throw(ValueError("missing required source")),
     )
+    monkeypatch.setattr(
+        script,
+        "_load_materialization_runtime",
+        lambda name: (SimpleNamespace(name=name), object(), object()),
+    )
 
     rc = script.main(
         [
             "--output-root",
             str(tmp_path / "corpus"),
+            "--training-profile",
+            "phase1-test",
             "--summary-json",
             str(tmp_path / "summary.json"),
         ]

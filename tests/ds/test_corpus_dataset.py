@@ -318,7 +318,7 @@ def test_phase1_renderer_matches_existing_token_stream(tmp_path: Path):
                 "source_corpus": "unit-fixture",
                 "trust_level": "REAL",
             },
-            "metadata must contain exactly",
+            "metadata must contain source lineage",
             id="missing-vendor",
         ),
         pytest.param(
@@ -329,7 +329,7 @@ def test_phase1_renderer_matches_existing_token_stream(tmp_path: Path):
                 "vendor": "unit",
                 "extra": "forbidden",
             },
-            "metadata must contain exactly",
+            "metadata must contain source lineage",
             id="extra-field",
         ),
         pytest.param(

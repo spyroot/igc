@@ -373,7 +373,9 @@ def test_manifest_content_hash_is_exact_canonical_sha256():
         train_row_ids=["sha256:" + "1" * 64],
         heldout_row_ids=["sha256:" + "2" * 64],
     )
-    payload = json.dumps(manifest.__dict__, sort_keys=True, default=str)
+    fields = dict(manifest.__dict__)
+    fields.pop("phase1_transform")
+    payload = json.dumps(fields, sort_keys=True, default=str)
     expected = f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
 
     assert manifest.content_hash() == expected

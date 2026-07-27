@@ -64,6 +64,8 @@ class DataManifest:
     :param source_registry_sha: exact source-registry spec identity, when used.
     :param source_manifest_shas: exact upstream manifest identity per registry source.
     :param min_eval_per_source: minimum held-out rows per eligible source.
+    :param phase1_transform: lossless chunk transform and original-resource lineage,
+        when this manifest describes a materialized Phase 1 registry corpus.
     """
     total: int
     train_count: int
@@ -82,6 +84,7 @@ class DataManifest:
     source_registry_sha: str = ""
     source_manifest_shas: Dict[str, str] = field(default_factory=dict)
     min_eval_per_source: int = 0
+    phase1_transform: Dict[str, object] = field(default_factory=dict)
 
     def content_hash(self) -> str:
         """Return a canonical SHA-256 identity over the manifest fields.
@@ -92,7 +95,10 @@ class DataManifest:
 
         :return: a ``sha256:<64 lowercase hex>`` digest.
         """
-        payload = json.dumps(self.__dict__, sort_keys=True, default=str)
+        fields = dict(self.__dict__)
+        if not fields["phase1_transform"]:
+            fields.pop("phase1_transform")
+        payload = json.dumps(fields, sort_keys=True, default=str)
         return f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
 
     def eval_split_id(self) -> str:

@@ -5,11 +5,15 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 import yaml
+
+if TYPE_CHECKING:
+    from igc.ds.phase1_chunking import Phase1ChunkingPolicy
 
 
 SOURCE_SPEC_PATH = (
@@ -156,8 +160,15 @@ def materialize_phase1_registry_corpus(
     corpus_kind: str = "dataset",
     eval_fraction: float = 0.15,
     seed: int = 0,
+    tokenizer: Any | None = None,
+    chunking_policy: Phase1ChunkingPolicy | None = None,
 ) -> dict[str, Any]:
     """Build immutable train/held-out Phase 1 corpora from every registry source."""
+    from igc.ds.phase1_chunking import (
+        chunk_phase1_row,
+        phase1_token_distribution,
+        reassemble_phase1_rows,
+    )
     from igc.ds.phase1_render import build_phase1_source_row
     from igc.ds.sources.base import TrustLevel
     from igc.ds.sources.corpus_io import write_corpus
@@ -231,6 +242,79 @@ def materialize_phase1_registry_corpus(
     manifest = mix.manifest()
     manifest.source_registry_sha = registry.spec_sha256
     manifest.source_manifest_shas = dict(sorted(source_manifest_shas.items()))
+    train_rows = [build_phase1_source_row(record) for record in train_records]
+    heldout_rows = [build_phase1_source_row(record) for record in heldout_records]
+    if (tokenizer is None) != (chunking_policy is None):
+        raise ValueError("Phase 1 tokenizer and chunking_policy must be provided together")
+    if chunking_policy is not None:
+        original_train_rows = list(train_rows)
+        original_heldout_rows = list(heldout_rows)
+        distribution = phase1_token_distribution(
+            [*original_train_rows, *original_heldout_rows],
+            tokenizer=tokenizer,
+            telemetry_rest_api_markers=chunking_policy.telemetry_rest_api_markers,
+        )
+        train_rows = [
+            chunk
+            for row in original_train_rows
+            for chunk in chunk_phase1_row(row, tokenizer=tokenizer, policy=chunking_policy)
+        ]
+        heldout_rows = [
+            chunk
+            for row in original_heldout_rows
+            for chunk in chunk_phase1_row(row, tokenizer=tokenizer, policy=chunking_policy)
+        ]
+        _verify_phase1_chunk_groups(train_rows, reassemble_phase1_rows)
+        _verify_phase1_chunk_groups(heldout_rows, reassemble_phase1_rows)
+        original_manifest = {
+            "total": manifest.total,
+            "train_count": manifest.train_count,
+            "eval_count": manifest.eval_count,
+            "by_source": dict(manifest.by_source),
+            "by_trust": dict(manifest.by_trust),
+            "by_vendor": dict(manifest.by_vendor),
+            "train_row_ids": list(manifest.train_row_ids),
+            "heldout_row_ids": list(manifest.heldout_row_ids),
+            "heldout_by_source": dict(manifest.heldout_by_source),
+        }
+        manifest.total = len(train_rows) + len(heldout_rows)
+        manifest.train_count = len(train_rows)
+        manifest.eval_count = len(heldout_rows)
+        manifest.by_source = _count_phase1_metadata(
+            train_rows + heldout_rows,
+            "source_corpus",
+        )
+        manifest.by_trust = _count_phase1_metadata(
+            train_rows + heldout_rows,
+            "trust_level",
+        )
+        manifest.by_vendor = _count_phase1_metadata(
+            train_rows + heldout_rows,
+            "vendor",
+            null_name="unknown",
+        )
+        manifest.train_row_ids = [row["metadata"]["row_id"] for row in train_rows]
+        manifest.heldout_row_ids = [row["metadata"]["row_id"] for row in heldout_rows]
+        manifest.heldout_by_source = _count_phase1_metadata(
+            heldout_rows,
+            "source_corpus",
+        )
+        manifest.phase1_transform = {
+            "transform": chunking_policy.transform,
+            "tokenizer_sha": chunking_policy.tokenizer_sha,
+            "max_tokens": chunking_policy.max_tokens,
+            "padding": "max_length",
+            "overflow_policy": "lossless_json_chunk",
+            "split_before_chunk": True,
+            "exact_reassembly_verified": True,
+            "original": original_manifest,
+            "chunks": {
+                "total": manifest.total,
+                "train_count": manifest.train_count,
+                "eval_count": manifest.eval_count,
+            },
+            "original_token_lengths": distribution,
+        }
     output = Path(output_root).expanduser().resolve()
     pending = output.with_name(f"{output.name}.pending")
     release_lock = output.with_name(f"{output.name}.release.lock")
@@ -255,12 +339,12 @@ def materialize_phase1_registry_corpus(
         pending.mkdir()
         try:
             train_paths = write_corpus(
-                (build_phase1_source_row(record) for record in train_records),
+                train_rows,
                 manifest,
                 str(pending / "train"),
             )
             heldout_paths = write_corpus(
-                (build_phase1_source_row(record) for record in heldout_records),
+                heldout_rows,
                 manifest,
                 str(pending / "heldout"),
             )
@@ -281,9 +365,40 @@ def materialize_phase1_registry_corpus(
         "heldout_artifact_sha": heldout_artifact_sha,
         "written_manifest_sha": written_manifest_sha,
         "manifest_sha": manifest.content_hash(),
-        "train_rows": len(train_records),
-        "heldout_rows": len(heldout_records),
+        "train_rows": len(train_rows),
+        "heldout_rows": len(heldout_rows),
+        "train_resources": len(train_records),
+        "heldout_resources": len(heldout_records),
+        "phase1_transform": dict(manifest.phase1_transform),
     }
+
+
+def _verify_phase1_chunk_groups(rows: list[dict[str, Any]], reassemble: Any) -> None:
+    """Prove every original resource is complete within exactly one split."""
+
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        chunk = row["metadata"].get("chunk")
+        if not isinstance(chunk, Mapping):
+            raise ValueError("Phase 1 transformed row is missing chunk metadata")
+        groups.setdefault(str(chunk["original_row_id"]), []).append(row)
+    for group in groups.values():
+        reassemble(group)
+
+
+def _count_phase1_metadata(
+    rows: list[dict[str, Any]],
+    field: str,
+    *,
+    null_name: str | None = None,
+) -> dict[str, int]:
+    """Count materialized rows by one validated metadata field."""
+
+    values = (
+        null_name if row["metadata"][field] is None else str(row["metadata"][field])
+        for row in rows
+    )
+    return dict(sorted(Counter(values).items()))
 
 
 def _sha256_file(path: Path) -> str:

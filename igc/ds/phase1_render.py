@@ -117,8 +117,10 @@ def validate_phase1_row(example: Mapping[str, Any]) -> None:
 def _validate_phase1_metadata(value: Any) -> None:
     """Validate optional source lineage retained beside the D0 model fields."""
     required = {"row_id", "source_corpus", "trust_level", "vendor"}
-    if not isinstance(value, Mapping) or set(value) != required:
-        raise ValueError(f"Phase 1 metadata must contain exactly {sorted(required)}")
+    if not isinstance(value, Mapping) or set(value) not in (required, required | {"chunk"}):
+        raise ValueError(
+            "Phase 1 metadata must contain source lineage and optional chunk metadata"
+        )
     row_id = value.get("row_id")
     digest = row_id.removeprefix("sha256:") if isinstance(row_id, str) else ""
     if (
@@ -134,6 +136,86 @@ def _validate_phase1_metadata(value: Any) -> None:
         raise ValueError("Phase 1 metadata.trust_level must be non-empty")
     if value.get("vendor") is not None and not isinstance(value["vendor"], str):
         raise ValueError("Phase 1 metadata.vendor must be null or a string")
+    if "chunk" in value:
+        _validate_phase1_chunk_metadata(value["chunk"])
+
+
+def _validate_phase1_chunk_metadata(value: Any) -> None:
+    """Validate exact lossless-chunk lineage without interpreting JSON values."""
+
+    required = {
+        "version",
+        "original_row_id",
+        "original_json_sha256",
+        "tokenizer_sha",
+        "max_tokens",
+        "index",
+        "count",
+        "json_path",
+        "kind",
+        "range_start",
+        "range_stop",
+        "container_length",
+        "chunk_json_sha256",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise ValueError("Phase 1 metadata.chunk has missing or unknown fields")
+    if not isinstance(value["version"], str) or not value["version"]:
+        raise ValueError("Phase 1 metadata.chunk.version must be non-empty")
+    for name in (
+        "original_row_id",
+        "original_json_sha256",
+        "tokenizer_sha",
+        "chunk_json_sha256",
+    ):
+        digest = value[name].removeprefix("sha256:") if isinstance(value[name], str) else ""
+        if (
+            not isinstance(value[name], str)
+            or not value[name].startswith("sha256:")
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest.lower())
+        ):
+            raise ValueError(f"Phase 1 metadata.chunk.{name} must be a SHA-256 id")
+    max_tokens = value["max_tokens"]
+    index = value["index"]
+    count = value["count"]
+    if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 2:
+        raise ValueError("Phase 1 metadata.chunk.max_tokens must be >= 2")
+    if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+        raise ValueError("Phase 1 metadata.chunk.index must be non-negative")
+    if not isinstance(count, int) or isinstance(count, bool) or count < 1 or index >= count:
+        raise ValueError("Phase 1 metadata.chunk.count must contain index")
+    path = value["json_path"]
+    if not isinstance(path, list) or any(
+        not isinstance(component, (str, int))
+        or isinstance(component, bool)
+        or isinstance(component, str) and not component
+        or isinstance(component, int) and component < 0
+        for component in path
+    ):
+        raise ValueError("Phase 1 metadata.chunk.json_path must be string/int components")
+    kind = value["kind"]
+    if kind not in {
+        "whole_document",
+        "object_fields",
+        "array_slice",
+        "string_slice",
+        "scalar_value",
+    }:
+        raise ValueError("Phase 1 metadata.chunk.kind is unknown")
+    ranges = (
+        value["range_start"],
+        value["range_stop"],
+        value["container_length"],
+    )
+    if kind in {"array_slice", "string_slice"}:
+        if not all(isinstance(item, int) and not isinstance(item, bool) for item in ranges):
+            raise ValueError("Phase 1 slice chunks require integer range metadata")
+        start, stop, length = ranges
+        if not 0 <= start <= stop <= length:
+            raise ValueError("Phase 1 slice chunk range is invalid")
+    elif any(item is not None for item in ranges):
+        raise ValueError("Phase 1 non-slice chunks require null range metadata")
 
 
 def render_phase1_prompt(example: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:

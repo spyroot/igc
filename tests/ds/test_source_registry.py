@@ -8,8 +8,10 @@ from pathlib import Path
 from typing import Iterable
 
 import pytest
+import torch
 
 import igc.ds.source_registry as source_registry
+from igc.ds.phase1_chunking import Phase1ChunkingPolicy, reassemble_phase1_rows
 from igc.ds.source_registry import (
     load_source_registry,
     materialize_phase1_registry_corpus,
@@ -27,17 +29,22 @@ class _FakeRedfishAdapter:
         trust_level: TrustLevel,
         urls: Iterable[str],
         vendor: str | None,
+        payload_size: int = 0,
     ) -> None:
         self.source = source
         self.trust_level = trust_level
         self._urls = list(urls)
         self._vendor = vendor
+        self._payload_size = payload_size
 
     def iter_records(self):
         for url in self._urls:
+            response = {"@odata.id": url, "source": self.source}
+            if self._payload_size:
+                response["Payload"] = "x" * self._payload_size
             yield SourceRecord(
                 url=url,
-                response={"@odata.id": url, "source": self.source},
+                response=response,
                 source=self.source,
                 trust_level=self.trust_level,
                 vendor=self._vendor,
@@ -116,6 +123,8 @@ def _install_manifest_factory(
     *,
     real_urls: Iterable[str] = ("/redfish/v1/Systems/1",),
     replay_urls: Iterable[str] = ("/redfish/v1/Systems/1",),
+    real_payload_size: int = 0,
+    replay_payload_size: int = 0,
 ) -> list[dict]:
     import igc.ds.sources.redfish_fixture_source as fixture_source
 
@@ -143,6 +152,7 @@ def _install_manifest_factory(
                     trust_level=trust_level,
                     urls=real_urls,
                     vendor="dell",
+                    payload_size=real_payload_size,
                 )
             ]
         if Path(manifest_path) == replay_manifest.resolve():
@@ -152,6 +162,7 @@ def _install_manifest_factory(
                     trust_level=trust_level,
                     urls=replay_urls,
                     vendor=None,
+                    payload_size=replay_payload_size,
                 )
             ]
         raise AssertionError(f"unexpected manifest path: {manifest_path}")
@@ -162,6 +173,23 @@ def _install_manifest_factory(
         staticmethod(fake_from_redfish_ctl_manifest),
     )
     return calls
+
+
+class _CharacterTokenizer:
+    """Tokenizer stub whose token count equals rendered character count."""
+
+    def __call__(
+        self,
+        text,
+        *,
+        padding=False,
+        truncation=False,
+        return_tensors="pt",
+        add_special_tokens=False,
+    ):
+        del padding, truncation, return_tensors, add_special_tokens
+        ids = torch.arange(1, len(text) + 1, dtype=torch.long).unsqueeze(0)
+        return {"input_ids": ids, "attention_mask": torch.ones_like(ids)}
 
 
 def _registry_env(
@@ -358,6 +386,84 @@ def test_materialize_phase1_registry_corpus_records_registry_and_upstream_shas(
         "real_vendor:real_dell:systems": 1
     }
     assert manifest_payload["min_eval_per_source"] == 1
+
+
+def test_materialize_phase1_registry_corpus_chunks_after_split_and_records_lineage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Lossless chunks stay in one split and replace manifest row IDs deterministically."""
+
+    registry = _write_registry(tmp_path / "redfish_sources.yaml")
+    real_manifest = tmp_path / "real.manifest.json"
+    replay_manifest = tmp_path / "replay.manifest.json"
+    real_manifest.write_text('{"source":"real_dell"}\n', encoding="utf-8")
+    replay_manifest.write_text('{"source":"dsp_replay"}\n', encoding="utf-8")
+    real_root = tmp_path / "real-root"
+    replay_root = tmp_path / "replay-root"
+    real_root.mkdir()
+    replay_root.mkdir()
+    _install_manifest_factory(
+        monkeypatch,
+        real_manifest,
+        replay_manifest,
+        real_payload_size=420,
+        replay_payload_size=420,
+    )
+    policy = Phase1ChunkingPolicy(
+        transform="phase1.lossless-json-chunk.v1",
+        tokenizer_sha="sha256:" + "1" * 64,
+        max_tokens=320,
+        telemetry_rest_api_markers=("/TelemetryService",),
+    )
+    output = tmp_path / "corpus"
+
+    summary = materialize_phase1_registry_corpus(
+        registry_path=registry,
+        output_root=output,
+        env={
+            "IGC_REAL_ROOT": str(real_root),
+            "IGC_REAL_MANIFEST": str(real_manifest),
+            "IGC_REPLAY_ROOT": str(replay_root),
+            "IGC_REPLAY_MANIFEST": str(replay_manifest),
+        },
+        eval_fraction=1.0,
+        seed=3,
+        tokenizer=_CharacterTokenizer(),
+        chunking_policy=policy,
+    )
+
+    train_rows = _read_jsonl(output / "train" / "examples.jsonl")
+    heldout_rows = _read_jsonl(output / "heldout" / "examples.jsonl")
+    manifest = json.loads((output / "train" / "manifest.json").read_text())
+    groups: dict[str, list[dict]] = {}
+    for split_rows in (train_rows, heldout_rows):
+        split_original_ids = {
+            row["metadata"]["chunk"]["original_row_id"] for row in split_rows
+        }
+        assert len(split_original_ids) == 1
+        for row in split_rows:
+            original_id = row["metadata"]["chunk"]["original_row_id"]
+            groups.setdefault(original_id, []).append(row)
+    assert set(row["metadata"]["row_id"] for row in train_rows) == set(
+        manifest["train_row_ids"]
+    )
+    assert set(row["metadata"]["row_id"] for row in heldout_rows) == set(
+        manifest["heldout_row_ids"]
+    )
+    assert set(manifest["train_row_ids"]).isdisjoint(manifest["heldout_row_ids"])
+    assert all(
+        reassemble_phase1_rows(group)["Payload"] == "x" * 420
+        for group in groups.values()
+    )
+    assert summary["train_resources"] == 1
+    assert summary["heldout_resources"] == 1
+    assert summary["train_rows"] > summary["train_resources"]
+    assert summary["heldout_rows"] > summary["heldout_resources"]
+    assert manifest["phase1_transform"]["exact_reassembly_verified"] is True
+    assert manifest["phase1_transform"]["original_token_lengths"][
+        "non_telemetry_resources"
+    ]["count"] == 2
 
 
 def test_materialize_phase1_registry_corpus_publishes_release_dir_without_pending(
