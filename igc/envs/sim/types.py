@@ -30,8 +30,6 @@ ERROR_METHOD_NOT_ALLOWED = 405
 
 def freeze_json(value: Any) -> Any:
     """Return a recursively immutable copy of a JSON-compatible value."""
-    if isinstance(value, MappingProxyType):
-        return value
     if isinstance(value, Mapping):
         if any(not isinstance(key, str) for key in value):
             raise TypeError("JSON object keys must be strings")

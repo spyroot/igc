@@ -1,0 +1,14 @@
+# Minimal CPU environment for the standalone REST SIM/GYM gate. The external
+# HTTP backend and observation encoder are mocked at their abstract boundaries,
+# so Torch, Gymnasium, Transformers, Requests, and live-service clients do not
+# belong in this environment.
+name: igc-sim
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.10
+  - numpy<2
+  - pytest=9.1.1
+  - ruff=0.15.22

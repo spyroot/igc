@@ -71,14 +71,32 @@ class RestRuntimeBatch:
         if self.visible_edges.shape != (self.num_envs, capture.num_edges):
             raise ValueError("runtime edge shape does not match capture")
 
+        int64 = np.iinfo(np.int64)
         if seeds is None:
             seed_values = np.zeros(self.num_envs, dtype=np.int64)
+        elif isinstance(seeds, (bool, np.bool_)):
+            raise TypeError("seeds must contain integers")
         elif isinstance(seeds, (int, np.integer)):
-            seed_values = np.full(self.num_envs, int(seeds), dtype=np.int64)
+            seed = int(seeds)
+            if not int64.min <= seed <= int64.max:
+                raise ValueError("seed is outside int64 range")
+            seed_values = np.full(self.num_envs, seed, dtype=np.int64)
         else:
-            seed_values = np.asarray(tuple(seeds), dtype=np.int64)
-            if seed_values.shape != (self.num_envs,):
+            seed_items = tuple(seeds)
+            if len(seed_items) != self.num_envs:
                 raise ValueError("one seed is required per runtime")
+            if any(
+                not isinstance(seed, (int, np.integer))
+                or isinstance(seed, (bool, np.bool_))
+                for seed in seed_items
+            ):
+                raise TypeError("seeds must contain integers")
+            if any(
+                not int64.min <= int(seed) <= int64.max
+                for seed in seed_items
+            ):
+                raise ValueError("seeds contain a value outside int64 range")
+            seed_values = np.asarray(seed_items, dtype=np.int64)
 
         self.known.fill(False)
         self.visited.fill(False)

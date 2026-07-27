@@ -32,6 +32,9 @@ passes:
   contract_gates:           { surface: cpu, tool: "scripts/gates/* structural + schema gates" }
   docs_consistency:         { surface: cpu, tool: "scripts/gates/docs_consistency.py" }
   perf_budgets:             { surface: cpu, tool: "pytest -m perf (machine-loose tripwires)" }
+  gym_sim_contract_profile:
+    surface: cpu
+    tool: "FOCUSED_GATE=GYM: SIM contract tests + fixed-latency GET profile"
   no_gpu_homelab_policy:    { surface: cpu, tool: "policy scan: no GPU resource requests in home-lab CI/manifests" }
   gpu_evidence_validation:  { surface: cpu, tool: "validate committed GPU evidence manifests against the schema below" }
   agent_leak_guard:         { surface: cpu, tool: "scripts/gates/agent_leak_guard.py: no agent artifacts tracked, no agent attribution/chatter in commit+PR/MR messages, no internal endpoint literals" }

@@ -7,6 +7,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from .capture import RestCapture
+from .interfaces import RestBackend
 from .observation import materialize_observation, snapshot_sha256
 from .runtime import RestRuntimeBatch
 from .types import (
@@ -31,7 +32,7 @@ from .types import (
 )
 
 
-class BatchedRestSimulator:
+class BatchedRestSimulator(RestBackend):
     """Advance aligned requests over independent rows sharing one capture."""
 
     def __init__(

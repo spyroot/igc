@@ -6,7 +6,7 @@ import hashlib
 import json
 from collections import deque
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
@@ -23,7 +23,10 @@ from .types import (
 
 
 def _normalize_methods(methods: Iterable[str], *, uri: str) -> tuple[str, ...]:
-    if not isinstance(methods, Iterable) or isinstance(methods, (str, bytes)):
+    if not isinstance(methods, Iterable) or isinstance(
+        methods,
+        (str, bytes, bytearray),
+    ):
         raise TypeError(
             f"allowed methods for {uri!r} must be an iterable of names"
         )
@@ -39,6 +42,50 @@ def _normalize_methods(methods: Iterable[str], *, uri: str) -> tuple[str, ...]:
     return tuple(sorted(normalized))
 
 
+def _content_sha256(
+    *,
+    root_uri: str,
+    resources: Iterable[RestResource],
+    edges: Iterable[RestEdge],
+) -> str:
+    """Hash immutable capture content independently of its caller label."""
+    payload = {
+        "root_uri": root_uri,
+        "resources": [
+            {
+                "uri": resource.uri,
+                "body": plain_json(resource.base_json),
+                "methods": list(resource.allowed_methods),
+            }
+            for resource in resources
+        ],
+        "edges": [
+            [edge.source_id, edge.target_id, edge.relation]
+            for edge in edges
+        ],
+    }
+    encoded = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _canonical_sha256(payload: object) -> bytes:
+    """Return a compact immutable fingerprint for canonical JSON content."""
+    encoded = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).digest()
+
+
 @dataclass(frozen=True, slots=True)
 class RestCapture:
     """One immutable REST graph shared by all simulator runtimes."""
@@ -51,9 +98,23 @@ class RestCapture:
     reachable_mask: np.ndarray
     edge_indptr: np.ndarray
     edge_indices: np.ndarray
+    content_sha256: str = field(init=False)
+    resource_metadata_fingerprints: tuple[bytes, ...] = field(
+        init=False,
+        repr=False,
+    )
+    resource_body_fingerprints: tuple[bytes, ...] = field(
+        init=False,
+        repr=False,
+    )
+    edge_fingerprints: tuple[bytes, ...] = field(
+        init=False,
+        repr=False,
+    )
+    graph_shape_bytes: bytes = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if not self.capture_id:
+        if not isinstance(self.capture_id, str) or not self.capture_id:
             raise ValueError("capture_id must not be empty")
         if not self.resources:
             raise ValueError("a capture requires at least one resource")
@@ -152,12 +213,64 @@ class RestCapture:
         if not np.array_equal(reachable, expected_reachable):
             raise ValueError("reachable_mask does not match the rooted graph")
 
+        content_sha256 = _content_sha256(
+            root_uri=resources[self.root_node_id].uri,
+            resources=resources,
+            edges=edges,
+        )
+        resource_metadata_fingerprints = tuple(
+            _canonical_sha256(
+                {
+                    "node_id": resource.node_id,
+                    "uri": resource.uri,
+                    "methods": list(resource.allowed_methods),
+                }
+            )
+            for resource in resources
+        )
+        resource_body_fingerprints = tuple(
+            _canonical_sha256(plain_json(resource.base_json))
+            for resource in resources
+        )
+        edge_fingerprints = tuple(
+            _canonical_sha256(
+                {
+                    "source_id": edge.source_id,
+                    "target_id": edge.target_id,
+                    "relation": edge.relation,
+                }
+            )
+            for edge in edges
+        )
+        graph_shape_bytes = len(resources).to_bytes(
+            8,
+            byteorder="little",
+            signed=False,
+        ) + len(edges).to_bytes(
+            8,
+            byteorder="little",
+            signed=False,
+        )
+
         object.__setattr__(self, "resources", tuple(resources))
         object.__setattr__(self, "edges", edges)
         object.__setattr__(self, "uri_to_id", MappingProxyType(expected_uri_to_id))
         object.__setattr__(self, "reachable_mask", reachable)
         object.__setattr__(self, "edge_indptr", indptr)
         object.__setattr__(self, "edge_indices", indices)
+        object.__setattr__(self, "content_sha256", content_sha256)
+        object.__setattr__(
+            self,
+            "resource_metadata_fingerprints",
+            resource_metadata_fingerprints,
+        )
+        object.__setattr__(
+            self,
+            "resource_body_fingerprints",
+            resource_body_fingerprints,
+        )
+        object.__setattr__(self, "edge_fingerprints", edge_fingerprints)
+        object.__setattr__(self, "graph_shape_bytes", graph_shape_bytes)
 
     @classmethod
     def from_mappings(
@@ -232,29 +345,11 @@ class RestCapture:
                     pending.append(target_id)
 
         if capture_id is None:
-            payload = {
-                "root_uri": root_uri,
-                "resources": [
-                    {
-                        "uri": resource.uri,
-                        "body": plain_json(resource.base_json),
-                        "methods": list(resource.allowed_methods),
-                    }
-                    for resource in resources
-                ],
-                "edges": [
-                    [edge.source_id, edge.target_id, edge.relation]
-                    for edge in edges
-                ],
-            }
-            encoded = json.dumps(
-                payload,
-                allow_nan=False,
-                ensure_ascii=False,
-                separators=(",", ":"),
-                sort_keys=True,
-            ).encode("utf-8")
-            capture_id = hashlib.sha256(encoded).hexdigest()
+            capture_id = _content_sha256(
+                root_uri=root_uri,
+                resources=resources,
+                edges=edges,
+            )
 
         return cls(
             capture_id=capture_id,

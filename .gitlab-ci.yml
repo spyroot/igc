@@ -26,6 +26,19 @@ default:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
+.private-cpu-base: &private-cpu-base
+  tags: [homelab-k8s]
+  image: "$IGC_CI_TOOLBOX_IMAGE"
+  variables:
+    IGC_SURFACE: cpu
+    KMP_DUPLICATE_LIB_OK: "TRUE"
+    MKL_NUM_THREADS: "1"
+    NUMEXPR_NUM_THREADS: "1"
+    OMP_NUM_THREADS: "1"
+    OPENBLAS_NUM_THREADS: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    HF_DATASETS_OFFLINE: "1"
+
 lint:
   <<: *cpu-base
   stage: cpu-gate
@@ -50,6 +63,78 @@ offline-gate:
     - pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
     - pip install --quiet -r docker/requirements-test.txt
     - python -m pytest -q
+
+# IGC_CI_TOOLBOX_IMAGE is an Internal GitLab project variable populated from
+# the Builder shared-toolbox inventory. Its presence also scopes these focused
+# jobs to the private CI chain without committing an internal endpoint.
+unit.all:
+  <<: *private-cpu-base
+  stage: cpu-gate
+  rules:
+    - if: >-
+        $IGC_CI_TOOLBOX_IMAGE != null &&
+        $IGC_CI_TOOLBOX_IMAGE != "" &&
+        ($CI_PIPELINE_SOURCE == "api" || $CI_PIPELINE_SOURCE == "web") &&
+        $FOCUSED_GATE == "unit.all"
+    - when: never
+  script:
+    - conda env update --file environment-dev.yaml --prune
+    - conda run -n igc-dev ruff check igc tests
+    - conda run -n igc-dev python -m pytest -q
+
+GYM:
+  <<: *private-cpu-base
+  stage: cpu-gate
+  rules:
+    - if: >-
+        $IGC_CI_TOOLBOX_IMAGE != null &&
+        $IGC_CI_TOOLBOX_IMAGE != "" &&
+        ($CI_PIPELINE_SOURCE == "api" || $CI_PIPELINE_SOURCE == "web") &&
+        $FOCUSED_GATE == "GYM"
+    - if: >-
+        $IGC_CI_TOOLBOX_IMAGE != null &&
+        $IGC_CI_TOOLBOX_IMAGE != "" &&
+        $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - .gitlab-ci.yml
+        - configs/ci/pass_matrix.yaml
+        - environment-sim.yaml
+        - igc/envs/sim/**/*
+        - tests/envs/sim/**/*
+    - if: >-
+        $IGC_CI_TOOLBOX_IMAGE != null &&
+        $IGC_CI_TOOLBOX_IMAGE != "" &&
+        $CI_PIPELINE_SOURCE == "push" &&
+        $CI_COMMIT_BRANCH == "main"
+      changes:
+        - .gitlab-ci.yml
+        - configs/ci/pass_matrix.yaml
+        - environment-sim.yaml
+        - igc/envs/sim/**/*
+        - tests/envs/sim/**/*
+    - when: never
+  script:
+    - conda env update --file environment-sim.yaml --prune
+    - conda run -n igc-sim ruff check igc/envs/sim tests/envs/sim
+    - conda run -n igc-sim python -m pytest -q tests/envs/sim
+    - mkdir -p reports/sim reports/gates
+    - >-
+      PYTHONPATH=. conda run -n igc-sim python
+      tests/envs/sim/benchmark_get.py
+      --batch-sizes 1,32,256,1024
+      --api-latency-ms 2.0
+      --encoder-latency-ms 12.0
+      --output reports/sim/rest_sim_get_only.json
+    - >-
+      conda run -n igc-sim python
+      tests/envs/sim/validate_benchmark.py
+      --input reports/sim/rest_sim_get_only.json
+      --output reports/gates/GYM.json
+  artifacts:
+    when: always
+    paths:
+      - reports/gates/GYM.json
+      - reports/sim/rest_sim_get_only.json
 
 surface-guard:
   <<: *cpu-base

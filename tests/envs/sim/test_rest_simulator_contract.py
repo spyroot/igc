@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
 from pathlib import Path
+from types import MappingProxyType
 
 import numpy as np
 import pytest
@@ -10,6 +12,8 @@ from igc.envs.sim import (
     METHOD_GET,
     METHOD_HEAD,
     BatchedRestSimulator,
+    ObservationSpaceEncoder,
+    RestBackend,
     RestCapture,
     RestRequest,
     RestRequestBatch,
@@ -136,6 +140,60 @@ def batch_get(node: int, count: int) -> RestRequestBatch:
     )
 
 
+class MockObservationEncoder(ObservationSpaceEncoder[dict[str, int]]):
+    """Synthetic external encoder with an injected latency mechanism."""
+
+    def __init__(
+        self,
+        *,
+        latency_seconds: float,
+        sleep: Callable[[float], None],
+    ) -> None:
+        self.latency_seconds = latency_seconds
+        self.sleep = sleep
+
+    def encode(self, observation):
+        self.sleep(self.latency_seconds)
+        return {
+            "batch_size": observation.batch_size,
+            "num_nodes": observation.num_nodes,
+        }
+
+
+class MockLatencyBackend(RestBackend):
+    """External REST backend stand-in with one response delay per batch."""
+
+    def __init__(
+        self,
+        *,
+        simulator: BatchedRestSimulator,
+        latency_seconds: float,
+        sleep: Callable[[float], None],
+    ) -> None:
+        self.simulator = simulator
+        self.latency_seconds = latency_seconds
+        self.sleep = sleep
+
+    def reset(self, *, seeds=None):
+        return self.simulator.reset(seeds=seeds)
+
+    def step(self, request: RestRequestBatch):
+        result = self.simulator.step(request)
+        self.sleep(self.latency_seconds)
+        return result
+
+
+def run_encoder(
+    encoder: ObservationSpaceEncoder[dict[str, int]],
+    observation,
+) -> dict[str, int]:
+    return encoder.encode(observation)
+
+
+def run_backend(backend: RestBackend, request: RestRequestBatch):
+    return backend.step(request)
+
+
 def test_reset_observes_root_for_free_and_reveals_only_direct_children(
     capture: RestCapture,
 ) -> None:
@@ -158,6 +216,35 @@ def test_reset_observes_root_for_free_and_reveals_only_direct_children(
         assert true_ids(observation.body_visible_mask[row]) == {root}
         assert true_ids(observation.frontier_mask[row]) == direct_children
         assert true_ids(observation.visible_edge_mask[row]) == root_edges
+
+
+def test_external_profile_applies_api_and_encoder_batch_latency(
+    capture: RestCapture,
+) -> None:
+    requested_sleeps: list[float] = []
+    simulator = BatchedRestSimulator(capture=capture, num_envs=32)
+    backend = MockLatencyBackend(
+        simulator=simulator,
+        latency_seconds=0.002,
+        sleep=requested_sleeps.append,
+    )
+    backend.reset(seeds=101)
+    encoder = MockObservationEncoder(
+        latency_seconds=0.012,
+        sleep=requested_sleeps.append,
+    )
+
+    step = run_backend(
+        backend,
+        batch_get(node_id(capture, SYSTEMS), 32),
+    )
+    encoding = run_encoder(encoder, step.observation)
+
+    assert requested_sleeps == [0.002, 0.012]
+    assert encoding == {
+        "batch_size": 32,
+        "num_nodes": capture.num_nodes,
+    }
 
 
 def test_materialized_reset_masks_child_bodies(capture: RestCapture) -> None:
@@ -225,13 +312,27 @@ def test_recursive_discovery_reveals_links_only_after_successful_get(
     assert systems.transition.newly_discovered_node_ids == (
         node_id(capture, SYSTEM_1),
     )
+    assert set(systems.transition.newly_visible_edge_ids) == set(
+        capture.outgoing_edge_ids(node_id(capture, SYSTEMS))
+        .astype(int)
+        .tolist()
+    )
     assert SYSTEM_1 in {node.uri for node in systems.observation.graph.nodes}
+    assert get_node(systems.observation, SYSTEMS).visited is True
+    assert get_node(systems.observation, SYSTEMS).json_body is not None
     assert get_node(systems.observation, SYSTEM_1).json_body is None
 
     system = simulator.step(
         RestRequest(uri=SYSTEM_1, method="GET", arguments={}),
     )
     assert system.transition.status_code == 200
+    assert get_node(system.observation, SYSTEM_1).visited is True
+    assert get_node(system.observation, SYSTEM_1).json_body is not None
+    assert set(system.transition.newly_visible_edge_ids) == set(
+        capture.outgoing_edge_ids(node_id(capture, SYSTEM_1))
+        .astype(int)
+        .tolist()
+    )
     assert set(system.transition.newly_discovered_node_ids) == uri_ids(
         capture,
         {BIOS, MANAGER_1},
@@ -285,6 +386,40 @@ def test_hidden_uri_and_unknown_uri_are_indistinguishable_404(
         ROOT,
         *DIRECT_ROOT_CHILDREN,
     }
+
+
+@pytest.mark.parametrize("method", ["HEAD", "PATCH"])
+def test_hidden_uri_does_not_leak_through_method_validation(
+    capture: RestCapture,
+    method: str,
+) -> None:
+    hidden_simulator = RestSimulator(capture=capture)
+    unknown_simulator = RestSimulator(capture=capture)
+    hidden_initial = hidden_simulator.reset(seed=30)
+    unknown_initial = unknown_simulator.reset(seed=30)
+
+    hidden = hidden_simulator.step(
+        RestRequest(uri=SYSTEM_1, method=method, arguments={}),
+    )
+    unknown = unknown_simulator.step(
+        RestRequest(
+            uri="/redfish/v1/NoSuchResource",
+            method=method,
+            arguments={},
+        ),
+    )
+
+    assert hidden.transition.status_code == 404
+    assert unknown.transition.status_code == 404
+    assert plain_error(hidden.transition.error) == plain_error(
+        unknown.transition.error,
+    )
+    assert hidden.transition.after_version == 0
+    assert unknown.transition.after_version == 0
+    assert hidden.transition.after_sha256 == hidden_initial.graph.snapshot_sha256
+    assert unknown.transition.after_sha256 == unknown_initial.graph.snapshot_sha256
+    assert hidden.transition.newly_discovered_node_ids == ()
+    assert hidden.transition.newly_visible_edge_ids == ()
 
 
 def test_unsupported_method_returns_405_for_known_uri(capture: RestCapture) -> None:
@@ -388,6 +523,17 @@ def test_step_requires_reset(capture: RestCapture) -> None:
         simulator.step_many(batch_get(capture.root_node_id, 1))
 
 
+@pytest.mark.parametrize("seeds", [True, [1.5], [False]])
+def test_reset_rejects_non_integer_seeds(
+    capture: RestCapture,
+    seeds,
+) -> None:
+    simulator = BatchedRestSimulator(capture=capture, num_envs=1)
+
+    with pytest.raises(TypeError, match="seeds must contain integers"):
+        simulator.reset(seeds=seeds)
+
+
 def test_same_seed_replays_same_trace_and_hashes(capture: RestCapture) -> None:
     def run_trace() -> tuple[object, ...]:
         simulator = RestSimulator(capture=capture)
@@ -431,6 +577,21 @@ def test_capture_json_and_observation_batches_are_immutable_and_detached(
 
     assert true_ids(observation.known_mask[0]) == original_known
     assert true_ids(simulator.observe().known_mask[0]) != original_known
+
+
+def test_mapping_proxy_input_is_deeply_copied_and_frozen() -> None:
+    caller_owned = ["original"]
+    request = RestRequest(
+        uri=ROOT,
+        method="GET",
+        arguments=MappingProxyType({"nested": caller_owned}),
+    )
+
+    caller_owned.append("mutated")
+
+    assert request.arguments["nested"] == ("original",)
+    with pytest.raises(TypeError):
+        request.arguments["new"] = "value"
 
 
 def test_malformed_request_types_fail_before_state_changes(
@@ -480,6 +641,106 @@ def test_snapshot_hash_changes_only_when_visible_graph_state_changes(
     )
 
 
+def test_snapshot_hash_binds_capture_content_not_only_capture_label() -> None:
+    def capture_with_name(name: str) -> RestCapture:
+        return RestCapture.from_mappings(
+            responses={ROOT: {"Name": name}},
+            allowed_methods={ROOT: {"GET"}},
+            root_uri=ROOT,
+            capture_id="reused-caller-label",
+        )
+
+    first_capture = capture_with_name("First")
+    second_capture = capture_with_name("Second")
+    first = RestSimulator(capture=first_capture).reset(seed=89)
+    second = RestSimulator(capture=second_capture).reset(seed=89)
+
+    assert first_capture.capture_id == second_capture.capture_id
+    assert first_capture.content_sha256 != second_capture.content_sha256
+    assert first.graph.snapshot_sha256 != second.graph.snapshot_sha256
+
+
+def test_snapshot_hash_does_not_expose_hidden_body_content() -> None:
+    def capture_with_hidden_name(name: str) -> RestCapture:
+        return RestCapture.from_mappings(
+            responses={
+                ROOT: {"Systems": {"@odata.id": SYSTEMS}},
+                SYSTEMS: {"Name": name},
+            },
+            allowed_methods={ROOT: {"GET"}, SYSTEMS: {"GET"}},
+            root_uri=ROOT,
+            capture_id="reused-caller-label",
+        )
+
+    first_capture = capture_with_hidden_name("First")
+    second_capture = capture_with_hidden_name("Second")
+    first_simulator = RestSimulator(capture=first_capture)
+    second_simulator = RestSimulator(capture=second_capture)
+
+    first_reset = first_simulator.reset(seed=101)
+    second_reset = second_simulator.reset(seed=101)
+    first_step = first_simulator.step(
+        RestRequest(uri=SYSTEMS, method="GET", arguments={}),
+    )
+    second_step = second_simulator.step(
+        RestRequest(uri=SYSTEMS, method="GET", arguments={}),
+    )
+
+    assert first_capture.content_sha256 != second_capture.content_sha256
+    assert (
+        first_reset.graph.snapshot_sha256
+        == second_reset.graph.snapshot_sha256
+    )
+    assert (
+        first_step.transition.after_sha256
+        != second_step.transition.after_sha256
+    )
+
+
+def test_snapshot_hash_identity_ignores_caller_capture_label() -> None:
+    def capture_with_label(label: str) -> RestCapture:
+        return RestCapture.from_mappings(
+            responses={
+                SYSTEMS: {"Members": []},
+                ROOT: {
+                    "Name": "Root",
+                    "Systems": {"@odata.id": SYSTEMS},
+                },
+            },
+            allowed_methods={
+                ROOT: {"GET", "HEAD"},
+                SYSTEMS: {"GET"},
+            },
+            root_uri=ROOT,
+            capture_id=label,
+        )
+
+    first_capture = capture_with_label("caller-label-a")
+    second_capture = capture_with_label("caller-label-b")
+    first_simulator = RestSimulator(capture=first_capture)
+    second_simulator = RestSimulator(capture=second_capture)
+
+    first_reset = first_simulator.reset(seed=97)
+    second_reset = second_simulator.reset(seed=97)
+    first_step = first_simulator.step(
+        RestRequest(uri=SYSTEMS, method="GET", arguments={}),
+    )
+    second_step = second_simulator.step(
+        RestRequest(uri=SYSTEMS, method="GET", arguments={}),
+    )
+
+    assert first_capture.capture_id != second_capture.capture_id
+    assert first_capture.content_sha256 == second_capture.content_sha256
+    assert (
+        first_reset.graph.snapshot_sha256
+        == second_reset.graph.snapshot_sha256
+    )
+    assert (
+        first_step.transition.after_sha256
+        == second_step.transition.after_sha256
+    )
+
+
 def test_head_method_id_has_no_body_or_discovery_in_batch(
     capture: RestCapture,
 ) -> None:
@@ -498,6 +759,55 @@ def test_head_method_id_has_no_body_or_discovery_in_batch(
     assert step.transition.newly_discovered_node_ids == ((), ())
     assert not np.any(step.observation.visited_mask[:, managers])
     assert not np.any(step.observation.body_visible_mask[:, managers])
+
+
+def test_batch_preserves_heterogeneous_row_semantics(capture: RestCapture) -> None:
+    simulator = BatchedRestSimulator(capture=capture, num_envs=3)
+    simulator.reset(seeds=[67, 71, 73])
+    request = RestRequestBatch(
+        node_ids=np.asarray(
+            [
+                capture.root_node_id,
+                node_id(capture, MANAGERS),
+                -1,
+            ],
+            dtype=np.int32,
+        ),
+        method_ids=np.asarray(
+            [METHOD_GET, METHOD_HEAD, METHOD_GET],
+            dtype=np.int8,
+        ),
+    )
+
+    step = simulator.step(request)
+
+    assert step.transition.status_codes.tolist() == [200, 200, 404]
+    assert step.transition.first_visit.tolist() == [False, False, False]
+    assert step.transition.after_versions.tolist() == [0, 1, 0]
+    assert step.transition.newly_discovered_node_ids == ((), (), ())
+    assert step.transition.json_bodies[1:] == (None, None)
+    assert not step.observation.visited_mask[1, node_id(capture, MANAGERS)]
+
+
+def test_batch_invalid_method_id_returns_405_for_known_node(
+    capture: RestCapture,
+) -> None:
+    simulator = BatchedRestSimulator(capture=capture, num_envs=2)
+    simulator.reset(seeds=[79, 83])
+    request = RestRequestBatch(
+        node_ids=np.full(2, capture.root_node_id, dtype=np.int32),
+        method_ids=np.full(2, 99, dtype=np.int8),
+    )
+
+    step = simulator.step(request)
+
+    assert step.transition.status_codes.tolist() == [405, 405]
+    assert step.transition.first_visit.tolist() == [False, False]
+    assert step.transition.after_versions.tolist() == [1, 1]
+    assert all(
+        plain_error(error) == {"code": "MethodNotAllowed", "status": 405}
+        for error in step.transition.errors
+    )
 
 
 def test_sim_core_has_no_forbidden_runtime_imports() -> None:
