@@ -33,7 +33,7 @@ rouge_score
 evaluate
 # dev / test
 pytest
-ruff
+-r requirements-lint.txt
 
 # coverage reporting for the gate + metrics snapshot
 pytest-cov

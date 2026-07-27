@@ -30,7 +30,7 @@ lint:
   <<: *cpu-base
   stage: cpu-gate
   script:
-    - pip install --quiet ruff
+    - pip install --quiet -r docker/requirements-lint.txt
     - ruff check igc tests
 
 offline-gate:
