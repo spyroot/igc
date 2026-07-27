@@ -40,7 +40,11 @@ EOF
 [ "$1" = "--tap" ] || exit 96
 printf '1..1\nok 1 focused fixture\n'
 EOF
-    chmod +x "${FAKE_BIN}/bats"
+    cat >"${FAKE_BIN}/rg" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+    chmod +x "${FAKE_BIN}/bats" "${FAKE_BIN}/rg"
 
     run env \
         HOMELAB_IN_CLUSTER=1 \
@@ -52,9 +56,6 @@ EOF
         PATH="${FAKE_BIN}:${PATH}" \
         "$CHECK" --profile merge --gate unit.all
 
-    if [ "$status" -ne 0 ]; then
-        printf 'check.sh output:\n%s\n' "$output" >&3
-    fi
     [ "$status" -eq 0 ]
     run jq -e \
         '.schema == "igc/gate-result/v1" and
