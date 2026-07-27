@@ -19,6 +19,7 @@ set -uo pipefail
 IMAGE="${IMAGE:-igc-train}"
 TAG="${TAG:-ngc26.03-py3}"
 REF="${IMAGE}:${TAG}"
+MAX_FANOUT_NODES=18
 PYTHON="${PYTHON:-python3}"
 DATASET_COMPAT_GATE="scripts/gates/dataset_runtime_compat.py"
 MODELS_IMAGES="${MODELS_IMAGES:-/models/images}"
@@ -42,6 +43,12 @@ NODES=(${DIST_NODES:-$(cat "$NODES_FILE" 2>/dev/null || true)})
     echo "BLOCKER: set DIST_NODES=\"ip ip ...\" or provide $NODES_FILE" >&2
     exit 3
 }
+if [ "${#NODES[@]}" -gt "$MAX_FANOUT_NODES" ]; then
+    echo \
+        "BLOCKER: distribution inventory has ${#NODES[@]} nodes;" \
+        "maximum is $MAX_FANOUT_NODES" >&2
+    exit 3
+fi
 DIST_MAX_PARALLEL="${DIST_MAX_PARALLEL:-${#NODES[@]}}"
 case "$DIST_MAX_PARALLEL" in
     ''|*[!0-9]*|0)
@@ -61,7 +68,7 @@ for ip in "${NODES[@]}"; do
     fi
     SEEN_NODES[$ip]=1
 done
-SSH="ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new"
+SSH="ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=yes"
 
 log() { echo "=== [$(date -u '+%F %T')] $* ==="; }
 
