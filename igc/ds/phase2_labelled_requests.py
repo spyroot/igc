@@ -924,12 +924,19 @@ class Phase2LabelledRequestCounters:
             result,
             selected_api_set=expected_rest_api_list,
         )
+        clean_quality_verdict = (
+            result.valid_json
+            and not result.nonsense
+            and not result.ambiguous
+            and not result.duplicate_intent
+            and not result.extra_intents
+        )
 
         if result.nonsense:
             self.nonsense_total += 1
         if not result.valid_json:
             self.invalid_json_total += 1
-        if result.natural and result.valid_json:
+        if result.natural and clean_quality_verdict:
             self.natural_total += 1
         if result.ambiguous and result.valid_json:
             self.ambiguous_total += 1
@@ -937,7 +944,7 @@ class Phase2LabelledRequestCounters:
             self.duplicate_intent_total += 1
         if result.extra_intents and result.valid_json:
             self.extra_intent_total += 1
-        if result.method_semantics_valid and result.valid_json:
+        if result.method_semantics_valid and clean_quality_verdict:
             self.method_semantics_valid_total += 1
         if accepted:
             self.pro_accept_total += 1

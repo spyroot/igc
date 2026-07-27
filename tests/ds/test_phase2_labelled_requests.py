@@ -1212,8 +1212,10 @@ def test_judge_calibration_floors_require_precision_recall_and_false_accept_rate
     low_recall = evaluate_judge_calibration([
         (strict_accept, target, True),
         (strict_reject, target, True),
+        (strict_reject, target, False),
     ])
     false_accept = evaluate_judge_calibration([
+        (strict_accept, target, True),
         (strict_accept, target, False),
         (strict_reject, target, False),
     ])
@@ -1448,7 +1450,8 @@ def test_builder_returns_none_and_counts_rejection_on_set_mismatch(tmp_path: Pat
         ),
     )
 
-    row, counters = builder.build_one((_record(1),), k=1, rng=random.Random(1))
+    records = tuple(_record(index) for index in range(1, 6))
+    row, counters = builder.build_one(records, k=1, rng=random.Random(1))
     summary = counters.summary()
 
     assert row is None
@@ -1472,7 +1475,8 @@ def test_builder_rejects_accepted_nonsense_even_when_set_matches(tmp_path: Path)
         ),
     )
 
-    row, counters = builder.build_one((_record(1),), k=1, rng=random.Random(1))
+    records = tuple(_record(index) for index in range(1, 6))
+    row, counters = builder.build_one(records, k=1, rng=random.Random(1))
     summary = counters.summary()
 
     assert row is None
