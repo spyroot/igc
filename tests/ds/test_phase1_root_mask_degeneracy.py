@@ -22,6 +22,7 @@ from pathlib import Path
 
 from igc.ds.phase1_render import (
     build_phase1_row,
+    phase1_json_dumps,
     render_phase1_completion,
     render_phase1_prompt,
     validate_phase1_row,
@@ -100,9 +101,13 @@ def test_root_mask_degenerates_to_memorization_on_real_corpus_document() -> None
     assert view.operations == ("mask:json_objects:/",)
 
     # Leg 2: input context is a bare mask token; loss covers the whole doc.
+    # The completion is the rendered document plus a trailing newline; the
+    # root span covers every byte of the document itself.
     assert view.row["x"]["json"] == {profile.mask_token: True}
     completion = render_phase1_completion(source["y_true"]["json"])
-    assert view.completion_spans == ((0, len(completion)),)
+    rendered = phase1_json_dumps(source["y_true"]["json"])
+    assert completion == rendered + "\n"
+    assert view.completion_spans == ((0, len(rendered)),)
 
     prompt, target_json = render_phase1_prompt(view.row)
     assert profile.mask_token in prompt
