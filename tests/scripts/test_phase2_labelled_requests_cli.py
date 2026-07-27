@@ -351,9 +351,17 @@ def test_cli_all_sample_widths_releases_balanced_canonical_d1(
         "max_accepted_per_api": 200,
         "max_empty_set_candidates": 2,
     }
-    assert metrics["sampling_budget"]["observed"]["attempts_total"] == 5
-    assert metrics["sampling_budget"]["observed"]["accepted_total"] == 5
-    assert metrics["sampling_budget"]["observed"]["unique_combinations_attempted"] == 3
+    observed_budget = metrics["sampling_budget"]["observed"]
+    positive_combinations = {
+        tuple(sorted(row["y_true"]["rest_api_list"]))
+        for row in rows
+        if row["y_true"]["rest_api_list"]
+    }
+    assert observed_budget["attempts_total"] == 5
+    assert observed_budget["accepted_total"] == 5
+    assert observed_budget["empty_set_attempts_total"] == 2
+    assert observed_budget["empty_set_accepted_total"] == 2
+    assert observed_budget["unique_combinations_attempted"] == len(positive_combinations)
     assert manifest["sample_width_counts"] == {"0": 2, "1": 1, "2": 1, "3": 1}
     assert manifest["sampling_budget"] == metrics["sampling_budget"]
     rendered_manifest = json.dumps(manifest, sort_keys=True)

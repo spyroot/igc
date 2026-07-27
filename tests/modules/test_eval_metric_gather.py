@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import inspect
 
+from igc.modules.base.metric_keys import PHASE1_FINETUNE
 from igc.modules.train.sft import SFTTrainer
+from igc.modules.train.sft_tasks import resolve_sft_task
 
 
 def test_validate_all_reduces_the_metric():
@@ -48,10 +50,17 @@ def test_best_metric_tracked_on_all_ranks_not_only_rank_zero():
 
 def test_phase1_best_metric_is_eval_loss_minimize_with_min_delta():
     """Phase 1 must select checkpoints by lower eval loss, not higher token accuracy."""
+    phase1_task = resolve_sft_task("redfish_json_reconstruction")
+    init_src = inspect.getsource(SFTTrainer.__init__)
     src = inspect.getsource(SFTTrainer._evaluate_and_checkpoint)
-    assert "self._select_best_by_eval_loss" in src
-    assert "validation_eval_loss" in src
-    assert "else validation_acc" in src
+    normalized = " ".join(src.split())
+
+    assert phase1_task.metric_namespace == PHASE1_FINETUNE
+    assert "self._select_best_by_eval_loss = bool(self._metric_namespace)" in init_src
+    assert (
+        "selection_metric = ( validation_eval_loss "
+        "if self._select_best_by_eval_loss else validation_acc )"
+    ) in normalized
     assert "self._early_stopping_min_delta" in src
     assert "< self._best_validation_metric" in src
 
