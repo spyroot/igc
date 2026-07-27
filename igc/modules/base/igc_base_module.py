@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Optional, Any, Union, Dict, Tuple, Callable, Set
 from urllib.error import URLError
 
-import pkg_resources
 import torch
 from torch.utils.data import random_split, Subset, Dataset
 from transformers import PreTrainedModel, PreTrainedTokenizer, PreTrainedTokenizerBase
@@ -959,39 +958,43 @@ class IgcModule(IgcBaseState):
         :return:  The model specs data and root dir where the modules need to be saved
         """
 
-        dataset_path = pkg_resources.resource_filename(
-            "igc", default_model_file
-        )
+        package_root = Path(__file__).resolve().parents[2]
+        dataset_path = (package_root / default_model_file).resolve()
 
-        if not os.path.isfile(dataset_path):
+        if not dataset_path.is_file():
             raise FileNotFoundError(
-                f"The model specs file '{dataset_path}' does not exist.")
+                f"The model specs file '{dataset_path}' does not exist."
+            )
         try:
-            with open(dataset_path, "r") as file:
+            with dataset_path.open("r", encoding="utf-8") as file:
                 models_data = json.load(file)
 
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(
-                f"Failed to parse the model specs file '{dataset_path}': {str(e)}")
+                f"Failed to parse model specs file '{dataset_path}': {exc}"
+            ) from exc
 
         required_keys = ["mirrors"]
         for key in required_keys:
             if key not in models_data or not isinstance(models_data[key], dict):
                 raise ValueError(
-                    f"Invalid model specs file. '{key}' key is missing or not a dictionary.")
+                    f"Invalid model specs file: '{key}' is missing "
+                    "or is not a dictionary."
+                )
 
         for mirror_url, mirror_entries in models_data["mirrors"].items():
             if not isinstance(mirror_entries, list):
                 raise ValueError(
-                    f"Invalid model specs file. Mirror entries for '{mirror_url}' is not a list.")
+                    f"Mirror entries for '{mirror_url}' must be a list."
+                )
 
             for entry in mirror_entries:
                 if not isinstance(entry, dict):
                     raise ValueError(
-                        f"Invalid model specs file. "
-                        f"Mirror entry for '{mirror_url}' is not a dictionary.")
+                        f"Mirror entry for '{mirror_url}' must be a dictionary."
+                    )
 
-        return models_data, os.path.abspath(os.path.dirname(dataset_path))
+        return models_data, str(dataset_path.parent)
 
     @staticmethod
     def _download_module(

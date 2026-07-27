@@ -58,7 +58,9 @@ workflow:
 .igc-test-before-script: &igc-test-before-script
   - export HOMELAB_IN_CLUSTER=1
   - conda env create --file environment-dev.yaml
-  - conda install --name igc-dev --yes setuptools
+  - conda install --name igc-dev --yes 'setuptools=81.*'
+  - conda run -n igc-dev python -c 'import setuptools; print(setuptools.__version__, setuptools.__file__)'
+  - conda run -n igc-dev python -c 'import pkg_resources; print(pkg_resources.__file__)'
 
 focused-gate:
   stage: cpu-gate

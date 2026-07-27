@@ -64,7 +64,7 @@ jobs:
           wf='^\.github/workflows/'
           {
             echo "shell=$(match "$wf|^scripts/.*\.(sh|sbatch)$|^tests/bats/|^tests/shell/.*\.sh$|^collector\.sh$")"
-            echo "python=$(match "$wf|^igc/|^tests/|^configs/|^scripts/.*\.py$|^docker/requirements|^pytest\.ini$|^setup\.py$|^igc_main\.py$|^igc_ctl\.py$|^redfish_ctl")"
+            echo "python=$(match "$wf|^\.gitlab-ci\.yml$|^environment.*\.ya?ml$|^igc/|^tests/|^configs/|^scripts/.*\.py$|^docker/requirements|^requirements\.txt$|^pytest\.ini$|^setup\.py$|^igc_main\.py$|^igc_ctl\.py$|^redfish_ctl")"
             echo "perf=$(match "$wf|^igc/|^tests/perf/|^scripts/bench_hot_paths\.py$|^redfish_ctl")"
             echo "docker=$(match "$wf|^docker/|^\.dockerignore$|^requirements|^setup\.py$|^conda-recipe\.yaml$")"
           } >> "$GITHUB_OUTPUT"
@@ -127,6 +127,15 @@ jobs:
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r docker/requirements-test.txt
+      - name: Verify packaging compatibility
+        run: |
+          python -c 'import setuptools; print(setuptools.__version__, setuptools.__file__)'
+          python -c 'import pkg_resources; print(pkg_resources.__file__)'
+      - name: Import and collection smoke
+        env:
+          TRANSFORMERS_OFFLINE: "1"
+          HF_DATASETS_OFFLINE: "1"
+        run: python -m pytest --collect-only -q
       - name: Agent-leak guard
         shell: bash
         env:
