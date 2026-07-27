@@ -180,7 +180,7 @@ def test_phase1_items_mask_prompt_and_padding_labels(tmp_path: Path):
             tmp_path,
             {"@odata.id": "/redfish/v1/Systems/1", "Id": "1"},
         ),
-        max_len=512,
+        max_len=256,
         tokenizer=_FakeTokenizer(),
         objective="phase1_pretrain",
     )
@@ -268,7 +268,7 @@ def test_phase1_renderer_matches_existing_token_stream(tmp_path: Path):
     tok = _FakeTokenizer()
     ds = CorpusJSONLDataset(
         corpus_dir,
-        max_len=256,
+        max_len=512,
         tokenizer=tok,
         objective="phase1_pretrain",
     )
