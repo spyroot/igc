@@ -36,4 +36,5 @@ jobs:
           KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 \
             python -m pytest -q \
               tests/ds/test_phase1_input_noise_gap.py \
-              tests/ds/test_phase1_root_mask_degeneracy.py
+              tests/ds/test_phase1_root_mask_degeneracy.py \
+              tests/ds/test_phase1_array_telemetry_loss.py
