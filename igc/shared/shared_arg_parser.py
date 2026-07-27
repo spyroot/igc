@@ -575,12 +575,6 @@ def add_trainer_group(parser):
         default=0,
         help="Evaluate every N optimizer steps; 0 runs only the final evaluation.",
     )
-    parser.add_argument(
-        "--save_steps",
-        type=int,
-        default=0,
-        help="Save a rolling checkpoint every N optimizer steps; best always saves.",
-    )
 
     # this mainly for debug model to overfit on a batch.
     parser.add_argument(
@@ -746,9 +740,12 @@ def add_checkpoint_group(parser):
                        choices=['no', 'epoch', 'steps'],
                        help="Save is done at the end of each epoch, or given step")
 
-    group.add_argument("--save_steps",
-                       type=int, default=500,
-                       help="Number of updates steps before two checkpoint saves.")
+    group.add_argument(
+        "--save_steps",
+        type=int,
+        default=0,
+        help="Save a rolling checkpoint every N optimizer steps; 0 disables periodic saves.",
+    )
 
     group.add_argument("--save_total_limit",
                        type=int, default=None,
