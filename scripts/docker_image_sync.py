@@ -16,7 +16,8 @@ import subprocess
 import sys
 from typing import Protocol
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
 from igc.shared.run_spec import RunSpecError, load_run_spec
 
@@ -132,7 +133,9 @@ def _pull(runner: Runner, image: str) -> bool:
 def _build(runner: Runner, image_cfg: dict, image: str) -> bool:
     dockerfile = str(image_cfg.get("dockerfile", "docker/Dockerfile.train"))
     context = str(image_cfg.get("context", "."))
-    rc, out, err = runner.run(["docker", "build", "-f", dockerfile, "-t", image, context])
+    command = ["docker", "build", *_dataset_contract_build_args(dockerfile)]
+    command.extend(["-f", dockerfile, "-t", image, context])
+    rc, out, err = runner.run(command)
     if rc != 0:
         print(f"BLOCKER: docker build failed rc={rc}: {(err or out).strip()}")
         return False
@@ -152,10 +155,33 @@ def _push(runner: Runner, image: str) -> bool:
 def _build_command(image_cfg: dict, image: str) -> str:
     dockerfile = str(image_cfg.get("dockerfile", "docker/Dockerfile.train"))
     context = str(image_cfg.get("context", "."))
+    contract_args = " ".join(
+        _shell(value) for value in _dataset_contract_build_args(dockerfile)
+    )
+    if contract_args:
+        contract_args += " "
     return (
-        f"docker build -f {_shell(dockerfile)} "
+        f"docker build {contract_args}-f {_shell(dockerfile)} "
         f"-t {_shell(image)} {_shell(context)}"
     )
+
+
+def _dataset_contract_build_args(dockerfile: str) -> list[str]:
+    """Stamp the canonical training image with its exact data contract."""
+
+    candidate = Path(dockerfile)
+    resolved = candidate if candidate.is_absolute() else REPO_ROOT / candidate
+    if resolved.resolve() != (REPO_ROOT / "docker" / "Dockerfile.train").resolve():
+        return []
+    from scripts.gates.dataset_runtime_compat import contract_identity
+
+    digest, transform, _ = contract_identity(REPO_ROOT)
+    return [
+        "--build-arg",
+        f"IGC_DATASET_CONTRACT_SHA={digest}",
+        "--build-arg",
+        f"IGC_DATASET_TRANSFORM_VERSION={transform}",
+    ]
 
 
 def _shell(value: str) -> str:

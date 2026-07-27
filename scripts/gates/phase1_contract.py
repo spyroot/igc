@@ -78,6 +78,8 @@ def _check_machine_contract(failures: list[str]) -> None:
         ],
         "single_atomic_directory_rename": True,
         "immutable": True,
+        "split_membership_unit": "original_resource_before_chunking",
+        "exact_reassembly_required": True,
     }:
         failures.append("Phase 1 materialization must be one immutable directory release")
 

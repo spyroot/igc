@@ -18,6 +18,8 @@ set -uo pipefail
 IMAGE="${IMAGE:-igc-train}"
 TAG="${TAG:-ngc26.03-py3}"
 REF="${IMAGE}:${TAG}"
+PYTHON="${PYTHON:-python3}"
+DATASET_COMPAT_GATE="scripts/gates/dataset_runtime_compat.py"
 MODELS_IMAGES="${MODELS_IMAGES:-/models/images}"
 # Compression: zstd is smaller/faster (9GB vs ~15GB) but must be on EVERY node for the
 # load; gzip is universal (coreutils) but bigger. Default zstd; COMPRESS=gzip when some
@@ -35,7 +37,10 @@ IMAGE_FINGERPRINT_FILE="${TARBALL}.fingerprint"
 NODES_FILE="${GB300_NODES_FILE:-.internal/gb300_nodes}"
 # shellcheck disable=SC2206  # word-split the space-separated override on purpose
 NODES=(${DIST_NODES:-$(cat "$NODES_FILE" 2>/dev/null || true)})
-[ "${#NODES[@]}" -gt 0 ] || { echo "BLOCKER: set DIST_NODES=\"ip ip ...\" or provide $NODES_FILE (one line, space-separated node IPs)" >&2; exit 3; }
+[ "${#NODES[@]}" -gt 0 ] || {
+    echo "BLOCKER: set DIST_NODES=\"ip ip ...\" or provide $NODES_FILE" >&2
+    exit 3
+}
 SSH="ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new"
 
 log() { echo "=== [$(date -u '+%F %T')] $* ==="; }
@@ -47,13 +52,36 @@ image_fingerprint() {
         | awk '{print "sha256:" $1}'
 }
 
-command -v "${COMPRESS}" >/dev/null || { echo "BLOCKER: $COMPRESS missing on $(hostname) — install it (safe-apt-install.sh $COMPRESS) or use COMPRESS=gzip" >&2; exit 3; }
+command -v "${COMPRESS}" >/dev/null || {
+    echo "BLOCKER: $COMPRESS missing on $(hostname); use COMPRESS=gzip" >&2
+    exit 3
+}
+command -v "$PYTHON" >/dev/null || {
+    echo "BLOCKER: $PYTHON is required to resolve the dataset contract" >&2
+    exit 3
+}
+CONTRACT_SHA="$($PYTHON "$DATASET_COMPAT_GATE" contract-sha --output text)" || exit 3
+TRANSFORM_VERSION="$($PYTHON "$DATASET_COMPAT_GATE" transform --output text)" || exit 3
 
 # 1. build (unless already present) then save to /models (read by every node)
+needs_build="${FORCE_BUILD:-0}"
 if ! docker image inspect "$REF" >/dev/null 2>&1; then
-    log "building $REF from docker/Dockerfile.train"
-    docker build -f docker/Dockerfile.train -t "$REF" . || { echo "BLOCKER: build failed" >&2; exit 3; }
+    needs_build=1
+elif ! "$PYTHON" "$DATASET_COMPAT_GATE" check-image --image "$REF" >/dev/null; then
+    log "$REF is update-required for dataset contract $CONTRACT_SHA"
+    needs_build=1
 fi
+if [ "$needs_build" = "1" ]; then
+    log "building $REF from docker/Dockerfile.train"
+    docker build \
+        --build-arg "IGC_DATASET_CONTRACT_SHA=$CONTRACT_SHA" \
+        --build-arg "IGC_DATASET_TRANSFORM_VERSION=$TRANSFORM_VERSION" \
+        -f docker/Dockerfile.train \
+        -t "$REF" . \
+        || { echo "BLOCKER: build failed" >&2; exit 3; }
+fi
+"$PYTHON" "$DATASET_COMPAT_GATE" check-image --image "$REF" >/dev/null \
+    || { echo "BLOCKER: built image does not match the dataset contract" >&2; exit 3; }
 SOURCE_FINGERPRINT="$(image_fingerprint "$REF")"
 [ -n "$SOURCE_FINGERPRINT" ] || {
     echo "BLOCKER: cannot resolve source image fingerprint for $REF" >&2
@@ -97,7 +125,9 @@ for ip in "${NODES[@]}"; do
         echo "  $ip: LOADED $REF ($SOURCE_FINGERPRINT)"
         ok=$((ok + 1))
     else
-        echo "  $ip: FAILED expected=$SOURCE_FINGERPRINT observed=${loaded_fingerprint:-missing}" >&2
+        echo \
+            "  $ip: FAILED expected=$SOURCE_FINGERPRINT" \
+            "observed=${loaded_fingerprint:-missing}" >&2
         fail=$((fail + 1))
     fi
 done

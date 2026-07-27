@@ -159,6 +159,30 @@ def check_matrix(matrix: Mapping[str, Any]) -> list[str]:
     return violations
 
 
+def check_dataset_runtime_contract(repo_root: Path = REPO_ROOT) -> list[str]:
+    """Validate the static dataset contract and training-image build boundary."""
+
+    sys.path.insert(0, str(repo_root))
+    from scripts.gates.dataset_runtime_compat import (
+        GateError,
+        check_dockerfile,
+        contract_identity,
+    )
+
+    try:
+        contract_identity(repo_root)
+        result = check_dockerfile(
+            repo_root / "docker" / "Dockerfile.train",
+            repo_root=repo_root,
+        )
+    except (GateError, OSError, ValueError) as exc:
+        return [f"dataset runtime contract: {exc}"]
+    return [
+        f"dataset runtime contract: {violation}"
+        for violation in result["violations"]
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     _ = argv
@@ -168,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
         ci = yaml.safe_load(GITLAB_CI_PATH.read_text(encoding="utf-8"))
         violations += check_gitlab_ci(ci, matrix)
     violations += check_evidence(matrix)
+    violations += check_dataset_runtime_contract()
     for violation in violations:
         print(f"BLOCKER: {violation}", file=sys.stderr)
     if not violations:

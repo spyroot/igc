@@ -111,8 +111,11 @@ def test_build_policy_builds_and_optionally_pushes(tmp_path):
     """Build policy builds once and pushes only when requested."""
     module = _load_module()
     runner = FakeDocker()
-    assert module.sync_image(_write_spec(tmp_path, pull_policy="build"), runner=runner, push=True) == 0
-    assert any(call[:2] == ["docker", "build"] for call in runner.calls)
+    spec = _write_spec(tmp_path, pull_policy="build")
+    assert module.sync_image(spec, runner=runner, push=True) == 0
+    build = next(call for call in runner.calls if call[:2] == ["docker", "build"])
+    assert "IGC_DATASET_CONTRACT_SHA=sha256:" in " ".join(build)
+    assert "IGC_DATASET_TRANSFORM_VERSION=phase1.lossless-json-chunk.v1" in build
     assert any(call[:2] == ["docker", "push"] for call in runner.calls)
 
 

@@ -9,6 +9,7 @@ NGC_TAG     ?= 26.03-py3
 TRAIN_TAG   ?= ngc$(NGC_TAG)
 PLATFORM    ?= linux/arm64
 SAVE        ?= /models/images/$(TRAIN_IMAGE)-$(TRAIN_TAG).tar.zst
+DATASET_COMPAT_GATE := scripts/gates/dataset_runtime_compat.py
 
 .PHONY: help gate test lint perf coverage metrics profile profile-rl profile-dataset-cuda \
         docker-test docker-push \
@@ -57,8 +58,17 @@ docker-push: ## Build and push the CPU test image (requires DOCKER_REPO=<user>/i
 	docker push $${DOCKER_REPO}:latest
 
 train-image: ## Build the GB300 training image for PLATFORM (default linux/arm64), loaded into local docker
-	docker buildx build --platform $(PLATFORM) --build-arg NGC_TAG=$(NGC_TAG) \
-	    -f docker/Dockerfile.train -t $(TRAIN_IMAGE):$(TRAIN_TAG) --load .
+	@set -eu; \
+	contract_sha="$$($(PYTHON) $(DATASET_COMPAT_GATE) contract-sha --output text)"; \
+	transform="$$($(PYTHON) $(DATASET_COMPAT_GATE) transform --output text)"; \
+	docker buildx build \
+	    --platform $(PLATFORM) \
+	    --build-arg NGC_TAG=$(NGC_TAG) \
+	    --build-arg IGC_DATASET_CONTRACT_SHA="$$contract_sha" \
+	    --build-arg IGC_DATASET_TRANSFORM_VERSION="$$transform" \
+	    -f docker/Dockerfile.train \
+	    -t $(TRAIN_IMAGE):$(TRAIN_TAG) \
+	    --load .
 
 train-image-arm64: ## Build the training image for linux/arm64 (the GB300 / Grace cluster arch)
 	$(MAKE) train-image PLATFORM=linux/arm64
@@ -68,8 +78,17 @@ train-image-amd64: ## Build the training image for linux/amd64 (x86; runs under 
 
 train-image-multi: ## Build+push a multi-arch arm64+amd64 manifest (set REGISTRY=<user>/igc-train)
 	@test "$(REGISTRY)" || (echo "ERROR: set REGISTRY, e.g. REGISTRY=youruser/igc-train make train-image-multi"; exit 1)
-	docker buildx build --platform linux/arm64,linux/amd64 --build-arg NGC_TAG=$(NGC_TAG) \
-	    -f docker/Dockerfile.train -t $(REGISTRY):$(TRAIN_TAG) --push .
+	@set -eu; \
+	contract_sha="$$($(PYTHON) $(DATASET_COMPAT_GATE) contract-sha --output text)"; \
+	transform="$$($(PYTHON) $(DATASET_COMPAT_GATE) transform --output text)"; \
+	docker buildx build \
+	    --platform linux/arm64,linux/amd64 \
+	    --build-arg NGC_TAG=$(NGC_TAG) \
+	    --build-arg IGC_DATASET_CONTRACT_SHA="$$contract_sha" \
+	    --build-arg IGC_DATASET_TRANSFORM_VERSION="$$transform" \
+	    -f docker/Dockerfile.train \
+	    -t $(REGISTRY):$(TRAIN_TAG) \
+	    --push .
 
 train-image-save: ## Save the built training image to a zstd tarball (override SAVE=/path) for offline docker load
 	@mkdir -p $(dir $(SAVE))

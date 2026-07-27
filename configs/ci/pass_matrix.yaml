@@ -30,6 +30,11 @@ passes:
   shell_suite:              { surface: cpu, tool: "bats + shellcheck over scripts" }
   orchestration_dry_runs:   { surface: cpu, tool: "render_run/launch_run --dry-run spec renders" }
   contract_gates:           { surface: cpu, tool: "scripts/gates/* structural + schema gates" }
+  dataset_runtime_compat:
+    surface: cpu
+    tool: >-
+      dataset contract identity + Dockerfile boundary; live image/release
+      comparison runs in GB300 preflight
   docs_consistency:         { surface: cpu, tool: "scripts/gates/docs_consistency.py" }
   perf_budgets:             { surface: cpu, tool: "pytest -m perf (machine-loose tripwires)" }
   no_gpu_homelab_policy:    { surface: cpu, tool: "policy scan: no GPU resource requests in home-lab CI/manifests" }

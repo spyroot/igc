@@ -11,6 +11,7 @@ MODELS_DIR="${IGC_MODELS_DIR:-/models}"
 OUTPUT_DIR="${IGC_OUTPUT_DIR:?set IGC_OUTPUT_DIR to a durable path under IGC_MODELS_DIR}"
 RUN_NAME="${IGC_RUN_NAME:-${PROFILE}}"
 DRY_RUN="${IGC_DRY_RUN:-0}"
+DATASET_COMPAT_GATE="scripts/gates/dataset_runtime_compat.py"
 
 blocker() {
     printf 'BLOCKER: %s\n' "$*" >&2
@@ -60,6 +61,10 @@ docker_args=(
 for name in \
     IGC_CORPUS_DIR \
     IGC_CORPUS_EVAL_DIR \
+    IGC_CORPUS_SUMMARY \
+    IGC_SOURCE_REGISTRY \
+    IGC_REDFISH_CORPUS_MANIFEST \
+    IGC_DSP2043_CORPUS_MANIFEST \
     IGC_SFT_DATA_PATH \
     IGC_SFT_EVAL_DATA_PATH \
     IGC_SFT_DATA_MANIFEST \
@@ -109,6 +114,80 @@ command -v nvidia-smi >/dev/null 2>&1 || blocker "nvidia-smi is unavailable on t
 [ -d "$MODELS_DIR" ] || blocker "IGC_MODELS_DIR does not exist: ${MODELS_DIR}"
 docker image inspect "$IMAGE" >/dev/null 2>&1 \
     || blocker "prepared training image is missing: ${IMAGE}"
+
+# Compare the image label to the exact checked-out data contract without
+# exposing the host Docker socket to the container.
+if ! docker image inspect "$IMAGE" \
+    | docker run --rm -i \
+        -v "${CODE_DIR}:/workspace/igc:ro" \
+        -w /workspace/igc \
+        "$IMAGE" \
+        python "$DATASET_COMPAT_GATE" \
+        check-image --image "$IMAGE" --labels-json -
+then
+    blocker "training image is update-required for the checked-out dataset contract"
+fi
+
+if [[ "$PROFILE" == phase1_* ]]; then
+    CORPUS_DIR="${IGC_CORPUS_DIR:?set IGC_CORPUS_DIR for Phase 1}"
+    CORPUS_SUMMARY="${IGC_CORPUS_SUMMARY:?set IGC_CORPUS_SUMMARY for Phase 1}"
+    SOURCE_REGISTRY="${IGC_SOURCE_REGISTRY:-${CODE_DIR}/configs/data/redfish_sources.yaml}"
+    REDFISH_MANIFEST="${IGC_REDFISH_CORPUS_MANIFEST:?set IGC_REDFISH_CORPUS_MANIFEST for Phase 1}"
+    DSP2043_MANIFEST="${IGC_DSP2043_CORPUS_MANIFEST:?set IGC_DSP2043_CORPUS_MANIFEST for Phase 1}"
+
+    for path in \
+        "$CORPUS_DIR" \
+        "$CORPUS_SUMMARY" \
+        "$REDFISH_MANIFEST" \
+        "$DSP2043_MANIFEST"
+    do
+        case "$path" in
+            "${MODELS_DIR}"/*) ;;
+            *) blocker "Phase 1 data and manifests must be under IGC_MODELS_DIR: $path" ;;
+        esac
+    done
+    case "$SOURCE_REGISTRY" in
+        "${CODE_DIR}"/*|"${MODELS_DIR}"/*) ;;
+        *)
+            blocker \
+                "Phase 1 source registry is outside code/models mounts: $SOURCE_REGISTRY"
+            ;;
+    esac
+    [ -d "$CORPUS_DIR" ] || blocker "Phase 1 corpus release is missing: $CORPUS_DIR"
+    for path in \
+        "$CORPUS_SUMMARY" \
+        "$SOURCE_REGISTRY" \
+        "$REDFISH_MANIFEST" \
+        "$DSP2043_MANIFEST"
+    do
+        [ -f "$path" ] || blocker "Phase 1 compatibility input is missing: $path"
+    done
+
+    container_source_registry="$SOURCE_REGISTRY"
+    case "$SOURCE_REGISTRY" in
+        "${CODE_DIR}"/*)
+            container_source_registry="/workspace/igc/${SOURCE_REGISTRY#"${CODE_DIR}"/}"
+            ;;
+    esac
+    if ! docker run --rm \
+        -v "${CODE_DIR}:/workspace/igc:ro" \
+        -v "${MODELS_DIR}:${MODELS_DIR}:ro" \
+        -w /workspace/igc \
+        -e "IGC_FOUNDATION_MODEL_SHA=${IGC_FOUNDATION_MODEL_SHA:-}" \
+        -e "IGC_TOKENIZER_SHA=${IGC_TOKENIZER_SHA:-}" \
+        "$IMAGE" \
+        python "$DATASET_COMPAT_GATE" \
+        check-release \
+        --release-root "$CORPUS_DIR" \
+        --summary "$CORPUS_SUMMARY" \
+        --source-registry "$container_source_registry" \
+        --training-profile "$PROFILE" \
+        --source-manifest "redfish_ctl_full_corpus=$REDFISH_MANIFEST" \
+        --source-manifest "dsp2043_redfish_ctl_corpus=$DSP2043_MANIFEST"
+    then
+        blocker "Phase 1 corpus release is incompatible with its sources or profile"
+    fi
+fi
 
 available_gpus="$(nvidia-smi -L 2>/dev/null | /usr/bin/grep -c '^GPU ' || true)"
 [ "$GPUS" -le "${available_gpus:-0}" ] \
