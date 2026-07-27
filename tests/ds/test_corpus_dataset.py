@@ -180,7 +180,7 @@ def test_phase1_items_mask_prompt_and_padding_labels(tmp_path: Path):
             tmp_path,
             {"@odata.id": "/redfish/v1/Systems/1", "Id": "1"},
         ),
-        max_len=256,
+        max_len=512,
         tokenizer=_FakeTokenizer(),
         objective="phase1_pretrain",
     )
@@ -437,16 +437,16 @@ def test_shared_sft_dataset_surface(tmp_path: Path):
             tmp_path,
             {"@odata.id": "/redfish/v1/Systems/1", "Id": "1"},
         ),
-        max_len=128,
+        max_len=512,
         tokenizer=_FakeTokenizer(),
         objective="phase1_pretrain",
     )
 
     item = ds[0]
     assert set(item) == {"input_ids", "attention_mask", "labels"}
-    assert item["input_ids"].shape == (128,)
-    assert item["attention_mask"].shape == (128,)
-    assert item["labels"].shape == (128,)
+    assert item["input_ids"].shape == (512,)
+    assert item["attention_mask"].shape == (512,)
+    assert item["labels"].shape == (512,)
     assert ds.tokenizer is not None
     ds.load_tokenizer()  # idempotent
     fields = ds.run_manifest_fields()
