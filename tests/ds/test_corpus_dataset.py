@@ -41,7 +41,8 @@ class _FakeTokenizer:
     pad_token_id = 0
 
     def __call__(self, text, padding=None, max_length=None, truncation=None,
-                 return_tensors=None, add_special_tokens=None):
+                 return_tensors=None, add_special_tokens=None,
+                 return_offsets_mapping=False):
         ids = [ord(c) % 1000 + 1 for c in text]
         if add_special_tokens:
             ids = [999] + ids + [998]
@@ -52,14 +53,23 @@ class _FakeTokenizer:
             while len(ids) < max_length:
                 ids.append(0)
                 mask.append(0)
-        return {"input_ids": torch.tensor([ids]), "attention_mask": torch.tensor([mask])}
+        result = {
+            "input_ids": torch.tensor([ids]),
+            "attention_mask": torch.tensor([mask]),
+        }
+        if return_offsets_mapping:
+            result["offset_mapping"] = torch.tensor(
+                [[(index, index + 1) for index in range(len(text))]]
+            )
+        return result
 
 
 class _EmptyCompletionTokenizer(_FakeTokenizer):
     """Tokenizer stub that exposes a degenerate zero-token completion."""
 
     def __call__(self, text, padding=None, max_length=None, truncation=None,
-                 return_tensors=None, add_special_tokens=None):
+                 return_tensors=None, add_special_tokens=None,
+                 return_offsets_mapping=False):
         if text == '{\n  "empty": true\n}\n':
             empty = torch.empty((1, 0), dtype=torch.long)
             return {"input_ids": empty, "attention_mask": empty}
@@ -70,6 +80,7 @@ class _EmptyCompletionTokenizer(_FakeTokenizer):
             truncation=truncation,
             return_tensors=return_tensors,
             add_special_tokens=add_special_tokens,
+            return_offsets_mapping=return_offsets_mapping,
         )
 
 
@@ -196,6 +207,73 @@ def test_phase1_items_mask_prompt_and_padding_labels(tmp_path: Path):
     assert torch.equal(item["labels"][active], item["input_ids"][active])
     assert item["labels"][item["attention_mask"].eq(0)].eq(-100).all()
     assert ds.metric_namespace == "phase1_finetune"
+
+
+def test_phase1_structural_loss_changes_train_view_and_active_labels(tmp_path: Path):
+    """Epochs rotate structural masks while preserving canonical target bytes."""
+    tokenizer = _FakeTokenizer()
+    ds = CorpusJSONLDataset(
+        _explicit_phase1_corpus_dir(
+            tmp_path,
+            {
+                "@odata.id": "/redfish/v1/Systems/1",
+                "Id": "1",
+                "Actions": {
+                    "#ComputerSystem.Reset": {
+                        "target": "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
+                        "ResetType@Redfish.AllowableValues": ["On", "ForceOff"],
+                    }
+                },
+            },
+        ),
+        max_len=2048,
+        tokenizer=tokenizer,
+        objective="phase1_pretrain",
+        phase1_structural_loss_profile="historical_structural_mask_v1",
+        phase1_structural_loss_mode="train",
+        phase1_structural_loss_seed=31,
+    )
+
+    items = []
+    for epoch in range(6):
+        ds.set_epoch(epoch)
+        items.append(ds[0])
+
+    assert len({tuple(item["input_ids"].tolist()) for item in items}) > 1
+    active_labels = [
+        tuple(item["labels"][item["labels"].ne(-100)].tolist())
+        for item in items
+    ]
+    assert len(set(active_labels)) > 1
+    canonical_completion = render_phase1_completion(
+        _first_example(ds._corpus_dir)["y_true"]["json"]
+    )
+    assert all(0 < len(labels) < len(canonical_completion) for labels in active_labels)
+    assert ds.phase1_structural_loss_profile == "historical_structural_mask_v1"
+    assert ds.phase1_structural_loss_spec_sha.startswith("sha256:")
+
+
+def test_phase1_structural_loss_heldout_view_ignores_epoch_changes(tmp_path: Path):
+    """Held-out structural masking is row-fixed for stable promotion evidence."""
+    ds = CorpusJSONLDataset(
+        _explicit_phase1_corpus_dir(
+            tmp_path,
+            {"@odata.id": "/redfish/v1/Systems/1", "Id": "1"},
+        ),
+        max_len=1024,
+        tokenizer=_FakeTokenizer(),
+        objective="phase1_pretrain",
+        phase1_structural_loss_profile="historical_structural_mask_v1",
+        phase1_structural_loss_mode="evaluation",
+        phase1_structural_loss_seed=31,
+    )
+
+    before = ds[0]
+    ds.set_epoch(99)
+    after = ds[0]
+
+    for key in ("input_ids", "attention_mask", "labels"):
+        assert torch.equal(before[key], after[key])
 
 
 def test_phase1_tiny_sequence_raises_instead_of_truncating_sft(tmp_path: Path):

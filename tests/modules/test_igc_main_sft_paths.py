@@ -82,12 +82,19 @@ class _FakeCorpusJSONLDataset:
         max_len,
         tokenizer=None,
         objective="legacy",
+        phase1_structural_loss_profile="none",
+        phase1_structural_loss_mode="train",
+        phase1_structural_loss_seed=42,
     ):
         self.path = Path(corpus_dir)
         self.default_tokenize = default_tokenize
         self.max_len = max_len
         self.input_tokenizer = tokenizer
         self.objective = objective
+        self.phase1_structural_loss_profile = phase1_structural_loss_profile
+        self.phase1_structural_loss_mode = phase1_structural_loss_mode
+        self.phase1_structural_loss_seed = phase1_structural_loss_seed
+        self.phase1_structural_loss_spec_sha = "sha256:" + "c" * 64
         self.tokenizer = tokenizer or object()
         suffix = "d" if tokenizer is None else "e"
         self.data_sha256 = "sha256:" + suffix * 64
@@ -328,8 +335,12 @@ def test_igc_main_phase1_shared_sft_requires_canonical_registry_corpus_dirs(
     assert eval_dataset.path == Path(specs.corpus_eval_dir)
     assert dataset.objective == "phase1_pretrain"
     assert eval_dataset.objective == "phase1_pretrain"
+    assert dataset.phase1_structural_loss_profile == "none"
+    assert dataset.phase1_structural_loss_mode == "train"
+    assert eval_dataset.phase1_structural_loss_mode == "evaluation"
     assert dataset.default_tokenize == "gpt2"
     assert eval_dataset.input_tokenizer is dataset.tokenizer
     assert dataset.eval_split_sha256 == eval_dataset.data_sha256
     assert specs.task_spec_sha.startswith("sha256:")
+    assert specs.phase1_structural_loss_spec_sha == "sha256:" + "c" * 64
     assert specs.phase_number == 1

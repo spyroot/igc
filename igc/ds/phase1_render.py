@@ -1,13 +1,15 @@
 """Canonical Phase 1 prompt and target rendering.
 
-Phase 1 trains on a prompt followed by the whole target Redfish JSON document.
-Producer jobs, offline gates, and the tokenizer bridge should share this module
-so they stay on-distribution when prompt wording evolves.
+Phase 1 renders a prompt followed by the whole target Redfish JSON document.
+The selected training profile decides which completion spans receive loss.
+Producer jobs, gates, and the tokenizer bridge share this module so target
+bytes remain identical.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from igc.modules.train.sft_tasks import resolve_sft_task
@@ -15,6 +17,17 @@ from igc.modules.train.sft_tasks import resolve_sft_task
 
 PHASE1_DATASET = "D0"
 PHASE1_TASK = "redfish_json_reconstruction"
+
+
+@dataclass(frozen=True)
+class Phase1JSONSpan:
+    """Character span in the canonical Phase 1 JSON rendering."""
+
+    kind: str
+    path: tuple[str | int, ...]
+    key: str | None
+    start: int
+    end: int
 
 
 def build_phase1_row(
@@ -218,22 +231,25 @@ def _validate_phase1_chunk_metadata(value: Any) -> None:
         raise ValueError("Phase 1 non-slice chunks require null range metadata")
 
 
-def render_phase1_prompt(example: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+def render_phase1_prompt(
+    example: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]]:
     """Render a Phase 1 prompt and return the target JSON object.
 
     Phase 1 training accepts only explicit D0 rows. Raw source records must be
     converted with :func:`build_phase1_source_row` before persistence.
+
     """
 
     rest_api, allowed_methods, input_json, target_json = _phase1_fields(example)
     allowed = ", ".join(allowed_methods) if allowed_methods else "UNKNOWN"
     task = resolve_sft_task(PHASE1_TASK)
-    prompt = task.render_prompt({
+    values = {
         "rest_api": rest_api,
         "allowed_methods": allowed,
         "json_context": phase1_json_dumps(input_json),
-    })
-    return prompt, target_json
+    }
+    return task.render_prompt(values), target_json
 
 
 def render_phase1_completion(target_json: Mapping[str, Any]) -> str:
@@ -243,9 +259,78 @@ def render_phase1_completion(target_json: Mapping[str, Any]) -> str:
 
 
 def phase1_json_dumps(value: Any) -> str:
-    """Stable pretty JSON rendering for Phase 1 documents."""
+    """Render canonical pretty JSON while sharing the structural span index."""
 
-    return json.dumps(value or {}, indent=2, sort_keys=True)
+    return phase1_json_with_spans(value)[0]
+
+
+def phase1_json_with_spans(value: Any) -> tuple[str, tuple[Phase1JSONSpan, ...]]:
+    """Render canonical pretty JSON and index keys, values, objects, and arrays."""
+
+    pieces: list[str] = []
+    spans: list[Phase1JSONSpan] = []
+    length = 0
+
+    def append(text: str) -> None:
+        nonlocal length
+        pieces.append(text)
+        length += len(text)
+
+    def render(current: Any, level: int, path: tuple[str | int, ...]) -> None:
+        start = length
+        if isinstance(current, Mapping):
+            append("{")
+            if current:
+                append("\n")
+                items = sorted(current.items(), key=lambda item: str(item[0]))
+                for index, (raw_key, child) in enumerate(items):
+                    key = str(raw_key)
+                    append("  " * (level + 1))
+                    key_start = length
+                    append(json.dumps(key))
+                    key_end = length
+                    append(": ")
+                    value_start = length
+                    render(child, level + 1, path + (key,))
+                    value_end = length
+                    spans.append(
+                        Phase1JSONSpan("key", path + (key,), key, key_start, key_end)
+                    )
+                    spans.append(
+                        Phase1JSONSpan(
+                            "key_value",
+                            path + (key,),
+                            key,
+                            key_start,
+                            value_end,
+                        )
+                    )
+                    if index + 1 < len(items):
+                        append(",")
+                    append("\n")
+                append("  " * level)
+            append("}")
+            spans.append(Phase1JSONSpan("object", path, None, start, length))
+            return
+        if isinstance(current, list):
+            append("[")
+            if current:
+                append("\n")
+                for index, child in enumerate(current):
+                    append("  " * (level + 1))
+                    render(child, level + 1, path + (index,))
+                    if index + 1 < len(current):
+                        append(",")
+                    append("\n")
+                append("  " * level)
+            append("]")
+            spans.append(Phase1JSONSpan("array", path, None, start, length))
+            return
+        append(json.dumps(current))
+        spans.append(Phase1JSONSpan("scalar", path, None, start, length))
+
+    render({} if value is None else value, 0, ())
+    return "".join(pieces), tuple(spans)
 
 
 def _phase1_fields(
@@ -269,7 +354,9 @@ __all__ = (
     "PHASE1_TASK",
     "build_phase1_row",
     "build_phase1_source_row",
+    "Phase1JSONSpan",
     "phase1_json_dumps",
+    "phase1_json_with_spans",
     "render_phase1_completion",
     "render_phase1_prompt",
     "validate_phase1_row",

@@ -23,6 +23,11 @@ from typing import Any, Dict, List, Mapping, Optional
 import torch
 from torch.utils.data import Dataset
 
+from igc.ds.phase1_structural_loss import (
+    Phase1StructuralLossResult,
+    build_phase1_structural_loss_view,
+    load_phase1_structural_loss_profile,
+)
 from igc.ds.phase1_render import render_phase1_completion, render_phase1_prompt
 from igc.ds.sft_dataset import token_ids, tokenize_prompt_completion
 from igc.ds.sources.corpus_io import iter_examples, read_manifest
@@ -51,15 +56,32 @@ class CorpusJSONLDataset(Dataset):
                  default_tokenize: Optional[str] = "gpt2",
                  max_len: Optional[int] = 1024,
                  tokenizer: Optional[Any] = None,
-                 objective: str = LEGACY_OBJECTIVE):
+                 objective: str = LEGACY_OBJECTIVE,
+                 phase1_structural_loss_profile: str = "none",
+                 phase1_structural_loss_mode: str = "train",
+                 phase1_structural_loss_seed: int = 42):
         self._corpus_dir = os.path.abspath(os.path.expanduser(corpus_dir))
         self._default_tokenize = default_tokenize
         self._max_len = max_len
         self._tokenizer = tokenizer
         self.objective = objective
+        self._epoch = 0
+        self._phase1_structural_loss_seed = int(phase1_structural_loss_seed)
+        self._phase1_structural_loss_mode = phase1_structural_loss_mode
+        self._phase1_structural_loss = load_phase1_structural_loss_profile(
+            phase1_structural_loss_profile
+        )
         if objective not in CORPUS_OBJECTIVES:
             raise ValueError(
                 f"unknown corpus objective {objective!r}; choose from {CORPUS_OBJECTIVES}")
+        if phase1_structural_loss_mode not in {"train", "evaluation"}:
+            raise ValueError(
+                "phase1_structural_loss_mode must be 'train' or 'evaluation'"
+            )
+        if self._phase1_structural_loss.enabled and objective != PHASE1_PRETRAIN_OBJECTIVE:
+            raise ValueError(
+                "Phase 1 structural loss requires objective='phase1_pretrain'"
+            )
         self.metric_namespace = PHASE1_FINETUNE if objective == PHASE1_PRETRAIN_OBJECTIVE else ""
 
         examples_path = os.path.join(self._corpus_dir, "examples.jsonl")
@@ -75,11 +97,24 @@ class CorpusJSONLDataset(Dataset):
         )
         self._eval_data_sha256 = ""
 
+        examples = list(iter_examples(examples_path))
+        self._dynamic_phase1_structural_loss = (
+            objective == PHASE1_PRETRAIN_OBJECTIVE
+            and self._phase1_structural_loss.enabled
+            and phase1_structural_loss_mode == "train"
+        )
+        self._examples: List[Mapping[str, Any]] = (
+            examples if self._dynamic_phase1_structural_loss else []
+        )
         self._data: List[Dict[str, torch.Tensor]] = []
         tok = self.tokenizer
-        for example in iter_examples(examples_path):
+        if self._dynamic_phase1_structural_loss:
+            return
+        for row_index, example in enumerate(examples):
             if objective == PHASE1_PRETRAIN_OBJECTIVE:
-                self._data.append(self._phase1_item(tok, example))
+                self._data.append(
+                    self._phase1_item(tok, example, row_index=row_index)
+                )
             else:
                 self._data.append(self._legacy_item(tok, example))
 
@@ -114,19 +149,63 @@ class CorpusJSONLDataset(Dataset):
             "attention_mask": out["attention_mask"].squeeze(0).long(),
         }
 
-    def _phase1_item(self, tok: Any, example: Mapping[str, Any]) -> Dict[str, torch.Tensor]:
+    def _phase1_item(
+        self,
+        tok: Any,
+        example: Mapping[str, Any],
+        *,
+        row_index: int,
+    ) -> Dict[str, torch.Tensor]:
         """Render Phase 1 as prompt context plus JSON completion labels."""
-        prompt, target_json = render_phase1_prompt(example)
+        view = self._phase1_view(example, row_index=row_index)
+        prompt, target_json = render_phase1_prompt(view.row)
         completion = render_phase1_completion(target_json)
-        return self._tokenize_prompt_completion(tok, prompt, completion)
+        completion_label_spans = (
+            tuple(view.completion_spans) if self._phase1_structural_loss.enabled else None
+        )
+        return self._tokenize_prompt_completion(
+            tok,
+            prompt,
+            completion,
+            completion_label_spans=completion_label_spans,
+        )
+
+    def _phase1_view(
+        self,
+        example: Mapping[str, Any],
+        *,
+        row_index: int,
+    ) -> Phase1StructuralLossResult:
+        """Return the current deterministic train or fixed held-out view."""
+
+        return build_phase1_structural_loss_view(
+            example,
+            profile=self._phase1_structural_loss,
+            mode=self._phase1_structural_loss_mode,
+            run_seed=self._phase1_structural_loss_seed,
+            epoch=self._epoch,
+            row_index=row_index,
+        )
 
     def _tokenize_prompt_completion(
-            self, tok: Any, prompt: str, completion: str) -> Dict[str, torch.Tensor]:
+        self,
+        tok: Any,
+        prompt: str,
+        completion: str,
+        *,
+        completion_label_spans: tuple[tuple[int, int], ...] | None = None,
+    ) -> Dict[str, torch.Tensor]:
         """Tokenize prompt/completion and mask loss over prompt + padding."""
         prompt_ids = token_ids(tok, prompt)
         completion_ids = token_ids(tok, completion)
         max_len = int(self._max_len or (prompt_ids.numel() + completion_ids.numel()))
-        return tokenize_prompt_completion(tok, prompt, completion, max_len)
+        return tokenize_prompt_completion(
+            tok,
+            prompt,
+            completion,
+            max_len,
+            completion_label_spans=completion_label_spans,
+        )
 
     @staticmethod
     def _token_ids(tok: Any, text: str) -> torch.Tensor:
@@ -152,6 +231,8 @@ class CorpusJSONLDataset(Dataset):
                 "source_manifest_sha": "",
                 "source_registry_sha": "",
                 "source_artifact_manifest_shas": {},
+                "phase1_structural_loss_profile": self.phase1_structural_loss_profile,
+                "phase1_structural_loss_spec_sha": self.phase1_structural_loss_spec_sha,
             }
         manifest = DataManifest(**self.manifest)
         fields = manifest.to_run_manifest_fields()
@@ -162,8 +243,29 @@ class CorpusJSONLDataset(Dataset):
             "source_manifest_sha": self.manifest_sha256,
             "source_registry_sha": manifest.source_registry_sha,
             "source_artifact_manifest_shas": dict(manifest.source_manifest_shas),
+            "phase1_structural_loss_profile": self.phase1_structural_loss_profile,
+            "phase1_structural_loss_spec_sha": self.phase1_structural_loss_spec_sha,
         })
         return fields
+
+    @property
+    def phase1_structural_loss_profile(self) -> str:
+        """Resolved runtime structural-loss profile name."""
+
+        return self._phase1_structural_loss.name
+
+    @property
+    def phase1_structural_loss_spec_sha(self) -> str:
+        """Exact SHA-256 identity of the structural-loss profile registry."""
+
+        return self._phase1_structural_loss.spec_sha256
+
+    def set_epoch(self, epoch: int) -> None:
+        """Select the reproducible per-epoch train view before iteration starts."""
+
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 0:
+            raise ValueError("dataset epoch must be a non-negative integer")
+        self._epoch = epoch
 
     @property
     def data_sha256(self) -> str:
@@ -191,10 +293,20 @@ class CorpusJSONLDataset(Dataset):
 
     def __len__(self) -> int:
         """Number of tokenized examples."""
-        return len(self._data)
+        return (
+            len(self._examples)
+            if self._dynamic_phase1_structural_loss
+            else len(self._data)
+        )
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """The fixed-length ``input_ids``/``attention_mask`` item at ``idx``."""
+        if self._dynamic_phase1_structural_loss:
+            return self._phase1_item(
+                self.tokenizer,
+                self._examples[idx],
+                row_index=idx,
+            )
         return self._data[idx]
 
 

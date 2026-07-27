@@ -54,6 +54,23 @@ def test_7b_rslora_argv_matches_spec(monkeypatch):
     assert _val(argv, "--lora_init") == "default"
 
 
+def test_structural_mask_profile_forwards_named_loss_policy(monkeypatch):
+    """The A/B arm selects structural loss without changing the baseline profile."""
+    monkeypatch.setenv("IGC_FOUNDATION_MODEL_SHA", "sha256:" + "1" * 64)
+    monkeypatch.setenv("IGC_TOKENIZER_SHA", "sha256:" + "2" * 64)
+
+    baseline = profile_to_argv(resolve_profile("phase1_7b_rslora_r32"))
+    structural_mask = profile_to_argv(
+        resolve_profile("phase1_7b_rslora_r32_structural_mask")
+    )
+
+    assert _val(baseline, "--phase1_structural_loss_profile") == "none"
+    assert (
+        _val(structural_mask, "--phase1_structural_loss_profile")
+        == "historical_structural_mask_v1"
+    )
+
+
 def test_profile_to_argv_forwards_every_lora_target_module_after_flag():
     """All adapter target modules must follow one --lora_target_modules flag."""
     target_modules = ("q_proj", "v_proj", "down_proj", "lm_head")

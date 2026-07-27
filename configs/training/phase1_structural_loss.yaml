@@ -1,0 +1,48 @@
+version: 1
+profiles:
+  none:
+    enabled: false
+    mask_token: <|redfish_mask|>
+    selection: row_epoch_cycle
+    families: []
+
+  historical_structural_mask_v1:
+    enabled: true
+    mask_token: <|redfish_mask|>
+    selection: row_epoch_cycle
+    families:
+      - name: odata_id
+        selector: key_value
+        patterns:
+          - "@odata.id"
+        max_spans: 8
+      - name: action_targets
+        selector: key_value
+        patterns:
+          - target
+          - Target
+        max_spans: 8
+      - name: target_keys
+        selector: key
+        patterns:
+          - target
+          - Target
+        max_spans: 8
+      - name: json_objects
+        selector: object
+        patterns: []
+        max_spans: 1
+      - name: json_arrays
+        selector: array
+        patterns: []
+        max_spans: 2
+      - name: allowable_values
+        selector: key_value_suffix
+        patterns:
+          - "@Redfish.AllowableValues"
+        max_spans: 8
+      - name: api_prefixes
+        selector: substring
+        patterns:
+          - /redfish/v1/
+        max_spans: 16

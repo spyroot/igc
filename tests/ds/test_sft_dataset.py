@@ -23,10 +23,17 @@ class _CharTokenizer:
         truncation=None,
         return_tensors=None,
         add_special_tokens=None,
+        return_offsets_mapping=False,
     ):
         _ = (padding, truncation, return_tensors, add_special_tokens)
         ids = [ord(char) % 1000 + 1 for char in text]
-        return {"input_ids": torch.tensor([ids], dtype=torch.long)}
+        result = {"input_ids": torch.tensor([ids], dtype=torch.long)}
+        if return_offsets_mapping:
+            result["offset_mapping"] = torch.tensor(
+                [[(index, index + 1) for index in range(len(text))]],
+                dtype=torch.long,
+            )
+        return result
 
 
 def test_prompt_completion_overflow_raises_instead_of_truncating() -> None:
@@ -54,6 +61,41 @@ def test_prompt_completion_masks_prompt_and_padding_when_it_fits() -> None:
     assert item["labels"][:2].tolist() == [-100, -100]
     assert item["labels"][2:4].tolist() == item["input_ids"][2:4].tolist()
     assert item["labels"][4:].tolist() == [-100, -100]
+
+
+def test_prompt_completion_labels_only_selected_character_spans() -> None:
+    """Selective Phase 1 loss keeps prompt and unselected completion ignored."""
+    item = tokenize_prompt_completion(
+        _CharTokenizer(),
+        prompt="ab",
+        completion="cdef",
+        max_len=8,
+        completion_label_spans=((1, 3),),
+    )
+
+    assert item["labels"].tolist() == [
+        -100,
+        -100,
+        -100,
+        item["input_ids"][3].item(),
+        item["input_ids"][4].item(),
+        -100,
+        -100,
+        -100,
+    ]
+
+
+@pytest.mark.parametrize("span", [(), ((0, 0),), ((0, 5),)])
+def test_prompt_completion_rejects_empty_or_out_of_range_label_spans(span) -> None:
+    """Malformed selective-loss spans fail closed instead of yielding zero loss."""
+    with pytest.raises((TypeError, ValueError)):
+        tokenize_prompt_completion(
+            _CharTokenizer(),
+            prompt="ab",
+            completion="cdef",
+            max_len=8,
+            completion_label_spans=span,
+        )
 
 
 def _write_jsonl(path, rows):

@@ -34,6 +34,7 @@ _SETTINGS_KEYS = (
     "early_stopping_patience", "early_stopping_min_delta", "masking_type", "num_workers",
     "eval_steps", "save_steps",
     "seed", "profile", "weights_role", "corpus_objective",
+    "phase1_structural_loss_profile", "phase1_structural_loss_spec_sha",
     "phase", "sft_task", "parent_role", "parent_artifact_sha", "output_role",
     "task_spec_sha", "phase_number",
     "foundation_model_sha", "tokenizer_sha", "promotion_source",

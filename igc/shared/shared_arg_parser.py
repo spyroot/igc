@@ -908,6 +908,15 @@ def add_dataset_dataloader(parser):
              "json} and masks labels so loss applies only to the y_true JSON completion.")
 
     group.add_argument(
+        "--phase1_structural_loss_profile",
+        type=str,
+        default="none",
+        help="Named selective-loss profile from "
+             "configs/training/phase1_structural_loss.yaml. Only Phase 1 "
+             "corpus training may enable it.",
+    )
+
+    group.add_argument(
         "--raw_data_dir",
         type=str, default="~/.json_responses",
         help="Raw captured Redfish responses the mock REST env serves; mirrors "

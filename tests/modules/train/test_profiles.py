@@ -37,6 +37,7 @@ _PROFILE_HYPERPARAMETERS = {
     "cycle_momentum",
     "anneal_strategy",
     "seed",
+    "phase1_structural_loss_profile",
 }
 
 _REGISTERED = [
@@ -44,6 +45,7 @@ _REGISTERED = [
     "phase1_3b_lora",
     "phase1_7b_lora",
     "phase1_7b_rslora_r32",
+    "phase1_7b_rslora_r32_structural_mask",
     "phase1_local",
     "phase1_3b_full",
     "phase1_7b_full_zero3",
@@ -68,6 +70,11 @@ _PROFILE_CASES = [
     ),
     (
         "phase1_7b_rslora_r32", "Qwen/Qwen2.5-7B-Instruct", True, 8, 4,
+        1e-4, "none", 2048, "bf16", None,
+        "phase1_finetune", "model_x", "sft", "phase1_pretrain",
+    ),
+    (
+        "phase1_7b_rslora_r32_structural_mask", "Qwen/Qwen2.5-7B-Instruct", True, 8, 4,
         1e-4, "none", 2048, "bf16", None,
         "phase1_finetune", "model_x", "sft", "phase1_pretrain",
     ),
@@ -151,6 +158,12 @@ def test_profile_matrix_matches_plan_contract(
     assert p.weights_role == weights_role
     assert p.llm_stage == llm_stage
     assert p.corpus_objective == corpus_objective
+    expected_structural_loss = (
+        "historical_structural_mask_v1"
+        if name == "phase1_7b_rslora_r32_structural_mask"
+        else "none"
+    )
+    assert p.phase1_structural_loss_profile == expected_structural_loss
     assert p.early_stopping_patience == 3
     assert p.early_stopping_min_delta == 0.005
 
@@ -202,6 +215,7 @@ def test_resolved_profile_describe_includes_profile_driven_hyperparameters():
         "max_grad_norm": 0.75,
         "max_lr": 0.003,
         "optimizer": "SGD",
+        "phase1_structural_loss_profile": "none",
         "seed": 1234,
         "weight_decay": 0.02,
     }
