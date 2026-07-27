@@ -1,18 +1,11 @@
-"""Executable evidence for review break 2: root masking recreates memorization.
+"""Regression coverage for the flat-resource root masking failure.
 
 Grounded on real data: the fixture is an actual GB300 HGX ERoT firmware
 ImageSlot document from the public ``redfish_ctl`` Supermicro corpus, where
 19% of the 1,886 captured resources are flat like it (a private full-crawl
-measured 27.3% of 7,329). The ``json_objects`` family indexes every object
-span including the ROOT; for a flat document the root is the only candidate,
-so the draw is deterministic: the whole input context collapses to a single
-mask token while the loss span covers the entire completion — the model must
-reproduce real firmware states and version numbers from the URL alone, which
-is exactly the memorize-from-URL objective Phase 1 was redesigned to
-eliminate. No existing guard rejects the degenerate view; acceptance is the
-defect this test pins. When root exclusion (or a subtree-size cap) lands,
-this demonstration is expected to be replaced by the real coverage contract
-tests.
+measured 27.3% of 7,329). The ``json_objects`` family must never select the
+root span: flat documents fall back to one bounded root field so the model
+cannot be trained to regenerate an entire firmware document from its URL.
 """
 
 from __future__ import annotations
@@ -53,28 +46,12 @@ def _nested_object_count(value) -> int:
     return count
 
 
-def test_root_mask_degenerates_to_memorization_on_real_corpus_document() -> None:
-    """Root draw is certain for a real flat capture, and no guard rejects it.
-
-    Three legs of the same break:
-
-    1. reachability — ``row_epoch_cycle`` starts at family index
-       ``(row_index + epoch) % 7``, so epoch 3 / row 0 selects
-       ``json_objects``; the real document is flat, so the root span is the
-       only candidate and the draw is certain, no randomness involved;
-    2. degeneracy — the masked input is exactly ``{mask_token: True}`` (all
-       document content gone) while the loss span covers the entire
-       completion, so every token of the real firmware document carries loss
-       and the only remaining signal is the URL in the prompt;
-    3. no guard — ``build_phase1_structural_loss_view`` returns the view and
-       ``validate_phase1_row`` accepts it; nothing in the pipeline refuses
-       the memorization task.
-    """
+def test_root_object_span_is_rejected_for_flat_real_corpus_document() -> None:
+    """A real flat capture receives one bounded field mask, never a root mask."""
     document = json.loads(FIXTURE.read_text())
 
-    # Fixture preconditions: a real, flat Redfish resource. If the fixture
-    # is ever swapped for a nested document this test must scream, because
-    # leg 1 would no longer be deterministic.
+    # If the fixture becomes nested, this no longer exercises the flat-row
+    # fallback and must fail instead of silently weakening the regression.
     assert document["@odata.id"].startswith("/redfish/v1/")
     assert _nested_object_count(document) == 0
     assert "FirmwareComparisonNumber" in document
@@ -96,26 +73,29 @@ def test_root_mask_degenerates_to_memorization_on_real_corpus_document() -> None
         row_index=0,
     )
 
-    # Leg 1: the deterministic root draw happened on the real document.
     assert view.family == "json_objects"
-    assert view.operations == ("mask:json_objects:/",)
+    assert len(view.operations) == 1
+    assert view.operations != ("mask:json_objects:/",)
 
-    # Leg 2: input context is a bare mask token; loss covers the whole doc.
-    # The completion is the rendered document plus a trailing newline; the
-    # root span covers every byte of the document itself.
-    assert view.row["x"]["json"] == {profile.mask_token: True}
+    # The root survives and exactly one field is hidden. The supervised span
+    # is therefore smaller than the whole canonical document.
+    assert view.row["x"]["json"] != {profile.mask_token: True}
+    assert len(view.row["x"]["json"]) == len(document)
+    assert list(view.row["x"]["json"].values()).count(profile.mask_token) == 1
     completion = render_phase1_completion(source["y_true"]["json"])
     rendered = phase1_json_dumps(source["y_true"]["json"])
     assert completion == rendered + "\n"
-    assert view.completion_spans == ((0, len(rendered)),)
+    assert all(
+        0 <= start < end <= len(rendered) and end - start < len(rendered)
+        for start, end in view.completion_spans
+    )
 
     prompt, target_json = render_phase1_prompt(view.row)
     assert profile.mask_token in prompt
-    assert document["@odata.id"] in prompt      # the URL survives...
-    assert "FirmwareComparisonNumber" not in prompt  # ...the document does not
-    assert str(document["FirmwareComparisonNumber"]) not in prompt
-    assert "FirmwareComparisonNumber" in completion  # yet all of it carries loss
+    assert document["@odata.id"] in prompt
+    assert phase1_json_dumps(document) not in prompt
+    assert "FirmwareComparisonNumber" in completion
     assert target_json == source["y_true"]["json"]
 
-    # Leg 3: every existing guard accepts the degenerate view.
+    # The bounded view remains a valid Phase 1 row.
     validate_phase1_row(view.row)

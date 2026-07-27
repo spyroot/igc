@@ -59,13 +59,41 @@ def _check_machine_contract(failures: list[str]) -> None:
 
     objective = value.get("objective", {})
     expected_objective = {
-        "family": "causal_lm_completion",
+        "family": "causal_lm_profile_selected_completion",
         "prompt_tokens_ignored": True,
-        "completion_tokens_supervised": True,
+        "completion_tokens_supervised": (
+            "training_profile.phase1_structural_loss_profile"
+        ),
+        "canonical_target_immutable": True,
+        "full_completion_profile": "none",
+        "structural_loss_registry": (
+            "configs/training/phase1_structural_loss.yaml"
+        ),
+        "structural_loss_registry_role": (
+            "authoritative_runtime_selector_definitions"
+        ),
+        "historical_structural_mask_v1": {
+            "selection": "row_epoch_cycle_with_available_family_fallback",
+            "evaluation_selection": "row_fixed_at_epoch_zero",
+            "requires_input_target_json_equal_before_masking": True,
+            "selected_span_hidden_from_input": True,
+            "api_prefix_policy": "supervise_every_removed_occurrence",
+            "families": [
+                "odata_id",
+                "action_targets",
+                "target_keys",
+                "json_objects",
+                "json_arrays",
+                "allowable_values",
+                "api_prefixes",
+            ],
+        },
         "overflow_policy": "reject",
     }
     if objective != expected_objective:
-        failures.append("Phase 1 objective does not match completion-only training")
+        failures.append(
+            "Phase 1 objective does not match profile-selected structural loss"
+        )
 
     materialization = value.get("materialization", {})
     if materialization != {

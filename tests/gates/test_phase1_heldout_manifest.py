@@ -116,7 +116,12 @@ def test_phase1_contract_yaml_matches_render_constants_and_invariants() -> None:
     assert set(row["y_true"]) == set(spec["row"]["target"]) - {"required"}
     assert set(row["metadata"]) == set(spec["metadata"]["fields"])
     assert spec["objective"]["prompt_tokens_ignored"] is True
-    assert spec["objective"]["completion_tokens_supervised"] is True
+    assert spec["objective"]["completion_tokens_supervised"] == (
+        "training_profile.phase1_structural_loss_profile"
+    )
+    assert spec["objective"]["canonical_target_immutable"] is True
+    structural = spec["objective"]["historical_structural_mask_v1"]
+    assert structural["selected_span_hidden_from_input"] is True
     assert spec["objective"]["overflow_policy"] == "reject"
 
 

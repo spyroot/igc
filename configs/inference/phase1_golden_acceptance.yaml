@@ -9,6 +9,7 @@ thresholds:
   max_missing_target_rows: 0
   max_missing_prediction_rows: 0
   min_model_json_parse_rate: 0.995
+  min_model_json_exact_match_rate: 0.8
   min_model_resource_identity_match_rate: 0.995
   min_exact_match_delta_vs_foundation: 0.02
   max_instruction_judge_accept_rate_drop: 0.03

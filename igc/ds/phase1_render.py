@@ -7,6 +7,7 @@ bytes remain identical.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from dataclasses import dataclass
@@ -46,9 +47,9 @@ def build_phase1_row(
         "x": {
             "rest_api": rest_api,
             "allowed_methods": list(allowed_methods),
-            "json": dict(input_json),
+            "json": copy.deepcopy(dict(input_json)),
         },
-        "y_true": {"json": dict(target_json)},
+        "y_true": {"json": copy.deepcopy(dict(target_json))},
     }
     if metadata is not None:
         row["metadata"] = dict(metadata)

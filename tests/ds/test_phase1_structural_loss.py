@@ -9,11 +9,15 @@ import pytest
 
 from igc.ds.phase1_render import (
     build_phase1_row,
+    phase1_json_dumps,
     phase1_json_with_spans,
     render_phase1_completion,
+    render_phase1_prompt,
 )
 from igc.ds.phase1_structural_loss import (
+    apply_phase1_repairs,
     build_phase1_structural_loss_view,
+    detect_phase1_repairs,
     load_phase1_structural_loss_profile,
 )
 
@@ -293,3 +297,167 @@ def test_structural_loss_rejects_non_reconstruction_source_rows() -> None:
             epoch=0,
             row_index=0,
         )
+
+
+def test_phase1_target_is_not_present_in_input() -> None:
+    """Every enabled family removes target bytes before the prompt is rendered."""
+    source = _row()
+    profile = load_phase1_structural_loss_profile("historical_structural_mask_v1")
+    target = phase1_json_dumps(source["y_true"]["json"])
+
+    for epoch in range(len(EXPECTED_FAMILIES)):
+        view = build_phase1_structural_loss_view(
+            source,
+            profile=profile,
+            mode="train",
+            run_seed=31,
+            epoch=epoch,
+            row_index=0,
+        )
+        prompt, prompt_target = render_phase1_prompt(view.row)
+
+        assert prompt_target == source["y_true"]["json"]
+        assert view.row["x"] != source["x"]
+        assert target not in prompt
+
+
+def test_phase1_copy_baseline_cannot_pass() -> None:
+    """Copying the corrupted JSON context cannot equal the canonical completion."""
+    source = _row()
+    profile = load_phase1_structural_loss_profile("historical_structural_mask_v1")
+    expected = render_phase1_completion(source["y_true"]["json"])
+
+    for epoch in range(len(EXPECTED_FAMILIES)):
+        view = build_phase1_structural_loss_view(
+            source,
+            profile=profile,
+            mode="train",
+            run_seed=31,
+            epoch=epoch,
+            row_index=0,
+        )
+        copied = render_phase1_completion(view.row["x"]["json"])
+
+        assert copied != expected
+        assert any(
+            copied[start:end] != expected[start:end]
+            for start, end in view.completion_spans
+            if end <= len(copied)
+        ) or len(copied) != len(expected)
+
+
+def test_phase1_corruption_is_deterministic() -> None:
+    """Seed, epoch, row identity, and profile fully determine one corruption."""
+    source = _row()
+    profile = load_phase1_structural_loss_profile("historical_structural_mask_v1")
+    kwargs = {
+        "profile": profile,
+        "mode": "train",
+        "run_seed": 97,
+        "epoch": 3,
+        "row_index": 2,
+    }
+
+    first = build_phase1_structural_loss_view(source, **kwargs)
+    second = build_phase1_structural_loss_view(copy.deepcopy(source), **kwargs)
+
+    assert first == second
+
+
+def test_phase1_each_corruption_has_exact_inverse_repair() -> None:
+    """Every historical family produces a complete, lossless input repair plan."""
+    source = _row()
+    profile = load_phase1_structural_loss_profile("historical_structural_mask_v1")
+
+    for epoch in range(len(EXPECTED_FAMILIES)):
+        view = build_phase1_structural_loss_view(
+            source,
+            profile=profile,
+            mode="train",
+            run_seed=31,
+            epoch=epoch,
+            row_index=0,
+        )
+        repairs = detect_phase1_repairs(view.row["x"], source["x"])
+
+        assert repairs
+        assert apply_phase1_repairs(view.row["x"], repairs) == source["x"]
+        assert view.row["x"] != source["x"]
+
+
+def test_phase1_structural_error_detection() -> None:
+    """Wrong types and unexpected members are explicit, exactly repairable errors."""
+    expected = _row()["x"]
+    observed = copy.deepcopy(expected)
+    observed["json"]["Boot"] = []
+    observed["json"]["UnexpectedTelemetryAlias"] = 73
+
+    repairs = detect_phase1_repairs(observed, expected)
+
+    assert {(repair.kind, repair.path) for repair in repairs} == {
+        ("set", ("json", "Boot")),
+        ("delete", ("json", "UnexpectedTelemetryAlias")),
+    }
+    assert apply_phase1_repairs(observed, repairs) == expected
+
+
+def test_phase1_missing_action_and_missing_api_cases() -> None:
+    """Missing action structure, API identity, and REST path remain distinguishable."""
+    expected = _row()["x"]
+    observed = copy.deepcopy(expected)
+    del observed["rest_api"]
+    del observed["json"]["@odata.id"]
+    del observed["json"]["Actions"]
+
+    repairs = detect_phase1_repairs(observed, expected)
+    repair_paths = {repair.path for repair in repairs}
+
+    assert ("rest_api",) in repair_paths
+    assert ("json", "@odata.id") in repair_paths
+    assert ("json", "Actions") in repair_paths
+    assert apply_phase1_repairs(observed, repairs) == expected
+
+
+def test_phase1_correct_document_emits_no_repair() -> None:
+    """An already-correct observation is a fixed point of repair detection."""
+    expected = _row()["x"]
+
+    repairs = detect_phase1_repairs(copy.deepcopy(expected), expected)
+
+    assert repairs == ()
+    assert apply_phase1_repairs(expected, repairs) == expected
+
+
+def test_phase1_telemetry_object_receives_bounded_structural_loss() -> None:
+    """Telemetry remains learnable without ever selecting the whole root object."""
+    body = {
+        "@odata.id": "/redfish/v1/Chassis/1/Sensors/CPU0Temp",
+        "Reading": 71.25,
+        "ReadingUnits": "Cel",
+        "Status": {"Health": "OK", "State": "Enabled"},
+    }
+    source = build_phase1_row(
+        rest_api=body["@odata.id"],
+        allowed_methods=["GET"],
+        input_json=body,
+        target_json=body,
+    )
+    view = build_phase1_structural_loss_view(
+        source,
+        profile=load_phase1_structural_loss_profile(
+            "historical_structural_mask_v1"
+        ),
+        mode="train",
+        run_seed=31,
+        epoch=3,
+        row_index=0,
+    )
+    rendered = phase1_json_dumps(body)
+
+    assert view.family == "json_objects"
+    assert view.operations != ("mask:json_objects:/",)
+    assert all(end - start < len(rendered) for start, end in view.completion_spans)
+    assert apply_phase1_repairs(
+        view.row["x"],
+        detect_phase1_repairs(view.row["x"], source["x"]),
+    ) == source["x"]

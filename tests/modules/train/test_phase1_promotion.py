@@ -43,6 +43,7 @@ def _thresholds(**overrides: object) -> dict[str, object]:
     thresholds: dict[str, object] = {
         "require_complete_heldout_manifest": True,
         "min_model_json_parse_rate": 0.995,
+        "min_model_json_exact_match_rate": 0.8,
         "min_model_resource_identity_match_rate": 0.995,
         "min_exact_match_delta_vs_foundation": 0.02,
         "max_instruction_judge_accept_rate_drop": 0.03,
@@ -59,12 +60,14 @@ def _thresholds(**overrides: object) -> dict[str, object]:
 def _metrics(*, min_generation_budget: int = 160) -> dict[str, object]:
     baseline_metrics = {
         PARSE_KEY: 1.0,
+        EXACT_KEY: 0.90,
         IDENTITY_KEY: 1.0,
         TARGET_P95_KEY: 96.0,
         BUDGET_KEY: min_generation_budget,
     }
     model_metrics = {
         PARSE_KEY: 1.0,
+        EXACT_KEY: 0.95,
         IDENTITY_KEY: 1.0,
         TARGET_P95_KEY: 96.0,
         BUDGET_KEY: min_generation_budget,
@@ -592,6 +595,40 @@ def test_phase1_promotion_rejects_negative_generation_margin() -> None:
         _evaluate(thresholds=_thresholds(generation_target_token_margin=-1))
 
 
+def test_phase1_instruction_retention_is_merge_blocking() -> None:
+    """A judge-acceptance regression beyond the configured drop blocks promotion."""
+    retention = {
+        "comparison": {"delta": {"judge_acceptance_rate": -0.031}},
+    }
+
+    result = _evaluate(retention_evidence=retention)
+
+    assert result["status"] == "fail"
+    assert any(
+        failure["name"] == "max_instruction_judge_accept_rate_drop"
+        for failure in result["failures"]
+    )
+
+
+def test_phase1_absolute_completion_quality_floor() -> None:
+    """A strong baseline delta cannot hide unusable absolute completion quality."""
+    full_metrics = _metrics()
+    full_metrics["metrics"]["model_x"][EXACT_KEY] = 0.79
+    full_evidence = _evidence()
+    full_evidence["model_x"]["metrics"][EXACT_KEY] = 0.79
+
+    result = _evaluate(
+        full_metrics=full_metrics,
+        full_evidence=full_evidence,
+    )
+
+    assert result["status"] == "fail"
+    assert any(
+        failure["name"] == "min_model_json_exact_match_rate"
+        for failure in result["failures"]
+    )
+
+
 def test_phase1_golden_acceptance_config_declares_new_run_report_hard_checks() -> None:
     """The checked-in golden acceptance spec names the new run-report gates."""
     spec = yaml.safe_load(
@@ -605,3 +642,4 @@ def test_phase1_golden_acceptance_config_declares_new_run_report_hard_checks() -
         "optimizer_steps_positive",
         "finite_run_metrics",
     } <= set(spec["hard_checks"])
+    assert spec["thresholds"]["min_model_json_exact_match_rate"] == 0.8
