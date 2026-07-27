@@ -19,7 +19,7 @@ from typing import Protocol
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from igc.shared.run_spec import RunSpecError, load_run_spec
+from igc.shared.run_spec import RunSpecError, load_run_spec  # noqa: E402
 
 
 class Runner(Protocol):
