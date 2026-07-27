@@ -52,6 +52,9 @@ EOF
         PATH="${FAKE_BIN}:${PATH}" \
         "$CHECK" --profile merge --gate unit.all
 
+    if [ "$status" -ne 0 ]; then
+        printf 'check.sh output:\n%s\n' "$output" >&3
+    fi
     [ "$status" -eq 0 ]
     run jq -e \
         '.schema == "igc/gate-result/v1" and
