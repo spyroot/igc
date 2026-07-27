@@ -2,6 +2,7 @@
 # torch is installed separately from the CPU wheel index in the Dockerfile.
 # numpy pinned <2: the legacy env's numpy 2.x breaks accelerate/sklearn/nltk/evaluate.
 numpy<2
+setuptools==81.*
 pyyaml
 tqdm
 transformers

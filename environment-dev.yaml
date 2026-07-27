@@ -19,7 +19,7 @@ channels:
 dependencies:
   - python=3.10
   - pip
-  - setuptools
+  - setuptools=81.*
   - numpy<2
   - pyyaml
   - tqdm
